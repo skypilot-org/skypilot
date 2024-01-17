@@ -15,8 +15,10 @@ class TestExecutionOnExistingClusters:
         tmp_path.mkdir(parents=True, exist_ok=True)
         db_path = tmp_path / 'state_testing_optimizer_dryrun.db'
         monkeypatch.setattr(
-            global_user_state, '_DB',
-            db_utils.SQLiteConn(str(db_path), global_user_state.create_table))
+            global_user_state,
+            '_DB',
+            db_utils.SQLiteConn(str(db_path), global_user_state.create_table),
+        )
 
     @pytest.fixture
     def _mock_cluster_state(self, _mock_db_conn, enable_all_clouds):
@@ -34,46 +36,53 @@ class TestExecutionOnExistingClusters:
             cluster_name_on_cloud='test-cluster1',
             cluster_yaml='/tmp/cluster1.yaml',
             launched_nodes=2,
-            launched_resources=sky.Resources(sky.AWS(),
-                                             instance_type='p4d.24xlarge',
-                                             region='us-east-1',
-                                             zone='us-east-1a'),
+            launched_resources=sky.Resources(
+                sky.AWS(),
+                instance_type='p4d.24xlarge',
+                region='us-east-1',
+                zone='us-east-1a',
+            ),
         )
         global_user_state.add_or_update_cluster(
             'test-cluster1',
             handle,
             requested_resources={handle.launched_resources},
-            ready=True)
+            ready=True,
+        )
         handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster2',
             cluster_name_on_cloud='test-cluster2',
             cluster_yaml='/tmp/cluster2.yaml',
             launched_nodes=1,
-            launched_resources=sky.Resources(sky.GCP(),
-                                             instance_type='n1-highmem-64',
-                                             accelerators='V100:4',
-                                             region='us-west1',
-                                             zone='us-west1-a'),
+            launched_resources=sky.Resources(
+                sky.GCP(),
+                instance_type='n1-highmem-64',
+                accelerators='V100:4',
+                region='us-west1',
+                zone='us-west1-a',
+            ),
         )
         global_user_state.add_or_update_cluster(
             'test-cluster2',
             handle,
             requested_resources={handle.launched_resources},
-            ready=True)
+            ready=True,
+        )
         handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster3',
             cluster_name_on_cloud='test-cluster3',
             cluster_yaml='/tmp/cluster3.yaml',
             launched_nodes=1,
-            launched_resources=sky.Resources(sky.Azure(),
-                                             instance_type='Standard_D4s_v3',
-                                             region='eastus'),
+            launched_resources=sky.Resources(
+                sky.Azure(), instance_type='Standard_D4s_v3', region='eastus'
+            ),
         )
         global_user_state.add_or_update_cluster(
             'test-cluster3',
             handle,
             requested_resources={handle.launched_resources},
-            ready=False)
+            ready=False,
+        )
 
     def test_launch_exec(self, _mock_cluster_state, monkeypatch):
         """Test launch and exec on existing clusters.
@@ -93,7 +102,8 @@ class TestExecutionOnExistingClusters:
                 sky.AWS(),
                 accelerators='A100:1',
                 region='us-east-1',
-            ))
+            )
+        )
         sky.launch(task, cluster_name='test-cluster1', dryrun=True)
         sky.exec(task, cluster_name='test-cluster1', dryrun=True)
 
@@ -102,7 +112,8 @@ class TestExecutionOnExistingClusters:
         sky.launch(task, cluster_name='test-cluster2', dryrun=True)
         sky.exec(task, cluster_name='test-cluster2', dryrun=True)
         task.set_resources(
-            sky.Resources(sky.GCP(), accelerators='V100:3', region='us-west1'))
+            sky.Resources(sky.GCP(), accelerators='V100:3', region='us-west1')
+        )
         sky.launch(task, cluster_name='test-cluster2', dryrun=True)
         sky.exec(task, cluster_name='test-cluster2', dryrun=True)
 
@@ -112,12 +123,10 @@ class TestExecutionOnExistingClusters:
     def _run_launch_exec_with_error(self, task, cluster_name):
         with pytest.raises(exceptions.ResourcesMismatchError) as e:
             sky.launch(task, cluster_name=cluster_name, dryrun=True)
-            assert 'do not match the existing cluster.' in str(e.value), str(
-                e.value)
+            assert 'do not match the existing cluster.' in str(e.value), str(e.value)
         with pytest.raises(exceptions.ResourcesMismatchError) as e:
             sky.exec(task, cluster_name=cluster_name, dryrun=True)
-            assert 'do not match the existing cluster.' in str(e.value), str(
-                e.value)
+            assert 'do not match the existing cluster.' in str(e.value), str(e.value)
 
     def test_launch_exec_mismatch(self, _mock_cluster_state, monkeypatch):
         """Test launch and exec on existing clusters with mismatched resources."""

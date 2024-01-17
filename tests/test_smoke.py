@@ -72,30 +72,35 @@ SCP_TYPE = '--cloud scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
 storage_setup_commands = [
-    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
-    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
+    'touch ~/tmpfile',
+    'mkdir -p ~/tmp-workdir',
+    'touch ~/tmp-workdir/tmp\ file',
+    'touch ~/tmp-workdir/tmp\ file2',
     'touch ~/tmp-workdir/foo',
     'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
-    'touch ~/.ssh/id_rsa.pub'
+    'touch ~/.ssh/id_rsa.pub',
 ]
 
 # Wait until the spot controller is not in INIT state.
 # This is a workaround for the issue that when multiple spot tests
 # are running in parallel, the spot controller may be in INIT and
 # the spot queue/cancel command will return staled table.
-_SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
-                    'until [ `echo "$s" '
-                    '| grep "jobs will not be shown until it becomes UP." '
-                    '| wc -l` -eq 0 ]; '
-                    'do echo "Waiting for spot queue to be ready..."; '
-                    'sleep 5; s=$(sky spot queue); done; echo "$s"; '
-                    'echo; echo; echo "$s"')
+_SPOT_QUEUE_WAIT = (
+    's=$(sky spot queue); '
+    'until [ `echo "$s" '
+    '| grep "jobs will not be shown until it becomes UP." '
+    '| wc -l` -eq 0 ]; '
+    'do echo "Waiting for spot queue to be ready..."; '
+    'sleep 5; s=$(sky spot queue); done; echo "$s"; '
+    'echo; echo; echo "$s"'
+)
 _SPOT_CANCEL_WAIT = (
     's=$(sky spot cancel -y -n {job_name}); until [ `echo "$s" '
     '| grep "Please wait for the controller to be ready." '
     '| wc -l` -eq 0 ]; do echo "Waiting for the spot controller '
     'to be ready"; sleep 5; s=$(sky spot cancel -y -n {job_name}); '
-    'done; echo "$s"; echo; echo; echo "$s"')
+    'done; echo "$s"; echo; echo; echo "$s"'
+)
 # TODO(zhwu): make the spot controller on GCP.
 
 
@@ -124,19 +129,18 @@ def _get_cluster_name() -> str:
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
-    test_name = common_utils.make_cluster_name_on_cloud(test_name,
-                                                        24,
-                                                        add_user_hash=False)
+    test_name = common_utils.make_cluster_name_on_cloud(
+        test_name, 24, add_user_hash=False
+    )
     return f'{test_name}-{test_id}'
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
     # Fail fast if `sky` CLI somehow errors out.
     subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
-    log_file = tempfile.NamedTemporaryFile('a',
-                                           prefix=f'{test.name}-',
-                                           suffix='.log',
-                                           delete=False)
+    log_file = tempfile.NamedTemporaryFile(
+        'a', prefix=f'{test.name}-', suffix='.log', delete=False
+    )
     test.echo(f'Test started. Log: less {log_file.name}')
     for command in test.commands:
         log_file.write(f'+ {command}\n')
@@ -166,16 +170,18 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
     style = colorama.Style
     fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
-               if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
+    outcome = (
+        f'{fore.RED}Failed{style.RESET_ALL}'
+        if proc.returncode
+        else f'{fore.GREEN}Passed{style.RESET_ALL}'
+    )
     reason = f'\nReason: {command}' if proc.returncode else ''
-    msg = (f'{outcome}.'
-           f'{reason}'
-           f'\nLog: less {log_file.name}\n')
+    msg = f'{outcome}.' f'{reason}' f'\nLog: less {log_file.name}\n'
     test.echo(msg)
     log_file.write(msg)
-    if (proc.returncode == 0 or
-            pytest.terminate_on_failure) and test.teardown is not None:
+    if (
+        proc.returncode == 0 or pytest.terminate_on_failure
+    ) and test.teardown is not None:
         subprocess_utils.run(
             test.teardown,
             stdout=log_file,
@@ -189,20 +195,21 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
-    candidate_regions = AWS.regions_with_offering(instance_type='p3.16xlarge',
-                                                  accelerators=None,
-                                                  use_spot=True,
-                                                  region=None,
-                                                  zone=None)
-    original_resources = sky.Resources(cloud=sky.AWS(),
-                                       instance_type='p3.16xlarge',
-                                       use_spot=True)
+    candidate_regions = AWS.regions_with_offering(
+        instance_type='p3.16xlarge',
+        accelerators=None,
+        use_spot=True,
+        region=None,
+        zone=None,
+    )
+    original_resources = sky.Resources(
+        cloud=sky.AWS(), instance_type='p3.16xlarge', use_spot=True
+    )
 
     # Filter the regions with proxy command in ~/.sky/config.yaml.
     filtered_regions = original_resources.get_valid_regions_for_launchable()
     candidate_regions = [
-        region for region in candidate_regions
-        if region.name in filtered_regions
+        region for region in candidate_regions if region.name in filtered_regions
     ]
 
     for region in candidate_regions:
@@ -214,28 +221,29 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
 
 
 def get_gcp_region_for_quota_failover() -> Optional[str]:
+    candidate_regions = GCP.regions_with_offering(
+        instance_type=None,
+        accelerators={'A100-80GB': 1},
+        use_spot=True,
+        region=None,
+        zone=None,
+    )
 
-    candidate_regions = GCP.regions_with_offering(instance_type=None,
-                                                  accelerators={'A100-80GB': 1},
-                                                  use_spot=True,
-                                                  region=None,
-                                                  zone=None)
-
-    original_resources = sky.Resources(cloud=sky.GCP(),
-                                       instance_type='a2-ultragpu-1g',
-                                       accelerators={'A100-80GB': 1},
-                                       use_spot=True)
+    original_resources = sky.Resources(
+        cloud=sky.GCP(),
+        instance_type='a2-ultragpu-1g',
+        accelerators={'A100-80GB': 1},
+        use_spot=True,
+    )
 
     # Filter the regions with proxy command in ~/.sky/config.yaml.
     filtered_regions = original_resources.get_valid_regions_for_launchable()
     candidate_regions = [
-        region for region in candidate_regions
-        if region.name in filtered_regions
+        region for region in candidate_regions if region.name in filtered_regions
     ]
 
     for region in candidate_regions:
-        if not GCP.check_quota_available(
-                original_resources.copy(region=region.name)):
+        if not GCP.check_quota_available(original_resources.copy(region=region.name)):
             return region.name
 
     return None
@@ -262,7 +270,7 @@ def test_minimal(generic_cloud: str):
             # Check the logs downloading
             f'log_path=$(sky logs {name} 1 --sync-down | grep "Job 1 logs:" | sed -E "s/^.*Job 1 logs: (.*)\\x1b\\[0m/\\1/g") && echo $log_path && test -f $log_path/run.log',
             # Ensure the raylet process has the correct file descriptor limit.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
+            f"sky exec {name} \"prlimit -n --pid=\$(pgrep -f 'raylet/raylet --raylet_socket_name') | grep '\"'1048576 1048576'\"'\"",
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -687,7 +695,8 @@ def test_stale_job(generic_cloud: str):
 def test_aws_stale_job_manual_restart():
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, sky.AWS.max_cluster_name_length())
+        name, sky.AWS.max_cluster_name_length()
+    )
     region = 'us-east-2'
     test = Test(
         'aws_stale_job_manual_restart',
@@ -718,13 +727,15 @@ def test_aws_stale_job_manual_restart():
 def test_gcp_stale_job_manual_restart():
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, sky.GCP.max_cluster_name_length())
+        name, sky.GCP.max_cluster_name_length()
+    )
     zone = 'us-west2-a'
-    query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name={name_on_cloud})" '
-                 f'--zones={zone} --format="value(name)"')
-    stop_cmd = (f'gcloud compute instances stop --zone={zone}'
-                f' --quiet $({query_cmd})')
+    query_cmd = (
+        f'gcloud compute instances list --filter='
+        f'"(labels.ray-cluster-name={name_on_cloud})" '
+        f'--zones={zone} --format="value(name)"'
+    )
+    stop_cmd = f'gcloud compute instances stop --zone={zone}' f' --quiet $({query_cmd})'
     test = Test(
         'gcp_stale_job_manual_restart',
         [
@@ -807,13 +818,17 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = _get_cluster_name()
     test_commands = [
         *storage_setup_commands,
-        (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
-         'examples/using_file_mounts_with_env_vars.yaml'),
+        (
+            f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
+            'examples/using_file_mounts_with_env_vars.yaml'
+        ),
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         # Override with --env:
-        (f'sky launch -y -c {name}-2 --cpus 2+ --cloud {generic_cloud} '
-         'examples/using_file_mounts_with_env_vars.yaml '
-         '--env MY_LOCAL_PATH=tmpfile'),
+        (
+            f'sky launch -y -c {name}-2 --cpus 2+ --cloud {generic_cloud} '
+            'examples/using_file_mounts_with_env_vars.yaml '
+            '--env MY_LOCAL_PATH=tmpfile'
+        ),
         f'sky logs {name}-2 1 --status',  # Ensure the job succeeded.
     ]
     test = Test(
@@ -831,7 +846,8 @@ def test_aws_storage_mounts_with_stop():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+        'tests/test_yamls/test_storage_mounting.yaml.j2'
+    ).read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -847,7 +863,7 @@ def test_aws_storage_mounts_with_stop():
             f'sky start -y {name}',
             # Check if hello.txt from mounting bucket exists after restart in
             # the mounted directory
-            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"',
         ]
         test = Test(
             'aws_storage_mounts',
@@ -863,7 +879,8 @@ def test_gcp_storage_mounts_with_stop():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+        'tests/test_yamls/test_storage_mounting.yaml.j2'
+    ).read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -879,7 +896,7 @@ def test_gcp_storage_mounts_with_stop():
             f'sky start -y {name}',
             # Check if hello.txt from mounting bucket exists after restart in
             # the mounted directory
-            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"',
         ]
         test = Test(
             'gcp_storage_mounts',
@@ -898,7 +915,8 @@ def test_kubernetes_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+        'tests/test_yamls/test_storage_mounting.yaml.j2'
+    ).read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -925,7 +943,8 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
-        'tests/test_yamls/test_r2_storage_mounting.yaml').read_text()
+        'tests/test_yamls/test_r2_storage_mounting.yaml'
+    ).read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     endpoint_url = cloudflare.create_endpoint()
@@ -937,7 +956,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
             *storage_setup_commands,
             f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2',
         ]
 
         test = Test(
@@ -954,9 +973,11 @@ def test_ibm_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-        storage_name, Rclone.RcloneClouds.IBM)
+        storage_name, Rclone.RcloneClouds.IBM
+    )
     template_str = pathlib.Path(
-        'tests/test_yamls/test_ibm_cos_storage_mounting.yaml').read_text()
+        'tests/test_yamls/test_ibm_cos_storage_mounting.yaml'
+    ).read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -1337,9 +1358,11 @@ def test_multi_echo(generic_cloud: str):
         [
             f'python examples/multi_echo.py {name} {generic_cloud}',
             'sleep 120',
-        ] +
+        ]
+        +
         # Ensure jobs succeeded.
-        [f'sky logs {name} {i + 1} --status' for i in range(32)] +
+        [f'sky logs {name} {i + 1} --status' for i in range(32)]
+        +
         # Ensure monitor/autoscaler didn't crash on the 'assert not
         # unfulfilled' error.  If process not found, grep->ssh returns 1.
         [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
@@ -1493,8 +1516,9 @@ def test_gcp_http_server_with_custom_ports():
         [
             f'sky launch -y -d -c {name} --cloud gcp examples/http_server_with_custom_ports/task.yaml',
             'sleep 10',
-            'ip=$(grep -A1 "Host ' + name +
-            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+            'ip=$(grep -A1 "Host '
+            + name
+            + '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
         ],
         f'sky down -y {name}',
     )
@@ -1510,8 +1534,9 @@ def test_aws_http_server_with_custom_ports():
         [
             f'sky launch -y -d -c {name} --cloud aws examples/http_server_with_custom_ports/task.yaml',
             'sleep 10',
-            'ip=$(grep -A1 "Host ' + name +
-            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+            'ip=$(grep -A1 "Host '
+            + name
+            + '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
         ],
         f'sky down -y {name}',
     )
@@ -1527,8 +1552,9 @@ def test_azure_http_server_with_custom_ports():
         [
             f'sky launch -y -d -c {name} --cloud azure examples/http_server_with_custom_ports/task.yaml',
             'sleep 10',
-            'ip=$(grep -A1 "Host ' + name +
-            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+            'ip=$(grep -A1 "Host '
+            + name
+            + '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
         ],
         f'sky down -y {name}',
     )
@@ -1540,8 +1566,8 @@ def test_azure_http_server_with_custom_ports():
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.skip(
-    reason=
-    'The resnet_distributed_tf_app is flaky, due to it failing to detect GPUs.')
+    reason='The resnet_distributed_tf_app is flaky, due to it failing to detect GPUs.'
+)
 def test_distributed_tf(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1568,7 +1594,7 @@ def test_gcp_start_stop():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
+            f"sky exec {name} \"prlimit -n --pid=\$(pgrep -f 'raylet/raylet --raylet_socket_name') | grep '\"'1048576 1048576'\"'\"",  # Ensure the raylet process has the correct file descriptor limit.
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sleep 20',
@@ -1593,14 +1619,14 @@ def test_azure_start_stop():
             f'sky launch -y -c {name} examples/azure_start_stop.yaml',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
+            f"sky exec {name} \"prlimit -n --pid=\$(pgrep -f 'raylet/raylet --raylet_socket_name') | grep '\"'1048576 1048576'\"'\"",  # Ensure the raylet process has the correct file descriptor limit.
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             'sleep 200',
-            f's=$(sky status -r {name}) && echo $s && echo $s | grep "INIT\|STOPPED"'
+            f's=$(sky status -r {name}) && echo $s && echo $s | grep "INIT\|STOPPED"',
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
@@ -1626,26 +1652,20 @@ def test_autostop(generic_cloud: str):
         [
             f'sky launch -y -d -c {name} --num-nodes 2 --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} -i 1',
-
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m"',
-
             # Ensure the cluster is not stopped early.
             'sleep 20',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
-
             # Ensure the cluster is STOPPED.
             f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
-
             # Ensure the cluster is UP and the autostop setting is reset ('-').
             f'sky start -y {name}',
             f'sky status | grep {name} | grep -E "UP\s+-"',
-
             # Ensure the job succeeded.
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
-
             # Test restarting the idleness timer via cancel + reset:
             f'sky autostop -y {name} -i 1',  # Idleness starts counting.
             'sleep 30',  # Almost reached the threshold.
@@ -1655,7 +1675,6 @@ def test_autostop(generic_cloud: str):
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
             f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
-
             # Test restarting the idleness timer via exec:
             f'sky start -y {name}',
             f'sky status | grep {name} | grep -E "UP\s+-"',
@@ -1771,8 +1790,7 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
 
 # ---------- Testing `sky cancel` ----------
 @pytest.mark.aws
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
+@pytest.mark.skip(reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_aws():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'aws')
@@ -1780,8 +1798,7 @@ def test_cancel_aws():
 
 
 @pytest.mark.gcp
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
+@pytest.mark.skip(reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_gcp():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'gcp')
@@ -1789,8 +1806,7 @@ def test_cancel_gcp():
 
 
 @pytest.mark.azure
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
+@pytest.mark.skip(reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_azure():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
@@ -1816,7 +1832,7 @@ def test_cancel_pytorch(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel -y {name} 1',
             'sleep 60',
-            f'sky exec {name} "(nvidia-smi | grep \'No running process\') || '
+            f"sky exec {name} \"(nvidia-smi | grep 'No running process') || "
             # Ensure Xorg is the only process running.
             '[ \$(nvidia-smi | grep -A 10 Processes | grep -A 10 === | grep -v Xorg) -eq 2 ]"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
@@ -1926,8 +1942,11 @@ def test_spot(generic_cloud: str):
         ],
         # TODO(zhwu): Change to _SPOT_CANCEL_WAIT.format(job_name=f'{name}-1 -n {name}-2') when
         # canceling multiple job names is supported.
-        (_SPOT_CANCEL_WAIT.format(job_name=f'{name}-1') + '; ' +
-         _SPOT_CANCEL_WAIT.format(job_name=f'{name}-2')),
+        (
+            _SPOT_CANCEL_WAIT.format(job_name=f'{name}-1')
+            + '; '
+            + _SPOT_CANCEL_WAIT.format(job_name=f'{name}-2')
+        ),
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -2039,7 +2058,8 @@ def test_spot_recovery_aws(aws_config_region):
     """Test managed spot recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False
+    )
     region = aws_config_region
     test = Test(
         'spot_recovery_aws',
@@ -2049,11 +2069,13 @@ def test_spot_recovery_aws(aws_config_region):
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
-            (f'aws ec2 terminate-instances --region {region} --instance-ids $('
-             f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}* '
-             f'--query Reservations[].Instances[].InstanceId '
-             '--output text)'),
+            (
+                f'aws ec2 terminate-instances --region {region} --instance-ids $('
+                f'aws ec2 describe-instances --region {region} '
+                f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}* '
+                f'--query Reservations[].Instances[].InstanceId '
+                '--output text)'
+            ),
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
@@ -2072,15 +2094,18 @@ def test_spot_recovery_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False
+    )
     zone = 'us-east4-b'
     query_cmd = (
         f'gcloud compute instances list --filter='
         # `:` means prefix match.
         f'"(labels.ray-cluster-name:{name_on_cloud})" '
-        f'--zones={zone} --format="value(name)"')
-    terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
-                     f' --quiet $({query_cmd})')
+        f'--zones={zone} --format="value(name)"'
+    )
+    terminate_cmd = (
+        f'gcloud compute instances delete --zone={zone}' f' --quiet $({query_cmd})'
+    )
     test = Test(
         'spot_recovery_gcp',
         [
@@ -2108,7 +2133,7 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
     """Test managed spot recovery for a pipeline."""
     name = _get_cluster_name()
     user_hash = common_utils.get_user_hash()
-    user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
+    user_hash = user_hash[: common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     region = aws_config_region
     if region != 'us-east-2':
         pytest.skip('Only run spot pipeline recovery test in us-east-2')
@@ -2126,14 +2151,15 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
             # separated by `-`.
             (
                 f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
-                'cut -d\'-\' -f2 | rev`;'
+                "cut -d'-' -f2 | rev`;"
                 f'aws ec2 terminate-instances --region {region} --instance-ids $('
                 f'aws ec2 describe-instances --region {region} '
                 # TODO(zhwu): fix the name for spot cluster.
                 '--filters Name=tag:ray-cluster-name,Values=*-${SPOT_JOB_ID}'
                 f'-{user_hash} '
                 f'--query Reservations[].Instances[].InstanceId '
-                '--output text)'),
+                '--output text)'
+            ),
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
@@ -2156,12 +2182,15 @@ def test_spot_pipeline_recovery_gcp():
     name = _get_cluster_name()
     zone = 'us-east4-b'
     user_hash = common_utils.get_user_hash()
-    user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
-    query_cmd = ('gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:*-${{SPOT_JOB_ID}}-{user_hash})" '
-                 f'--zones={zone} --format="value(name)"')
-    terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
-                     f' --quiet $({query_cmd})')
+    user_hash = user_hash[: common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
+    query_cmd = (
+        'gcloud compute instances list --filter='
+        f'"(labels.ray-cluster-name:*-${{SPOT_JOB_ID}}-{user_hash})" '
+        f'--zones={zone} --format="value(name)"'
+    )
+    terminate_cmd = (
+        f'gcloud compute instances delete --zone={zone}' f' --quiet $({query_cmd})'
+    )
     test = Test(
         'spot_pipeline_recovery_gcp',
         [
@@ -2174,8 +2203,10 @@ def test_spot_pipeline_recovery_gcp():
             # The `cat ...| rev` is to retrieve the job_id from the
             # SKYPILOT_TASK_ID, which gets the second to last field
             # separated by `-`.
-            (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
-             f'cut -d\'-\' -f2 | rev`;{terminate_cmd}'),
+            (
+                f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
+                f"cut -d'-' -f2 | rev`;{terminate_cmd}"
+            ),
             'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
@@ -2219,7 +2250,8 @@ def test_spot_recovery_multi_node_aws(aws_config_region):
     """Test managed spot recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False
+    )
     region = aws_config_region
     test = Test(
         'spot_recovery_multi_node_aws',
@@ -2229,12 +2261,14 @@ def test_spot_recovery_multi_node_aws(aws_config_region):
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
-            (f'aws ec2 terminate-instances --region {region} --instance-ids $('
-             f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}* '
-             'Name=tag:ray-node-type,Values=worker '
-             f'--query Reservations[].Instances[].InstanceId '
-             '--output text)'),
+            (
+                f'aws ec2 terminate-instances --region {region} --instance-ids $('
+                f'aws ec2 describe-instances --region {region} '
+                f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}* '
+                'Name=tag:ray-node-type,Values=worker '
+                f'--query Reservations[].Instances[].InstanceId '
+                '--output text)'
+            ),
             'sleep 50',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 560',
@@ -2253,15 +2287,18 @@ def test_spot_recovery_multi_node_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False
+    )
     zone = 'us-west2-a'
     # Use ':' to match as the cluster name will contain the suffix with job id
     query_cmd = (
         f'gcloud compute instances list --filter='
         f'"(labels.ray-cluster-name:{name_on_cloud} AND '
-        f'labels.ray-node-type=worker)" --zones={zone} --format="value(name)"')
-    terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
-                     f' --quiet $({query_cmd})')
+        f'labels.ray-node-type=worker)" --zones={zone} --format="value(name)"'
+    )
+    terminate_cmd = (
+        f'gcloud compute instances delete --zone={zone}' f' --quiet $({query_cmd})'
+    )
     test = Test(
         'spot_recovery_multi_node_gcp',
         [
@@ -2288,11 +2325,14 @@ def test_spot_recovery_multi_node_gcp():
 def test_spot_cancellation_aws(aws_config_region):
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False
+    )
     name_2_on_cloud = common_utils.make_cluster_name_on_cloud(
-        f'{name}-2', spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        f'{name}-2', spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False
+    )
     name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
-        f'{name}-3', spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        f'{name}-3', spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False
+    )
     region = aws_config_region
     test = Test(
         'spot_cancellation_aws',
@@ -2306,10 +2346,11 @@ def test_spot_cancellation_aws(aws_config_region):
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
-            (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}-* '
-             f'--query Reservations[].Instances[].State[].Name '
-             '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            (
+                f's=$(aws ec2 describe-instances --region {region} '
+                f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}-* '
+                f'--query Reservations[].Instances[].State[].Name '
+                '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancelling the spot cluster during spot job being setup.
             f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
@@ -2319,21 +2360,24 @@ def test_spot_cancellation_aws(aws_config_region):
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
-            (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_2_on_cloud}-* '
-             f'--query Reservations[].Instances[].State[].Name '
-             '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            (
+                f's=$(aws ec2 describe-instances --region {region} '
+                f'--filters Name=tag:ray-cluster-name,Values={name_2_on_cloud}-* '
+                f'--query Reservations[].Instances[].State[].Name '
+                '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancellation during spot job is recovering.
             f'sky spot launch --cloud aws --region {region} -n {name}-3 "sleep 1000"  -y -d',
             'sleep 300',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
-            (f'aws ec2 terminate-instances --region {region} --instance-ids $('
-             f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_3_on_cloud}-* '
-             f'--query Reservations[].Instances[].InstanceId '
-             '--output text)'),
+            (
+                f'aws ec2 terminate-instances --region {region} --instance-ids $('
+                f'aws ec2 describe-instances --region {region} '
+                f'--filters Name=tag:ray-cluster-name,Values={name_3_on_cloud}-* '
+                f'--query Reservations[].Instances[].InstanceId '
+                '--output text)'
+            ),
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
             _SPOT_CANCEL_WAIT.format(job_name=f'{name}-3'),
@@ -2343,13 +2387,15 @@ def test_spot_cancellation_aws(aws_config_region):
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
-            (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_3_on_cloud}-* '
-             f'--query Reservations[].Instances[].State[].Name '
-             '--output text) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
+            (
+                f's=$(aws ec2 describe-instances --region {region} '
+                f'--filters Name=tag:ray-cluster-name,Values={name_3_on_cloud}-* '
+                f'--query Reservations[].Instances[].State[].Name '
+                '--output text) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
             ),
         ],
-        timeout=25 * 60)
+        timeout=25 * 60,
+    )
     run_one_test(test)
 
 
@@ -2359,17 +2405,22 @@ def test_spot_cancellation_gcp():
     name = _get_cluster_name()
     name_3 = f'{name}-3'
     name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name_3, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name_3, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False
+    )
     zone = 'us-west3-b'
     query_state_cmd = (
         'gcloud compute instances list '
         f'--filter="(labels.ray-cluster-name:{name_3_on_cloud})" '
-        '--format="value(status)"')
-    query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:{name_3_on_cloud})" '
-                 f'--zones={zone} --format="value(name)"')
-    terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
-                     f' --quiet $({query_cmd})')
+        '--format="value(status)"'
+    )
+    query_cmd = (
+        f'gcloud compute instances list --filter='
+        f'"(labels.ray-cluster-name:{name_3_on_cloud})" '
+        f'--zones={zone} --format="value(name)"'
+    )
+    terminate_cmd = (
+        f'gcloud compute instances delete --zone={zone}' f' --quiet $({query_cmd})'
+    )
     test = Test(
         'spot_cancellation_gcp',
         [
@@ -2405,10 +2456,12 @@ def test_spot_cancellation_gcp():
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
             # The cluster should be terminated (STOPPING) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
-            (f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "PROVISIONING|STAGING|RUNNING|REPAIRING|TERMINATED|SUSPENDING|SUSPENDED|SUSPENDED"'
+            (
+                f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "PROVISIONING|STAGING|RUNNING|REPAIRING|TERMINATED|SUSPENDING|SUSPENDED|SUSPENDED"'
             ),
         ],
-        timeout=25 * 60)
+        timeout=25 * 60,
+    )
     run_one_test(test)
 
 
@@ -2422,8 +2475,7 @@ def test_spot_cancellation_gcp():
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
     name = _get_cluster_name()
-    yaml_str = pathlib.Path(
-        'examples/managed_spot_with_storage.yaml').read_text()
+    yaml_str = pathlib.Path('examples/managed_spot_with_storage.yaml').read_text()
     storage_name = f'sky-test-{int(time.time())}'
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -2437,7 +2489,7 @@ def test_spot_storage(generic_cloud: str):
                 f'sky spot launch -n {name} --cloud {generic_cloud} {file_path} -y',
                 'sleep 60',  # Wait the spot queue to be updated
                 f'{_SPOT_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
-                f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
+                f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
             ],
             _SPOT_CANCEL_WAIT.format(job_name=name),
             # Increase timeout since sky spot queue -r can be blocked by other spot tests.
@@ -2567,17 +2619,19 @@ def test_azure_start_stop_two_nodes():
 # ---------- Testing env for disk tier ----------
 @pytest.mark.aws
 def test_aws_disk_tier():
-
     def _get_aws_query_command(region, instance_id, field, expected):
-        return (f'aws ec2 describe-volumes --region {region} '
-                f'--filters Name=attachment.instance-id,Values={instance_id} '
-                f'--query Volumes[*].{field} | grep {expected} ; ')
+        return (
+            f'aws ec2 describe-volumes --region {region} '
+            f'--filters Name=attachment.instance-id,Values={instance_id} '
+            f'--query Volumes[*].{field} | grep {expected} ; '
+        )
 
     for disk_tier in ['low', 'medium', 'high']:
         specs = AWS._get_disk_specs(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
-            name, sky.AWS.max_cluster_name_length())
+            name, sky.AWS.max_cluster_name_length()
+        )
         region = 'us-east-2'
         test = Test(
             'aws-disk-tier',
@@ -2586,14 +2640,22 @@ def test_aws_disk_tier():
                 f'--disk-tier {disk_tier} echo "hello sky"',
                 f'id=`aws ec2 describe-instances --region {region} --filters '
                 f'Name=tag:ray-cluster-name,Values={name_on_cloud} --query '
-                f'Reservations[].Instances[].InstanceId --output text`; ' +
-                _get_aws_query_command(region, '$id', 'VolumeType',
-                                       specs['disk_tier']) +
-                ('' if disk_tier == 'low' else
-                 (_get_aws_query_command(region, '$id', 'Iops',
-                                         specs['disk_iops']) +
-                  _get_aws_query_command(region, '$id', 'Throughput',
-                                         specs['disk_throughput']))),
+                f'Reservations[].Instances[].InstanceId --output text`; '
+                + _get_aws_query_command(
+                    region, '$id', 'VolumeType', specs['disk_tier']
+                )
+                + (
+                    ''
+                    if disk_tier == 'low'
+                    else (
+                        _get_aws_query_command(
+                            region, '$id', 'Iops', specs['disk_iops']
+                        )
+                        + _get_aws_query_command(
+                            region, '$id', 'Throughput', specs['disk_throughput']
+                        )
+                    )
+                ),
             ],
             f'sky down -y {name}',
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
@@ -2607,7 +2669,8 @@ def test_gcp_disk_tier():
         type = GCP._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
-            name, sky.GCP.max_cluster_name_length())
+            name, sky.GCP.max_cluster_name_length()
+        )
         region = 'us-west2'
         test = Test(
             'gcp-disk-tier',
@@ -2618,7 +2681,7 @@ def test_gcp_disk_tier():
                 f'"labels.ray-cluster-name:{name_on_cloud}" '
                 '--format="value(name)"`; '
                 f'gcloud compute disks list --filter="name=$name" '
-                f'--format="value(type)" | grep {type} '
+                f'--format="value(type)" | grep {type} ',
             ],
             f'sky down -y {name}',
             timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
@@ -2632,7 +2695,8 @@ def test_azure_disk_tier():
         type = Azure._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
-            name, sky.Azure.max_cluster_name_length())
+            name, sky.Azure.max_cluster_name_length()
+        )
         region = 'westus2'
         test = Test(
             'azure-disk-tier',
@@ -2641,7 +2705,7 @@ def test_azure_disk_tier():
                 f'--disk-tier {disk_tier} echo "hello sky"',
                 f'az resource list --tag ray-cluster-name={name_on_cloud} --query '
                 f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
-                f'--output tsv | grep {type}'
+                f'--output tsv | grep {type}',
             ],
             f'sky down -y {name}',
             timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
@@ -2652,7 +2716,6 @@ def test_azure_disk_tier():
 # ------ Testing Zero Quota Failover ------
 @pytest.mark.aws
 def test_aws_zero_quota_failover():
-
     name = _get_cluster_name()
     region = get_aws_region_for_quota_failover()
 
@@ -2660,7 +2723,8 @@ def test_aws_zero_quota_failover():
         pytest.xfail(
             'Unable to test zero quota failover optimization — quotas '
             'for EC2 P3 instances were found on all AWS regions. Is this '
-            'expected for your account?')
+            'expected for your account?'
+        )
         return
 
     test = Test(
@@ -2675,7 +2739,6 @@ def test_aws_zero_quota_failover():
 
 @pytest.mark.gcp
 def test_gcp_zero_quota_failover():
-
     name = _get_cluster_name()
     region = get_gcp_region_for_quota_failover()
 
@@ -2683,7 +2746,8 @@ def test_gcp_zero_quota_failover():
         pytest.xfail(
             'Unable to test zero quota failover optimization — quotas '
             'for A100-80GB GPUs were found on all GCP regions. Is this '
-            'expected for your account?')
+            'expected for your account?'
+        )
         return
 
     test = Test(
@@ -2724,7 +2788,8 @@ _SERVE_WAIT_UNTIL_READY = (
     '     echo "$output" | grep -q "{replica_num}/{replica_num}" && break;'
     '     echo "$output" | grep -q "FAILED" && exit 1;'
     '     sleep 10;'
-    f' done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};')
+    f' done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};'
+)
 _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
 _ENDPOINT_REGEX = _IP_REGEX + r':[0-9]{1,5}'
 _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
@@ -2738,7 +2803,8 @@ _TEARDOWN_SERVICE = (
     '     output=$(sky serve down -y {name});'
     '     echo "$output" | grep -q "scheduled to be terminated" && break;'
     '     sleep 10;'
-    'done)')
+    'done)'
+)
 
 
 def _get_serve_endpoint(name: str) -> str:
@@ -2746,17 +2812,20 @@ def _get_serve_endpoint(name: str) -> str:
 
 
 def _get_replica_line(name: str, replica_id: int) -> str:
-    return (f'sky serve status {name} | awk "{_AWK_ALL_LINES_BELOW_REPLICAS}"'
-            f' | grep -E "{name}\s+{replica_id}"')
+    return (
+        f'sky serve status {name} | awk "{_AWK_ALL_LINES_BELOW_REPLICAS}"'
+        f' | grep -E "{name}\s+{replica_id}"'
+    )
 
 
 def _get_replica_ip(name: str, replica_id: int) -> str:
-    return (f'ip{replica_id}=$({_get_replica_line(name, replica_id)}'
-            f' | grep -Eo "{_IP_REGEX}")')
+    return (
+        f'ip{replica_id}=$({_get_replica_line(name, replica_id)}'
+        f' | grep -Eo "{_IP_REGEX}")'
+    )
 
 
-def _get_skyserve_http_test(name: str, cloud: str,
-                            timeout_minutes: int) -> Test:
+def _get_skyserve_http_test(name: str, cloud: str, timeout_minutes: int) -> Test:
     test = Test(
         f'test-skyserve-{cloud.replace("_", "-")}',
         [
@@ -2808,7 +2877,8 @@ def test_skyserve_llm():
         expected_output = shlex.quote(expected_output)
         return (
             f'{_get_serve_endpoint(name)}; python tests/skyserve/llm/get_response.py'
-            f' --endpoint $endpoint --prompt {prompt} | grep {expected_output}')
+            f' --endpoint $endpoint --prompt {prompt} | grep {expected_output}'
+        )
 
     with open('tests/skyserve/llm/prompt_output.json', 'r') as f:
         prompt2output = json.load(f)
@@ -2838,11 +2908,14 @@ def test_skyserve_spot_recovery():
     # Reference: test_spot_recovery_gcp
     def terminate_replica(replica_id: int) -> str:
         cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-        query_cmd = (f'gcloud compute instances list --filter='
-                     f'"(labels.ray-cluster-name:{cluster_name})" '
-                     f'--zones={zone} --format="value(name)"')
-        return (f'gcloud compute instances delete --zone={zone}'
-                f' --quiet $({query_cmd})')
+        query_cmd = (
+            f'gcloud compute instances list --filter='
+            f'"(labels.ray-cluster-name:{cluster_name})" '
+            f'--zones={zone} --format="value(name)"'
+        )
+        return (
+            f'gcloud compute instances delete --zone={zone}' f' --quiet $({query_cmd})'
+        )
 
     test = Test(
         f'test-skyserve-spot-recovery-gcp',
@@ -2916,11 +2989,14 @@ def test_skyserve_auto_restart():
     # Reference: test_spot_recovery_gcp
     def terminate_replica(replica_id: int) -> str:
         cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-        query_cmd = (f'gcloud compute instances list --filter='
-                     f'"(labels.ray-cluster-name:{cluster_name})" '
-                     f'--zones={zone} --format="value(name)"')
-        return (f'gcloud compute instances delete --zone={zone}'
-                f' --quiet $({query_cmd})')
+        query_cmd = (
+            f'gcloud compute instances list --filter='
+            f'"(labels.ray-cluster-name:{cluster_name})" '
+            f'--zones={zone} --format="value(name)"'
+        )
+        return (
+            f'gcloud compute instances delete --zone={zone}' f' --quiet $({query_cmd})'
+        )
 
     test = Test(
         f'test-skyserve-auto-restart',
@@ -3013,7 +3089,7 @@ def _build(code: List[str]) -> str:
 @pytest.mark.gcp
 def test_core_api_sky_launch_exec():
     name = _get_cluster_name()
-    task = sky.Task(run="whoami")
+    task = sky.Task(run='whoami')
     task.set_resources(sky.Resources(cloud=sky.GCP()))
     job_id, handle = sky.launch(task, cluster_name=name)
     assert job_id == 1
@@ -3092,7 +3168,7 @@ class TestStorageWithCredentials:
         'a.-bc',  # contains the sequence '.-'
         'a-.bc',  # contains the sequence '-.'
         'a&bc'  # contains special characters
-        'ab^c'  # contains special characters
+        'ab^c',  # contains special characters
     ]
     GITIGNORE_SYNC_TEST_DIR_STRUCTURE = {
         'double_asterisk': {
@@ -3182,8 +3258,7 @@ class TestStorageWithCredentials:
             else:
                 # Create a subdirectory
                 os.mkdir(path)
-                TestStorageWithCredentials.create_dir_structure(
-                    path, substructure)
+                TestStorageWithCredentials.create_dir_structure(path, substructure)
 
     @staticmethod
     def cli_delete_cmd(store_type, bucket_name):
@@ -3200,7 +3275,8 @@ class TestStorageWithCredentials:
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.IBM:
             bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-                bucket_name, Rclone.RcloneClouds.IBM)
+                bucket_name, Rclone.RcloneClouds.IBM
+            )
             return f'rclone purge {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
 
     @staticmethod
@@ -3226,7 +3302,8 @@ class TestStorageWithCredentials:
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.IBM:
             bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-                bucket_name, Rclone.RcloneClouds.IBM)
+                bucket_name, Rclone.RcloneClouds.IBM
+            )
             return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
 
     @staticmethod
@@ -3279,21 +3356,18 @@ class TestStorageWithCredentials:
 
     @staticmethod
     def yield_storage_object(
-            name: Optional[str] = None,
-            source: Optional[storage_lib.Path] = None,
-            stores: Optional[Dict[storage_lib.StoreType,
-                                  storage_lib.AbstractStore]] = None,
-            persistent: Optional[bool] = True,
-            mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT):
+        name: Optional[str] = None,
+        source: Optional[storage_lib.Path] = None,
+        stores: Optional[Dict[storage_lib.StoreType, storage_lib.AbstractStore]] = None,
+        persistent: Optional[bool] = True,
+        mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT,
+    ):
         # Creates a temporary storage object. Stores must be added in the test.
-        storage_obj = storage_lib.Storage(name=name,
-                                          source=source,
-                                          stores=stores,
-                                          persistent=persistent,
-                                          mode=mode)
+        storage_obj = storage_lib.Storage(
+            name=name, source=source, stores=stores, persistent=persistent, mode=mode
+        )
         yield storage_obj
-        handle = global_user_state.get_handle_from_storage_name(
-            storage_obj.name)
+        handle = global_user_state.get_handle_from_storage_name(storage_obj.name)
         if handle:
             # If handle exists, delete manually
             # TODO(romilb): This is potentially risky - if the delete method has
@@ -3320,8 +3394,7 @@ class TestStorageWithCredentials:
             storage_mult_obj.append(store_obj)
         yield storage_mult_obj
         for storage_obj in storage_mult_obj:
-            handle = global_user_state.get_handle_from_storage_name(
-                storage_obj.name)
+            handle = global_user_state.get_handle_from_storage_name(storage_obj.name)
             if handle:
                 # If handle exists, delete manually
                 # TODO(romilb): This is potentially risky - if the delete method has
@@ -3341,21 +3414,20 @@ class TestStorageWithCredentials:
             src_path = os.path.expanduser(f'~/{name}')
             pathlib.Path(src_path).expanduser().mkdir(exist_ok=True)
             timestamp = str(time.time()).replace('.', '')
-            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
-                                            source=src_path)
+            store_obj = storage_lib.Storage(
+                name=f'sky-test-{timestamp}', source=src_path
+            )
             storage_mult_obj.append(store_obj)
         yield storage_mult_obj
         for storage_obj in storage_mult_obj:
-            handle = global_user_state.get_handle_from_storage_name(
-                storage_obj.name)
+            handle = global_user_state.get_handle_from_storage_name(storage_obj.name)
             if handle:
                 storage_obj.delete()
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
-        yield from self.yield_storage_object(name=tmp_bucket_name,
-                                             source=tmp_source)
+        yield from self.yield_storage_object(name=tmp_bucket_name, source=tmp_source)
 
     @pytest.fixture
     def tmp_local_list_storage_obj(self, tmp_bucket_name, tmp_source):
@@ -3363,22 +3435,19 @@ class TestStorageWithCredentials:
         # Stores must be added in the test. After upload, the bucket should
         # have two files - /tmp-file and /tmp-source/tmp-file
         list_source = [tmp_source, tmp_source + '/tmp-file']
-        yield from self.yield_storage_object(name=tmp_bucket_name,
-                                             source=list_source)
+        yield from self.yield_storage_object(name=tmp_bucket_name, source=list_source)
 
     @pytest.fixture
     def tmp_bulk_del_storage_obj(self, tmp_bucket_name):
         # Creates a temporary storage object for testing bulk deletion.
         # Stores must be added in the test.
         with tempfile.TemporaryDirectory() as tmpdir:
-            subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}',
-                                    shell=True)
-            subprocess.check_output(f'touch {tmpdir}/test{{000..255}}.txt',
-                                    shell=True)
+            subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}', shell=True)
+            subprocess.check_output(f'touch {tmpdir}/test{{000..255}}.txt', shell=True)
             subprocess.check_output(
-                f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True)
-            yield from self.yield_storage_object(name=tmp_bucket_name,
-                                                 source=tmpdir)
+                f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True
+            )
+            yield from self.yield_storage_object(name=tmp_bucket_name, source=tmpdir)
 
     @pytest.fixture
     def tmp_copy_mnt_existing_storage_obj(self, tmp_scratch_storage_obj):
@@ -3388,8 +3457,9 @@ class TestStorageWithCredentials:
 
         # Try to initialize another storage with the storage object created
         # above, but now in COPY mode. This should succeed.
-        yield from self.yield_storage_object(name=storage_name,
-                                             mode=storage_lib.StorageMode.COPY)
+        yield from self.yield_storage_object(
+            name=storage_name, mode=storage_lib.StorageMode.COPY
+        )
 
     @pytest.fixture
     def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
@@ -3412,23 +3482,20 @@ class TestStorageWithCredentials:
             temp_path = f'{tmpdir}/.git/info/'
             os.makedirs(temp_path)
             temp_exclude_path = os.path.join(temp_path, 'exclude')
-            file_path = os.path.join(skypilot_path,
-                                     'tests/git_info_exclude_test')
+            file_path = os.path.join(skypilot_path, 'tests/git_info_exclude_test')
             shutil.copyfile(file_path, temp_exclude_path)
 
             # Create sky Storage with the files created
             yield from self.yield_storage_object(
-                name=tmp_bucket_name,
-                source=tmpdir,
-                mode=storage_lib.StorageMode.COPY)
+                name=tmp_bucket_name, source=tmpdir, mode=storage_lib.StorageMode.COPY
+            )
 
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
         subprocess.check_call(['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
         yield tmp_bucket_name
-        subprocess.check_call(
-            ['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force'])
+        subprocess.check_call(['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force'])
 
     @pytest.fixture
     def tmp_gsutil_bucket(self, tmp_bucket_name):
@@ -3443,16 +3510,18 @@ class TestStorageWithCredentials:
         endpoint_url = cloudflare.create_endpoint()
         subprocess.check_call(
             f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2',
-            shell=True)
+            shell=True,
+        )
         yield tmp_bucket_name
         subprocess.check_call(
             f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2',
-            shell=True)
+            shell=True,
+        )
 
     @pytest.fixture
     def tmp_ibm_cos_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using IBM COS API
-        storage_obj = storage_lib.IBMCosStore(source="", name=tmp_bucket_name)
+        storage_obj = storage_lib.IBMCosStore(source='', name=tmp_bucket_name)
         yield tmp_bucket_name
         storage_obj.delete()
 
@@ -3464,13 +3533,16 @@ class TestStorageWithCredentials:
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
 
-    @pytest.mark.parametrize('store_type', [
-        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
-    ])
-    def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
-                                              store_type):
+    @pytest.mark.parametrize(
+        'store_type',
+        [
+            storage_lib.StoreType.S3,
+            storage_lib.StoreType.GCS,
+            pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+            pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        ],
+    )
+    def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj, store_type):
         # Creates a new bucket with a local source, uploads files to it
         # and deletes it.
         tmp_local_storage_obj.add_store(store_type)
@@ -3481,20 +3553,26 @@ class TestStorageWithCredentials:
 
         # Run sky storage delete to delete the storage object
         subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_local_storage_obj.name, '--yes'])
+            ['sky', 'storage', 'delete', tmp_local_storage_obj.name, '--yes']
+        )
 
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
     @pytest.mark.xdist_group('multiple_bucket_deletion')
-    @pytest.mark.parametrize('store_type', [
-        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
-        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm)
-    ])
+    @pytest.mark.parametrize(
+        'store_type',
+        [
+            storage_lib.StoreType.S3,
+            storage_lib.StoreType.GCS,
+            pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+            pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+        ],
+    )
     def test_multiple_buckets_creation_and_deletion(
-            self, tmp_multiple_scratch_storage_obj, store_type):
+        self, tmp_multiple_scratch_storage_obj, store_type
+    ):
         # Creates multiple new buckets(5 buckets) with a local source
         # and deletes them.
         storage_obj_name = []
@@ -3527,13 +3605,18 @@ class TestStorageWithCredentials:
         ]
         assert all([item not in out for item in storage_obj_name])
 
-    @pytest.mark.parametrize('store_type', [
-        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
-    ])
-    def test_upload_source_with_spaces(self, store_type,
-                                       tmp_multiple_custom_source_storage_obj):
+    @pytest.mark.parametrize(
+        'store_type',
+        [
+            storage_lib.StoreType.S3,
+            storage_lib.StoreType.GCS,
+            pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+            pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        ],
+    )
+    def test_upload_source_with_spaces(
+        self, store_type, tmp_multiple_custom_source_storage_obj
+    ):
         # Creates two buckets with specified local sources
         # with spaces in the name
         storage_obj_names = []
@@ -3551,13 +3634,16 @@ class TestStorageWithCredentials:
         ]
         assert all([item in out for item in storage_obj_names])
 
-    @pytest.mark.parametrize('store_type', [
-        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
-    ])
-    def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
-                                      store_type):
+    @pytest.mark.parametrize(
+        'store_type',
+        [
+            storage_lib.StoreType.S3,
+            storage_lib.StoreType.GCS,
+            pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+            pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        ],
+    )
+    def test_bucket_external_deletion(self, tmp_scratch_storage_obj, store_type):
         # Creates a bucket, deletes it externally using cloud cli commands
         # and then tries to delete it using sky storage delete.
         tmp_scratch_storage_obj.add_store(store_type)
@@ -3572,7 +3658,8 @@ class TestStorageWithCredentials:
 
         # Run sky storage delete to delete the storage object
         out = subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name, '--yes'])
+            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name, '--yes']
+        )
         # Make sure bucket was not created during deletion (see issue #1322)
         assert 'created' not in out.decode('utf-8').lower()
 
@@ -3580,29 +3667,36 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_scratch_storage_obj.name not in out.decode('utf-8')
 
-    @pytest.mark.parametrize('store_type', [
-        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
-    ])
+    @pytest.mark.parametrize(
+        'store_type',
+        [
+            storage_lib.StoreType.S3,
+            storage_lib.StoreType.GCS,
+            pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+            pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        ],
+    )
     def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
         # Creates a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
         tmp_bulk_del_storage_obj.add_store(store_type)
 
-        subprocess.check_output([
-            'sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name, '--yes'
-        ])
+        subprocess.check_output(
+            ['sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name, '--yes']
+        )
 
         output = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
 
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
-        [('s3://tcga-2-open', storage_lib.StoreType.S3),
-         ('s3://digitalcorpora', storage_lib.StoreType.S3),
-         ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS)],
-        indirect=['tmp_public_storage_obj'])
+        [
+            ('s3://tcga-2-open', storage_lib.StoreType.S3),
+            ('s3://digitalcorpora', storage_lib.StoreType.S3),
+            ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS),
+        ],
+        indirect=['tmp_public_storage_obj'],
+    )
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not
         # added to global_user_state.
@@ -3612,11 +3706,15 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
-    @pytest.mark.parametrize('nonexist_bucket_url', [
-        's3://{random_name}', 'gs://{random_name}',
-        pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
-        pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
-    ])
+    @pytest.mark.parametrize(
+        'nonexist_bucket_url',
+        [
+            's3://{random_name}',
+            'gs://{random_name}',
+            pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
+            pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare),
+        ],
+    )
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
         # Generate a random bucket name and verify it doesn't exist:
@@ -3636,10 +3734,12 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('cos'):
                 # Using API calls, since using rclone requires a profile's name
                 try:
-                    expected_output = command = "echo"  # avoid unrelated exception in case of failure.
+                    expected_output = (
+                        command
+                    ) = 'echo'  # avoid unrelated exception in case of failure.
                     bucket_name = urllib.parse.urlsplit(
-                        nonexist_bucket_url.format(
-                            random_name=nonexist_bucket_name)).path.strip('/')
+                        nonexist_bucket_url.format(random_name=nonexist_bucket_name)
+                    ).path.strip('/')
                     client = ibm.get_cos_client('us-east')
                     client.head_bucket(Bucket=bucket_name)
                 except ibm.ibm_botocore.exceptions.ClientError as e:
@@ -3647,14 +3747,13 @@ class TestStorageWithCredentials:
                         # success
                         return
             else:
-                raise ValueError('Unsupported bucket type '
-                                 f'{nonexist_bucket_url}')
+                raise ValueError('Unsupported bucket type ' f'{nonexist_bucket_url}')
 
             # Check if bucket exists using the cli:
             try:
-                out = subprocess.check_output(command,
-                                              stderr=subprocess.STDOUT,
-                                              shell=True)
+                out = subprocess.check_output(
+                    command, stderr=subprocess.STDOUT, shell=True
+                )
             except subprocess.CalledProcessError as e:
                 out = e.output
             out = out.decode('utf-8')
@@ -3663,44 +3762,63 @@ class TestStorageWithCredentials:
             else:
                 retry_count += 1
                 if retry_count > 3:
-                    raise RuntimeError('Unable to find a nonexistent bucket '
-                                       'to use. This is higly unlikely - '
-                                       'check if the tests are correct.')
+                    raise RuntimeError(
+                        'Unable to find a nonexistent bucket '
+                        'to use. This is higly unlikely - '
+                        'check if the tests are correct.'
+                    )
 
         with pytest.raises(
-                sky.exceptions.StorageBucketGetError,
-                match='Attempted to use a non-existent bucket as a source'):
-            storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
-                random_name=nonexist_bucket_name))
+            sky.exceptions.StorageBucketGetError,
+            match='Attempted to use a non-existent bucket as a source',
+        ):
+            storage_obj = storage_lib.Storage(
+                source=nonexist_bucket_url.format(random_name=nonexist_bucket_name)
+            )
 
-    @pytest.mark.parametrize('private_bucket', [
-        f's3://imagenet', f'gs://imagenet',
-        pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
-    ])
+    @pytest.mark.parametrize(
+        'private_bucket',
+        [
+            f's3://imagenet',
+            f'gs://imagenet',
+            pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm),
+        ],
+    )
     def test_private_bucket(self, private_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
-        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc if \
-              urllib.parse.urlsplit(private_bucket).scheme != 'cos' else \
-                  urllib.parse.urlsplit(private_bucket).path.strip('/')
+        private_bucket_name = (
+            urllib.parse.urlsplit(private_bucket).netloc
+            if urllib.parse.urlsplit(private_bucket).scheme != 'cos'
+            else urllib.parse.urlsplit(private_bucket).path.strip('/')
+        )
         with pytest.raises(
-                sky.exceptions.StorageBucketGetError,
-                match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                    name=private_bucket_name)):
+            sky.exceptions.StorageBucketGetError,
+            match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                name=private_bucket_name
+            ),
+        ):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
-    @pytest.mark.parametrize('ext_bucket_fixture, store_type',
-                             [('tmp_awscli_bucket', storage_lib.StoreType.S3),
-                              ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
-                              pytest.param('tmp_ibm_cos_bucket',
-                                           storage_lib.StoreType.IBM,
-                                           marks=pytest.mark.ibm),
-                              pytest.param('tmp_awscli_bucket_r2',
-                                           storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare)])
-    def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
-                                       tmp_source, store_type):
+    @pytest.mark.parametrize(
+        'ext_bucket_fixture, store_type',
+        [
+            ('tmp_awscli_bucket', storage_lib.StoreType.S3),
+            ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
+            pytest.param(
+                'tmp_ibm_cos_bucket', storage_lib.StoreType.IBM, marks=pytest.mark.ibm
+            ),
+            pytest.param(
+                'tmp_awscli_bucket_r2',
+                storage_lib.StoreType.R2,
+                marks=pytest.mark.cloudflare,
+            ),
+        ],
+    )
+    def test_upload_to_existing_bucket(
+        self, ext_bucket_fixture, request, tmp_source, store_type
+    ):
         # Tries uploading existing files to newly created bucket (outside of
         # sky) and verifies that files are written.
         bucket_name = request.getfixturevalue(ext_bucket_fixture)
@@ -3708,27 +3826,28 @@ class TestStorageWithCredentials:
         storage_obj.add_store(store_type)
 
         # Check if tmp_source/tmp-file exists in the bucket using aws cli
-        out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name),
-                                      shell=True)
-        assert 'tmp-file' in out.decode('utf-8'), \
-            'File not found in bucket - output was : {}'.format(out.decode
-                                                                ('utf-8'))
+        out = subprocess.check_output(
+            self.cli_ls_cmd(store_type, bucket_name), shell=True
+        )
+        assert 'tmp-file' in out.decode(
+            'utf-8'
+        ), 'File not found in bucket - output was : {}'.format(out.decode('utf-8'))
 
         # Check symlinks - symlinks don't get copied by sky storage
         assert (pathlib.Path(tmp_source) / 'circle-link').is_symlink(), (
             'circle-link was not found in the upload source - '
-            'are the test fixtures correct?')
-        assert 'circle-link' not in out.decode('utf-8'), (
-            'Symlink found in bucket - ls output was : {}'.format(
-                out.decode('utf-8')))
+            'are the test fixtures correct?'
+        )
+        assert 'circle-link' not in out.decode(
+            'utf-8'
+        ), 'Symlink found in bucket - ls output was : {}'.format(out.decode('utf-8'))
 
         # Run sky storage ls to check if storage object exists in the output.
         # It should not exist because the bucket was created externally.
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
 
-    def test_copy_mount_existing_storage(self,
-                                         tmp_copy_mnt_existing_storage_obj):
+    def test_copy_mount_existing_storage(self, tmp_copy_mnt_existing_storage_obj):
         # Creates a bucket with no source in MOUNT mode (empty bucket), and
         # then tries to load the same storage in COPY mode.
         tmp_copy_mnt_existing_storage_obj.add_store(storage_lib.StoreType.S3)
@@ -3736,43 +3855,56 @@ class TestStorageWithCredentials:
 
         # Check `sky storage ls` to ensure storage object exists
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
-        assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
+        assert (
+            storage_name in out
+        ), f'Storage {storage_name} not found in sky storage ls.'
 
-    @pytest.mark.parametrize('store_type', [
-        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
-        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
-    ])
+    @pytest.mark.parametrize(
+        'store_type',
+        [
+            storage_lib.StoreType.S3,
+            storage_lib.StoreType.GCS,
+            pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+            pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        ],
+    )
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
         tmp_local_list_storage_obj.add_store(store_type)
 
         # Check if tmp-file exists in the bucket root using cli
-        out = subprocess.check_output(self.cli_ls_cmd(
-            store_type, tmp_local_list_storage_obj.name),
-                                      shell=True)
-        assert 'tmp-file' in out.decode('utf-8'), \
-            'File not found in bucket - output was : {}'.format(out.decode
-                                                                ('utf-8'))
+        out = subprocess.check_output(
+            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name), shell=True
+        )
+        assert 'tmp-file' in out.decode(
+            'utf-8'
+        ), 'File not found in bucket - output was : {}'.format(out.decode('utf-8'))
 
         # Check if tmp-file exists in the bucket/tmp-source using cli
-        out = subprocess.check_output(self.cli_ls_cmd(
-            store_type, tmp_local_list_storage_obj.name, 'tmp-source/'),
-                                      shell=True)
-        assert 'tmp-file' in out.decode('utf-8'), \
-            'File not found in bucket - output was : {}'.format(out.decode
-                                                                ('utf-8'))
+        out = subprocess.check_output(
+            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name, 'tmp-source/'),
+            shell=True,
+        )
+        assert 'tmp-file' in out.decode(
+            'utf-8'
+        ), 'File not found in bucket - output was : {}'.format(out.decode('utf-8'))
 
-    @pytest.mark.parametrize('invalid_name_list, store_type',
-                             [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
-                              (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
-                              pytest.param(IBM_INVALID_NAMES,
-                                           storage_lib.StoreType.IBM,
-                                           marks=pytest.mark.ibm),
-                              pytest.param(AWS_INVALID_NAMES,
-                                           storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare)])
+    @pytest.mark.parametrize(
+        'invalid_name_list, store_type',
+        [
+            (AWS_INVALID_NAMES, storage_lib.StoreType.S3),
+            (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
+            pytest.param(
+                IBM_INVALID_NAMES, storage_lib.StoreType.IBM, marks=pytest.mark.ibm
+            ),
+            pytest.param(
+                AWS_INVALID_NAMES,
+                storage_lib.StoreType.R2,
+                marks=pytest.mark.cloudflare,
+            ),
+        ],
+    )
     def test_invalid_names(self, invalid_name_list, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
@@ -3783,14 +3915,19 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize(
         'gitignore_structure, store_type',
-        [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
-         (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS),
-         pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
-                      storage_lib.StoreType.R2,
-                      marks=pytest.mark.cloudflare)])
-    def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
-                                                     store_type,
-                                                     tmp_gitignore_storage_obj):
+        [
+            (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
+            (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS),
+            pytest.param(
+                GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
+                storage_lib.StoreType.R2,
+                marks=pytest.mark.cloudflare,
+            ),
+        ],
+    )
+    def test_excluded_file_cloud_storage_upload_copy(
+        self, gitignore_structure, store_type, tmp_gitignore_storage_obj
+    ):
         # tests if files included in .gitignore and .git/info/exclude are
         # excluded from being transferred to Storage
 
@@ -3798,26 +3935,31 @@ class TestStorageWithCredentials:
 
         upload_file_name = 'included'
         # Count the number of files with the given file name
-        up_cmd = self.cli_count_name_in_bucket(store_type, \
-            tmp_gitignore_storage_obj.name, file_name=upload_file_name)
-        git_exclude_cmd = self.cli_count_name_in_bucket(store_type, \
-            tmp_gitignore_storage_obj.name, file_name='.git')
+        up_cmd = self.cli_count_name_in_bucket(
+            store_type, tmp_gitignore_storage_obj.name, file_name=upload_file_name
+        )
+        git_exclude_cmd = self.cli_count_name_in_bucket(
+            store_type, tmp_gitignore_storage_obj.name, file_name='.git'
+        )
         cnt_num_file_cmd = self.cli_count_file_in_bucket(
-            store_type, tmp_gitignore_storage_obj.name)
+            store_type, tmp_gitignore_storage_obj.name
+        )
 
         up_output = subprocess.check_output(up_cmd, shell=True)
-        git_exclude_output = subprocess.check_output(git_exclude_cmd,
-                                                     shell=True)
+        git_exclude_output = subprocess.check_output(git_exclude_cmd, shell=True)
         cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
 
-        assert '3' in up_output.decode('utf-8'), \
-                'Files to be included are not completely uploaded.'
+        assert '3' in up_output.decode(
+            'utf-8'
+        ), 'Files to be included are not completely uploaded.'
         # 1 is read as .gitignore is uploaded
-        assert '1' in git_exclude_output.decode('utf-8'), \
-               '.git directory should not be uploaded.'
+        assert '1' in git_exclude_output.decode(
+            'utf-8'
+        ), '.git directory should not be uploaded.'
         # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
-        assert '4' in cnt_output.decode('utf-8'), \
-               'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+        assert '4' in cnt_output.decode(
+            'utf-8'
+        ), 'Some items listed in .gitignore and .git/info/exclude are not excluded.'
 
 
 # ---------- Testing YAML Specs ----------
@@ -3828,9 +3970,11 @@ class TestYamlSpecs:
     #  We should not use `examples/storage_demo.yaml` here, since it requires
     #  users to ensure bucket names to not exist and/or be unique.
     _TEST_YAML_PATHS = [
-        'examples/minimal.yaml', 'examples/managed_spot.yaml',
-        'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
-        'examples/multi_hostname.yaml'
+        'examples/minimal.yaml',
+        'examples/managed_spot.yaml',
+        'examples/using_file_mounts.yaml',
+        'examples/resnet_app.yaml',
+        'examples/multi_hostname.yaml',
     ]
 
     def _is_dict_subset(self, d1, d2):
@@ -3871,8 +4015,7 @@ class TestYamlSpecs:
         pathlib.Path('~/.ssh').expanduser().mkdir(exist_ok=True)
         pathlib.Path('~/.ssh/id_rsa.pub').expanduser().touch()
         pathlib.Path('~/tmp-workdir').expanduser().mkdir(exist_ok=True)
-        pathlib.Path('~/Downloads/tpu').expanduser().mkdir(parents=True,
-                                                           exist_ok=True)
+        pathlib.Path('~/Downloads/tpu').expanduser().mkdir(parents=True, exist_ok=True)
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)
 

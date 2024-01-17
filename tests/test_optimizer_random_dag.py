@@ -8,8 +8,7 @@ import sky
 from sky import clouds
 from sky.clouds import service_catalog
 
-ALL_INSTANCE_TYPE_INFOS = sum(
-    sky.list_accelerators(gpus_only=True).values(), [])
+ALL_INSTANCE_TYPE_INFOS = sum(sky.list_accelerators(gpus_only=True).values(), [])
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
@@ -57,19 +56,23 @@ def generate_random_dag(
             op.set_outputs('CLOUD', random.randint(0, max_data_size))
 
             num_candidates = random.randint(1, max_num_candidate_resources)
-            candidate_instance_types = random.choices(ALL_INSTANCE_TYPE_INFOS,
-                                                      k=num_candidates)
+            candidate_instance_types = random.choices(
+                ALL_INSTANCE_TYPE_INFOS, k=num_candidates
+            )
 
             candidate_resources = set()
             for candidate in candidate_instance_types:
                 instance_type = candidate.instance_type
                 if pd.isna(instance_type):
                     assert candidate.cloud == 'GCP', candidate
-                    (instance_list,
-                     _) = service_catalog.get_instance_type_for_accelerator(
-                         candidate.accelerator_name,
-                         candidate.accelerator_count,
-                         clouds='gcp')
+                    (
+                        instance_list,
+                        _,
+                    ) = service_catalog.get_instance_type_for_accelerator(
+                        candidate.accelerator_name,
+                        candidate.accelerator_count,
+                        clouds='gcp',
+                    )
                     assert instance_list, (candidate, instance_list)
                     instance_type = random.choice(instance_list)
                     if 'tpu' in candidate.accelerator_name:
@@ -79,7 +82,8 @@ def generate_random_dag(
                     instance_type=instance_type,
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count
-                    })
+                    },
+                )
                 candidate_resources.add(resources)
             op.set_resources(candidate_resources)
     return dag
@@ -106,10 +110,12 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
             if len(tasks) == 1:
                 if minimize_cost:
                     objective = sky.Optimizer._compute_total_cost(
-                        graph, topo_order, plan)
+                        graph, topo_order, plan
+                    )
                 else:
                     objective = sky.Optimizer._compute_total_time(
-                        graph, topo_order, plan)
+                        graph, topo_order, plan
+                    )
                 if objective < min_objective:
                     final_plan = {
                         topo_order[i]: resources_stack[i]
@@ -128,17 +134,17 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
 def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     copy_dag = copy.deepcopy(dag)
     if minimize_cost:
-        optimizer_plan = sky.Optimizer._optimize_dag(dag,
-                                                     sky.OptimizeTarget.COST)
+        optimizer_plan = sky.Optimizer._optimize_dag(dag, sky.OptimizeTarget.COST)
     else:
-        optimizer_plan = sky.Optimizer._optimize_dag(dag,
-                                                     sky.OptimizeTarget.TIME)
+        optimizer_plan = sky.Optimizer._optimize_dag(dag, sky.OptimizeTarget.TIME)
     if minimize_cost:
-        objective = sky.Optimizer._compute_total_cost(dag.get_graph(),
-                                                      dag.tasks, optimizer_plan)
+        objective = sky.Optimizer._compute_total_cost(
+            dag.get_graph(), dag.tasks, optimizer_plan
+        )
     else:
-        objective = sky.Optimizer._compute_total_time(dag.get_graph(),
-                                                      dag.tasks, optimizer_plan)
+        objective = sky.Optimizer._compute_total_time(
+            dag.get_graph(), dag.tasks, optimizer_plan
+        )
 
     min_objective = find_min_objective(copy_dag, minimize_cost)
     assert abs(objective - min_objective) < 5e-2

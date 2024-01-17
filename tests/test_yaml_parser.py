@@ -14,7 +14,8 @@ def _create_config_file(config: str, tmp_path: pathlib.Path) -> str:
 
 def test_empty_fields_task(tmp_path):
     config_path = _create_config_file(
-        textwrap.dedent(f"""\
+        textwrap.dedent(
+            f"""\
             name: task
             resources:
             workdir: examples/
@@ -23,7 +24,10 @@ def test_empty_fields_task(tmp_path):
             num_nodes:
             run:
               # commented out, empty run
-            """), tmp_path)
+            """
+        ),
+        tmp_path,
+    )
     task = Task.from_yaml(config_path)
 
     assert task.name == 'task'
@@ -37,11 +41,15 @@ def test_empty_fields_task(tmp_path):
 
 def test_invalid_fields_task(tmp_path):
     config_path = _create_config_file(
-        textwrap.dedent(f"""\
+        textwrap.dedent(
+            f"""\
             name: task
 
             not_a_valid_field:
-            """), tmp_path)
+            """
+        ),
+        tmp_path,
+    )
     with pytest.raises(AssertionError) as e:
         Task.from_yaml(config_path)
     assert 'Invalid task args' in e.value.args[0]
@@ -49,7 +57,8 @@ def test_invalid_fields_task(tmp_path):
 
 def test_empty_fields_resources(tmp_path):
     config_path = _create_config_file(
-        textwrap.dedent(f"""\
+        textwrap.dedent(
+            f"""\
             resources:
                 cloud:
                 region:
@@ -57,7 +66,10 @@ def test_empty_fields_resources(tmp_path):
                 disk_size:
                 use_spot:
                 cpus: 32
-            """), tmp_path)
+            """
+        ),
+        tmp_path,
+    )
     task = Task.from_yaml(config_path)
 
     resources = list(task.resources)[0]
@@ -71,11 +83,15 @@ def test_empty_fields_resources(tmp_path):
 
 def test_invalid_fields_resources(tmp_path):
     config_path = _create_config_file(
-        textwrap.dedent(f"""\
+        textwrap.dedent(
+            f"""\
             resources:
                 cloud: aws
                 not_a_valid_field:
-            """), tmp_path)
+            """
+        ),
+        tmp_path,
+    )
     with pytest.raises(AssertionError) as e:
         Task.from_yaml(config_path)
     assert 'Invalid resource args' in e.value.args[0]
@@ -83,14 +99,18 @@ def test_invalid_fields_resources(tmp_path):
 
 def test_empty_fields_storage(tmp_path):
     config_path = _create_config_file(
-        textwrap.dedent(f"""\
+        textwrap.dedent(
+            f"""\
             file_mounts:
                 /mystorage:
                     name: sky-dataset
                     source:
                     store:
                     persistent:
-            """), tmp_path)
+            """
+        ),
+        tmp_path,
+    )
     task = Task.from_yaml(config_path)
 
     storage = task.storage_mounts['/mystorage']
@@ -102,12 +122,16 @@ def test_empty_fields_storage(tmp_path):
 
 def test_invalid_fields_storage(tmp_path):
     config_path = _create_config_file(
-        textwrap.dedent(f"""\
+        textwrap.dedent(
+            f"""\
             file_mounts:
                 /datasets-storage:
                     name: sky-dataset
                     not_a_valid_field:
-            """), tmp_path)
+            """
+        ),
+        tmp_path,
+    )
     with pytest.raises(AssertionError) as e:
         Task.from_yaml(config_path)
     assert 'Invalid storage args' in e.value.args[0]

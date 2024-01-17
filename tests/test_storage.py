@@ -12,8 +12,7 @@ class TestStorageSpecLocalSource:
 
     def test_nonexist_local_source(self):
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='test',
-                                source=f'/tmp/test-{int(time.time())}')
+            storage_lib.Storage(name='test', source=f'/tmp/test-{int(time.time())}')
         assert 'Local source path does not exist' in str(e)
 
     def test_source_trailing_slashes(self):
@@ -29,8 +28,7 @@ class TestStorageSpecLocalSource:
 
     def test_source_multifile_conflict(self):
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='test',
-                                source=['/myfile.txt', '/a/myfile.txt'])
+            storage_lib.Storage(name='test', source=['/myfile.txt', '/a/myfile.txt'])
         assert 'Cannot have multiple files or directories' in str(e)
 
 
@@ -47,8 +45,10 @@ class TestStorageSpecValidation:
         with pytest.raises(exceptions.StorageSpecError) as e:
             storage_lib.Storage(name='test', source='s3://tcga-2-open')
 
-        assert 'Storage name should not be specified if the source is a ' \
-               'remote URI.' in str(e)
+        assert (
+            'Storage name should not be specified if the source is a '
+            'remote URI.' in str(e)
+        )
 
     def test_source_and_noname(self):
         """Tests when only source is specified"""
@@ -67,14 +67,14 @@ class TestStorageSpecValidation:
         """Tests when only name is specified"""
         # When mode is COPY and the storage object doesn't exist - error out
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='sky-test-bucket',
-                                mode=storage_lib.StorageMode.COPY)
+            storage_lib.Storage(
+                name='sky-test-bucket', mode=storage_lib.StorageMode.COPY
+            )
 
         assert 'source must be specified when using COPY mode' in str(e)
 
         # When mode is MOUNT - valid spec (e.g., use for scratch space)
-        storage_lib.Storage(name='sky-test-bucket',
-                            mode=storage_lib.StorageMode.MOUNT)
+        storage_lib.Storage(name='sky-test-bucket', mode=storage_lib.StorageMode.MOUNT)
 
     def test_noname_and_nosource(self):
         """Tests when neither name nor source is specified"""
