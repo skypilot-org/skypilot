@@ -118,10 +118,9 @@ def list_accelerators(
     all_regions: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in vSphere offering GPUs."""
-    df = common.read_catalog('vsphere/vms.csv')
     return common.list_accelerators_impl(
         _CLOUD_VSPHERE,
-        df,
+        _df,
         gpus_only,
         name_filter,
         region_filter,
