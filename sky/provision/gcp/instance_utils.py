@@ -1192,13 +1192,13 @@ class GCPTPUVMInstance(GCPInstance):
             if error:
                 error['domain'] = 'create_instances'
                 errors.append(error)
-            error = operation.get('error', {}).get('details')
-            for detail in error:
+            details = operation.get('error', {}).get('details', [])
+            for detail in details:
                 detail['code'] = detail.pop('@type', '')
                 detail['message'] = str(detail)
                 detail['domain'] = 'create_instances'
-            if error:
-                errors.extend(error)
+            if details:
+                errors.extend(details)
         if errors:
             logger.debug('create_instances: Failed to create instances. '
                          f'Reason: {errors}')
