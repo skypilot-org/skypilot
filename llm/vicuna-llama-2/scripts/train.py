@@ -301,7 +301,7 @@ def cleanup_incomplete_checkpoints(output_dir):
                 subprocess.run(
                     ['gsutil', '-m', 'rsync', '-r', checkpoint, tmp_dir], check=True
                 )
-            except:
+            except Exception:
                 print('Failed to optimize checkpoint loading. Skip.')
             break
 

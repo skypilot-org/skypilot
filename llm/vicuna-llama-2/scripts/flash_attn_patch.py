@@ -4,7 +4,6 @@ from typing import List, Optional, Tuple
 from einops import rearrange
 from flash_attn.bert_padding import pad_input
 from flash_attn.bert_padding import unpad_input
-
 # pip3 install "flash-attn>=2.0"
 from flash_attn.flash_attn_interface import flash_attn_varlen_qkvpacked_func
 import torch
