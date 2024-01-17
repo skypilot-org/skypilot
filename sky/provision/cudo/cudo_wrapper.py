@@ -110,6 +110,7 @@ def list_instances():
         vms = api.list_vms(cudo().cudo_api.project_id())
         instances = {}
         for vm in vms.to_dict()['vms']:
+            internal_ip = vm['external_ip_address'] if vm['internal_ip_address'] is '' else vm['internal_ip_address']
             instance = {
                 # active_state, init_state, lcm_state, short_state
                 'status': vm['short_state'],
@@ -117,7 +118,7 @@ def list_instances():
                 'name': vm['id'],
                 'ip': vm['external_ip_address'],
                 'external_ip': vm['external_ip_address'],
-                'internal_ip': vm['internal_ip_address']
+                'internal_ip': internal_ip
             }
             instances[vm['id']] = instance
         return instances
