@@ -175,6 +175,13 @@ class GCP(clouds.Cloud):
                     'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
                 )
             }
+        if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
+            # TPU node does not support multi-node.
+            return {
+                clouds.CloudImplementationFeatures.MULTI_NODE:
+                    ('TPU node does not support multi-node. Please set '
+                     'num_nodes to 1.')
+            }
         return {}
 
     @classmethod
@@ -705,20 +712,18 @@ class GCP(clouds.Cloud):
         import google.auth
         import googleapiclient.discovery
 
-        from sky.skylet.providers.gcp import constants
-
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
         service = googleapiclient.discovery.build('cloudresourcemanager',
                                                   'v1',
                                                   credentials=credentials)
-        permissions = {'permissions': constants.VM_MINIMAL_PERMISSIONS}
+        gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
+        permissions = {'permissions': gcp_minimal_permissions}
         request = service.projects().testIamPermissions(resource=project,
                                                         body=permissions)
         ret_permissions = request.execute().get('permissions', [])
 
-        diffs = set(constants.VM_MINIMAL_PERMISSIONS).difference(
-            set(ret_permissions))
+        diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
         if len(diffs) > 0:
             identity_str = identity[0] if identity else None
             return False, (

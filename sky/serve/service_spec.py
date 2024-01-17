@@ -66,13 +66,8 @@ class SkyServiceSpec:
         self._max_replicas = max_replicas
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
-
-        self._upscale_delay_seconds = (
-            upscale_delay_seconds if upscale_delay_seconds is not None else
-            constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
-        self._downscale_delay_seconds = (
-            downscale_delay_seconds if downscale_delay_seconds is not None else
-            constants.AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS)
+        self._upscale_delay_seconds = upscale_delay_seconds
+        self._downscale_delay_seconds = downscale_delay_seconds
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -238,9 +233,9 @@ class SkyServiceSpec:
         return self._post_data
 
     @property
-    def upscale_delay_seconds(self) -> int:
+    def upscale_delay_seconds(self) -> Optional[int]:
         return self._upscale_delay_seconds
 
     @property
-    def downscale_delay_seconds(self) -> int:
+    def downscale_delay_seconds(self) -> Optional[int]:
         return self._downscale_delay_seconds
