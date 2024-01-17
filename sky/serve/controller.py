@@ -118,7 +118,9 @@ class SkyServeController:
             logger.info(f'Update to version: {version}')
 
             mixed_replica_versions = request_data['mixed_replica_versions']
-
+            # TODO(MaoZiming): we do not currently support
+            # mixing traffic from old and new replicas.
+            assert mixed_replica_versions is False
             latest_task_yaml = serve_utils.generate_task_yaml_file_name(
                 self._service_name, version)
             service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)

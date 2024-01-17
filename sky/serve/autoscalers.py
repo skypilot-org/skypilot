@@ -269,20 +269,20 @@ class RequestRateAutoscaler(Autoscaler):
             return [info.replica_id for info in launched_replica_infos_sorted
                    ][:num_limit]
 
-        #   Case 1. We have ready new replicas, and
-        #   mixed_replica_versions is False.
-        #   In such case, since once there is a ready match replica,
-        #   we will direct all traffic to it, we can scale down all
-        #   old replicas.
+        # Case 1. We have ready new replicas, and
+        # mixed_replica_versions is False.
+        # In such case, since once there is min_replicas number of
+        # ready match replica, we will direct all traffic to them,
+        # we can scale down all old replicas.
         if (not self.mixed_replica_versions and
-                len(ready_new_replica_infos) > 0):
+                len(ready_new_replica_infos) > self.min_replicas):
             for info in ready_old_replica_infos:
                 all_replica_ids_to_scale_down.append(info.replica_id)
 
         # Case 2. We have mixed_replica_versions is True
-        #   In such case, we want to keep the old ready replicas,
-        #   until total number of ready replicas is greater than
-        #   target_num_replicas. Then we scale down the old replicas.
+        # In such case, we want to keep the old ready replicas,
+        # until total number of ready replicas is greater than
+        # target_num_replicas. Then we scale down the old replicas.
         if (self.mixed_replica_versions and
                 len(ready_new_replica_infos) + len(ready_old_replica_infos) >
                 self.target_num_replicas):
@@ -293,8 +293,8 @@ class RequestRateAutoscaler(Autoscaler):
                 all_replica_ids_to_scale_down.append(info.replica_id)
 
         # Case 3. We have some not ready old replicas.
-        #   In such case, we immediately scale down the replica with
-        #   mismatched version to reduce cost.
+        # In such case, we immediately scale down the replica with
+        # mismatched version to reduce cost.
         if len(not_ready_old_replica_infos) > 0:
             for info in not_ready_old_replica_infos:
                 all_replica_ids_to_scale_down.append(info.replica_id)

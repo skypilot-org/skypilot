@@ -4451,6 +4451,9 @@ def serve_up(
     serve_lib.up(task, service_name)
 
 
+# TODO(MaoZiming): Update Doc.
+# TODO(MaoZiming): Expose mix replica traffic option to user.
+# Currently, we do not mix traffic from old and new replicas.
 @serve.command('update', cls=_DocumentedCodeCommand)
 @click.argument('service_name', required=True, type=str)
 @click.argument('service_yaml',
@@ -4464,28 +4467,7 @@ def serve_up(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# Disabling quote check here, as there seems to be a bug in pylint,
-# which incorrectly recognizes the help string as a docstring.
-# pylint: disable=bad-docstring-quotes
-@click.option(
-    '--mixed-replica-version',
-    '-m',
-    is_flag=True,
-    default=False,
-    required=False,
-    help=('Mixing replicas with different versions. If this flag is set to '
-          'True, SkyServe will still send traffic to previously ready '
-          'replicas; otherwise, SkyServe will only send traffic to replicas '
-          'with same version, i.e. before the first replica with latest '
-          'version become ready, direct traffic only to previous replicas '
-          'with same version and after that, direct traffic only to the '
-          'new replicas.'))
-def serve_update(
-    service_name: str,
-    service_yaml: List[str],
-    yes: bool,
-    mixed_replica_version: bool,
-):
+def serve_update(service_name: str, service_yaml: List[str], yes: bool):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
@@ -4512,7 +4494,7 @@ def serve_update(
                       abort=True,
                       show_default=True)
 
-    serve_lib.update(task, service_name, mixed_replica_version)
+    serve_lib.update(task, service_name)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
