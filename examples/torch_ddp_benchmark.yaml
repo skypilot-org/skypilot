@@ -3,7 +3,7 @@ name: torch-ddp-bench
 num_nodes: 2
 
 resources:
-  accelerators: A100:8
+  accelerators: A100:8 # Make sure you use 8 GPU instances
   use_spot: True
   cloud: gcp
 
