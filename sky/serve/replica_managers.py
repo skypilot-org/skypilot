@@ -571,8 +571,6 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._next_replica_id += 1
 
     def _terminate_replica(self, replica_id: int, sync_down_logs: bool) -> None:
-        if replica_id not in self._launch_process_pool:
-            return
         p = self._launch_process_pool[replica_id]
         if p.is_alive():
             assert p.pid is not None
