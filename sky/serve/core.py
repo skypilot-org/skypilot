@@ -349,7 +349,8 @@ def update(task: 'sky.Task', service_name: str) -> None:
             service_name, current_version, expand_user=False))
 
         backend.sync_file_mounts(handle,
-                                 {remote_task_yaml_path: service_file.name})
+                                 {remote_task_yaml_path: service_file.name},
+                                 storage_mounts=None)
 
         code = serve_utils.ServeCodeGen.update_service(service_name,
                                                        current_version)

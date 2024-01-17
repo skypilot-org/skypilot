@@ -867,7 +867,7 @@ class ServeCodeGen:
     @classmethod
     def update_service(cls, service_name: str, version: int) -> str:
         code = [
-            f'msg = serve_utils.update_service({service_name}, '
+            f'msg = serve_utils.update_service({service_name!r}, '
             f'{version})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
