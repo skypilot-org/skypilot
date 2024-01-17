@@ -10,6 +10,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
+from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
@@ -54,8 +55,6 @@ class Kubernetes(clouds.Cloud):
         #  https://kubernetes.io/blog/2022/12/05/forensic-container-checkpointing-alpha/ # pylint: disable=line-too-long
         clouds.CloudImplementationFeatures.STOP: 'Kubernetes does not '
                                                  'support stopping VMs.',
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not '
-                                                     'support stopping VMs.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
@@ -66,18 +65,27 @@ class Kubernetes(clouds.Cloud):
         clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker image is not '
                                                          'supported in '
                                                          'Kubernetes.',
-        clouds.CloudImplementationFeatures.OPEN_PORTS: 'Opening ports is not '
-                                                       'supported in '
-                                                       'Kubernetes.'
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
     IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
+        if curr_context == kubernetes_utils.KIND_CONTEXT_NAME:
+            # If we are using KIND, the loadbalancer service will never be
+            # assigned an external IP. Users may use ingress, but that requires
+            # blocking HTTP port 80.
+            # For now, we disable port opening feature on kind clusters.
+            unsupported_features[
+                clouds.CloudImplementationFeatures.OPEN_PORTS] = (
+                    'Opening ports is not supported in Kubernetes when '
+                    'using local kind cluster.')
+        return unsupported_features
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
@@ -225,6 +233,8 @@ class Kubernetes(clouds.Cloud):
             k8s_acc_label_key, k8s_acc_label_value = \
                 kubernetes_utils.get_gpu_label_key_value(acc_type)
 
+        port_mode = network_utils.get_port_mode(None)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -233,6 +243,9 @@ class Kubernetes(clouds.Cloud):
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             'timeout': str(self.TIMEOUT),
+            'k8s_namespace':
+                kubernetes_utils.get_current_kube_config_context_namespace(),
+            'k8s_port_mode': port_mode.value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
@@ -241,6 +254,7 @@ class Kubernetes(clouds.Cloud):
             # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
         }
+
         return deploy_vars
 
     def _get_feasible_launchable_resources(

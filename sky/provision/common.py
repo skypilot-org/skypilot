@@ -1,6 +1,10 @@
 """Common data structures for provisioning"""
+import abc
 import dataclasses
+import os
 from typing import Any, Dict, List, Optional, Tuple
+
+from sky.utils.resources_utils import port_ranges_to_set
 
 # NOTE: we can use pydantic instead of dataclasses or namedtuples, because
 # pydantic provides more features like validation or parsing from
@@ -10,6 +14,11 @@ from typing import Any, Dict, List, Optional, Tuple
 # -------------------- input data model -------------------- #
 
 InstanceId = str
+
+
+class ProvisionError(RuntimeError):
+    """Exception for provisioning."""
+    errors: List[Dict[str, str]]
 
 
 @dataclasses.dataclass
@@ -70,6 +79,7 @@ class InstanceInfo:
     internal_ip: str
     external_ip: Optional[str]
     tags: Dict[str, str]
+    ssh_port: int = 22
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns
@@ -82,11 +92,34 @@ class InstanceInfo:
 @dataclasses.dataclass
 class ClusterInfo:
     """Cluster Information."""
-    instances: Dict[InstanceId, InstanceInfo]
+    instances: Dict[InstanceId, List[InstanceInfo]]
     # The unique identifier of the head instance, i.e., the
     # `instance_info.instance_id` of the head node.
     head_instance_id: Optional[InstanceId]
     docker_user: Optional[str] = None
+
+    @property
+    def num_instances(self) -> int:
+        """Get the number of instances in the cluster."""
+        return sum(len(instances) for instances in self.instances.values())
+
+    def get_head_instance(self) -> Optional[InstanceInfo]:
+        """Get the instance metadata of the head node"""
+        if self.head_instance_id is None:
+            return None
+        if self.head_instance_id not in self.instances:
+            raise ValueError('Head instance ID not in the cluster metadata.')
+        return self.instances[self.head_instance_id][0]
+
+    def get_worker_instances(self) -> List[InstanceInfo]:
+        """Get all worker instances."""
+        worker_instances = []
+        for inst_id, instances in self.instances.items():
+            if inst_id == self.head_instance_id:
+                worker_instances.extend(instances[1:])
+            else:
+                worker_instances.extend(instances)
+        return worker_instances
 
     def ip_tuples(self) -> List[Tuple[str, Optional[str]]]:
         """Get IP tuples of all instances. Make sure that list always
@@ -95,14 +128,17 @@ class ClusterInfo:
         Returns:
             A list of tuples (internal_ip, external_ip) of all instances.
         """
-        head_node_ip, other_ips = [], []
-        for instance in self.instances.values():
+        head_instance = self.get_head_instance()
+        if head_instance is None:
+            head_instance_ip = []
+        else:
+            head_instance_ip = [(head_instance.internal_ip,
+                                 head_instance.external_ip)]
+        other_ips = []
+        for instance in self.get_worker_instances():
             pair = (instance.internal_ip, instance.external_ip)
-            if instance.instance_id == self.head_instance_id:
-                head_node_ip.append(pair)
-            else:
-                other_ips.append(pair)
-        return head_node_ip + other_ips
+            other_ips.append(pair)
+        return head_instance_ip + other_ips
 
     def has_external_ips(self) -> bool:
         """True if the cluster has external IP."""
@@ -136,10 +172,72 @@ class ClusterInfo:
         """Get external IPs if they exist, otherwise get internal ones."""
         return self._get_ips(not self.has_external_ips() or force_internal_ips)
 
-    def get_head_instance(self) -> Optional[InstanceInfo]:
-        """Get the instance metadata of the head node"""
-        if self.head_instance_id is None:
-            return None
-        if self.head_instance_id not in self.instances:
-            raise ValueError('Head instance ID not in the cluster metadata.')
-        return self.instances[self.head_instance_id]
+    def get_ssh_ports(self) -> List[int]:
+        """Get the SSH port of all the instances."""
+        head_instance = self.get_head_instance()
+        assert head_instance is not None, self
+        head_instance_port = [head_instance.ssh_port]
+
+        worker_instances = self.get_worker_instances()
+        worker_instance_ports = [
+            instance.ssh_port for instance in worker_instances
+        ]
+        return head_instance_port + worker_instance_ports
+
+
+class Endpoint:
+    """Base class for endpoints."""
+    pass
+
+    @abc.abstractmethod
+    def url(self, ip: str):
+        raise NotImplementedError
+
+
+@dataclasses.dataclass
+class SocketEndpoint(Endpoint):
+    """Socket endpoint accesible via a host and a port."""
+    port: Optional[int]
+    host: str = ''
+
+    def url(self, ip: str):
+        if not self.host:
+            self.host = ip
+        return f'{self.host}{":" + str(self.port) if self.port else ""}'
+
+
+@dataclasses.dataclass
+class HTTPEndpoint(SocketEndpoint):
+    """HTTP endpoint accesible via a url."""
+    path: str = ''
+
+    def url(self, ip: str):
+        del ip  # Unused.
+        return f'http://{os.path.join(super().url(self.host), self.path)}'
+
+
+@dataclasses.dataclass
+class HTTPSEndpoint(SocketEndpoint):
+    """HTTPS endpoint accesible via a url."""
+    path: str = ''
+
+    def url(self, ip: str):
+        del ip  # Unused.
+        return f'https://{os.path.join(super().url(self.host), self.path)}'
+
+
+def query_ports_passthrough(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[Endpoint]]:
+    """Common function to query ports for AWS, GCP and Azure.
+
+    Returns a list of socket endpoint with empty host and the input ports."""
+    del cluster_name_on_cloud, provider_config  # Unused.
+    ports = list(port_ranges_to_set(ports))
+    result: Dict[int, List[Endpoint]] = {}
+    for port in ports:
+        result[port] = [SocketEndpoint(port=port)]
+
+    return result

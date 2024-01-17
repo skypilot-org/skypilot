@@ -85,16 +85,17 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 
 def list_accelerators(
-        gpus_only: bool,
-        name_filter: Optional[str],
-        region_filter: Optional[str],
-        quantity_filter: Optional[int],
-        case_sensitive: bool = True
+    gpus_only: bool,
+    name_filter: Optional[str],
+    region_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in IBM offering accelerators."""
     return common.list_accelerators_impl('IBM', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
-                                         case_sensitive)
+                                         case_sensitive, all_regions)
 
 
 def get_default_instance_type(cpus: Optional[str] = None,

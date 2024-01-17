@@ -13,17 +13,16 @@ import colorama
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
-from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+    from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -161,9 +160,26 @@ class GCP(clouds.Cloud):
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        if gcp_utils.is_tpu_vm_pod(resources):
+            return {
+                clouds.CloudImplementationFeatures.STOP: (
+                    'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
+                )
+            }
+        if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
+            # TPU node does not support multi-node.
+            return {
+                clouds.CloudImplementationFeatures.MULTI_NODE:
+                    ('TPU node does not support multi-node. Please set '
+                     'num_nodes to 1.')
+            }
         return {}
 
     @classmethod
@@ -401,7 +417,8 @@ class GCP(clouds.Cloud):
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
 
-                resources_vars['tpu_vm'] = r.accelerator_args.get('tpu_vm')
+                resources_vars['tpu_vm'] = r.accelerator_args.get(
+                    'tpu_vm', True)
                 resources_vars['runtime_version'] = r.accelerator_args[
                     'runtime_version']
                 resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
@@ -478,14 +495,11 @@ class GCP(clouds.Cloud):
                 )
                 return ([r], [])
 
-        use_tpu_vm = False
-        if resources.accelerator_args is not None:
-            use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
-
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
                   ) == 1, 'cannot handle more than one accelerator candidates.'
         acc, acc_count = list(resources.accelerators.items())[0]
+        use_tpu_vm = gcp_utils.is_tpu_vm(resources)
 
         # For TPU VMs, the instance type is fixed to 'TPU-VM'. However, we still
         # need to call the below function to get the fuzzy candidate list.
@@ -695,20 +709,18 @@ class GCP(clouds.Cloud):
         import google.auth
         import googleapiclient.discovery
 
-        from sky.skylet.providers.gcp import constants
-
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
         service = googleapiclient.discovery.build('cloudresourcemanager',
                                                   'v1',
                                                   credentials=credentials)
-        permissions = {'permissions': constants.VM_MINIMAL_PERMISSIONS}
+        gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
+        permissions = {'permissions': gcp_minimal_permissions}
         request = service.projects().testIamPermissions(resource=project,
                                                         body=permissions)
         ret_permissions = request.execute().get('permissions', [])
 
-        diffs = set(constants.VM_MINIMAL_PERMISSIONS).difference(
-            set(ret_permissions))
+        diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
         if len(diffs) > 0:
             identity_str = identity[0] if identity else None
             return False, (
@@ -809,9 +821,7 @@ class GCP(clouds.Cloud):
         # you must delete it and create a new one ..."
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
 
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import tpu_utils
-        return tpu_utils.is_tpu_vm(resources)
+        return gcp_utils.is_tpu_vm(resources)
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
@@ -940,77 +950,8 @@ class GCP(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
         """Query the status of a cluster."""
-        del region  # unused
-
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import tpu_utils
-        use_tpu_vm = kwargs.pop('use_tpu_vm', False)
-
-        label_filter_str = cls._label_filter_str(tag_filters)
-        if use_tpu_vm:
-            # TPU VM's state definition is different from compute VM
-            # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
-            status_map = {
-                'CREATING': status_lib.ClusterStatus.INIT,
-                'STARTING': status_lib.ClusterStatus.INIT,
-                'RESTARTING': status_lib.ClusterStatus.INIT,
-                'READY': status_lib.ClusterStatus.UP,
-                'REPAIRING': status_lib.ClusterStatus.INIT,
-                # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
-                'STOPPING': status_lib.ClusterStatus.STOPPED,
-                'STOPPED': status_lib.ClusterStatus.STOPPED,
-                'DELETING': None,
-                'PREEMPTED': None,
-            }
-            tpu_utils.check_gcp_cli_include_tpu_vm()
-            query_cmd = ('gcloud compute tpus tpu-vm list '
-                         f'--zone {zone} '
-                         f'--filter="({label_filter_str})" '
-                         '--format="value(state)"')
-        else:
-            # Ref: https://cloud.google.com/compute/docs/instances/instance-life-cycle
-            status_map = {
-                'PROVISIONING': status_lib.ClusterStatus.INIT,
-                'STAGING': status_lib.ClusterStatus.INIT,
-                'RUNNING': status_lib.ClusterStatus.UP,
-                'REPAIRING': status_lib.ClusterStatus.INIT,
-                # 'TERMINATED' in GCP means stopped, with disk preserved.
-                'STOPPING': status_lib.ClusterStatus.STOPPED,
-                'TERMINATED': status_lib.ClusterStatus.STOPPED,
-                # 'SUSPENDED' in GCP means stopped, with disk and OS memory
-                # preserved.
-                'SUSPENDING': status_lib.ClusterStatus.STOPPED,
-                'SUSPENDED': status_lib.ClusterStatus.STOPPED,
-            }
-            # TODO(zhwu): The status of the TPU attached to the cluster should
-            # also be checked, since TPUs are not part of the VMs.
-            query_cmd = ('gcloud compute instances list '
-                         f'--filter="({label_filter_str})" '
-                         '--format="value(status)"')
-        returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
-                                                          '/dev/null',
-                                                          require_outputs=True,
-                                                          shell=True)
-        logger.debug(f'{query_cmd} returned {returncode}.\n'
-                     '**** STDOUT ****\n'
-                     f'{stdout}\n'
-                     '**** STDERR ****\n'
-                     f'{stderr}')
-
-        if returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query GCP cluster {name!r} status: '
-                    f'{stdout + stderr}')
-
-        status_list = []
-        for line in stdout.splitlines():
-            status = status_map.get(line.strip())
-            if status is None:
-                continue
-            status_list.append(status)
-
-        return status_list
+        # TODO(suquark): deprecate this method
+        assert False, 'This code path should not be used.'
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,

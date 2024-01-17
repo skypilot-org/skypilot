@@ -167,11 +167,6 @@ class AbstractStore:
     present in a cloud.
     """
 
-    _STAT_CACHE_TTL = '5s'
-    _STAT_CACHE_CAPACITY = 4096
-    _TYPE_CACHE_TTL = '5s'
-    _RENAME_DIR_LIMIT = 10000
-
     class StoreMetadata:
         """A pickle-able representation of Store
 
@@ -1408,8 +1403,9 @@ class S3Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = storage_utils.get_s3_mount_install_cmd()
-        mount_cmd = storage_utils.get_s3_mount_cmd(self.bucket.name, mount_path)
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
+        mount_cmd = mounting_utils.get_s3_mount_cmd(self.bucket.name,
+                                                    mount_path)
         return mounting_utils.get_mounting_command(StorageMode.MOUNT,
                                                    mount_path, mount_cmd,
                                                    install_cmd)
@@ -1837,11 +1833,11 @@ class GcsStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = storage_utils.get_gcs_mount_install_cmd()
-        mount_cmd = storage_utils.get_gcs_mount_cmd(self.bucket.name,
-                                                    mount_path)
+        install_cmd = mounting_utils.get_gcs_mount_install_cmd()
+        mount_cmd = mounting_utils.get_gcs_mount_cmd(self.bucket.name,
+                                                     mount_path)
         version_check_cmd = (
-            f'gcsfuse --version | grep -q {storage_utils.GCSFUSE_VERSION}')
+            f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(StorageMode.MOUNT,
                                                    mount_path, mount_cmd,
                                                    install_cmd,
@@ -2209,14 +2205,15 @@ class R2Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = storage_utils.get_s3_mount_install_cmd()
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
         endpoint_url = cloudflare.create_endpoint()
         r2_credential_path = cloudflare.R2_CREDENTIALS_PATH
         r2_profile_name = cloudflare.R2_PROFILE_NAME
-        mount_cmd = storage_utils.get_r2_mount_cmd(r2_credential_path,
-                                                   r2_profile_name,
-                                                   endpoint_url,
-                                                   self.bucket.name, mount_path)
+        mount_cmd = mounting_utils.get_r2_mount_cmd(r2_credential_path,
+                                                    r2_profile_name,
+                                                    endpoint_url,
+                                                    self.bucket.name,
+                                                    mount_path)
         return mounting_utils.get_mounting_command(StorageMode.MOUNT,
                                                    mount_path, mount_cmd,
                                                    install_cmd)
@@ -2641,18 +2638,17 @@ class IBMCosStore(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         # install rclone if not installed.
-        install_cmd = storage_utils.get_cos_mount_install_cmd()
+        install_cmd = mounting_utils.get_cos_mount_install_cmd()
         rclone_config_data = Rclone.get_rclone_config(
             self.bucket.name,
             Rclone.RcloneClouds.IBM,
             self.region,  # type: ignore
         )
-        mount_cmd = storage_utils.get_cos_mount_cmd(rclone_config_data,
-                                                    Rclone.RCLONE_CONFIG_PATH,
-                                                    self.bucket_rclone_profile,
-                                                    self.bucket.name,
-                                                    mount_path)
-
+        mount_cmd = mounting_utils.get_cos_mount_cmd(rclone_config_data,
+                                                     Rclone.RCLONE_CONFIG_PATH,
+                                                     self.bucket_rclone_profile,
+                                                     self.bucket.name,
+                                                     mount_path)
         return mounting_utils.get_mounting_command(StorageMode.MOUNT,
                                                    mount_path, mount_cmd,
                                                    install_cmd)

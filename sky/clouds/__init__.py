@@ -1,7 +1,9 @@
 """Clouds in Sky."""
 from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import CloudImplementationFeatures
+from sky.clouds.cloud import ProvisionerVersion
 from sky.clouds.cloud import Region
+from sky.clouds.cloud import StatusVersion
 from sky.clouds.cloud import Zone
 from sky.clouds.cloud_registry import CLOUD_REGISTRY
 
@@ -15,6 +17,7 @@ from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.local import Local
 from sky.clouds.oci import OCI
+from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
 
 __all__ = [
@@ -26,10 +29,13 @@ __all__ = [
     'Lambda',
     'Local',
     'SCP',
+    'RunPod',
     'OCI',
     'Kubernetes',
     'CloudImplementationFeatures',
     'Region',
     'Zone',
     'CLOUD_REGISTRY',
+    'ProvisionerVersion',
+    'StatusVersion',
 ]
