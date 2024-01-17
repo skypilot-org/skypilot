@@ -1,4 +1,5 @@
 """Vsphere catalog."""
+import io
 import os
 import typing
 from typing import Dict, List, Optional, Tuple
@@ -14,11 +15,16 @@ _DEFAULT_NUM_VCPUS = 2
 _DEFAULT_MEMORY_CPU_RATIO = 4
 _CLOUD_VSPHERE = 'vsphere'
 
+VSPHERE_CATALOG_HEADER = (
+    'InstanceType,AcceleratorName,AcceleratorCount,vCPUs,'
+    'MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone')
+
 _LOCAL_CATALOG = common.get_catalog_path('vsphere/vms.csv')
 if os.path.exists(_LOCAL_CATALOG):
     _df = pd.read_csv(_LOCAL_CATALOG)
 else:
-    _df = None
+    header_content = io.StringIO(VSPHERE_CATALOG_HEADER + '\n')
+    _df = pd.read_csv(header_content)
 
 
 def instance_type_exists(instance_type: str) -> bool:

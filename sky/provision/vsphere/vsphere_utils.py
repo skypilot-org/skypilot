@@ -10,6 +10,7 @@ import yaml
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import vsphere as vsphere_adaptor
+from sky.clouds.service_catalog import vsphere_catalog
 from sky.clouds.service_catalog.common import get_catalog_path
 from sky.clouds.service_catalog.data_fetchers.fetch_vsphere import (
     initialize_accelerators_csv)
@@ -337,15 +338,14 @@ def initialize_vsphere_data():
 
     vms_csv_path = get_catalog_path('vsphere/vms.csv')
     with open(vms_csv_path, 'w', encoding='utf-8') as f:
-        f.write('InstanceType,AcceleratorName,AcceleratorCount,vCPUs,'
-                'MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone\n')
+        f.write(vsphere_catalog.VSPHERE_CATALOG_HEADER + '\n')
     images_csv_path = get_catalog_path('vsphere/images.csv')
     with open(images_csv_path, 'w', encoding='utf-8') as f:
         f.write('ImageID,vCenter,CPU,Memory,OS,OSVersion,GpuTags\n')
     hosts_csv_path = get_catalog_path('vsphere/hosts.csv')
     with open(hosts_csv_path, 'w', encoding='utf-8') as f:
         f.write(
-            'HostName,MobID,vCenter,Datacenter,Cluster,TotalCPUs,AvailableCPUs,'
+            f'HostName,MobID,vCenter,Datacenter,Cluster,TotalCPUs,AvailableCPUs,'
             'TotalMemory(MB),AvailableMemory(MB),GPU,cpuMhz,UUID\n')
     instance_image_mapping_csv_path = get_catalog_path(
         'vsphere/instance_image_mapping.csv')
