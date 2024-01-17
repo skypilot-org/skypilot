@@ -271,7 +271,7 @@ class RequestRateAutoscaler(Autoscaler):
                    ][:num_limit]
 
         # Case 1. Once there is min_replicas number of
-        # ready match replica, we will direct all traffic to them,
+        # ready new replicas, we will direct all traffic to them,
         # we can scale down all old replicas.
         if len(ready_new_replica_infos) >= self.min_replicas:
             for info in ready_old_replica_infos:
@@ -295,7 +295,7 @@ class RequestRateAutoscaler(Autoscaler):
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=None))
         # Case 4: when launched_new_replica_infos is more
-        # than target_num_replicas, we always scale down new replicas.
+        # than target_num_replicas, we scale down new replicas.
         if len(launched_new_replica_infos) > self.target_num_replicas:
             num_replicas_to_scale_down = (len(launched_new_replica_infos) -
                                           self.target_num_replicas)
