@@ -1,6 +1,7 @@
 """Cudo Compute library wrapper for SkyPilot."""
 import random
 import string
+import time
 from typing import Dict
 
 from sky import sky_logging
@@ -20,8 +21,7 @@ def launch(name: str, data_center_id: str, ssh_key: str, machine_type: str,
            tags: Dict[str, str], disk_size: int):
     """Launches an instance with the given parameters."""
     disk = cudo().Disk(storage_class='STORAGE_CLASS_NETWORK',
-                       size_gib=disk_size,
-                       id=generate_random_string(10))
+                       size_gib=disk_size)
 
     request = cudo().CreateVMBody(ssh_key_source='SSH_KEY_SOURCE_NONE',
                                   custom_ssh_keys=[ssh_key],
@@ -46,9 +46,37 @@ def launch(name: str, data_center_id: str, ssh_key: str, machine_type: str,
 
 def remove(instance_id: str):
     """Terminates the given instance."""
+    terminate_ok = [
+        'pend',
+        'poff',
+        'runn',
+        'stop',
+        'susp',
+        'unde',
+        'fail',
+    ]
+    api = cudo().cudo_api.virtual_machines()
+    max_retries = 10
+    retry_interval = 5
+    retry_count = 0
+    state = 'unknown'
+    project_id = cudo().cudo_api.project_id()
+    while retry_count < max_retries:
+        try:
+            vm = api.get_vm(project_id, instance_id)
+            state = vm.to_dict()['vm']['short_state']
+        except cudo().rest.ApiException as e:
+            raise e
+
+        if state in terminate_ok:
+            break
+        retry_count += 1
+        time.sleep(retry_interval)
+    else:
+        raise Exception('Timeout error, could not terminate due to VM state: {}'.format(state))
+
     try:
-        api = cudo().cudo_api.virtual_machines()
-        api.terminate_vm(cudo().cudo_api.project_id(), instance_id)
+        api.terminate_vm(project_id, instance_id)
     except cudo().rest.ApiException as e:
         raise e
 
