@@ -73,7 +73,9 @@ def remove(instance_id: str):
         retry_count += 1
         time.sleep(retry_interval)
     else:
-        raise Exception('Timeout error, could not terminate due to VM state: {}'.format(state))
+        raise Exception(
+            'Timeout error, could not terminate due to VM state: {}'.format(
+                state))
 
     try:
         api.terminate_vm(project_id, instance_id)
@@ -110,15 +112,18 @@ def list_instances():
         vms = api.list_vms(cudo().cudo_api.project_id())
         instances = {}
         for vm in vms.to_dict()['vms']:
-            internal_ip = vm['external_ip_address'] if vm['internal_ip_address'] is '' else vm['internal_ip_address']
+            ex_ip = vm['external_ip_address']
+            in_ip = vm['internal_ip_address']
+            if not in_ip:
+                in_ip = ex_ip
             instance = {
                 # active_state, init_state, lcm_state, short_state
                 'status': vm['short_state'],
                 'tags': vm['metadata'],
                 'name': vm['id'],
-                'ip': vm['external_ip_address'],
-                'external_ip': vm['external_ip_address'],
-                'internal_ip': internal_ip
+                'ip': ex_ip,
+                'external_ip': ex_ip,
+                'internal_ip': in_ip
             }
             instances[vm['id']] = instance
         return instances

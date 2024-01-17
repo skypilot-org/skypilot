@@ -221,7 +221,9 @@ class Cudo(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type
             default_instance_type = Cudo.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -235,6 +237,7 @@ class Cudo(clouds.Cloud):
             acc_count,
             use_spot=resources.use_spot,
             cpus=resources.cpus,
+            memory=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='cudo')

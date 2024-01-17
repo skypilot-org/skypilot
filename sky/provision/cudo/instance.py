@@ -155,7 +155,7 @@ def terminate_instances(
                     f'{inst}')
         if worker_only and inst['name'].endswith('-head'):
             continue
-        logger.info(f'Start {inst_id}: {inst}')
+        logger.info(f'Removing {inst_id}: {inst}')
         cudo_wrapper.remove(inst_id)
 
 
@@ -216,6 +216,7 @@ def query_instances(
 
 def cleanup_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     del cluster_name_on_cloud, provider_config
