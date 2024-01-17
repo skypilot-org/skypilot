@@ -136,6 +136,7 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
+    serve_state.remove_service_versions(service_name)
     success = _cleanup_storage_from_service_name(service_name, task_yaml)
     if not success:
         failed = True

@@ -458,7 +458,6 @@ class ReplicaManager:
         self.oldest_version: int = initial_version
         serve_state.add_or_update_version(self._service_name, initial_version,
                                           spec, task_yaml_path)
-        self.mixed_replica_versions: bool = False
 
     def get_ready_replica_urls(self) -> List[str]:
         """Get all ready replica's IP addresses."""
@@ -476,11 +475,7 @@ class ReplicaManager:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
-    def set_mixed_replica_versions(self, mixed_replica_versions: bool) -> None:
-        raise NotImplementedError
-
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
-                       mixed_replica_versions: bool,
                        task_yaml_path: str) -> None:
         raise NotImplementedError
 
@@ -528,15 +523,14 @@ class SkyPilotReplicaManager(ReplicaManager):
                 assert info.url is not None
                 version2url[info.version].append(info.url)
                 ready_replica_urls.append(info.url)
-        if not self.mixed_replica_versions:
-            # Try all version in descending order. There is possibility that
-            # user consecutively update the service several times, and some
-            # version might not have any ready replicas.
-            version = self.latest_version
-            while version >= serve_constants.INITIAL_VERSION:
-                if version in version2url:
-                    return version2url[version]
-                version -= 1
+        # Try all version in descending order. There is possibility that
+        # user consecutively update the service several times, and some
+        # version might not have any ready replicas.
+        version = self.latest_version
+        while version >= serve_constants.INITIAL_VERSION:
+            if version in version2url:
+                return version2url[version]
+            version -= 1
         # If not separate replicas, return all ready replicas.
         return ready_replica_urls
 
@@ -657,6 +651,21 @@ class SkyPilotReplicaManager(ReplicaManager):
         else:
             self._terminate_replica(replica_id, sync_down_logs=False)
 
+        # Clean old version
+        replica_infos = serve_state.get_replica_infos(self._service_name)
+        current_oldest_version = min([
+            info.version for info in replica_infos
+        ]) if replica_infos else self.oldest_version
+        if self.oldest_version < current_oldest_version:
+            for version in range(self.oldest_version, current_oldest_version):
+                task_yaml = self._get_yaml(version)
+                # Delete old version metadata.
+                serve_state.delete_version(self._service_name, version)
+                # Delete storage buckets of older versions.
+                service.cleanup_storage(task_yaml)
+            # newest version will be cleaned in serve down
+            self.oldest_version = current_oldest_version
+
     def _handle_preemption(self, replica_id: int) -> None:
         logger.info(f'Beginning handle for preempted replica {replica_id}.')
         # TODO(MaoZiming): Support spot recovery policies
@@ -760,7 +769,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # Don't keep failed record for version mismatch replicas,
                 # since user should fixed the error before update.
                 elif info.version != self.latest_version:
-                    removal_reason = 'for old version'
+                    removal_reason = 'for version outdated'
                 else:
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '
@@ -972,21 +981,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                 serve_utils.set_service_status_from_replica_statuses(
                     self._service_name, replica_statuses)
 
-                # Clean old version
-                current_oldest_version = min([
-                    info.version for info in replica_infos
-                ]) if replica_infos else self.oldest_version
-                if self.oldest_version < current_oldest_version:
-                    for version in range(self.oldest_version,
-                                         current_oldest_version):
-                        task_yaml = self._get_yaml(version)
-                        # Delete old version metadata.
-                        serve_state.delete_version(self._service_name, version)
-                        # Delete storage buckets of older versions.
-                        service.cleanup_storage(task_yaml)
-                    # newest version will be cleaned in serve down
-                    self.oldest_version = current_oldest_version
-
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # replica prober running.
@@ -1001,26 +995,24 @@ class SkyPilotReplicaManager(ReplicaManager):
     #########################################
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
-                       mixed_replica_versions: bool,
                        task_yaml_path: str) -> None:
         serve_state.add_or_update_version(self._service_name, version, spec,
                                           task_yaml_path)
         self.latest_version = version
-        self.mixed_replica_versions = mixed_replica_versions
         self._task_yaml_path = task_yaml_path
 
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         output = serve_state.get_spec_and_yaml(self._service_name, version)
-        assert output is not None
+        if output is None:
+            raise ValueError(f'Version {version} not found.')
         spec, _ = output
-        assert spec is not None
         return spec
 
     def _get_yaml(self, version: int) -> str:
         output = serve_state.get_spec_and_yaml(self._service_name, version)
-        assert output is not None
+        if output is None:
+            raise ValueError(f'Version {version} not found.')
         _, yaml = output
-        assert yaml is not None
         return yaml
 
     def _get_readiness_path(self, version: int) -> str:

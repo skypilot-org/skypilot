@@ -116,21 +116,14 @@ class SkyServeController:
             request_data = await request.json()
             version = request_data['version']
             logger.info(f'Update to version: {version}')
-
-            mixed_replica_versions = request_data['mixed_replica_versions']
-            # TODO(MaoZiming): we do not currently support
-            # mixing traffic from old and new replicas.
-            assert mixed_replica_versions is False
             latest_task_yaml = serve_utils.generate_task_yaml_file_name(
                 self._service_name, version)
             service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
-            logger.info(f'Service spec: {service}')
+            logger.info(f'New service spec for version {version}: {service}')
 
             self._replica_manager.update_version(version, service,
-                                                 mixed_replica_versions,
                                                  latest_task_yaml)
-            self._autoscaler.update_spec(version, service,
-                                         mixed_replica_versions)
+            self._autoscaler.update_spec(version, service)
             serve_state.set_service_version(self._service_name, version)
             return {'message': 'Success'}
 

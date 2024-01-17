@@ -239,8 +239,9 @@ def set_service_status_from_replica_statuses(
         replica_statuses: List[serve_state.ReplicaStatus]) -> None:
     record = serve_state.get_service_from_name(service_name)
     if record is None:
-        raise ValueError(f'Service {service_name!r} does not exist. '
-                         'Cannot refresh service status.')
+        raise ValueError('The service is up-ed in an old version and does not'
+                         'support update. Please `sky serve down` '
+                         'it first and relaunch the service.')
     if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
         # When the service is shutting down, there is a period of time which the
         # controller still responds to the request, and the replica is not
@@ -267,14 +268,16 @@ def update_service_status() -> None:
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-def update_service(controller_port: int, version: int,
-                   mixed_replica_versions: bool) -> str:
+def update_service(service_name: str, version: int) -> str:
+    service_status = _get_service_status(service_name)
+    if service_status is None:
+        raise ValueError(f'Service {service_name!r} does not exist.')
+    controller_port = service_status['controller_port']
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
         '/controller/update_service',
         json={
             'version': version,
-            'mixed_replica_versions': mixed_replica_versions
         })
     if resp.status_code == 404:
         raise ValueError('The service is up-ed before update is supported, '
@@ -684,7 +687,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         return 'No existing services.'
 
     service_columns = [
-        'NAME', 'LATEST_VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
+        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
     ]
     if show_all:
         service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
@@ -697,8 +700,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             replica_infos.append(replica)
 
         service_name = record['name']
-        version = (record['version']
-                   if 'version' in record else constants.INITIAL_VERSION)
+        version = (record['version'] if 'version' in record else '-')
         uptime = log_utils.readable_time_duration(record['uptime'],
                                                   absolute=True)
         service_status = record['status']
@@ -754,8 +756,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
     for record in replica_records:
         service_name = record['service_name']
         replica_id = record['replica_id']
-        version = (record['version']
-                   if 'version' in record else constants.INITIAL_VERSION)
+        version = (record['version'] if 'version' in record else '-')
         replica_ip = '-'
         launched_at = log_utils.readable_time_duration(record['launched_at'])
         resources_str = '-'
@@ -864,11 +865,9 @@ class ServeCodeGen:
         return f'python3 -u -c {shlex.quote(generated_code)}'
 
     @classmethod
-    def update_service(cls, controller_port: int, version: int,
-                       mixed_replica_versions: bool) -> str:
+    def update_service(cls, service_name: str, version: int) -> str:
         code = [
-            f'msg = serve_utils.update_service({controller_port}, '
-            f'{version}, {mixed_replica_versions})',
-            'print(msg, end="", flush=True)'
+            f'msg = serve_utils.update_service({service_name}, '
+            f'{version})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)

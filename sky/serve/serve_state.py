@@ -432,6 +432,15 @@ def add_or_update_version(service_name: str, version: int,
     _DB.conn.commit()
 
 
+def remove_service_versions(service_name: str) -> None:
+    """Removes a replica from the database."""
+    _DB.cursor.execute(
+        """\
+        DELETE FROM versions
+        WHERE service_name=(?)""", (service_name))
+    _DB.conn.commit()
+
+
 def get_spec_and_yaml(
         service_name: str,
         version: int) -> Optional[Tuple['service_spec.SkyServiceSpec', str]]:
