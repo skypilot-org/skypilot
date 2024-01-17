@@ -437,7 +437,7 @@ def remove_service_versions(service_name: str) -> None:
     _DB.cursor.execute(
         """\
         DELETE FROM versions
-        WHERE service_name=(?)""", (service_name))
+        WHERE service_name=(?)""", (service_name,))
     _DB.conn.commit()
 
 
