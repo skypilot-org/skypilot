@@ -118,7 +118,7 @@ def get_mounting_script(
           mounting util.
 
     Returns:
-        str: Mounting script as a heredoc.
+        str: Mounting script as a str.
     """
 
     mount_binary = mount_cmd.split()[0]
