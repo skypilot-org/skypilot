@@ -169,11 +169,6 @@ class AbstractStore:
     present in a cloud.
     """
 
-    _STAT_CACHE_TTL = '5s'
-    _STAT_CACHE_CAPACITY = 4096
-    _TYPE_CACHE_TTL = '5s'
-    _RENAME_DIR_LIMIT = 10000
-
     class StoreMetadata:
         """A pickle-able representation of Store
 
@@ -1307,14 +1302,9 @@ class S3Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
-                       'releases/download/0.24.0-romilb-upstream/goofys '
-                       '-O /usr/local/bin/goofys && '
-                       'sudo chmod +x /usr/local/bin/goofys')
-        mount_cmd = ('goofys -o allow_other '
-                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-                     f'{self.bucket.name} {mount_path}')
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
+        mount_cmd = mounting_utils.get_s3_mount_cmd(self.bucket.name,
+                                                    mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -1391,9 +1381,6 @@ class GcsStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-
-    # https://github.com/GoogleCloudPlatform/gcsfuse/releases
-    _GCSFUSE_VERSION = '1.3.0'
 
     def __init__(self,
                  name: str,
@@ -1744,20 +1731,11 @@ class GcsStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
-                       f'/releases/download/v{self._GCSFUSE_VERSION}/'
-                       f'gcsfuse_{self._GCSFUSE_VERSION}_amd64.deb '
-                       '-O /tmp/gcsfuse.deb && '
-                       'sudo dpkg --install /tmp/gcsfuse.deb')
-        mount_cmd = ('gcsfuse -o allow_other '
-                     '--implicit-dirs '
-                     f'--stat-cache-capacity {self._STAT_CACHE_CAPACITY} '
-                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-                     f'--rename-dir-limit {self._RENAME_DIR_LIMIT} '
-                     f'{self.bucket.name} {mount_path}')
+        install_cmd = mounting_utils.get_gcs_mount_install_cmd()
+        mount_cmd = mounting_utils.get_gcs_mount_cmd(self.bucket.name,
+                                                     mount_path)
         version_check_cmd = (
-            f'gcsfuse --version | grep -q {self._GCSFUSE_VERSION}')
+            f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
@@ -2123,18 +2101,15 @@ class R2Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
-                       'releases/download/0.24.0-romilb-upstream/goofys '
-                       '-O /usr/local/bin/goofys && '
-                       'sudo chmod +x /usr/local/bin/goofys')
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
         endpoint_url = cloudflare.create_endpoint()
-        mount_cmd = (
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
-            f'AWS_PROFILE={cloudflare.R2_PROFILE_NAME} goofys -o allow_other '
-            f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-            f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-            f'--endpoint {endpoint_url} '
-            f'{self.bucket.name} {mount_path}')
+        r2_credential_path = cloudflare.R2_CREDENTIALS_PATH
+        r2_profile_name = cloudflare.R2_PROFILE_NAME
+        mount_cmd = mounting_utils.get_r2_mount_cmd(r2_credential_path,
+                                                    r2_profile_name,
+                                                    endpoint_url,
+                                                    self.bucket.name,
+                                                    mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -2546,22 +2521,18 @@ class IBMCosStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
+        # install rclone if not installed.
+        install_cmd = mounting_utils.get_cos_mount_install_cmd()
         rclone_config_data = Rclone.get_rclone_config(
             self.bucket.name,
             Rclone.RcloneClouds.IBM,
             self.region,  # type: ignore
         )
-        # pylint: disable=line-too-long
-        # creates a fusermount soft link on older (<22) Ubuntu systems for rclone's mount utility.
-        create_fuser3_soft_link = '[ ! -f /bin/fusermount3 ] && sudo ln -s /bin/fusermount /bin/fusermount3 || true'
-        # stores bucket profile in rclone config file at the cluster's nodes.
-        configure_rclone_profile = (
-            f'{create_fuser3_soft_link}; mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}'
-        )
-        # install rclone if not installed.
-        install_cmd = 'rclone version >/dev/null 2>&1 || (curl https://rclone.org/install.sh | sudo bash)'
-        # --daemon will keep the mounting process running in the background.
-        mount_cmd = f'{configure_rclone_profile} && rclone mount {self.bucket_rclone_profile}:{self.bucket.name} {mount_path} --daemon'
+        mount_cmd = mounting_utils.get_cos_mount_cmd(rclone_config_data,
+                                                     Rclone.RCLONE_CONFIG_PATH,
+                                                     self.bucket_rclone_profile,
+                                                     self.bucket.name,
+                                                     mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
