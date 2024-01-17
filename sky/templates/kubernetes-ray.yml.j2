@@ -16,6 +16,12 @@ provider:
     type: external
     module: sky.skylet.providers.kubernetes.KubernetesNodeProvider
 
+    # The namespace to create the Ray cluster in.
+    namespace: {{k8s_namespace}}
+
+    # This should be one of KubernetesPortMode
+    port_mode: {{k8s_port_mode}}
+
     # We use internal IPs since we set up a port-forward between the kubernetes
     # cluster and the local machine, or directly use NodePort to reach the
     # head node.
@@ -346,4 +352,3 @@ cluster_synced_files: []
 file_mounts_sync_continuously: False
 initialization_commands: []
 rsync_exclude: []
-
