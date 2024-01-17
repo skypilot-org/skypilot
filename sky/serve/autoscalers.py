@@ -273,7 +273,7 @@ class RequestRateAutoscaler(Autoscaler):
         # Case 1. Once there is min_replicas number of
         # ready match replica, we will direct all traffic to them,
         # we can scale down all old replicas.
-        if len(ready_new_replica_infos) > self.min_replicas:
+        if len(ready_new_replica_infos) >= self.min_replicas:
             for info in ready_old_replica_infos:
                 all_replica_ids_to_scale_down.append(info.replica_id)
 
