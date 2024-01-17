@@ -16,7 +16,7 @@ from sky.utils.resources_utils import port_ranges_to_set
 InstanceId = str
 
 
-class ProvisionError(RuntimeError):
+class ProvisionerError(RuntimeError):
     """Exception for provisioning."""
     errors: List[Dict[str, str]]
 

@@ -99,15 +99,17 @@ def _generate_node_name(cluster_name: str, node_suffix: str,
     return node_name
 
 
-def _log_errors(errors: List[Dict[str, str]], e: Any, zone: str) -> None:
+def _log_errors(errors: List[Dict[str, str]], e: Any,
+                zone: Optional[str]) -> None:
     """Format errors into a string."""
     if errors:
         plural = 's' if len(errors) > 1 else ''
         codes = ', '.join(repr(e.get('code', 'N/A')) for e in errors)
         messages = '; '.join(
             repr(e.get('message', 'N/A').strip('.')) for e in errors)
-        logger.warning(f'create_instances: Got return code{plural} {codes} in '
-                       f'{zone}: {messages}')
+        zone_str = f' in {zone}' if zone else ''
+        logger.warning(f'GCP provisioner: Got return code{plural} {codes}'
+                       f'{zone_str}: {messages}')
     else:
         logger.warning(f'create_instances: Failed with reason: {e}')
 
@@ -174,7 +176,7 @@ class GCPInstance:
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: Optional[str]) -> bool:
+                           zone: Optional[str]) -> None:
         raise NotImplementedError
 
     @classmethod
@@ -245,13 +247,13 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
-    def start_instance(cls, node_id: str, project_id: str, zone: str) -> bool:
+    def start_instance(cls, node_id: str, project_id: str, zone: str) -> None:
         """Start a stopped instance."""
         raise NotImplementedError
 
     @classmethod
     def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
-                   labels: dict) -> bool:
+                   labels: dict) -> None:
         raise NotImplementedError
 
     @classmethod
@@ -284,7 +286,7 @@ class GCPInstance:
 
     @classmethod
     def resize_disk(cls, project_id: str, availability_zone: str,
-                    node_config: dict, instance_name: str) -> bool:
+                    node_config: dict, instance_name: str) -> None:
         """Resize a Google Cloud disk based on the provided configuration.
         Returns the response of resize operation.
         """
@@ -398,28 +400,65 @@ class GCPComputeInstance(GCPInstance):
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: Optional[str]) -> bool:
+                           zone: Optional[str]) -> None:
         if zone is not None:
-            op_type = 'zone'
-            result = (cls.load_resource().zoneOperations().get(
-                project=project_id,
-                operation=operation['name'],
-                zone=zone,
-            ).execute())
+            kwargs = {'zone': zone}
+            operation_caller = cls.load_resource().zoneOperations()
         else:
-            op_type = 'global'
-            result = (cls.load_resource().globalOperations().get(
+            kwargs = {}
+            operation_caller = cls.load_resource().globalOperations()
+        logger.debug(
+            f'Waiting GCP operation {operation["name"]} to be ready ...')
+        wait_start = time.time()
+        while time.time() - wait_start < GCP_TIMEOUT:
+            # Retry the wait() call until it succeeds or times out.
+            # This is because the wait() call is only best effort, and does not
+            # guarantee that the operation is done when it returns.
+            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # pylint: disable=line-too-long
+            request = operation_caller.wait(
                 project=project_id,
                 operation=operation['name'],
-            ).execute())
-        if 'error' in result:
-            raise Exception(result['error'])
-
-        if result['status'] == 'DONE':
-            logger.debug(f'wait_for_compute_{op_type}_operation: '
-                         f'Operation {operation["name"]} finished.')
-            return True
-        return False
+                **kwargs,
+            )
+            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
+            result = request.execute(num_retries=GCP_MAX_RETRIES)
+            if result['status'] == 'DONE':
+                # NOTE: Error example:
+                # {
+                #   'code': 'VM_MIN_COUNT_NOT_REACHED',
+                #   'message': 'Requested minimum count of 4 VMs could not be created.'
+                # }
+                errors = result.get('error', {}).get('errors')
+                if errors:
+                    logger.debug(
+                        'create_instances: Failed to create instances. Reason: '
+                        f'{errors}')
+                    _log_errors(errors, result, zone)
+                    error = common.ProvisionerError('Operation failed')
+                    error.errors = errors
+                    raise error
+                return
+            logger.debug(f'wait_for_operation: Retry waiting for operation '
+                         f'{operation["name"]} to finish (result: {result})...')
+        else:
+            logger.warning('wait_for_operation: Timeout waiting for creation '
+                           'operation, cancelling the operation ...')
+            request = operation_caller.delete(
+                project=project_id,
+                operation=operation['name'],
+                **kwargs,
+            )
+            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
+            request.execute(num_retries=GCP_MAX_RETRIES)
+            errors = [{
+                'code': 'TIMEOUT',
+                'message': f'Timeout waiting for operation {operation["name"]}',
+                'domain': 'wait_for_operation'
+            }]
+            _log_errors(errors, None, zone)
+            error = common.ProvisionerError('Operation timed out')
+            error.errors = errors
+            raise error
 
     @classmethod
     def get_vpc_name(
@@ -543,7 +582,7 @@ class GCPComputeInstance(GCPInstance):
 
     @classmethod
     def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
-                   labels: dict) -> bool:
+                   labels: dict) -> None:
         node = cls.load_resource().instances().get(
             project=project_id,
             instance=node_id,
@@ -560,9 +599,7 @@ class GCPComputeInstance(GCPInstance):
             body=body,
         ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
-        result = cls.wait_for_operation(operation, project_id,
-                                        availability_zone)
-        return result
+        cls.wait_for_operation(operation, project_id, availability_zone)
 
     @classmethod
     def create_instances(
@@ -736,57 +773,11 @@ class GCPComputeInstance(GCPInstance):
             return errors, names
 
         logger.debug('Waiting GCP instances to be ready ...')
-        wait_start = time.time()
-        success = False
-        while time.time() - wait_start < GCP_TIMEOUT:
-            # Retry the wait() call until it succeeds or times out.
-            # This is because the wait() call is only best effort, and does not
-            # guarantee that the operation is done when it returns.
-            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # pylint: disable=line-too-long
-            request = cls.load_resource().zoneOperations().wait(
-                project=project_id,
-                operation=operation['name'],
-                zone=zone,
-            )
-            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
-            result = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
-            success = result['status'] == 'DONE'
-            if success:
-                break
-            logger.debug(f'create_instances: Retry waiting for operation '
-                         f'{operation["name"]} to finish (result: {result})...')
-        else:
-            logger.warning('create_instances: Timeout waiting for creation '
-                           'operation, cancelling the operation ...')
-            request = cls.load_resource().zoneOperations().delete(
-                project=project_id,
-                operation=operation['name'],
-                zone=zone,
-            )
-            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
-            request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
-            errors = [{
-                'code': 'TIMEOUT',
-                'message': 'Timeout waiting for creation operation',
-                'domain': 'create_instances'
-            }]
-            _log_errors(errors, None, zone)
-            return errors, names
+        try:
+            cls.wait_for_operation(operation, project_id, zone)
+        except common.ProvisionerError as e:
+            return e.errors, names
 
-        # NOTE: Error example:
-        # {
-        #   'code': 'VM_MIN_COUNT_NOT_REACHED',
-        #   'message': 'Requested minimum count of 4 VMs could not be created.'
-        # }
-        errors = result.get('error', {}).get('errors')
-        if errors:
-            logger.debug(
-                'create_instances: Failed to create instances. Reason: '
-                f'{errors}')
-            _log_errors(errors, result, zone)
-            return errors, names
-        assert success, ('Failed to create instances, but there is no error. '
-                         f'Instance status: {result}')
         # assign labels for head node
         with pool.ThreadPool() as p:
             p.starmap(cls.create_node_tag,
@@ -795,15 +786,14 @@ class GCPComputeInstance(GCPInstance):
         return None, names
 
     @classmethod
-    def start_instance(cls, node_id: str, project_id: str, zone: str) -> bool:
+    def start_instance(cls, node_id: str, project_id: str, zone: str) -> None:
         operation = (cls.load_resource().instances().start(
             project=project_id,
             zone=zone,
             instance=node_id,
         ).execute())
 
-        result = cls.wait_for_operation(operation, project_id, zone)
-        return result
+        cls.wait_for_operation(operation, project_id, zone)
 
     @classmethod
     def get_instance_info(cls, project_id: str, availability_zone: str,
@@ -829,7 +819,7 @@ class GCPComputeInstance(GCPInstance):
 
     @classmethod
     def resize_disk(cls, project_id: str, availability_zone: str,
-                    node_config: dict, instance_name: str) -> bool:
+                    node_config: dict, instance_name: str) -> None:
         """Resize a Google Cloud disk based on the provided configuration."""
 
         # Extract the specified disk size from the configuration
@@ -857,13 +847,12 @@ class GCPComputeInstance(GCPInstance):
             # Catch HttpError when provided with invalid value for new disk
             # size. Allowing users to create instances with the same size as the
             # image.
+            # TODO(zhwu): We should only match the error message that are using
+            # the disk with same size as the image.
             logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
-            return False
+            return
 
-        result = cls.wait_for_operation(operation, project_id,
-                                        availability_zone)
-
-        return result
+        cls.wait_for_operation(operation, project_id, availability_zone)
 
 
 class GCPTPUVMInstance(GCPInstance):
@@ -888,19 +877,42 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: Optional[str]) -> bool:
+                           zone: Optional[str]) -> None:
         """Poll for TPU operation until finished."""
         del project_id, zone  # unused
-        result = (cls.load_resource().projects().locations().operations().get(
-            name=str(operation['name'])).execute(num_retries=GCP_MAX_RETRIES))
+        wait_start = time.time()
+        while time.time() - wait_start < GCP_TIMEOUT:
+            request = (
+                cls.load_resource().projects().locations().operations().get(
+                    name=str(operation['name'])))
+            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
+            result = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+            if result['done']:
+                break
+            logger.debug('wait_for_tpu_operation: '
+                         f'Waiting for operation {operation["name"]} to '
+                         'finish ...')
+
         if 'error' in result:
-            raise Exception(result['error'])
+            error = common.ProvisionerError('Operation failed')
+            errors = []
+            errors.append({
+                'code': result['error']['code'],
+                'message': result['error']['message'],
+                'domain': 'wait_for_operation',
+            })
+            for detail in result['error'].get('details', []):
+                errors.append({
+                    'code': detail.pop('@type', ''),
+                    'domain': 'wait_for_operation',
+                    'message': str(detail),
+                })
+            error.errors = errors
+            raise error
 
         if 'response' in result:
             logger.debug('wait_for_tpu_operation: '
                          f'Operation {operation["name"]} finished.')
-            return True
-        return False
 
     @classmethod
     def filter(
@@ -1030,7 +1042,7 @@ class GCPTPUVMInstance(GCPInstance):
     @classmethod
     @_retry_on_http_exception('unable to queue the operation')
     def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
-                   labels: dict) -> bool:
+                   labels: dict) -> None:
         while True:
             # wait until the instance become ready before setting labels
             # as Cloud TPU API does not allow setting labels on pending
@@ -1061,10 +1073,7 @@ class GCPTPUVMInstance(GCPInstance):
             body=body,
         ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
-        result = cls.wait_for_operation(operation, project_id,
-                                        availability_zone)
-
-        return result
+        cls.wait_for_operation(operation, project_id, availability_zone)
 
     @classmethod
     def create_instances(
@@ -1179,7 +1188,15 @@ class GCPTPUVMInstance(GCPInstance):
                 return errors, names
         errors = []
         for operation in operations:
+            error = operation.get('error')
+            if error:
+                error['domain'] = 'create_instances'
+                errors.append(error)
             error = operation.get('error', {}).get('details')
+            for detail in error:
+                detail['code'] = detail.pop('@type', '')
+                detail['message'] = str(detail)
+                detail['domain'] = 'create_instances'
             if error:
                 errors.extend(error)
         if errors:
@@ -1252,25 +1269,23 @@ class GCPTPUVMInstance(GCPInstance):
         return None, names
 
     @classmethod
-    def start_instance(cls, node_id: str, project_id: str, zone: str) -> bool:
+    def start_instance(cls, node_id: str, project_id: str, zone: str) -> None:
         operation = (cls.load_resource().projects().locations().nodes().start(
             name=node_id).execute())
 
         # FIXME: original implementation has the 'max_polls=MAX_POLLS' option.
-        result = cls.wait_for_operation(operation, project_id, zone)
-
-        return result
+        cls.wait_for_operation(operation, project_id, zone)
 
     @classmethod
     def resize_disk(cls, project_id: str, availability_zone: str,
-                    node_config: dict, instance_name: str) -> bool:
+                    node_config: dict, instance_name: str) -> None:
         """Resize the disk a machine image with a different size is used.
 
         TODO: Implement the feature to attach persistent disks for TPU VMs.
         The boot disk of TPU VMs is not resizable, and users need to add a
         persistent disk to expand disk capacity. Related issue: #2387
         """
-        return False
+        return
 
     @classmethod
     def get_instance_info(cls, project_id: str, availability_zone: str,
@@ -1359,7 +1374,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
             # right thing to do (force kill + re-provision?).
             logger.warning(f'TPU {tpu_name} already exists; skipped creation.')
             return
-        provisioner_err = common.ProvisionError(TPU_NODE_CREATION_FAILURE)
+        provisioner_err = common.ProvisionerError(TPU_NODE_CREATION_FAILURE)
         if 'RESOURCE_EXHAUSTED' in stderr:
             provisioner_err.errors = [{
                 'code': 'RESOURCE_EXHAUSTED',

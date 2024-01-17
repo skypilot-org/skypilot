@@ -1008,7 +1008,7 @@ class FailoverCloudErrorHandlerV2:
         assert zones and len(zones) == 1, zones
         zone = zones[0]
 
-        if not isinstance(err, provision_common.ProvisionError):
+        if not isinstance(err, provision_common.ProvisionerError):
             logger.warning(f'{colorama.Style.DIM}Got an unparsed error: {err}; '
                            f'blocking resources by its zone {zone.name}'
                            f'{colorama.Style.RESET_ALL}')
