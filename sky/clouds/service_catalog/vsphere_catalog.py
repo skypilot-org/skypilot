@@ -1,4 +1,5 @@
 """Vsphere catalog."""
+import os
 import typing
 from typing import Dict, List, Optional, Tuple
 
@@ -13,13 +14,11 @@ _DEFAULT_NUM_VCPUS = 2
 _DEFAULT_MEMORY_CPU_RATIO = 4
 _CLOUD_VSPHERE = 'vsphere'
 
-
-def _get_vsphere_vms_csv_df() -> pd.DataFrame:
-    df = common.read_catalog('vsphere/vms.csv')
-    return df
-
-
-_df = _get_vsphere_vms_csv_df()
+_LOCAL_CATALOG = common.get_catalog_path('vsphere/vms.csv')
+if os.path.exists(_LOCAL_CATALOG):
+    _df = pd.read_csv(_LOCAL_CATALOG)
+else:
+    _df = None
 
 
 def instance_type_exists(instance_type: str) -> bool:
