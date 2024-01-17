@@ -1,4 +1,9 @@
 # Adapted from https://github.com/pytorch/pytorch/tree/main/benchmarks/distributed/ddp
+# The original program was written to be launched `python -m torch.distributed.launch`
+# but could not since it is missing `local-rank` as an argument in and also hardcoded the
+# distributed communications library to `gloo`. This version allows for `nccl`and launches
+# using `torchrun` to handle initializing the process ranks instead of the script arguments
+# and is the currently recommended way for writing/launching pytorch distributed programs.
 #
 # Measure distributed training iteration time.
 #
