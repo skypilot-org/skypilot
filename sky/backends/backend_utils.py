@@ -2981,10 +2981,10 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
 
     def _run_csync_terminate(runner):
 
-        rc, _, stderr = runner.run(csync_terminate_cmd,
+        rc, stdout, stderr = runner.run(csync_terminate_cmd,
                                    stream_logs=False,
                                    require_outputs=True)
-
+        stderr = stdout + stderr
         if rc:
             # TODO(Doyoung): following message will interrupt the progress
             # bar UI until #2504 is resolved. Remove this comment after the
