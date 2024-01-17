@@ -16,6 +16,9 @@ ignore = [
     "F402"
 ]
 
+[tool.ruff.format]
+quote-style = "single"
+
 [tool.pytest.ini_options]
 required_plugins = [
     "pytest-xdist",
