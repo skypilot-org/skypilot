@@ -445,7 +445,7 @@ class ReplicaManager:
     """Each replica manager monitors one service."""
 
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
-                 initial_version: int, task_yaml_path: str) -> None:
+                 initial_version: int) -> None:
         self.lock = threading.Lock()
         self._next_replica_id: int = 1
         self._service_name: str = service_name
@@ -457,7 +457,7 @@ class ReplicaManager:
         self.latest_version: int = initial_version
         self.oldest_version: int = initial_version
         serve_state.add_or_update_version(self._service_name, initial_version,
-                                          spec, task_yaml_path)
+                                          spec)
 
     def get_ready_replica_urls(self) -> List[str]:
         """Get all ready replica's IP addresses."""
@@ -475,8 +475,8 @@ class ReplicaManager:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
-    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
-                       task_yaml_path: str) -> None:
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
         raise NotImplementedError
 
 
@@ -494,7 +494,7 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
                  initial_version: int, task_yaml_path: str) -> None:
-        super().__init__(service_name, spec, initial_version, task_yaml_path)
+        super().__init__(service_name, spec, initial_version)
         self._task_yaml_path = task_yaml_path
         # TODO(tian): Store launch/down pid in the replica table, to make the
         # manager more persistent. Current blocker is that we need to manually
@@ -531,8 +531,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             if version in version2url:
                 return version2url[version]
             version -= 1
-        # If not separate replicas, return all ready replicas.
-        return ready_replica_urls
+        return []
 
     def _launch_replica(
         self,
@@ -571,13 +570,20 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._next_replica_id += 1
 
     def _terminate_replica(self, replica_id: int, sync_down_logs: bool) -> None:
-        p = self._launch_process_pool[replica_id]
-        if p.is_alive():
-            assert p.pid is not None
-            p.terminate()
-            p.join()
-        logger.info(f'Interrupted launch process for replica {replica_id} '
-                    'and deleted the cluster.')
+
+        if replica_id in self._launch_process_pool:
+            launch_process = self._launch_process_pool[replica_id]
+            if launch_process.is_alive():
+                assert launch_process.pid is not None
+                launch_process.terminate()
+                launch_process.join()
+            logger.info(f'Interrupted launch process for replica {replica_id} '
+                        'and deleted the cluster.')
+            info = serve_state.get_replica_info_from_id(self._service_name,
+                                                        replica_id)
+            assert info is not None
+            info.status_property.sky_launch_status = ProcessStatus.INTERRUPTED
+            del self._launch_process_pool[replica_id]
 
         if replica_id in self._down_process_pool:
             logger.warning(f'Terminate process for replica {replica_id} '
@@ -639,10 +645,6 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         p.start()
         self._down_process_pool[replica_id] = p
-
-        if replica_id in self._launch_process_pool:
-            info.status_property.sky_launch_status = ProcessStatus.INTERRUPTED
-            del self._launch_process_pool[replica_id]
 
     def scale_down(self, replica_id: int) -> None:
         self._terminate_replica(replica_id, sync_down_logs=False)
@@ -771,7 +773,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if self.oldest_version < current_oldest_version:
                     for version in range(self.oldest_version,
                                          current_oldest_version):
-                        task_yaml = self._get_yaml(version)
+                        task_yaml = serve_utils.generate_task_yaml_file_name(
+                            self._service_name, version)
                         # Delete old version metadata.
                         serve_state.delete_version(self._service_name, version)
                         # Delete storage buckets of older versions.
@@ -866,8 +869,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                 replica_to_probe.append(
                     f'replica_{info.replica_id}(url={info.url})')
                 probe_futures.append(
-                    pool.apply_async(info.probe, (self._get_readiness_path(
-                        info.version), self._get_post_data(info.version))))
+                    pool.apply_async(
+                        info.probe,
+                        (self._get_readiness_path(
+                            info.version), self._get_post_data(info.version)),
+                    ),)
             logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
 
             # Since futures.as_completed will return futures in the order of
@@ -973,9 +979,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.debug('Running replica prober.')
             try:
                 self._probe_all_replicas()
-                replica_infos = serve_state.get_replica_infos(
-                    self._service_name)
-                replica_statuses = [info.status for info in replica_infos]
+                replica_statuses = [
+                    info.status for info in serve_state.get_replica_infos(
+                        self._service_name)
+                ]
                 serve_utils.set_service_status_from_replica_statuses(
                     self._service_name, replica_statuses)
 
@@ -988,30 +995,23 @@ class SkyPilotReplicaManager(ReplicaManager):
                     logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
 
-    #########################################
+    ###########################################
     # SkyServe Update and replica versioning. #
-    #########################################
+    ###########################################
 
-    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
-                       task_yaml_path: str) -> None:
-        serve_state.add_or_update_version(self._service_name, version, spec,
-                                          task_yaml_path)
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
+        task_yaml_path = serve_utils.generate_task_yaml_file_name(
+            self._service_name, version)
+        serve_state.add_or_update_version(self._service_name, version, spec)
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
 
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
-        output = serve_state.get_spec_and_yaml(self._service_name, version)
-        if output is None:
+        spec = serve_state.get_spec(self._service_name, version)
+        if spec is None:
             raise ValueError(f'Version {version} not found.')
-        spec, _ = output
         return spec
-
-    def _get_yaml(self, version: int) -> str:
-        output = serve_state.get_spec_and_yaml(self._service_name, version)
-        if output is None:
-            raise ValueError(f'Version {version} not found.')
-        _, yaml = output
-        return yaml
 
     def _get_readiness_path(self, version: int) -> str:
         return self._get_version_spec(version).readiness_path

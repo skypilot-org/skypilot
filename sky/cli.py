@@ -4333,7 +4333,8 @@ def serve():
     pass
 
 
-def _generate_task_with_service(service_yaml_args: List[str]) -> sky.Task:
+def _generate_task_with_service(service_yaml_args: List[str],
+                                not_supported_cmd: str) -> sky.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
     if not is_yaml:
@@ -4343,7 +4344,7 @@ def _generate_task_with_service(service_yaml_args: List[str]) -> sky.Task:
         service_yaml_args, entrypoint_name='Service')
     if isinstance(task, sky.Dag):
         raise click.UsageError(
-            _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky serve up'))
+            _DAG_NOT_SUPPORTED_MESSAGE.format(command=not_supported_cmd))
 
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
@@ -4433,7 +4434,8 @@ def serve_up(
     if service_name is None:
         service_name = serve_lib.generate_service_name()
 
-    task = _generate_task_with_service(service_yaml)
+    task = _generate_task_with_service(service_yaml_args=service_yaml,
+                                       not_supported_cmd='sky serve up')
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
@@ -4478,7 +4480,8 @@ def serve_update(service_name: str, service_yaml: List[str], yes: bool):
 
         sky serve update sky-service-16aa new_service.yaml
     """
-    task = _generate_task_with_service(service_yaml)
+    task = _generate_task_with_service(service_yaml_args=service_yaml,
+                                       not_supported_cmd='sky serve update')
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 

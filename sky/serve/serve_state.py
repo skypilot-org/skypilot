@@ -5,7 +5,7 @@ import pathlib
 import pickle
 import sqlite3
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import colorama
 
@@ -49,7 +49,6 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
             service_name TEXT,
             version INTEGER,
             spec BLOB,
-            yaml STR,
             PRIMARY KEY (service_name, version))""")
     conn.commit()
 
@@ -58,7 +57,8 @@ _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
 # Backward compatibility.
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              'requested_resources_str', 'TEXT')
-db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services', 'version',
+db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
+                             'current_version',
                              f'INTEGER DEFAULT {constants.INITIAL_VERSION}')
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
@@ -218,7 +218,7 @@ def add_service(name: str, controller_job_id: int, policy: str, version: int,
             """\
             INSERT INTO services
             (name, controller_job_id, status, policy,
-            requested_resources_str, version)
+            requested_resources_str, current_version)
             VALUES (?, ?, ?, ?, ?, ?)""",
             (name, controller_job_id, status.value, policy,
              requested_resources_str, version))
@@ -260,7 +260,7 @@ def set_service_version(service_name: str, version: int) -> None:
     _DB.cursor.execute(
         """\
         UPDATE services SET
-        version=(?) WHERE name=(?)""", (version, service_name))
+        current_version=(?) WHERE name=(?)""", (version, service_name))
     _DB.conn.commit()
 
 
@@ -288,7 +288,7 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
      uptime, policy, _, requested_resources, requested_resources_str,
-     version) = row[:11]
+     current_version) = row[:11]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -297,7 +297,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'status': ServiceStatus[status],
         'uptime': uptime,
         'policy': policy,
-        'version': version,
+        'version': current_version,
         # TODO(tian): Backward compatibility.
         # Remove after 2 minor release, 0.6.0.
         'requested_resources': pickle.loads(requested_resources)
@@ -415,15 +415,13 @@ def total_number_provisioning_replicas() -> int:
 
 # === Version functions ===
 def add_or_update_version(service_name: str, version: int,
-                          spec: 'service_spec.SkyServiceSpec',
-                          task_yaml_path: str) -> None:
+                          spec: 'service_spec.SkyServiceSpec') -> None:
     """Adds a version to the database."""
     _DB.cursor.execute(
         """\
         INSERT OR REPLACE INTO versions
-        (service_name, version, spec, yaml)
-        VALUES (?, ?, ?, ?)""",
-        (service_name, version, pickle.dumps(spec), task_yaml_path))
+        (service_name, version, spec)
+        VALUES (?, ?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
     _DB.conn.commit()
 
 
@@ -436,17 +434,16 @@ def remove_service_versions(service_name: str) -> None:
     _DB.conn.commit()
 
 
-def get_spec_and_yaml(
-        service_name: str,
-        version: int) -> Optional[Tuple['service_spec.SkyServiceSpec', str]]:
-    """Gets a spec and yaml from the database."""
+def get_spec(service_name: str,
+             version: int) -> Optional['service_spec.SkyServiceSpec']:
+    """Gets spec from the database."""
     rows = _DB.cursor.execute(
         """\
-        SELECT spec, yaml FROM versions
+        SELECT spec FROM versions
         WHERE service_name=(?)
         AND version=(?)""", (service_name, version)).fetchall()
     for row in rows:
-        return pickle.loads(row[0]), row[1]
+        return pickle.loads(row[0])
     return None
 
 

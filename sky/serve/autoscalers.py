@@ -72,8 +72,8 @@ class Autoscaler:
         # TODO(MaoZiming): add init replica numbers in SkyServe spec.
         self.target_num_replicas: int = spec.min_replicas
 
-    def update_spec(self, version: int,
-                    spec: 'service_spec.SkyServiceSpec') -> None:
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
         del version  # Unused.
         self.min_nodes = spec.min_replicas
         self.max_nodes = (spec.max_replicas if spec.max_replicas is not None
@@ -141,9 +141,9 @@ class RequestRateAutoscaler(Autoscaler):
         self.bootstrap_done: bool = False
         self.latest_version: int = initial_version
 
-    def update_spec(self, version: int,
-                    spec: 'service_spec.SkyServiceSpec') -> None:
-        super().update_spec(version, spec)
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
+        super().update_version(version, spec)
         self.target_qps_per_replica = spec.target_qps_per_replica
         upscale_delay_seconds = (
             spec.upscale_delay_seconds if spec.upscale_delay_seconds is not None

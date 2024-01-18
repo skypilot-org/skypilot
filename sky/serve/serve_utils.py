@@ -239,7 +239,7 @@ def set_service_status_from_replica_statuses(
         replica_statuses: List[serve_state.ReplicaStatus]) -> None:
     record = serve_state.get_service_from_name(service_name)
     if record is None:
-        raise ValueError('The service is up-ed in an old version and does not'
+        raise ValueError('The service is up-ed in an old version and does not '
                          'support update. Please `sky serve down` '
                          'it first and relaunch the service.')
     if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
@@ -280,8 +280,9 @@ def update_service(service_name: str, version: int) -> str:
             'version': version,
         })
     if resp.status_code == 404:
-        raise ValueError('The service is up-ed before update is supported, '
-                         'serve down first and relaunch the service. ')
+        raise ValueError('The service is up-ed in an old version and does not '
+                         'support update. Please `sky serve down` '
+                         'it first and relaunch the service. ')
     elif resp.status_code != 200:
         raise ValueError(f'Failed to update service: {resp.text}')
     return resp.json()['message']
@@ -700,7 +701,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             replica_infos.append(replica)
 
         service_name = record['name']
-        version = (record['version'] if 'version' in record else '-')
+        version = record['version'] if 'version' in record else '-'
         uptime = log_utils.readable_time_duration(record['uptime'],
                                                   absolute=True)
         service_status = record['status']

@@ -268,11 +268,13 @@ def update(task: 'sky.Task', service_name: str) -> None:
 
     cluster_status, handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='Service is stopped. To spin up a new service, '
-        'use {bold}sky serve up{reset}',
+        stopped_message=
+        'Service controller is stopped. There is no service to update. '
+        f'To spin up a new service, use {backend_utils.BOLD}'
+        f'sky serve up{backend_utils.RESET_BOLD}',
         non_existent_message='Service does not exist. '
         'To spin up a new service, '
-        'use {bold}sky serve up{reset}',
+        f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
 
     if handle is None or handle.head_ip is None:
@@ -295,8 +297,8 @@ def update(task: 'sky.Task', service_name: str) -> None:
         separate_stderr=True)
     try:
         subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to update service',
+                                           code, 'Failed to get service status '
+                                           'when update service',
                                            stderr,
                                            stream_logs=True)
     except exceptions.CommandError as e:
@@ -305,9 +307,9 @@ def update(task: 'sky.Task', service_name: str) -> None:
     service_statuses = serve_utils.load_service_status(serve_status_payload)
     if len(service_statuses) == 0:
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                f'Cannot find service {service_name!r}.'
-                'To spin up a service, use {bold}sky serve up{reset}')
+            raise RuntimeError(f'Cannot find service {service_name!r}.'
+                               f'To spin up a service, use {backend_utils.BOLD}'
+                               f'sky serve up{backend_utils.RESET_BOLD}')
 
     if len(service_statuses) > 1:
         with ux_utils.print_exception_no_traceback():
@@ -315,11 +317,8 @@ def update(task: 'sky.Task', service_name: str) -> None:
                 f'Multiple services found for {service_name!r}. ')
     service_record = service_statuses[0]
     prompt = None
-    if service_record is None:
-        prompt = (f'Service {service_name!r} not exist. '
-                  'To create a new service, use `sky serve up`.')
-    elif (service_record['status'] ==
-          serve_state.ServiceStatus.CONTROLLER_FAILED):
+    if (service_record['status'] == serve_state.ServiceStatus.CONTROLLER_FAILED
+       ):
         prompt = (f'Service {service_name!r} has a failed controller. '
                   'Please clean up the service and try again.')
     elif (service_record['status'] == serve_state.ServiceStatus.CONTROLLER_INIT
@@ -345,8 +344,8 @@ def update(task: 'sky.Task', service_name: str) -> None:
             mode='w') as service_file:
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(service_file.name, task_config)
-        remote_task_yaml_path = (serve_utils.generate_task_yaml_file_name(
-            service_name, current_version, expand_user=False))
+        remote_task_yaml_path = serve_utils.generate_task_yaml_file_name(
+            service_name, current_version, expand_user=False)
 
         backend.sync_file_mounts(handle,
                                  {remote_task_yaml_path: service_file.name},
@@ -481,6 +480,7 @@ def status(
             'replica_id': (int) replica id,
             'name': (str) replica name,
             'status': (sky.serve.ReplicaStatus) replica status,
+            'version': (int) replica version,
             'launched_at': (int) timestamp of launched,
             'handle': (ResourceHandle) handle of the replica cluster,
         }
