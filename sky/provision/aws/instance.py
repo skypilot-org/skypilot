@@ -121,7 +121,7 @@ def _ec2_call_with_retry_on_rate_limit(ec2_fn: Callable[..., _T],
         except aws.botocore_exceptions().ClientError as e:
             if e.response['Error']['Code'] == 'RequestLimitExceeded':
                 time.sleep(backoff.current_backoff())
-                logger.warning(
+                logger.debug(
                     'create_instances: RequestLimitExceeded, retrying.')
                 continue
             logger.warning(f'create_instances: Failed with {e}.')
@@ -369,13 +369,16 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     if config.resume_stopped_nodes and to_start_count > 0 and (
             stopping_instances or stopped_instances):
         time_start = time.time()
-        timeout = 300
-        per_instance_timeout = 60
+        timeout = 480
+        per_instance_timeout = 120
         while (stopping_instances and
                to_start_count > len(stopped_instances) and
                time.time() - time_start < timeout):
             inst = stopping_instances.pop(0)
-            logger.info(f'Waiting for the stopping instance {inst.id} to stop.')
+            logger.warning(
+                f'Instance {inst.id} is still in stopping state on AWS.'
+                ' It can only be resumed after it is fully stopped. '
+                'Waiting ...')
             with pool.ThreadPool(processes=1) as pool_:
                 # wait_until_stopped() is a blocking call, and sometimes it can
                 # take significant time to return due to AWS keeping the
@@ -391,17 +394,15 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                     time.sleep(1)
                 else:
                     logger.warning(
-                        f'Instance {inst.id} is still in stopping state on AWS.'
-                        ' It can only be resumed after it is fully stopped. '
-                        'Retrying ...'
-                    )
+                        f'Instance {inst.id} is still in stopping state.'
+                        'Retrying ...')
                     stopping_instances.append(inst)
                     continue
             stopped_instances.append(inst)
         if stopping_instances and to_start_count > len(stopped_instances):
             msg = ('Timeout for waiting for existing instances '
-                f'{stopping_instances} in STOPPING state to '
-                'be STOPPED before restarting them. Please try again later.')
+                   f'{stopping_instances} in STOPPING state to '
+                   'be STOPPED before restarting them. Please try again later.')
             logger.error(msg)
             raise RuntimeError(msg)
 
