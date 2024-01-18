@@ -762,6 +762,23 @@ class SkyPilotReplicaManager(ReplicaManager):
                     logger.info(f'Replica {replica_id} removed from the '
                                 f'replica table {removal_reason}.')
 
+                # Clean old version
+                replica_infos = serve_state.get_replica_infos(
+                    self._service_name)
+                current_oldest_version = min([
+                    info.version for info in replica_infos
+                ]) if replica_infos else self.oldest_version
+                if self.oldest_version < current_oldest_version:
+                    for version in range(self.oldest_version,
+                                         current_oldest_version):
+                        task_yaml = self._get_yaml(version)
+                        # Delete old version metadata.
+                        serve_state.delete_version(self._service_name, version)
+                        # Delete storage buckets of older versions.
+                        service.cleanup_storage(task_yaml)
+                    # newest version will be cleaned in serve down
+                    self.oldest_version = current_oldest_version
+
     def _process_pool_refresher(self) -> None:
         """Periodically refresh the launch/down process pool."""
         while True:
@@ -961,21 +978,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                 replica_statuses = [info.status for info in replica_infos]
                 serve_utils.set_service_status_from_replica_statuses(
                     self._service_name, replica_statuses)
-
-                # Clean old version
-                current_oldest_version = min([
-                    info.version for info in replica_infos
-                ]) if replica_infos else self.oldest_version
-                if self.oldest_version < current_oldest_version:
-                    for version in range(self.oldest_version,
-                                         current_oldest_version):
-                        task_yaml = self._get_yaml(version)
-                        # Delete old version metadata.
-                        serve_state.delete_version(self._service_name, version)
-                        # Delete storage buckets of older versions.
-                        service.cleanup_storage(task_yaml)
-                    # newest version will be cleaned in serve down
-                    self.oldest_version = current_oldest_version
 
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
