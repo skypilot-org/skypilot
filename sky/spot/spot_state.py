@@ -74,7 +74,7 @@ db_utils.add_column_to_table(_CURSOR,
                              'spot',
                              'task_id',
                              'INTEGER DEFAULT 0',
-                             default_value_to_replace_nulls=0)
+                             value_to_replace_existing_entries=0)
 db_utils.add_column_to_table(_CURSOR,
                              _CONN,
                              'spot',
