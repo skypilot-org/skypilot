@@ -692,10 +692,11 @@ class GCPComputeInstance(GCPInstance):
                 logger.debug(f'Creating {reservation_count} instances '
                              f'with reservation {reservation}')
                 config['reservationAffinity']['values'] = [reservation]
-                errors, created_names = cls._create_instances(
-                    names[:reservation_count], project_id, zone, config,
-                    reservation_count, head_tag_needed[:reservation_count])
-                all_names.extend(names)
+                created_names = names[:reservation_count]
+                errors = cls._create_instances(
+                    created_names, project_id, zone, config, reservation_count,
+                    head_tag_needed[:reservation_count])
+                all_names.extend(created_names)
                 if errors:
                     return errors, all_names
                 count -= reservation_count
@@ -705,11 +706,10 @@ class GCPComputeInstance(GCPInstance):
                 head_tag_needed = head_tag_needed[reservation_count:]
             config.pop('reservationAffinity', None)
 
-        errors, created_names = cls._create_instances(names, project_id, zone,
-                                                      config, count,
-                                                      head_tag_needed)
+        errors = cls._create_instances(names, project_id, zone, config, count,
+                                       head_tag_needed)
 
-        all_names.extend(created_names)
+        all_names.extend(names)
         return errors, all_names
 
     @classmethod
@@ -721,7 +721,7 @@ class GCPComputeInstance(GCPInstance):
         config: dict,
         count: int,
         head_tag_needed: List[bool],
-    ) -> Tuple[Optional[List], List[str]]:
+    ) -> Optional[List]:
         source_instance_template = config.pop('sourceInstanceTemplate', None)
         body = {
             'count': count,
@@ -749,7 +749,7 @@ class GCPComputeInstance(GCPInstance):
             logger.debug(
                 f'create_instances: googleapiclient.errors.HttpError: {e}')
             _log_errors(errors, e, zone)
-            return errors, names
+            return errors
 
         # Allow Google Compute Engine instance templates.
         #
@@ -781,13 +781,13 @@ class GCPComputeInstance(GCPInstance):
             logger.debug('create_instances: Failed to create instances. '
                          f'Reason: {errors}')
             _log_errors(errors, operation, zone)
-            return errors, names
+            return errors
 
         logger.debug('Waiting GCP instances to be ready ...')
         try:
             cls.wait_for_operation(operation, project_id, zone)
         except common.ProvisionerError as e:
-            return e.errors, names
+            return e.errors
         except gcp.http_error_exception() as e:
             return _handle_http_error(e)
 
@@ -796,7 +796,7 @@ class GCPComputeInstance(GCPInstance):
             p.starmap(cls.create_node_tag,
                       [(project_id, zone, names[i], head_tag_needed[i])
                        for i in range(count)])
-        return None, names
+        return None
 
     @classmethod
     def start_instance(cls, node_id: str, project_id: str, zone: str) -> None:
