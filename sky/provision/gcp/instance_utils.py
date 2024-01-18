@@ -68,6 +68,7 @@ def _retry_on_http_exception(
                 ret = try_catch_exc()
                 if not isinstance(ret, Exception):
                     break
+                logger.debug(f'Retrying for exception: {ret}')
                 time.sleep(retry_interval_s)
             if isinstance(ret, Exception):
                 raise ret
@@ -451,7 +452,11 @@ class GCPComputeInstance(GCPInstance):
             logger.warning('wait_for_operation: Timeout waiting for creation '
                            'operation, cancelling the operation ...')
             timeout = max(GCP_TIMEOUT - (time.time() - wait_start), 1)
-            result = call_operation(operation_caller.delete, timeout)
+            try:
+                result = call_operation(operation_caller.delete, timeout)
+            except gcp.http_error_exception() as e:
+                logger.debug('wait_for_operation: failed to cancel operation '
+                             f'due to error: {e}')
             errors = [{
                 'code': 'TIMEOUT',
                 'message': f'Timeout waiting for operation {operation["name"]}',
