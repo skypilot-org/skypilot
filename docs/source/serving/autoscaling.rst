@@ -46,7 +46,7 @@ In this example, SkyServe will launch 2 replicas of your service and scale up to
 
 .. tip::
 
-    :code:`target_qps_per_replica` could be any positive floating point number. If process one request takes two seconds in one replica, using :code:`target_qps_per_replica=0.5`.
+    :code:`target_qps_per_replica` could be any positive floating point number. If processing one request takes two seconds in one replica, we can use :code:`target_qps_per_replica=0.5`.
 
 Scaling Delay
 -------------
@@ -70,7 +70,7 @@ SkyServe will not scale up or down immediately. Instead, SkyServe will wait for 
 Scale Down to 0
 ===============
 
-If your service has a consecutive time period with no traffic, consider using :code:`min_replicas=0`:
+If your service might experience long period of time with no traffic, consider using :code:`min_replicas=0`:
 
 .. code-block:: yaml
     :emphasize-lines: 4
