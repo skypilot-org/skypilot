@@ -640,16 +640,12 @@ class SkyPilotReplicaManager(ReplicaManager):
         p.start()
         self._down_process_pool[replica_id] = p
 
-    def scale_down(self, replica_id: int) -> None:
         if replica_id in self._launch_process_pool:
-            self._terminate_replica(replica_id, sync_down_logs=False)
-            info = serve_state.get_replica_info_from_id(self._service_name,
-                                                        replica_id)
-            assert info is not None
             info.status_property.sky_launch_status = ProcessStatus.INTERRUPTED
             del self._launch_process_pool[replica_id]
-        else:
-            self._terminate_replica(replica_id, sync_down_logs=False)
+
+    def scale_down(self, replica_id: int) -> None:
+        self._terminate_replica(replica_id, sync_down_logs=False)
 
     def _handle_preemption(self, replica_id: int) -> None:
         logger.info(f'Beginning handle for preempted replica {replica_id}.')
