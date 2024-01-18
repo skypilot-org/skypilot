@@ -151,7 +151,7 @@ Kubernetes support is under active development. Some features are in progress an
 * Auto-down - ✅ Available
 * Storage mounting - ✅ Available on x86_64 clusters
 * Multi-node tasks - ✅ Available
-* Opening ports and exposing services - 🚧 In progress
+* Opening ports and exposing services - :ref:`✅ Available <kubernetes-ports>`
 * Custom images - 🚧 In progress
 * Multiple Kubernetes Clusters - 🚧 In progress
 

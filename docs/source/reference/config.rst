@@ -173,6 +173,33 @@ Available fields and semantics:
     # is used as default if 'networking' is not specified.
     networking: portforward
 
+    # The mode to use for opening ports on Kubernetes
+    #
+    # This must be either: 'ingress' or 'loadbalancer'. If not specified,
+    # defaults to 'loadbalancer'.
+    #
+    # ingress: This requires an ingress controller to be configured on the
+    # Kubernetes cluster. The ingress controller will be used to open ports on
+    # the cluster. Currently, only the NGINX ingress controller is supported.
+    # Refer to https://kubernetes.github.io/ingress-nginx/ for details on
+    # configuring the NGINX ingress controller. This mode creates an ingress and a
+    # ClusterIP service for each port opened. The port can be accessed externally
+    # using the Ingress URL plus a path prefix of the form
+    # /skypilot/{cluster_name_on_cloud}/{port}
+    # Refer to kubernetes-ingress.yml.j2 for the exact template.
+    #
+    # loadbalancer: This mode is supported for all Kubernetes clusters that support
+    # the LoadBalancer service type. This mode creates a single LoadBalancer service for
+    # all ports opened. The port can be accessed externally using the service's external IP
+    # plus the specific port you want to access. The external IP generally takes some time
+    # to be assigned so there might be a slight delay before the port can be accessed.
+    #
+    # You can get the endpoint for any port opened using the following command:
+    # sky status {cluster_name} --endpoint {port}
+    # or list the endpoints for all ports opened using:
+    # sky status {cluster_name} --endpoints
+    ports: loadbalancer
+
   # Advanced OCI configurations (optional).
   oci:
     # A dict mapping region names to region-specific configurations, or
@@ -193,4 +220,3 @@ Available fields and semantics:
 
     us-ashburn-1:
       vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
-
