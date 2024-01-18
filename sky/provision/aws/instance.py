@@ -5,6 +5,7 @@ in this or config module, please make sure to reload it as in
 _default_ec2_resource() to avoid version mismatch issues.
 """
 import copy
+from multiprocessing import pool
 import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
@@ -103,8 +104,8 @@ def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
     }]
 
 
-def _ec2_call_with_retry_on_rate_limite(ec2_fn: Callable[..., _T],
-                                        **kwargs) -> _T:
+def _ec2_call_with_retry_on_rate_limit(ec2_fn: Callable[..., _T],
+                                       **kwargs) -> _T:
     # NOTE: We set retry=0 for fast failing when the resource is not
     # available. Here we have to handle 'RequestLimitExceeded'
     # error, so the provision would not fail due to request limit
@@ -123,6 +124,7 @@ def _ec2_call_with_retry_on_rate_limite(ec2_fn: Callable[..., _T],
                 logger.warning(
                     'create_instances: RequestLimitExceeded, retrying.')
                 continue
+            logger.warning(f'create_instances: Failed with {e}.')
             raise
     if ret is None:
         raise RuntimeError(
@@ -222,7 +224,7 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
             }]
             conf['NetworkInterfaces'] = network_interfaces
 
-            instances = _ec2_call_with_retry_on_rate_limite(
+            instances = _ec2_call_with_retry_on_rate_limit(
                 ec2_fail_fast.create_instances, **conf)
             return instances
         except aws.botocore_exceptions().ClientError as exc:
@@ -278,8 +280,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         'Values': [cluster_name_on_cloud],
     }]
     exist_instances = list(
-        _ec2_call_with_retry_on_rate_limite(ec2_fail_fast.instances.filter,
-                                            Filters=filters))
+        _ec2_call_with_retry_on_rate_limit(ec2_fail_fast.instances.filter,
+                                           Filters=filters))
     exist_instances.sort(key=lambda x: x.id)
     head_instance_id = _get_head_instance_id(exist_instances)
 
@@ -324,7 +326,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 'Key': 'Name',
                 'Value': f'sky-{cluster_name_on_cloud}-worker'
             }]
-        _ec2_call_with_retry_on_rate_limite(
+        _ec2_call_with_retry_on_rate_limit(
             ec2_fail_fast.meta.client.create_tags,
             Resources=[target_instance.id],
             Tags=target_instance.tags + node_tag,
@@ -366,21 +368,52 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     # Try to reuse previously stopped nodes with compatible configs
     if config.resume_stopped_nodes and to_start_count > 0 and (
             stopping_instances or stopped_instances):
-        for inst in stopping_instances:
-            if to_start_count <= len(stopped_instances):
-                break
-            inst.wait_until_stopped()
+        time_start = time.time()
+        timeout = 300
+        per_instance_timeout = 60
+        while (stopping_instances and
+               to_start_count > len(stopped_instances) and
+               time.time() - time_start < timeout):
+            inst = stopping_instances.pop(0)
+            logger.info(f'Waiting for the stopping instance {inst.id} to stop.')
+            with pool.ThreadPool(processes=1) as pool_:
+                # wait_until_stopped() is a blocking call, and sometimes it can
+                # take significant time to return due to AWS keeping the
+                # instance in STOPPING state. We add a timeout for it to make
+                # SkyPilot more responsive.
+                fut = pool_.apply_async(inst.wait_until_stopped)
+                per_instance_time_start = time.time()
+                while (time.time() - per_instance_time_start <
+                       per_instance_timeout):
+                    if fut.ready():
+                        fut.get()
+                        break
+                    time.sleep(1)
+                else:
+                    logger.warning(
+                        f'Instance {inst.id} is still in stopping state on AWS.'
+                        ' It can only be resumed after it is fully stopped. '
+                        'Retrying ...'
+                    )
+                    stopping_instances.append(inst)
+                    continue
             stopped_instances.append(inst)
+        if stopping_instances and to_start_count > len(stopped_instances):
+            raise RuntimeError(
+                'Timeout for waiting for existing instances '
+                f'{stopping_instances} in STOPPING state to '
+                'be STOPPED before restarting them. Please try again later.')
 
         resumed_instances = stopped_instances[:to_start_count]
         resumed_instances.sort(key=lambda x: x.id)
         resumed_instance_ids = [t.id for t in resumed_instances]
-        _ec2_call_with_retry_on_rate_limite(
+        logger.debug(f'Resuming stopped instances {resumed_instance_ids}.')
+        _ec2_call_with_retry_on_rate_limit(
             ec2_fail_fast.meta.client.start_instances,
             InstanceIds=resumed_instance_ids)
         if tags:
             # empty tags will result in error in the API call
-            _ec2_call_with_retry_on_rate_limite(
+            _ec2_call_with_retry_on_rate_limit(
                 ec2_fail_fast.meta.client.create_tags,
                 Resources=resumed_instance_ids,
                 Tags=_format_tags(tags))
