@@ -51,20 +51,15 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
             spec BLOB,
             yaml STR,
             PRIMARY KEY (service_name, version))""")
-    # For backward compatibility.
-    # TODO(MaoZiming): Remove this function after all users have migrated to
-    # the latest version of SkyServe.
-    # Add version column to services table
-    db_utils.add_column_to_table(
-        cursor, conn, 'services', 'version',
-        f'INTEGER DEFAULT {constants.INITIAL_VERSION}')
     conn.commit()
 
 
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+# Backward compatibility.
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              'requested_resources_str', 'TEXT')
-
+db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services', 'version',
+                             f'INTEGER DEFAULT {constants.INITIAL_VERSION}')
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 
@@ -222,11 +217,11 @@ def add_service(name: str, controller_job_id: int, policy: str, version: int,
         _DB.cursor.execute(
             """\
             INSERT INTO services
-            (name, controller_job_id, status, policy, version,
-            requested_resources_str)
+            (name, controller_job_id, status, policy,
+            requested_resources_str, version)
             VALUES (?, ?, ?, ?, ?, ?)""",
-            (name, controller_job_id, status.value, policy, version,
-             requested_resources_str))
+            (name, controller_job_id, status.value, policy,
+             requested_resources_str, version))
         _DB.conn.commit()
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -292,8 +287,8 @@ def set_service_load_balancer_port(service_name: str,
 
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
-     uptime, policy, _, requested_resources, version,
-     requested_resources_str) = row[:11]
+     uptime, policy, _, requested_resources, requested_resources_str,
+     version) = row[:11]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
