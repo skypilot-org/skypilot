@@ -371,14 +371,15 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         time_start = time.time()
         timeout = 480
         per_instance_timeout = 120
+        verb = 'is' if len(stopping_instances) == 1 else 'are'
+        logger.warning(
+            f'Instances {stopping_instances} {verb} still in stopping state on '
+            'AWS. It can only be resumed after it is fully stopped. '
+            'Waiting ...')
         while (stopping_instances and
                to_start_count > len(stopped_instances) and
                time.time() - time_start < timeout):
             inst = stopping_instances.pop(0)
-            logger.warning(
-                f'Instance {inst.id} is still in stopping state on AWS.'
-                ' It can only be resumed after it is fully stopped. '
-                'Waiting ...')
             with pool.ThreadPool(processes=1) as pool_:
                 # wait_until_stopped() is a blocking call, and sometimes it can
                 # take significant time to return due to AWS keeping the
