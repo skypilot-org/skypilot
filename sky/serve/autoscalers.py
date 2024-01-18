@@ -237,14 +237,16 @@ class RequestRateAutoscaler(Autoscaler):
         launched_new_replica_infos, ready_new_replica_infos = [], []
         ready_old_replica_infos, not_ready_old_replica_infos = [], []
         for info in replica_infos:
-            if info.is_launched and info.version == self.latest_version:
-                launched_new_replica_infos.append(info)
-            if info.is_ready and info.version == self.latest_version:
-                ready_new_replica_infos.append(info)
-            if info.is_ready and info.version != self.latest_version:
-                ready_old_replica_infos.append(info)
-            if not info.is_ready and info.version != self.latest_version:
-                not_ready_old_replica_infos.append(info)
+            if info.version == self.latest_version:
+                if info.is_launched:
+                    launched_new_replica_infos.append(info)
+                if info.is_ready:
+                    ready_new_replica_infos.append(info)
+            else:
+                if info.is_ready:
+                    ready_old_replica_infos.append(info)
+                else:
+                    not_ready_old_replica_infos.append(info)
 
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
