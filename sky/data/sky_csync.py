@@ -18,7 +18,6 @@ import psutil
 from sky import exceptions
 from sky import sky_logging
 from sky.data import mounting_utils
-from sky.data import storage_utils
 from sky.data.storage_utils import StorageMode
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -461,11 +460,11 @@ def run_fuse_operation(read_path, write_path, full_src):
 def get_storage_mount_script(storetype: str, destination: str,
                              mount_path: str) -> str:
     if storetype == 's3':
-        install_cmd = storage_utils.get_s3_mount_install_cmd()
-        mount_cmd = storage_utils.get_s3_mount_cmd(destination, mount_path)
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
+        mount_cmd = mounting_utils.get_s3_mount_cmd(destination, mount_path)
     else:  # storetype == 'gcs':
-        install_cmd = storage_utils.get_gcs_mount_install_cmd()
-        mount_cmd = storage_utils.get_gcs_mount_cmd(destination, mount_path)
+        install_cmd = mounting_utils.get_gcs_mount_install_cmd()
+        mount_cmd = mounting_utils.get_gcs_mount_cmd(destination, mount_path)
 
     storage_mount_script = mounting_utils.get_mounting_script(
         StorageMode.MOUNT, mount_path, mount_cmd, install_cmd)

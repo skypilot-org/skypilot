@@ -206,7 +206,7 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
-    'fusepy'
+    'fusepy',
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.
     'colorama < 0.4.5',
