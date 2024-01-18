@@ -399,10 +399,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                     continue
             stopped_instances.append(inst)
         if stopping_instances and to_start_count > len(stopped_instances):
-            raise RuntimeError(
-                'Timeout for waiting for existing instances '
+            msg = ('Timeout for waiting for existing instances '
                 f'{stopping_instances} in STOPPING state to '
                 'be STOPPED before restarting them. Please try again later.')
+            logger.error(msg)
+            raise RuntimeError(msg)
 
         resumed_instances = stopped_instances[:to_start_count]
         resumed_instances.sort(key=lambda x: x.id)
