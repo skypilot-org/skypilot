@@ -135,7 +135,7 @@ def bulk_provision(
     cluster_name: ClusterName,
     num_nodes: int,
     cluster_yaml: str,
-    is_prev_cluster_healthy: bool,
+    prev_cluster_ever_up: bool,
     log_dir: str,
 ) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned."""
@@ -169,12 +169,8 @@ def bulk_provision(
                          f'on {cloud} ({zone_str}).')
             logger.debug(f'bulk_provision for {cluster_name!r} '
                          f'failed. Stacktrace:\n{traceback.format_exc()}')
-            # If cluster was previously UP or STOPPED, stop it; otherwise
-            # terminate.
-            # FIXME(zongheng): terminating a potentially live cluster is
-            # scary. Say: users have an existing cluster that got into INIT, do
-            # sky launch, somehow failed, then we may be terminating it here.
-            terminate = not is_prev_cluster_healthy
+            # If the cluster was ever up, stop it; otherwise terminate it.
+            terminate = not prev_cluster_ever_up
             terminate_str = ('Terminating' if terminate else 'Stopping')
             logger.debug(f'{terminate_str} the failed cluster.')
             retry_cnt = 1
@@ -453,7 +449,7 @@ def _post_provision_setup(
                 stream_logs=False,
                 require_outputs=True)
             if returncode:
-                logger.info('Ray cluster on head is not up. Restarting...')
+                logger.debug('Ray cluster on head is not up. Restarting...')
             else:
                 logger.debug('Ray cluster on head is up.')
                 ray_port = common_utils.decode_payload(stdout)['ray_port']
