@@ -103,7 +103,7 @@ def _parallel_ssh_with_cache(func,
                              digest: Optional[str],
                              cluster_info: common.ClusterInfo,
                              ssh_credentials: Dict[str, Any],
-                             max_workers: int = 32) -> List[Any]:
+                             max_workers: Optional[int] = None) -> List[Any]:
     with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         results = []
         for instance_id, metadatas in cluster_info.instances.items():
