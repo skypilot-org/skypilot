@@ -421,7 +421,7 @@ def add_or_update_version(service_name: str, version: int,
         """\
         INSERT OR REPLACE INTO versions
         (service_name, version, spec)
-        VALUES (?, ?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
+        VALUES (?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
     _DB.conn.commit()
 
 

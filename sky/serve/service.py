@@ -123,10 +123,12 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
             replica_managers.ProcessStatus.RUNNING)
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
         logger.info(f'Terminating replica {info.replica_id} ...')
+    versions = set()
     for info, p in info2proc.items():
         p.join()
         if p.exitcode == 0:
             serve_state.remove_replica(service_name, info.replica_id)
+            versions.add(info.version)
             logger.info(f'Replica {info.replica_id} terminated successfully.')
         else:
             # Set replica status to `FAILED_CLEANUP`
@@ -137,7 +139,13 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
     serve_state.remove_service_versions(service_name)
-    success = _cleanup_storage_from_service_name(service_name, task_yaml)
+    success = True
+    logger.info(f'Cleaning up versions {versions}.')
+    for version in versions:
+        task_yaml = serve_utils.generate_task_yaml_file_name(
+            service_name, version)
+        success = success and _cleanup_storage_from_service_name(
+            service_name, task_yaml)
     if not success:
         failed = True
     return failed
