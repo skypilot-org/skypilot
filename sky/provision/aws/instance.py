@@ -395,8 +395,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                     time.sleep(1)
                 else:
                     logger.warning(
-                        f'Instance {inst.id} is still in stopping state.'
-                        'Retrying ...')
+                        f'Instance {inst.id} is still in stopping state '
+                        f'(Timeout: {per_instance_timeout}). Retrying ...')
                     stopping_instances.append(inst)
                     continue
             stopped_instances.append(inst)
