@@ -352,7 +352,7 @@ def _post_provision_setup(
         raise RuntimeError(
             f'Provision failed for cluster {cluster_name!r}. '
             'Could not find any head instance. To fix: refresh '
-            'status with `sky status -r`, and retry provisioning.')
+            'status with: sky status -r; and retry provisioning.')
 
     # TODO(suquark): Move wheel build here in future PRs.
     ip_list = cluster_info.get_feasible_ips()
