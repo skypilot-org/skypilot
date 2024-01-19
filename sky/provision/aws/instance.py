@@ -105,12 +105,11 @@ def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
     }]
 
 
-def _ec2_call_with_retry_on_rate_limit(ec2_fn: Callable[..., _T],
+def _ec2_call_with_retry_on_rate_limit(ec2_fail_fast_fn: Callable[..., _T],
                                        log_level=logging.DEBUG,
                                        **kwargs) -> _T:
-    # NOTE: We set retry=0 for fast failing when the resource is not
-    # available. Here we have to handle 'RequestLimitExceeded'
-    # error, so the provision would not fail due to request limit
+    # Here we have to handle 'RequestLimitExceeded' error, so the provision
+    # would not fail due to request limit
     # issues.
     # Here the backoff config (5, 12) is picked at random and does not
     # have any special meaning.
@@ -118,7 +117,7 @@ def _ec2_call_with_retry_on_rate_limit(ec2_fn: Callable[..., _T],
     ret = None
     for _ in range(utils.BOTO_MAX_RETRIES):
         try:
-            ret = ec2_fn(**kwargs)
+            ret = ec2_fail_fast_fn(**kwargs)
             break
         except aws.botocore_exceptions().ClientError as e:
             if e.response['Error']['Code'] == 'RequestLimitExceeded':
@@ -130,7 +129,7 @@ def _ec2_call_with_retry_on_rate_limit(ec2_fn: Callable[..., _T],
             raise
     if ret is None:
         raise RuntimeError(
-            f'Failed to call ec2 function {ec2_fn} due to RequestLimitExceeded.'
+            f'Failed to call ec2 function {ec2_fail_fast_fn} due to RequestLimitExceeded.'
             ' Max attempts exceeded.')
     return ret
 
@@ -266,6 +265,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
+    # NOTE: We set retry=0 for fast failing when the resource is not
+    # available (although the doc says it will only retry for network 
+    # issues, practically, it retries for capacity errors, etc as well).
     ec2_fail_fast = aws.resource('ec2', region_name=region, max_attempts=0)
 
     region = ec2.meta.client.meta.region_name
@@ -400,6 +402,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                         f'Instance {inst.id} is still in stopping state '
                         f'(Timeout: {per_instance_timeout}). Retrying ...')
                     stopping_instances.append(inst)
+                    time.sleep(5)
                     continue
             stopped_instances.append(inst)
         if stopping_instances and to_start_count > len(stopped_instances):
