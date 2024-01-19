@@ -197,10 +197,10 @@ def bulk_provision(
                     formatted_exception = (common_utils.format_exception(
                         e, use_bracket=True))
                     raise provision_common.TeardownError(
-                        f'Failed to {terminate_str} {cluster_name!r} that '
-                        'was failed to provision. This can cause resource '
+                        f'During provisioner's failover, {terminate_str.lower()} {cluster_name!r} failed. '
+                        'This can cause resource '
                         'leakage. Please check the failure and the cluster '
-                        'status, and manually terminate the cluster. '
+                        'status on the cloud, and manually terminate the cluster. '
                         f'Details: {formatted_exception}')
             raise
 
