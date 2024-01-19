@@ -239,8 +239,7 @@ class ClsApiHelper(object):
         self,
         session_id,
         file_name,
-        status_list=(vsphere_adaptor.get_downloadsession_client().File.
-                     PrepareStatus.PREPARED,),
+        status_list=None,
         timeout=30,
         sleep_interval=1,
     ):
@@ -250,6 +249,11 @@ class ClsApiHelper(object):
         downloadSessionFile.get(session_id, file_name)
 
         """
+        if status_list is None:
+            # Set default status list to prepared
+            status_list = [
+                vsphere_adaptor.get_updatesession_client().File.Status.PREPARED
+            ]
         start_time = time.time()
         while (time.time() - start_time) < timeout:
             file_info = self.client.download_file_service.get(
