@@ -293,7 +293,7 @@ class KubernetesNodeProvider(NodeProvider):
                                              f'Details: \'{event_message}\' ')
         raise config.KubernetesError(f'{timeout_err_msg}')
 
-    def _wait_for_pods_to_schedule(self, new_nodes):
+    def _wait_for_pods_to_schedule(self, new_nodes_with_jump_pod):
         """Wait for all pods to be scheduled.
         
         Wait for all pods including jump pod to be scheduled, and if it
@@ -304,7 +304,7 @@ class KubernetesNodeProvider(NodeProvider):
         start_time = time.time()
         while time.time() - start_time < self.timeout:
             all_pods_scheduled = True
-            for node in new_nodes:
+            for node in new_nodes_with_jump_pod:
                 # Iterate over each pod to check their status
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
@@ -321,7 +321,7 @@ class KubernetesNodeProvider(NodeProvider):
 
         # Handle pod scheduling errors
         try:
-            self._raise_pod_scheduling_errors(new_nodes)
+            self._raise_pod_scheduling_errors(new_nodes_with_jump_pod)
         except config.KubernetesError:
             raise
         except Exception as e:
@@ -330,7 +330,7 @@ class KubernetesNodeProvider(NodeProvider):
                 'for pod scheduling failure. '
                 f'Error: {common_utils.format_exception(e)}') from None
 
-    def _wait_for_pods_to_run(self, new_nodes):
+    def _wait_for_pods_to_run(self, new_nodes_with_jump_pod):
         """Wait for pods and their containers to be ready.
         
         Pods may be pulling images or may be in the process of container
@@ -339,7 +339,7 @@ class KubernetesNodeProvider(NodeProvider):
         while True:
             all_pods_running = True
             # Iterate over each pod to check their status
-            for node in new_nodes:
+            for node in new_nodes_with_jump_pod:
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
 
@@ -455,7 +455,6 @@ class KubernetesNodeProvider(NodeProvider):
     def _update_ssh_user_config(self, new_nodes, cluster_name_with_hash):
         get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
         for new_node in new_nodes:
-            # TODO(doyoung): skip this for jump pod when #2589 is merged
             ssh_user = run_command_on_pods(new_node.metadata.name,
                                            self.namespace, get_k8s_ssh_user_cmd)
 
