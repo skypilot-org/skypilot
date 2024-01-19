@@ -5,6 +5,7 @@ in this or config module, please make sure to reload it as in
 _default_ec2_resource() to avoid version mismatch issues.
 """
 import copy
+import logging
 from multiprocessing import pool
 import re
 import time
@@ -105,6 +106,7 @@ def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
 
 
 def _ec2_call_with_retry_on_rate_limit(ec2_fn: Callable[..., _T],
+                                       log_level=logging.DEBUG,
                                        **kwargs) -> _T:
     # NOTE: We set retry=0 for fast failing when the resource is not
     # available. Here we have to handle 'RequestLimitExceeded'
@@ -124,7 +126,7 @@ def _ec2_call_with_retry_on_rate_limit(ec2_fn: Callable[..., _T],
                 logger.debug(
                     'create_instances: RequestLimitExceeded, retrying.')
                 continue
-            logger.warning(f'create_instances: Failed with {e}.')
+            logger.log(log_level, f'create_instances: Attempt failed with {e}')
             raise
     if ret is None:
         raise RuntimeError(
@@ -263,9 +265,10 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
+    ec2 = _default_ec2_resource(region)
     ec2_fail_fast = aws.resource('ec2', region_name=region, max_attempts=0)
 
-    region = ec2_fail_fast.meta.client.meta.region_name
+    region = ec2.meta.client.meta.region_name
     zone = None
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
@@ -279,9 +282,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
         'Values': [cluster_name_on_cloud],
     }]
-    exist_instances = list(
-        _ec2_call_with_retry_on_rate_limit(ec2_fail_fast.instances.filter,
-                                           Filters=filters))
+    exist_instances = list(ec2.instances.filter(Filters=filters))
     exist_instances.sort(key=lambda x: x.id)
     head_instance_id = _get_head_instance_id(exist_instances)
 
@@ -326,8 +327,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 'Key': 'Name',
                 'Value': f'sky-{cluster_name_on_cloud}-worker'
             }]
-        _ec2_call_with_retry_on_rate_limit(
-            ec2_fail_fast.meta.client.create_tags,
+        ec2.meta.client.create_tags(
             Resources=[target_instance.id],
             Tags=target_instance.tags + node_tag,
         )
@@ -415,13 +415,12 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         logger.debug(f'Resuming stopped instances {resumed_instance_ids}.')
         _ec2_call_with_retry_on_rate_limit(
             ec2_fail_fast.meta.client.start_instances,
-            InstanceIds=resumed_instance_ids)
+            InstanceIds=resumed_instance_ids,
+            log_level=logging.WARNING)
         if tags:
             # empty tags will result in error in the API call
-            _ec2_call_with_retry_on_rate_limit(
-                ec2_fail_fast.meta.client.create_tags,
-                Resources=resumed_instance_ids,
-                Tags=_format_tags(tags))
+            ec2.meta.client.create_tags(Resources=resumed_instance_ids,
+                                        Tags=_format_tags(tags))
             for inst in resumed_instances:
                 inst.tags = _format_tags(tags)  # sync the tags info
         placement_zone = resumed_instances[0].placement['AvailabilityZone']
