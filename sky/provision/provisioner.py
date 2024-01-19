@@ -187,7 +187,7 @@ def bulk_provision(
                         provider_config=original_config['provider'])
                     break
                 except Exception as e:  # pylint: disable=broad-except
-                    logger.debug(f'Failed to {terminate_str} {cluster_name!r}.')
+                    logger.debug(f'{terminate_str} {cluster_name!r} failed.')
                     logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
                     retry_cnt += 1
                     if retry_cnt <= _MAX_RETRY:
