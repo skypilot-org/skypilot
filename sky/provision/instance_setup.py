@@ -3,6 +3,7 @@ from concurrent import futures
 import functools
 import hashlib
 import os
+import resource
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -96,11 +97,14 @@ def _hint_worker_log_path(cluster_name: str, cluster_info: common.ClusterInfo,
         logger.info(f'Logs of worker nodes can be found at: {worker_log_path}')
 
 
-def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
+def _parallel_ssh_with_cache(func,
+                             cluster_name: str,
+                             stage_name: str,
                              digest: Optional[str],
                              cluster_info: common.ClusterInfo,
-                             ssh_credentials: Dict[str, Any]) -> List[Any]:
-    with futures.ThreadPoolExecutor(max_workers=32) as pool:
+                             ssh_credentials: Dict[str, Any],
+                             max_workers: int = 32) -> List[Any]:
+    with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         results = []
         for instance_id, metadatas in cluster_info.instances.items():
             for i, metadata in enumerate(metadatas):
@@ -388,8 +392,22 @@ def _internal_file_mounts(file_mounts: Dict,
         )
 
 
+def _max_workers_for_file_mounts(common_file_mounts: Dict[str, str]) -> int:
+    fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+
+    # Assume that each file mount takes 5 file descriptors.
+    fd_per_rsync = len(common_file_mounts) * 5
+
+    # Reserve some file descriptors for the system and other processes
+    fd_reserve = 50
+
+    max_workers = (fd_limit - fd_reserve) // fd_per_rsync
+    # At least 1 worker, and avoid too many workers overloading the system.
+    return min(max(max_workers, 1), 32)
+
+
 @_log_start_end
-def internal_file_mounts(cluster_name: str, common_file_mounts: Dict,
+def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
                          cluster_info: common.ClusterInfo,
                          ssh_credentials: Dict[str, str]) -> None:
     """Executes file mounts - rsyncing internal local files"""
@@ -410,4 +428,5 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict,
         # is minimal and should not take too much time.
         digest=None,
         cluster_info=cluster_info,
-        ssh_credentials=ssh_credentials)
+        ssh_credentials=ssh_credentials,
+        max_workers=_max_workers_for_file_mounts(common_file_mounts))
