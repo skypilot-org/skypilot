@@ -10,12 +10,6 @@ from sky.adaptors.cudo import cudo
 logger = sky_logging.init_logger(__name__)
 
 
-def generate_random_string(length):
-    characters = string.ascii_lowercase + string.digits
-    random_string = ''.join(random.choice(characters) for _ in range(length))
-    return random_string
-
-
 def launch(name: str, data_center_id: str, ssh_key: str, machine_type: str,
            memory_gib: int, vcpu_count: int, gpu_count: int, gpu_model: str,
            tags: Dict[str, str], disk_size: int):
