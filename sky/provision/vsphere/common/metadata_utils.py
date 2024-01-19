@@ -8,8 +8,7 @@ METADATA_PATH = '~/.vsphere/metadata'
 
 
 class Metadata:
-    """    Metadata file for each cluster.
-    """
+    """Metadata file for each cluster."""
 
     def __init__(self) -> None:
         self.path = os.path.expanduser(METADATA_PATH)
