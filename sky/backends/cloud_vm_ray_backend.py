@@ -1536,7 +1536,7 @@ class RetryingVmProvisioner(object):
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
                     return config_dict
-                except provision_common.TeardownError:
+                except provision_common.StopFailoverError:
                     with ux_utils.print_exception_no_traceback():
                         raise
                 except Exception as e:  # pylint: disable=broad-except

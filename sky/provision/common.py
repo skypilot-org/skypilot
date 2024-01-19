@@ -21,7 +21,7 @@ class ProvisionerError(RuntimeError):
     errors: List[Dict[str, str]]
 
 
-class TeardownError(Exception):
+class StopFailoverError(Exception):
     """Exception for termination."""
 
 
