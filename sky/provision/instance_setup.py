@@ -3,6 +3,7 @@ from concurrent import futures
 import functools
 import hashlib
 import os
+import psutil
 import resource
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -50,7 +51,9 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 # Restart skylet when the version does not match to keep the skylet up-to-date.
 _MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
 
-_CPU_COUNT = os.cpu_count() or 8
+def _get_idle_cpu_count() -> int:
+    """Returns the number of idle CPUs."""
+    return max(8, int((1 - psutil.cpu_percent() / 100) * psutil.cpu_count()))
 
 
 def _auto_retry(func):
@@ -109,7 +112,7 @@ def _parallel_ssh_with_cache(func,
     if max_workers is None:
         # Not using the default value of `max_workers` in ThreadPoolExecutor,
         # as 32 is too large for some machines.
-        max_workers = _CPU_COUNT + 4
+        max_workers = _get_idle_cpu_count()
     with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         results = []
         for instance_id, metadatas in cluster_info.instances.items():
@@ -413,7 +416,7 @@ def _max_workers_for_file_mounts(common_file_mounts: Dict[str, str]) -> int:
 
     max_workers = (fd_limit - fd_reserve) // fd_per_rsync
     # At least 1 worker, and avoid too many workers overloading the system.
-    max_workers = min(max(max_workers, 1), _CPU_COUNT + 4)
+    max_workers = min(max(max_workers, 1), _get_idle_cpu_count())
     logger.debug(f'Using {max_workers} workers for file mounts.')
     return max_workers
 
