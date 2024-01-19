@@ -141,7 +141,7 @@ def bulk_provision(
     log_dir: str,
 ) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned.
-    
+
     Raises:
         StopFailoverError: If the cluster was ever up and the provisioning
             process failed.
@@ -214,7 +214,7 @@ def bulk_provision(
 def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
                      terminate: bool, provider_config: Dict) -> None:
     """Deleting or stopping a cluster.
-    
+
     Raises:
         Cloud specific exceptions: If the teardown process failed, cloud-
             specific exceptions will be raised by the cloud APIs.
@@ -328,7 +328,7 @@ def _wait_ssh_connection_indirect(
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
                  ssh_credentials: Dict[str, str]):
     """Wait until SSH is ready.
-    
+
     Raises:
         RuntimeError: If the SSH connection is not ready after timeout.
     """
