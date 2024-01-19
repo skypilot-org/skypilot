@@ -421,9 +421,9 @@ class KubernetesNodeProvider(NodeProvider):
         ]
 
         for new_node in new_nodes:
-            output=run_command_on_pods(new_node.metadata.name, self.namespace,
-                                set_k8s_ssh_cmd)
-            print(output)
+            run_command_on_pods(new_node.metadata.name, self.namespace,
+                                         set_k8s_ssh_cmd)
+
     def _set_env_vars_in_pods(self, new_nodes):
         """Setting environment variables in pods.
         
