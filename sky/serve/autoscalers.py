@@ -235,7 +235,7 @@ class RequestRateAutoscaler(Autoscaler):
         and SCALE_DOWN.
         """
         launched_new_replica_infos, ready_new_replica_infos = [], []
-        ready_old_replica_infos, not_ready_old_replica_infos = [], []
+        old_replicas_infos = []
         for info in replica_infos:
             if info.version == self.latest_version:
                 if info.is_launched:
@@ -243,10 +243,7 @@ class RequestRateAutoscaler(Autoscaler):
                 if info.is_ready:
                     ready_new_replica_infos.append(info)
             else:
-                if info.is_ready:
-                    ready_old_replica_infos.append(info)
-                else:
-                    not_ready_old_replica_infos.append(info)
+                old_replicas_infos.append(info)
 
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
@@ -276,17 +273,10 @@ class RequestRateAutoscaler(Autoscaler):
         # ready new replicas, we will direct all traffic to them,
         # we can scale down all old replicas.
         if len(ready_new_replica_infos) >= self.min_replicas:
-            for info in ready_old_replica_infos:
+            for info in old_replicas_infos:
                 all_replica_ids_to_scale_down.append(info.replica_id)
 
-        # Case 2. We have some not ready old replicas.
-        # In such case, we immediately scale down the replica with
-        # mismatched version to reduce cost.
-        if len(not_ready_old_replica_infos) > 0:
-            for info in not_ready_old_replica_infos:
-                all_replica_ids_to_scale_down.append(info.replica_id)
-
-        # Case 3. when launched_new_replica_infos is less
+        # Case 2. when launched_new_replica_infos is less
         # than target_num_replicas, we always scale up new replicas.
         if len(launched_new_replica_infos) < self.target_num_replicas:
             num_replicas_to_scale_up = (self.target_num_replicas -
@@ -296,7 +286,8 @@ class RequestRateAutoscaler(Autoscaler):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=None))
-        # Case 4: when launched_new_replica_infos is more
+
+        # Case 3: when launched_new_replica_infos is more
         # than target_num_replicas, we scale down new replicas.
         if len(launched_new_replica_infos) > self.target_num_replicas:
             num_replicas_to_scale_down = (len(launched_new_replica_infos) -
