@@ -12,8 +12,8 @@ from sky.adaptors import vsphere as vsphere_adaptor
 from sky.clouds.service_catalog.common import get_catalog_path
 from sky.provision import common
 from sky.provision.vsphere import vsphere_utils
-from sky.provision.vsphere.common.custom_script import CUSTOMIZED_SCRIPT
-from sky.provision.vsphere.common.metadata_utils import Metadata
+from sky.provision.vsphere.common import custom_script as custom_script_lib
+from sky.provision.vsphere.common import metadata_utils
 from sky.provision.vsphere.common.vim_utils import poweroff_vm
 from sky.provision.vsphere.common.vim_utils import wait_for_tasks
 from sky.provision.vsphere.common.vim_utils import wait_internal_ip_ready
@@ -308,7 +308,8 @@ def _create_instances(
 
     # Create a custom script to inject the ssh public key into the instance
     vm_user = config.authentication_config['ssh_user']
-    custom_script = CUSTOMIZED_SCRIPT.replace('ssh_public_key', ssh_public_key)
+    custom_script = custom_script_lib.CUSTOMIZED_SCRIPT.replace(
+        'ssh_public_key', ssh_public_key)
     custom_script = custom_script.replace('user_placeholder', vm_user)
     created_instance_uuid = vc_object.create_instances(
         cluster=vsphere_cluster_name,
@@ -327,7 +328,7 @@ def _create_instances(
                         f'{instance_type}.')
 
     # Store instance uuid in local file
-    cluster_info = Metadata()
+    cluster_info = metadata_utils.Metadata()
     new_cache_value = [created_instance_uuid]
     old_cache_value = cluster_info.get(cluster_name)
     if old_cache_value:
@@ -434,7 +435,7 @@ def _get_filtered_instance(
     worker_only: bool = False,
 ):
     # Get instance uuid in cache file
-    cluster_info = Metadata()
+    cluster_info = metadata_utils.Metadata()
     cached_inst_ids = cluster_info.get(cluster_name_on_cloud)
     # If cached_inst_ids is None of empty, means no VM instance exist
     # in the cluster,
@@ -501,7 +502,7 @@ def terminate_instances(
             poweroff_vm(vc_object.servicemanager.content, inst)
         vm_service.delete(inst._moId)  # pylint: disable=protected-access
     # Clear the cache when down the cluster
-    cluster_info = Metadata()
+    cluster_info = metadata_utils.Metadata()
     cluster_info.pop(cluster_name_on_cloud)
     cluster_info.save()
     vc_object.disconnect()
@@ -575,7 +576,7 @@ def get_cluster_info(
 
     filters = _get_cluster_name_filter(cluster_name)
     # Get instance uuid in cache file
-    cluster_info = Metadata()
+    cluster_info = metadata_utils.Metadata()
     cached_inst_ids = cluster_info.get(cluster_name)
     # If cached_inst_ids is None of empty, means no VM instance exist
     # in the cluster,
