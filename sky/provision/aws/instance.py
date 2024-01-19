@@ -120,10 +120,15 @@ def _ec2_call_with_retry_on_rate_limit(ec2_fail_fast_fn: Callable[..., _T],
             ret = ec2_fail_fast_fn(**kwargs)
             break
         except aws.botocore_exceptions().ClientError as e:
-            if e.response['Error']['Code'] == 'RequestLimitExceeded':
+            # Retry server side errors, as they are likely to be transient.
+            # https://docs.aws.amazon.com/AWSEC2/latest/APIReference/errors-overview.html#api-error-codes-table-server # pylint: disable=line-too-long
+            error_code = e.response['Error']['Code']
+            if error_code in [
+                    'RequestLimitExceeded', 'ServerInternal',
+                    'ServiceUnavailable', 'InternalError', 'Unavailable'
+            ]:
                 time.sleep(backoff.current_backoff())
-                logger.debug(
-                    'create_instances: RequestLimitExceeded, retrying.')
+                logger.debug(f'create_instances: {error_code}, retrying.')
                 continue
             logger.log(log_level, f'create_instances: Attempt failed with {e}')
             raise
