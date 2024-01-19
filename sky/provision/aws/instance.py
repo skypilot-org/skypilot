@@ -105,9 +105,9 @@ def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
     }]
 
 
-def _ec2_call_with_retry_on_rate_limit(ec2_fail_fast_fn: Callable[..., _T],
-                                       log_level=logging.DEBUG,
-                                       **kwargs) -> _T:
+def _ec2_call_with_retry_on_server_error(ec2_fail_fast_fn: Callable[..., _T],
+                                         log_level=logging.DEBUG,
+                                         **kwargs) -> _T:
     # Here we have to handle 'RequestLimitExceeded' error, so the provision
     # would not fail due to request limit
     # issues.
@@ -230,7 +230,7 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
             }]
             conf['NetworkInterfaces'] = network_interfaces
 
-            instances = _ec2_call_with_retry_on_rate_limit(
+            instances = _ec2_call_with_retry_on_server_error(
                 ec2_fail_fast.create_instances, **conf)
             return instances
         except aws.botocore_exceptions().ClientError as exc:
@@ -421,7 +421,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         resumed_instances.sort(key=lambda x: x.id)
         resumed_instance_ids = [t.id for t in resumed_instances]
         logger.debug(f'Resuming stopped instances {resumed_instance_ids}.')
-        _ec2_call_with_retry_on_rate_limit(
+        _ec2_call_with_retry_on_server_error(
             ec2_fail_fast.meta.client.start_instances,
             InstanceIds=resumed_instance_ids,
             log_level=logging.WARNING)
