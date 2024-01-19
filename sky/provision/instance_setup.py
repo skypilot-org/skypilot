@@ -50,6 +50,8 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 # Restart skylet when the version does not match to keep the skylet up-to-date.
 _MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
 
+_CPU_COUNT = os.cpu_count() or 8
+
 
 def _auto_retry(func):
     """Decorator that retries the function if it fails.
@@ -104,6 +106,10 @@ def _parallel_ssh_with_cache(func,
                              cluster_info: common.ClusterInfo,
                              ssh_credentials: Dict[str, Any],
                              max_workers: Optional[int] = None) -> List[Any]:
+    if max_workers is None:
+        # Not using the default value of `max_workers` in ThreadPoolExecutor,
+        # as 32 is too large for some machines.
+        max_workers = _CPU_COUNT + 4
     with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         results = []
         for instance_id, metadatas in cluster_info.instances.items():
@@ -395,15 +401,19 @@ def _internal_file_mounts(file_mounts: Dict,
 def _max_workers_for_file_mounts(common_file_mounts: Dict[str, str]) -> int:
     fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
 
-    # Assume that each file mount takes 5 file descriptors.
-    fd_per_rsync = len(common_file_mounts) * 5
+    fd_per_rsync = 5
+    for src in common_file_mounts.values():
+        if os.path.isdir(src):
+            # Assume that each file/folder under src takes 5 file descriptors
+            # on average.
+            fd_per_rsync = max(fd_per_rsync, len(os.listdir(src)) * 5)
 
     # Reserve some file descriptors for the system and other processes
-    fd_reserve = 50
+    fd_reserve = 100
 
     max_workers = (fd_limit - fd_reserve) // fd_per_rsync
     # At least 1 worker, and avoid too many workers overloading the system.
-    max_workers = min(max(max_workers, 1), 32)
+    max_workers = min(max(max_workers, 1), _CPU_COUNT + 4)
     logger.debug(f'Using {max_workers} workers for file mounts.')
     return max_workers
 
