@@ -192,7 +192,7 @@ def bulk_provision(
                         provider_config=original_config['provider'])
                     break
                 except Exception as e:  # pylint: disable=broad-except
-                    logger.debug(f'Failed to {terminate_str} {cluster_name!r}.')
+                    logger.debug(f'{terminate_str} {cluster_name!r} failed.')
                     logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
                     retry_cnt += 1
                     if retry_cnt <= _MAX_RETRY:
@@ -202,10 +202,10 @@ def bulk_provision(
                     formatted_exception = common_utils.format_exception(
                         e, use_bracket=True)
                     raise provision_common.StopFailoverError(
-                        f'Failed to {terminate_str} {cluster_name!r} that '
-                        'was failed to provision. This can cause resource '
+                        f'During provisioner's failover, {terminate_str.lower()} {cluster_name!r} failed. '
+                        'This can cause resource '
                         'leakage. Please check the failure and the cluster '
-                        'status, and manually terminate the cluster. '
+                        'status on the cloud, and manually terminate the cluster. '
                         f'Details: {formatted_exception}')
             raise
 
