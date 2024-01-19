@@ -83,28 +83,6 @@ def cleanup_storage(task_yaml: str) -> bool:
     return True
 
 
-def _cleanup_storage_from_service_name(service_name: str,
-                                       task_yaml: str) -> bool:
-    """Clean up the storage from service_name.
-
-    Args:
-        service_name: The service name.
-        task_yaml: The task yaml file.
-
-    Returns:
-        True if the storage is cleaned up successfully, False otherwise.
-    """
-    # TODO(MaoZiming): storage from multiple versions might
-    # need to be cleaned up
-    version = serve_state.get_service_version(service_name)
-    if version is not None:
-        task_yaml = serve_utils.generate_task_yaml_file_name(
-            service_name, version)
-        logger.info(f'Cleaning up storage for service {service_name} '
-                    f'with version {version} and task yaml {task_yaml}')
-    return cleanup_storage(task_yaml)
-
-
 def _cleanup(service_name: str, task_yaml: str) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
     failed = False
@@ -140,12 +118,12 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
             logger.error(f'Replica {info.replica_id} failed to terminate.')
     serve_state.remove_service_versions(service_name)
     success = True
-    logger.info(f'Cleaning up versions {versions}.')
     for version in versions:
+        logger.info(f'Cleaning up service with version {version}, '
+                    f'task_yaml: {task_yaml}')
         task_yaml = serve_utils.generate_task_yaml_file_name(
             service_name, version)
-        success = success and _cleanup_storage_from_service_name(
-            service_name, task_yaml)
+        success = success and cleanup_storage(task_yaml)
     if not success:
         failed = True
     return failed
