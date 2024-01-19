@@ -349,8 +349,10 @@ def _post_provision_setup(
 
     head_instance = cluster_info.get_head_instance()
     if head_instance is None:
-        raise RuntimeError(f'Provision failed for cluster {cluster_name!r}. '
-                           'Could not find any head instance.')
+        raise RuntimeError(
+            f'Provision failed for cluster {cluster_name!r}. '
+            'Could not find any head instance. To fix: refresh '
+            'status with `sky status -r`, and retry provisioning.')
 
     # TODO(suquark): Move wheel build here in future PRs.
     ip_list = cluster_info.get_feasible_ips()
