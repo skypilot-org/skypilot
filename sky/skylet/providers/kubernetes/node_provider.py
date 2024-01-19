@@ -408,6 +408,8 @@ class KubernetesNodeProvider(NodeProvider):
         set_k8s_ssh_cmd = [
             '/bin/sh', '-c',
             ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+             'export DEBIAN_FRONTEND=noninteractive;'
+             '$(prefix_cmd) apt-get update;'
              '$(prefix_cmd) apt install openssh-server rsync -y; '
              '$(prefix_cmd) mkdir -p /var/run/sshd; '
              '$(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config; '
@@ -419,9 +421,9 @@ class KubernetesNodeProvider(NodeProvider):
         ]
 
         for new_node in new_nodes:
-            run_command_on_pods(new_node.metadata.name, self.namespace,
+            output=run_command_on_pods(new_node.metadata.name, self.namespace,
                                 set_k8s_ssh_cmd)
-
+            print(output)
     def _set_env_vars_in_pods(self, new_nodes):
         """Setting environment variables in pods.
         
@@ -512,16 +514,17 @@ class KubernetesNodeProvider(NodeProvider):
         # Adding the jump pod to the new_nodes list as well so it can be
         # checked if it's scheduled and running along with other pod instances.
         ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
+        new_nodes_with_jump_pod = new_nodes[:]
         jump_pod = kubernetes.core_api().read_namespaced_pod(
             ssh_jump_pod_name, self.namespace)
-        new_nodes.append(jump_pod)
+        new_nodes_with_jump_pod.append(jump_pod)
 
         # Wait until the pods are scheduled and surface cause for error
         # if there is one
-        self._wait_for_pods_to_schedule(new_nodes)
+        self._wait_for_pods_to_schedule(new_nodes_with_jump_pod)
         # Wait until the pods and their containers are up and running, and
         # fail early if there is an error
-        self._wait_for_pods_to_run(new_nodes)
+        self._wait_for_pods_to_run(new_nodes_with_jump_pod)
         self._check_user_privilege(new_nodes)
         self._setup_ssh_in_pods(new_nodes)
         self._set_env_vars_in_pods(new_nodes)
