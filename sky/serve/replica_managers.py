@@ -764,23 +764,21 @@ class SkyPilotReplicaManager(ReplicaManager):
                     logger.info(f'Replica {replica_id} removed from the '
                                 f'replica table {removal_reason}.')
 
-                # Clean old version
-                replica_infos = serve_state.get_replica_infos(
-                    self._service_name)
-                current_oldest_version = min([
-                    info.version for info in replica_infos
-                ]) if replica_infos else self.oldest_version
-                if self.oldest_version < current_oldest_version:
-                    for version in range(self.oldest_version,
-                                         current_oldest_version):
-                        task_yaml = serve_utils.generate_task_yaml_file_name(
-                            self._service_name, version)
-                        # Delete old version metadata.
-                        serve_state.delete_version(self._service_name, version)
-                        # Delete storage buckets of older versions.
-                        service.cleanup_storage(task_yaml)
-                    # newest version will be cleaned in serve down
-                    self.oldest_version = current_oldest_version
+        # Clean old version
+        replica_infos = serve_state.get_replica_infos(self._service_name)
+        current_oldest_version = min([
+            info.version for info in replica_infos
+        ]) if replica_infos else self.oldest_version
+        if self.oldest_version < current_oldest_version:
+            for version in range(self.oldest_version, current_oldest_version):
+                task_yaml = serve_utils.generate_task_yaml_file_name(
+                    self._service_name, version)
+                # Delete old version metadata.
+                serve_state.delete_version(self._service_name, version)
+                # Delete storage buckets of older versions.
+                service.cleanup_storage(task_yaml)
+            # newest version will be cleaned in serve down
+            self.oldest_version = current_oldest_version
 
     def _process_pool_refresher(self) -> None:
         """Periodically refresh the launch/down process pool."""
