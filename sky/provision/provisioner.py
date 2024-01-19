@@ -32,7 +32,7 @@ from sky.utils import ux_utils
 # which will be customized in sky.provision.logging.
 logger = sky_logging.init_logger('sky.provisioner')
 
-# The maximum number of retries for waiting for instances to be ready and 
+# The maximum number of retries for waiting for instances to be ready and
 # teardown instances when provisioning fails.
 _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
