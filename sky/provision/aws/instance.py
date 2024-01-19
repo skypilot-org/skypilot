@@ -372,11 +372,12 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         timeout = 480
         per_instance_timeout = 120
         if stopping_instances:
-            verb = 'is' if len(stopping_instances) == 1 else 'are'
+            plural = 's' if len(stopping_instances) > 1 else ''
+            verb = 'are' if len(stopping_instances) > 1 else 'is'
             logger.warning(
-                f'Instances {stopping_instances} {verb} still in stopping '
-                'state on AWS. It can only be resumed after it is fully '
-                'stopped. Waiting ...')
+                f'Instance{plural} {stopping_instances} {verb} still in '
+                'STOPPING state on AWS. It can only be resumed after it is '
+                'fully STOPPED. Waiting ...')
         while (stopping_instances and
                to_start_count > len(stopped_instances) and
                time.time() - time_start < timeout):
