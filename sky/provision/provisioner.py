@@ -202,10 +202,11 @@ def bulk_provision(
                     formatted_exception = common_utils.format_exception(
                         e, use_bracket=True)
                     raise provision_common.StopFailoverError(
-                        f'During provisioner's failover, {terminate_str.lower()} {cluster_name!r} failed. '
-                        'This can cause resource '
-                        'leakage. Please check the failure and the cluster '
-                        'status on the cloud, and manually terminate the cluster. '
+                        'During provisioner\'s failover, '
+                        f'{terminate_str.lower()} {cluster_name!r} failed. '
+                        'This can cause resource leakage. Please check the '
+                        'failure and the cluster status on the cloud, and '
+                        'manually terminate the cluster. '
                         f'Details: {formatted_exception}')
             raise
 
