@@ -129,8 +129,8 @@ def _ec2_call_with_retry_on_rate_limit(ec2_fail_fast_fn: Callable[..., _T],
             raise
     if ret is None:
         raise RuntimeError(
-            f'Failed to call ec2 function {ec2_fail_fast_fn} due to RequestLimitExceeded.'
-            ' Max attempts exceeded.')
+            f'Failed to call ec2 function {ec2_fail_fast_fn} due to '
+            'RequestLimitExceeded. Max attempts exceeded.')
     return ret
 
 
@@ -266,7 +266,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
     # NOTE: We set retry=0 for fast failing when the resource is not
-    # available (although the doc says it will only retry for network 
+    # available (although the doc says it will only retry for network
     # issues, practically, it retries for capacity errors, etc as well).
     ec2_fail_fast = aws.resource('ec2', region_name=region, max_attempts=0)
 
