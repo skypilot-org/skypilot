@@ -166,12 +166,10 @@ def get_mounting_script(
           sudo mkdir -p $MOUNT_PATH
           sudo chmod 777 $MOUNT_PATH
         else
-          # Check if mount path contains files for MOUNT mode only
-          if [ "$MOUNT_MODE" = "MOUNT" ]; then
-            if [ "$(ls -A $MOUNT_PATH)" ]; then
-              echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
-              exit {exceptions.MOUNT_PATH_NON_EMPTY_CODE}
-            fi
+          # Check if mount path contains files
+          if [ "$(ls -A $MOUNT_PATH)" ]; then
+            echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
+            exit {exceptions.MOUNT_PATH_NON_EMPTY_CODE}
           fi
         fi
 
