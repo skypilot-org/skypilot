@@ -3,10 +3,11 @@ from concurrent import futures
 import functools
 import hashlib
 import os
-import psutil
 import resource
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+import psutil
 
 from sky import sky_logging
 from sky.provision import common
@@ -50,6 +51,7 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
 _MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
+
 
 def _get_idle_cpu_count() -> int:
     """Returns the number of idle CPUs."""
