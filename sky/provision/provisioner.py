@@ -247,7 +247,7 @@ def _wait_ssh_connection_direct(
     assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
         success = False
-        with socket.create_connection((ip, ssh_port), timeout=10) as s:
+        with socket.create_connection((ip, ssh_port), timeout=1) as s:
             if s.recv(100).startswith(b'SSH'):
                 # Wait for SSH being actually ready, otherwise we may get the
                 # following error:
