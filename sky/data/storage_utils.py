@@ -14,7 +14,6 @@ from sky.utils.cli_utils import status_utils
 
 logger = sky_logging.init_logger(__name__)
 
-
 _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
     f'{colorama.Fore.YELLOW}Warning: Files/dirs '
     'specified in .gitignore will be uploaded '

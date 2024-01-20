@@ -28,7 +28,6 @@ from sky.data import sky_csync
 from sky.data import storage_utils
 from sky.data.data_utils import Rclone
 from sky.data.storage_utils import StorageMode
-from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
