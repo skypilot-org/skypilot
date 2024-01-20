@@ -5,7 +5,9 @@ FROM continuumio/miniconda3:22.11.1
 
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
-    apt install sudo -y \
+    apt sudo -y && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt remove -y python3 && \
     conda init
 
 # Setup new user named sky and add to sudoers. Also add /opt/conda/bin to sudo path.

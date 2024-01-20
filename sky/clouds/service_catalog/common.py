@@ -452,6 +452,7 @@ def list_accelerators_impl(
     region_filter: Optional[str],
     quantity_filter: Optional[int],
     case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
@@ -469,7 +470,7 @@ def list_accelerators_impl(
         gpu_info_df = df['GpuInfo'].apply(ast.literal_eval)
         df['DeviceMemoryGiB'] = gpu_info_df.apply(
             lambda row: row['Gpus'][0]['MemoryInfo']['SizeInMiB']) / 1024.0
-    except ValueError:
+    except (ValueError, SyntaxError):
         # TODO(zongheng,woosuk): GCP/Azure catalogs do not have well-formed
         # GpuInfo fields. So the above will throw:
         #  ValueError: malformed node or string: <_ast.Name object at ..>
@@ -500,12 +501,20 @@ def list_accelerators_impl(
     grouped = df.groupby('AcceleratorName')
 
     def make_list_from_df(rows):
-        # Only keep the lowest prices across regions.
-        rows = rows.groupby([
-            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-            'MemoryGiB'
-        ],
-                            dropna=False).aggregate('min').reset_index()
+        if all_regions:
+            # Keep all regions.
+            rows = rows.groupby([
+                'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
+                'MemoryGiB', 'Region'
+            ],
+                                dropna=False).aggregate('min').reset_index()
+        else:
+            # Only keep the lowest prices across regions.
+            rows = rows.groupby([
+                'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
+                'MemoryGiB'
+            ],
+                                dropna=False).aggregate('min').reset_index()
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
                 cloud,

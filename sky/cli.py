@@ -51,6 +51,7 @@ from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
+from sky import provision as provision_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import spot as spot_lib
@@ -110,9 +111,12 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 # command.
 _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
-_STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE = (
-    '{cluster_num} cluster{plural} {verb}. Please specify an existing '
-    'cluster to show its IP address.\nUsage: `sky status --ip <cluster>`')
+_STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
+    '{cluster_num} cluster{plural} {verb}. Please specify {cause} '
+    'cluster to show its {property}.\nUsage: `sky status --{flag} <cluster>`')
+
+_ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
+                            'please retry after a while.')
 
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky spot launch`. `{command}` supports a '
@@ -223,8 +227,8 @@ def _interactive_node_cli_command(cli_func):
                                is_flag=True,
                                help='If true, use spot instances.')
 
-    tpuvm_option = click.option('--tpu-vm',
-                                default=False,
+    tpuvm_option = click.option('--tpu-vm/--no-tpu-vm',
+                                default=True,
                                 is_flag=True,
                                 help='If true, use TPU VMs.')
 
@@ -233,13 +237,14 @@ def _interactive_node_cli_command(cli_func):
                              type=int,
                              required=False,
                              help=('OS disk size in GBs.'))
-    disk_tier = click.option('--disk-tier',
-                             default=None,
-                             type=click.Choice(['low', 'medium', 'high'],
-                                               case_sensitive=False),
-                             required=False,
-                             help=('OS disk tier. Could be one of "low", '
-                                   '"medium", "high". Default: medium'))
+    disk_tier = click.option(
+        '--disk-tier',
+        default=None,
+        type=click.Choice(['low', 'medium', 'high', 'none'],
+                          case_sensitive=False),
+        required=False,
+        help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
+              '("none" for using the default value). Default: medium'))
     ports = click.option(
         '--ports',
         required=False,
@@ -697,7 +702,10 @@ def _parse_override_params(
     if disk_size is not None:
         override_params['disk_size'] = disk_size
     if disk_tier is not None:
-        override_params['disk_tier'] = disk_tier
+        if disk_tier.lower() == 'none':
+            override_params['disk_tier'] = None
+        else:
+            override_params['disk_tier'] = disk_tier
     if ports:
         override_params['ports'] = ports
     return override_params
@@ -709,7 +717,7 @@ def _default_interactive_node_name(node_type: str):
     # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
     # which is the current cloud for interactive nodes.
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
-    return f'sky-{node_type}-{backend_utils.get_cleaned_username()}'
+    return f'sky-{node_type}-{common_utils.get_cleaned_username()}'
 
 
 def _infer_interactive_node_type(resources: sky.Resources):
@@ -1143,13 +1151,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if name is not None:
         task.name = name
     task.update_envs(env)
-    # TODO(wei-lin): move this validation into Python API.
-    for resource in task.resources:
-        if resource.accelerators is not None:
-            acc, _ = list(resource.accelerators.items())[0]
-            if acc.startswith('tpu-') and task.num_nodes > 1:
-                raise ValueError('Multi-node TPU cluster is not supported. '
-                                 f'Got num_nodes={task.num_nodes}.')
     return task
 
 
@@ -1303,11 +1304,10 @@ def cli():
 @click.option(
     '--disk-tier',
     default=None,
-    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
+    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
     required=False,
-    help=(
-        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
-    ))
+    help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
+          '("none" for using the default value). Default: medium'))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1412,15 +1412,6 @@ def launch(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
-
-    # A basic check. Programmatic calls will have a proper (but less
-    # informative) error from optimizer.
-    if (cloud is not None and cloud.lower() == 'azure' and
-            use_spot is not None and use_spot):
-        raise click.UsageError(
-            'SkyPilot currently has not implemented '
-            'support for spot instances on Azure. Please file '
-            'an issue if you need this feature.')
 
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
@@ -1771,6 +1762,18 @@ def _get_services(service_names: Optional[List[str]],
                     'clusters, the returned IP address is the internal IP '
                     'of the head pod, and may not be accessible from outside '
                     'the cluster.'))
+@click.option('--endpoints',
+              default=False,
+              is_flag=True,
+              required=False,
+              help=('Get all exposed endpoints and corresponding URLs for a'
+                    'cluster. This option will override all other options.'))
+@click.option('--endpoint',
+              required=False,
+              default=None,
+              type=int,
+              help=('Get the endpoint URL for the specified port number on the'
+                    'cluster. This option will override all other options.'))
 @click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
               is_flag=True,
@@ -1788,8 +1791,9 @@ def _get_services(service_names: Optional[List[str]],
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
-           show_services: bool, clusters: List[str]):
+def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
+           endpoint: Optional[int], show_spot_jobs: bool, show_services: bool,
+           clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1798,6 +1802,11 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
     If --ip is specified, show the IP address of the head node of the cluster.
     Only available when CLUSTERS contains exactly one cluster, e.g.
     ``sky status --ip mycluster``.
+
+    If --endpoints is specified, show all exposed endpoints in the cluster.
+    Only available when CLUSTERS contains exactly one cluster, e.g.
+    ``sky status --endpoints mycluster``. To query a single endpoint, you
+    can use ``sky status mycluster --endpoint 8888``.
 
     The following fields for each cluster are recorded: cluster name, time
     since last launch, resources, region, zone, hourly price, status, autostop,
@@ -1848,8 +1857,10 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
     # can be used as a future.
     with multiprocessing.Pool(2) as pool:
         # Do not show spot queue if user specifies clusters, and if user
-        # specifies --ip.
-        show_spot_jobs = show_spot_jobs and not clusters and not ip
+        # specifies --ip or --endpoint(s).
+        show_spot_jobs = show_spot_jobs and not any([clusters, ip, endpoints])
+        show_endpoints = endpoints or endpoint is not None
+        show_single_endpoint = endpoint is not None
         if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
             spot_jobs_future = pool.apply_async(
@@ -1859,6 +1870,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                           show_all=False,
                           limit_num_jobs_to_show=not all,
                           is_called_by_user=False))
+
         show_services = show_services and not clusters and not ip
         if show_services:
             # Run the sky serve service query in parallel to speed up the
@@ -1869,21 +1881,41 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                                                    show_all=False,
                                                    show_endpoint=False,
                                                    is_called_by_user=False))
-        if ip:
+        if ip or show_endpoints:
             if refresh:
                 raise click.UsageError(
-                    'Using --ip with --refresh is not supported for now. '
-                    'To fix, refresh first, then query the IP.')
+                    'Using --ip or --endpoint(s) with --refresh is not'
+                    'supported for now. To fix, refresh first, '
+                    'then query the IP or endpoint.')
+
+            if ip and show_endpoints:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify both --ip and --endpoint(s) '
+                        'at the same time.')
+
+            if endpoint is not None and endpoints:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify both --endpoint and --endpoints '
+                        'at the same time.')
+
             if len(clusters) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(clusters) > 1 else ''
                     cluster_num = (str(len(clusters))
                                    if len(clusters) > 0 else 'No')
+                    cause = 'a single' if len(clusters) > 1 else 'an existing'
                     raise ValueError(
-                        _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE.format(
+                        _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
                             cluster_num=cluster_num,
                             plural=plural,
-                            verb='specified'))
+                            verb='specified',
+                            cause=cause,
+                            property='IP address' if ip else 'endpoint(s)',
+                            flag='ip' if ip else
+                            ('endpoint port'
+                             if show_single_endpoint else 'endpoints')))
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
@@ -1892,17 +1924,26 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
             query_clusters = _get_glob_clusters(clusters, silent=ip)
         cluster_records = core.status(cluster_names=query_clusters,
                                       refresh=refresh)
-        if ip:
+        if ip or show_endpoints:
             if len(cluster_records) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(cluster_records) > 1 else ''
                     cluster_num = (str(len(cluster_records))
-                                   if len(clusters) > 0 else 'No')
+                                   if len(cluster_records) > 0 else
+                                   f'{clusters[0]!r}')
+                    verb = 'found' if len(cluster_records) > 0 else 'not found'
+                    cause = 'a single' if len(clusters) > 1 else 'an existing'
                     raise ValueError(
-                        _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE.format(
+                        _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
                             cluster_num=cluster_num,
                             plural=plural,
-                            verb='found'))
+                            verb=verb,
+                            cause=cause,
+                            property='IP address' if ip else 'endpoint(s)',
+                            flag='ip' if ip else
+                            ('endpoint port'
+                             if show_single_endpoint else 'endpoints')))
+
             cluster_record = cluster_records[0]
             if cluster_record['status'] != status_lib.ClusterStatus.UP:
                 with ux_utils.print_exception_no_traceback():
@@ -1913,7 +1954,72 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Querying IP address is not supported '
                                      'for local clusters.')
+
             head_ip = handle.external_ips()[0]
+            if show_endpoints:
+                launched_resources = handle.launched_resources
+                cloud = launched_resources.cloud
+                try:
+                    cloud.check_features_are_supported(
+                        launched_resources,
+                        {clouds.CloudImplementationFeatures.OPEN_PORTS})
+                except exceptions.NotSupportedError:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('Querying endpoints is not supported '
+                                         f'for {cloud}.') from None
+
+                config = common_utils.read_yaml(handle.cluster_yaml)
+                port_details = provision_lib.query_ports(
+                    repr(cloud), handle.cluster_name_on_cloud,
+                    handle.launched_resources.ports, config['provider'])
+
+                if endpoint is not None:
+                    # If cluster had no ports to be exposed
+                    if str(endpoint) not in handle.launched_resources.ports:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(f'Port {endpoint} is not exposed '
+                                             'on cluster '
+                                             f'{cluster_record["name"]!r}.')
+                    # If the user requested a specific port endpoint
+                    if endpoint not in port_details:
+                        error_msg = (f'Port {endpoint} not exposed yet. '
+                                     f'{_ENDPOINTS_RETRY_MESSAGE} ')
+                        if handle.launched_resources.cloud.is_same_cloud(
+                                clouds.Kubernetes()):
+                            # Add Kubernetes specific debugging info
+                            error_msg += \
+                                kubernetes_utils.get_endpoint_debug_message()
+                        with ux_utils.print_exception_no_traceback():
+                            raise RuntimeError(error_msg)
+                    click.echo(port_details[endpoint][0].url(ip=head_ip))
+                    return
+
+                if not port_details:
+                    # If cluster had no ports to be exposed
+                    if handle.launched_resources.ports is None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError('Cluster does not have any ports '
+                                             'to be exposed.')
+                    # Else wait for the ports to be exposed
+                    else:
+                        error_msg = (f'No endpoints exposed yet. '
+                                     f'{_ENDPOINTS_RETRY_MESSAGE} ')
+                        if handle.launched_resources.cloud.is_same_cloud(
+                                clouds.Kubernetes()):
+                            # Add Kubernetes specific debugging info
+                            error_msg += \
+                                kubernetes_utils.get_endpoint_debug_message()
+                        with ux_utils.print_exception_no_traceback():
+                            raise RuntimeError(error_msg)
+
+                for port, urls in port_details.items():
+                    click.echo(
+                        f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
+                        f'{colorama.Style.RESET_ALL}: '
+                        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                        f'{urls[0].url(ip=head_ip)}{colorama.Style.RESET_ALL}')
+                return
+
             click.echo(head_ip)
             return
         hints = []
@@ -1983,6 +2089,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
         if show_services:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Services{colorama.Style.RESET_ALL}')
+            num_services = None
             if spot_jobs_query_interrupted:
                 # The pool is terminated, so we cannot run the service query.
                 msg = 'KeyboardInterrupt'
@@ -3326,6 +3433,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if tpu_vm:
         accelerator_args['tpu_vm'] = True
         accelerator_args['runtime_version'] = 'tpu-vm-base'
+    else:
+        accelerator_args['tpu_vm'] = False
     if instance_type is None:
         instance_type = default_resources.instance_type
     if tpus is None:
@@ -3398,13 +3507,20 @@ def check(verbose: bool):
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
 )
+@click.option(
+    '--all-regions',
+    is_flag=True,
+    default=False,
+    help='Show pricing and instance details for a specified accelerator across '
+    'all regions and clouds.')
 @service_catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
         cloud: Optional[str],
-        region: Optional[str]):
+        region: Optional[str],
+        all_regions: Optional[bool]):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -3418,6 +3534,9 @@ def show_gpus(
     To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
+    To show all regions for a specified accelerator, use
+    ``sky show-gpus <accelerator> --all-regions``.
+
     Definitions of certain fields:
 
     * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
@@ -3425,14 +3544,25 @@ def show_gpus(
 
     * ``HOST_MEM``: Memory of the host instance (VM).
 
-    If ``--region`` is not specified, the price displayed for each instance
-    type is the lowest across all regions for both on-demand and spot
-    instances. There may be multiple regions with the same lowest price.
+    If ``--region`` or ``--all-regions`` is not specified, the price displayed
+    for each instance type is the lowest across all regions for both on-demand
+    and spot instances. There may be multiple regions with the same lowest
+    price.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
+
+    # validation for the --all-regions flag
+    if all_regions and accelerator_str is None:
+        raise click.UsageError(
+            'The --all-regions flag is only valid when an accelerator '
+            'is specified.')
+    if all_regions and region is not None:
+        raise click.UsageError(
+            '--all-regions and --region flags cannot be used simultaneously.')
+
     # This will validate 'cloud' and raise if not found.
     clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
@@ -3517,7 +3647,8 @@ def show_gpus(
                                                    quantity_filter=quantity,
                                                    region_filter=region,
                                                    clouds=cloud,
-                                                   case_sensitive=False)
+                                                   case_sensitive=False,
+                                                   all_regions=all_regions)
 
         if len(result) == 0:
             if cloud == 'kubernetes':
@@ -3530,11 +3661,6 @@ def show_gpus(
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
             return
-
-        if cloud is None or cloud.lower() == 'gcp':
-            yield '*NOTE*: for most GCP accelerators, '
-            yield 'INSTANCE_TYPE == (attachable) means '
-            yield 'the host VM\'s cost is not included.\n\n'
 
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
@@ -3805,11 +3931,10 @@ def spot():
 @click.option(
     '--disk-tier',
     default=None,
-    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
+    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
     required=False,
-    help=(
-        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
-    ))
+    help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
+          '("none" for using the default value). Default: medium'))
 @click.option(
     '--detach-run',
     '-d',
@@ -4277,13 +4402,32 @@ def serve_up(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
-    assert len(task.resources) == 1
-    requested_resources = list(task.resources)[0]
-    if requested_resources.ports is None or len(requested_resources.ports) != 1:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Must only specify one port in resources. Each replica '
-                'will use the port specified as application ingress port.')
+    service_port: Optional[int] = None
+    for requested_resources in list(task.resources):
+        if requested_resources.ports is None or len(
+                requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port_str = requested_resources.ports[0]
+        if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Port {service_port_str!r} is not a valid '
+                                 'port number. Please specify a single port '
+                                 f'instead. Got: {service_port_str!r}')
+        # We request all the replicas using the same port for now, but it
+        # should be fine to allow different replicas to use different ports
+        # in the future.
+        resource_port = int(service_port_str)
+        if service_port is None:
+            service_port = resource_port
+        if service_port != resource_port:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Got multiple ports: {service_port} and '
+                                 f'{resource_port} in different resources. '
+                                 'Please specify single port instead.')
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
@@ -4329,7 +4473,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     - ``CONTROLLER_INIT``: The controller is initializing.
 
     - ``REPLICA_INIT``: The controller has finished initializing, and there are
-      no available replicas for now. This also indicates that no replica failure
+      no ready replicas for now. This also indicates that no replica failure
       has been detected.
 
     - ``CONTROLLER_FAILED``: The controller failed to start or is in an abnormal
@@ -4355,6 +4499,9 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     - ``FAILED_CLEANUP``: Some error occurred while the service was being shut
       down. This usually indicates resource leakages. If you see such status,
       please login to the cloud console and double-check
+
+    - ``NO_REPLICAS``: The service has no replicas. This usually happens when
+        min_replicas is set to 0 and there is no traffic to the system.
 
     Each replica can have one of the following statuses:
 
@@ -4640,11 +4787,10 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
 @click.option(
     '--disk-tier',
     default=None,
-    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
+    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
     required=False,
-    help=(
-        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
-    ))
+    help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
+          '("none" for using the default value). Default: medium'))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -4753,13 +4899,13 @@ def benchmark_launch(
     if gpus is not None:
         gpu_list = gpus.split(',')
         gpu_list = [gpu.strip() for gpu in gpu_list]
-        if '' in gpus:
+        if ' ' in gpus:
             raise click.BadParameter('Remove blanks in --gpus.')
 
         if len(gpu_list) == 1:
             override_gpu = gpu_list[0]
         else:
-            # If len(gpus) > 1, gpus is intrepreted
+            # If len(gpu_list) > 1, gpus is interpreted
             # as a list of benchmark candidates.
             if candidates is None:
                 candidates = [{'accelerators': gpu} for gpu in gpu_list]

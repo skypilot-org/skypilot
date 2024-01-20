@@ -136,9 +136,9 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
             tag_specs += [user_tag_spec]
 
 
-def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
-                                                                          Any],
-                      tags: Dict[str, str], count: int) -> List:
+def _create_instances(ec2_fail_fast, cluster_name: str,
+                      node_config: Dict[str, Any], tags: Dict[str, str],
+                      count: int, associate_public_ip_address: bool) -> List:
     tags = {
         'Name': cluster_name,
         TAG_RAY_CLUSTER_NAME: cluster_name,
@@ -165,6 +165,13 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
         'TagSpecifications': tag_specs
     })
 
+    # We are adding 'NetworkInterfaces' in the inner loop and having both keys
+    # is considered invalid by the create_instances API.
+    security_group_ids = conf.pop('SecurityGroupIds', None)
+    # Guaranteed by config.py (the bootstrapping phase):
+    assert 'NetworkInterfaces' not in conf, conf
+    assert security_group_ids is not None, conf
+
     # NOTE: This ensures that we try ALL availability zones before
     # throwing an error.
     num_subnets = len(subnet_ids)
@@ -173,17 +180,17 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
     per_subnet_tries = max_tries // num_subnets
     for i in range(max_tries):
         try:
-            if 'NetworkInterfaces' in conf:
-                logger.debug(
-                    'Attempting to create instances with NetworkInterfaces.'
-                    'Ignore SecurityGroupIds.')
-                # remove security group IDs previously copied from network
-                # interfaces (create_instances call fails otherwise)
-                conf.pop('SecurityGroupIds', None)
-            else:
-                # Try each subnet for per_subnet_tries times.
-                subnet_id = subnet_ids[i // per_subnet_tries]
-                conf['SubnetId'] = subnet_id
+            # Try each subnet for per_subnet_tries times.
+            subnet_id = subnet_ids[i // per_subnet_tries]
+
+            network_interfaces = [{
+                'SubnetId': subnet_id,
+                'DeviceIndex': 0,
+                # Whether the VM(s) should have a public IP.
+                'AssociatePublicIpAddress': associate_public_ip_address,
+                'Groups': security_group_ids,
+            }]
+            conf['NetworkInterfaces'] = network_interfaces
 
             # NOTE: We set retry=0 for fast failing when the resource is not
             # available. Here we have to handle 'RequestLimitExceeded'
@@ -383,10 +390,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         #  This is a known issue before.
         ec2_fail_fast = aws.resource('ec2', region_name=region, max_attempts=0)
 
-        created_instances = _create_instances(ec2_fail_fast,
-                                              cluster_name_on_cloud,
-                                              config.node_config, tags,
-                                              to_start_count)
+        created_instances = _create_instances(
+            ec2_fail_fast,
+            cluster_name_on_cloud,
+            config.node_config,
+            tags,
+            to_start_count,
+            associate_public_ip_address=(
+                not config.provider_config['use_internal_ips']))
         created_instances.sort(key=lambda x: x.id)
 
         created_instance_ids = [n.id for n in created_instances]
@@ -676,9 +687,11 @@ def open_ports(
 
 def cleanup_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    del ports  # Unused.
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
@@ -758,9 +771,12 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
     waiter.wait(WaiterConfig={'Delay': 5, 'MaxAttempts': 120}, Filters=filters)
 
 
-def get_cluster_info(region: str,
-                     cluster_name_on_cloud: str) -> common.ClusterInfo:
+def get_cluster_info(
+        region: str,
+        cluster_name_on_cloud: str,
+        provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
+    del provider_config  # unused
     ec2 = _default_ec2_resource(region)
     filters = [
         {
@@ -780,14 +796,26 @@ def get_cluster_info(region: str,
         tags = [(t['Key'], t['Value']) for t in inst.tags]
         # sort tags by key to support deterministic unit test stubbing
         tags.sort(key=lambda x: x[0])
-        instances[inst.id] = common.InstanceInfo(
-            instance_id=inst.id,
-            internal_ip=inst.private_ip_address,
-            external_ip=inst.public_ip_address,
-            tags=dict(tags),
-        )
+        instances[inst.id] = [
+            common.InstanceInfo(
+                instance_id=inst.id,
+                internal_ip=inst.private_ip_address,
+                external_ip=inst.public_ip_address,
+                tags=dict(tags),
+            )
+        ]
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
     )
+
+
+def query_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[common.Endpoint]]:
+    """See sky/provision/__init__.py"""
+    return common.query_ports_passthrough(cluster_name_on_cloud, ports,
+                                          provider_config)

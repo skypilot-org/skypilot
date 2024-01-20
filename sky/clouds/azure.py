@@ -60,15 +60,21 @@ class Azure(clouds.Cloud):
 
     _INDENT_PREFIX = ' ' * 4
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.RAY_AUTOSCALER
+
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return {
-            clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {cls._REPR}.',
-            # TODO(zhwu): our azure subscription offer ID does not support spot.
-            # Need to support it.
-            clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {cls._REPR}.',
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        features = {
+            clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+                (f'Migrating disk is currently not supported on {cls._REPR}.'),
         }
+        if resources.use_spot:
+            features[clouds.CloudImplementationFeatures.STOP] = (
+                'Stopping spot instances is currently not supported on'
+                f' {cls._REPR}.')
+        return features
 
     @classmethod
     def max_cluster_name_length(cls) -> int:
@@ -244,8 +250,6 @@ class Azure(clouds.Cloud):
         region_name = region.name
 
         r = resources
-        assert not r.use_spot, \
-            'Our subscription offer ID does not support spot instances.'
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
