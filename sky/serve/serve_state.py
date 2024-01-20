@@ -46,7 +46,7 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         PRIMARY KEY (service_name, replica_id))""")
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS versions (
-            version INTEGER PRIMARY KEY AUTOINCREMENT, 
+            version INTEGER, 
             service_name TEXT,
             spec BLOB,
             PRIMARY KEY (service_name, version))""")
@@ -416,16 +416,23 @@ def total_number_provisioning_replicas() -> int:
 # === Version functions ===
 def add_version(service_name: str) -> int:
     """Adds a version to the database."""
+
+    _DB.cursor.execute(
+        """\
+        SELECT MAX(version) FROM versions
+        WHERE service_name=(?)""", (service_name,))
+
+    # add_version is only called during update.
+    new_version = _DB.cursor.fetchone()[0] + 1
+
     _DB.cursor.execute(
         """\
         INSERT INTO versions
-        (service_name, spec)
-        VALUES (?, ?)""", (service_name, pickle.dumps(None)))
+        (version, service_name, spec)
+        VALUES (?, ?, ?)""", (new_version, service_name, pickle.dumps(None)))
     _DB.conn.commit()
 
-    # Retrieve new version number of the service.
-    assert _DB.cursor.lastrowid is not None
-    return _DB.cursor.lastrowid
+    return new_version
 
 
 def add_or_update_version(service_name: str, version: int,

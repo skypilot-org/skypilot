@@ -56,8 +56,7 @@ class AutoscalerDecision:
 class Autoscaler:
     """Abstract class for autoscalers."""
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec',
-                 initial_version: int) -> None:
+    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the autoscaler.
 
         Variables:
@@ -72,7 +71,7 @@ class Autoscaler:
                                   is not None else spec.min_replicas)
         # Target number of replicas is initialized to min replicas.
         self.target_num_replicas: int = spec.min_replicas
-        self.latest_version: int = initial_version
+        self.latest_version: int = constants.INITIAL_VERSION
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
@@ -105,8 +104,7 @@ class RequestRateAutoscaler(Autoscaler):
     the threshold.
     """
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec',
-                 qps_window_size: int, initial_version: int) -> None:
+    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
@@ -119,10 +117,10 @@ class RequestRateAutoscaler(Autoscaler):
             scale_down_consecutive_periods: period for scaling down.
             bootstrap_done: whether bootstrap is done.
         """
-        super().__init__(spec, initial_version)
+        super().__init__(spec)
         self.target_qps_per_replica: Optional[
             float] = spec.target_qps_per_replica
-        self.qps_window_size: int = qps_window_size
+        self.qps_window_size: int = constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
         self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0

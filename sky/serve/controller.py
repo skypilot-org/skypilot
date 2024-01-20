@@ -14,7 +14,6 @@ import uvicorn
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
-from sky.serve import constants
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -44,17 +43,11 @@ class SkyServeController:
                  task_yaml: str, port: int) -> None:
         self._service_name = service_name
         self._replica_manager: replica_managers.ReplicaManager = (
-            replica_managers.SkyPilotReplicaManager(
-                service_name=service_name,
-                spec=service_spec,
-                initial_version=constants.INITIAL_VERSION,
-                task_yaml_path=task_yaml))
+            replica_managers.SkyPilotReplicaManager(service_name=service_name,
+                                                    spec=service_spec,
+                                                    task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.RequestRateAutoscaler(
-                service_spec,
-                qps_window_size=constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS,
-                initial_version=constants.INITIAL_VERSION,
-            ))
+            autoscalers.RequestRateAutoscaler(service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
 

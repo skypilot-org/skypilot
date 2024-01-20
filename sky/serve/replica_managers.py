@@ -444,8 +444,8 @@ class ReplicaInfo:
 class ReplicaManager:
     """Each replica manager monitors one service."""
 
-    def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
-                 initial_version: int) -> None:
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
         self.lock = threading.Lock()
         self._next_replica_id: int = 1
         self._service_name: str = service_name
@@ -454,10 +454,10 @@ class ReplicaManager:
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
                     f'Post data: {spec.post_data}')
 
-        self.latest_version: int = initial_version
-        self.oldest_version: int = initial_version
-        serve_state.add_or_update_version(self._service_name, initial_version,
-                                          spec)
+        self.latest_version: int = serve_constants.INITIAL_VERSION
+        self.oldest_version: int = serve_constants.INITIAL_VERSION
+        serve_state.add_or_update_version(self._service_name,
+                                          self.latest_version, spec)
 
     def get_ready_replica_urls(self) -> List[str]:
         """Get all ready replica's IP addresses."""
@@ -493,8 +493,8 @@ class SkyPilotReplicaManager(ReplicaManager):
     """
 
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
-                 initial_version: int, task_yaml_path: str) -> None:
-        super().__init__(service_name, spec, initial_version)
+                 task_yaml_path: str) -> None:
+        super().__init__(service_name, spec)
         self._task_yaml_path = task_yaml_path
         # TODO(tian): Store launch/down pid in the replica table, to make the
         # manager more persistent. Current blocker is that we need to manually
