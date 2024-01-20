@@ -46,6 +46,7 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         PRIMARY KEY (service_name, replica_id))""")
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS versions (
+            version INTEGER PRIMARY KEY AUTOINCREMENT, 
             service_name TEXT,
             version INTEGER,
             spec BLOB,
@@ -414,14 +415,43 @@ def total_number_provisioning_replicas() -> int:
 
 
 # === Version functions ===
-def add_or_update_version(service_name: str, version: int,
-                          spec: 'service_spec.SkyServiceSpec') -> None:
+def add_version(service_name: str) -> int:
     """Adds a version to the database."""
     _DB.cursor.execute(
         """\
-        INSERT OR REPLACE INTO versions
-        (service_name, version, spec)
-        VALUES (?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
+        INSERT INTO versions
+        (service_name, spec)
+        VALUES (?, ?)""", (service_name, pickle.dumps(None)))
+    _DB.conn.commit()
+
+    # Retrieve new version number of the service.
+    assert _DB.cursor.lastrowid is not None
+    return _DB.cursor.lastrowid
+
+
+def add_or_update_version(service_name: str, version: int,
+                          spec: 'service_spec.SkyServiceSpec') -> None:
+    # Check if the entry with the specified service_name and version exists
+    _DB.cursor.execute(
+        """SELECT * FROM versions WHERE service_name=? AND version=?""",
+        (service_name, version))
+    existing_entry = _DB.cursor.fetchone()
+
+    if existing_entry:
+        _DB.cursor.execute(
+            """\
+            UPDATE versions SET spec=?
+            WHERE service_name=? AND version=?""", (
+                pickle.dumps(spec),
+                service_name,
+                version,
+            ))
+    else:
+        _DB.cursor.execute(
+            """\
+            INSERT INTO versions
+            (service_name, version, spec)
+            VALUES (?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
     _DB.conn.commit()
 
 

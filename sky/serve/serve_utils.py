@@ -820,6 +820,14 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
+    def add_version(cls, service_name: str) -> str:
+        code = [
+            f'msg = serve_state.add_version({service_name!r})',
+            'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
     def terminate_services(cls, service_names: Optional[List[str]],
                            purge: bool) -> str:
         code = [

@@ -329,8 +329,6 @@ def update(task: 'sky.Task', service_name: str) -> None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
-    version = service_record['version']
-
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the task. ')
@@ -338,7 +336,30 @@ def update(task: 'sky.Task', service_name: str) -> None:
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
 
-    current_version = version + 1
+    code = serve_utils.ServeCodeGen.add_version(service_name)
+    returncode, version_stirng, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to add version',
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    try:
+        current_version = int(version_stirng)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to parse version: {version_stirng}; '
+                             f'Returncode: {returncode}') from e
+
+    print(f'New version: {current_version}')
     with tempfile.NamedTemporaryFile(
             prefix=f'{service_name}-v{current_version}',
             mode='w') as service_file:
