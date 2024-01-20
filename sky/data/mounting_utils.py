@@ -97,6 +97,19 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
                  '--daemon')
     return mount_cmd
 
+def get_redirect_mount_cmd(mountpoint_path: str,
+                          csync_read_path: str,
+                          csync_write_path: str) -> str:
+    """Returns a command to mount redirection FUSE used by CSYNC."""
+    mount_cmd = ('sudo apt-get install -y libfuse3-dev; '
+             'command -v redirect-fuse >/dev/null 2>&1 || '
+             '{ sudo wget -nc https://github.com/landscapepainter/'
+             'sky-csync/releases/download/test/redirect-fuse '
+             '-O /usr/local/bin/redirect-fuse && '
+             'sudo chmod +x /usr/local/bin/redirect-fuse; }; '
+             f'sudo redirect-fuse {mountpoint_path} '
+             f'{csync_read_path} {csync_write_path}')
+    return mount_cmd
 
 def get_mounting_script(
     mount_mode: storage_utils.StorageMode,

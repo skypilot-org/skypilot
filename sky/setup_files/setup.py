@@ -162,7 +162,6 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
-    'fusepy'
 ]
 
 local_ray = [
@@ -206,7 +205,6 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
-    'fusepy',
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.
     'colorama < 0.4.5',
@@ -226,7 +224,7 @@ extras_require: Dict[str, List[str]] = {
     # parameter for stopping instances.
     # Reference: https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
     'gcp':
-        ['google-api-python-client>=2.69.0', 'google-cloud-storage', 'fusepy'] +
+        ['google-api-python-client>=2.69.0', 'google-cloud-storage',] +
         local_ray,
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'

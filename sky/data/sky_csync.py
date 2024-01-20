@@ -1,6 +1,5 @@
 """CSYNC module"""
 import functools
-import multiprocessing
 import os
 import shutil
 import subprocess
@@ -10,9 +9,6 @@ import time
 from typing import Any, List, Optional, Tuple
 
 import click
-from fuse import FUSE
-from fuse import FuseOSError
-from fuse import Operations
 import psutil
 
 from sky import exceptions
@@ -52,7 +48,7 @@ def connect_db(func):
                 csync_pid INTEGER PRIMARY KEY,
                 sync_pid INTEGER DEFAULT -1,
                 storage_mount_pid INTEGER,
-                fuse_pid INTEGER,
+                redirect_mount_pid INTEGER,
                 mountpoint_path TEXT,
                 boot_time FLOAT)""")
 
@@ -75,16 +71,16 @@ def connect_db(func):
 
 
 @connect_db
-def _add_running_csync(csync_pid: int, storage_mount_pid: int, fuse_pid: int,
+def _add_running_csync(csync_pid: int, storage_mount_pid: int, redirect_mount_pid: int,
                        mountpoint_path: str):
     """Given the ids processes necessary to CSYNC, it creates a row with it"""
     assert _CURSOR is not None
     assert _CONN is not None
     _CURSOR.execute(
         'INSERT INTO running_csync '
-        '(csync_pid, storage_mount_pid, fuse_pid, mountpoint_path, boot_time) '
+        '(csync_pid, storage_mount_pid, redirect_mount_pid, mountpoint_path, boot_time) '
         'VALUES (?, ?, ?, ?, ?)',
-        (csync_pid, storage_mount_pid, fuse_pid, mountpoint_path, _BOOT_TIME))
+        (csync_pid, storage_mount_pid, redirect_mount_pid, mountpoint_path, _BOOT_TIME))
     _CONN.commit()
 
 
@@ -159,190 +155,18 @@ def _get_mountpoint_path_from_csync_pid(csync_pid: int) -> Optional[str]:
     return None
 
 
-def _get_storage_mount_and_fuse_pid(
+def _get_storage_and_redirect_mount_pid(
         csync_pid: int) -> Tuple[Optional[int], Optional[int]]:
-    """Given the process id of CSYNC, returns storage_mount_pid and fuse_pid.
+    """Given the process id of CSYNC, returns storage_mount_pid and redirect_mount_pid.
     """
     assert _CURSOR is not None
     _CURSOR.execute(
-        'SELECT storage_mount_pid, fuse_pid FROM running_csync '
+        'SELECT storage_mount_pid, redirect_mount_pid FROM running_csync '
         'WHERE csync_pid=(?) AND boot_time=(?)', (csync_pid, _BOOT_TIME))
     row = _CURSOR.fetchone()
     if row:
-        return row[0], row[1]  # storage_mount_pid, fuse_pid
+        return row[0], row[1]  # storage_mount_pid, redirect_mount_pid
     return None, None
-
-
-class Passthrough(Operations):
-
-    def __init__(self, root_read, root_write):
-        self.root_read = root_read
-        self.root_write = root_write
-
-    # Helpers
-    # =======
-    # _full_path to the mount point
-    def _full_path(self, partial, write: bool = False, read: bool = False):
-        if partial.startswith("/"):
-            partial = partial[1:]
-
-        # Unless specified with write boolean, we default to the
-        # read directory where the bucket is mounted.
-        if write:
-            full_path = self._full_write_path(partial)
-        elif read:
-            full_path = self._full_read_path(partial)
-        elif self.is_in_write_dir(partial):
-            full_path = self._full_write_path(partial)
-        else:
-            full_path = self._full_read_path(partial)
-        return full_path
-
-    def _full_read_path(self, partial):
-        if partial.startswith("/"):
-            partial = partial[1:]
-        path = os.path.join(self.root_read, partial)
-        return path
-
-    def _full_write_path(self, partial):
-        if partial.startswith("/"):
-            partial = partial[1:]
-        path = os.path.join(self.root_write, partial)
-        return path
-
-    def is_in_read_dir(self, filename):
-        # Construct the full file path
-        if filename.startswith("/"):
-            filename = filename[1:]
-        file_path = os.path.join(self.root_read, filename)
-        return os.path.isfile(file_path) or os.path.isdir(file_path)
-
-    def is_in_write_dir(self, filename):
-        # Construct the full file path
-        if filename.startswith("/"):
-            filename = filename[1:]
-        file_path = os.path.join(self.root_write, filename)
-        return os.path.isfile(file_path) or os.path.isdir(file_path)
-
-    # Filesystem methods
-    # ==================
-
-    def access(self, path, mode):
-        if not os.access(self._full_path(path), mode):
-            raise FuseOSError(errno.EACCES)
-
-    def chmod(self, path, mode):
-        full_path = self._full_path(path)
-        return os.chmod(full_path, mode)
-
-    def chown(self, path, uid, gid):
-        full_path = self._full_path(path)
-        return os.chown(full_path, uid, gid)
-
-    def getattr(self, path, fh=None):
-        # a path is passed to this function
-        st = os.lstat(self._full_path(path))
-        ret_dict = dict(
-            (key, getattr(st, key))
-            for key in ('st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime',
-                        'st_nlink', 'st_size', 'st_uid', 'st_blocks'))
-
-        return ret_dict
-
-    def readdir(self, path, fh):
-        full_read_path = self._full_path(path, read=True)
-        full_write_path = self._full_path(path, write=True)
-        read_path_dir_set = set()
-        write_path_dir_set = set()
-
-        if os.path.isdir(full_read_path):
-            read_path_dir_set = set(os.listdir(full_read_path))
-
-        if os.path.isdir(full_write_path):
-            write_path_dir_set = set(os.listdir(full_write_path))
-
-        dirents = read_path_dir_set.union(write_path_dir_set)
-        dirents.add('.')
-        dirents.add('..')
-        for r in dirents:
-            yield r
-
-    def readlink(self, path):
-        pathname = os.readlink(self._full_path(path))
-        if pathname.startswith("/"):
-            # Path name is absolute, sanitize it.
-            return os.path.relpath(pathname, self.root)
-        else:
-            return pathname
-
-    def mknod(self, path, mode, dev):
-        return os.mknod(self._full_path(path), mode, dev)
-
-    def rmdir(self, path):
-        if self.is_in_read_dir(path):
-            os.rmdir(self._full_path(path, read=True))
-        if self.is_in_write_dir(path):
-            os.rmdir(self._full_path(path, write=True))
-
-    def mkdir(self, path, mode):
-        return os.mkdir(self._full_path(path, write=True), mode)
-
-    def statfs(self, path):
-        full_path = self._full_path(path)
-        stv = os.statvfs(full_path)
-        return dict((key, getattr(stv, key))
-                    for key in ('f_bavail', 'f_bfree', 'f_blocks', 'f_bsize',
-                                'f_favail', 'f_ffree', 'f_files', 'f_flag',
-                                'f_frsize', 'f_namemax'))
-
-    def unlink(self, path):
-        if self.is_in_read_dir(path):
-            os.unlink(self._full_path(path, read=True))
-        if self.is_in_write_dir(path):
-            os.unlink(self._full_path(path, write=True))
-
-    def symlink(self, name, target):
-        return os.symlink(name, self._full_path(target))
-
-    def rename(self, old, new):
-        return os.rename(self._full_path(old), self._full_path(new))
-
-    def link(self, target, name):
-        return os.link(self._full_path(target), self._full_path(name))
-
-    def utimens(self, path, times=None):
-        return os.utime(self._full_path(path), times)
-
-    # File methods
-    # ============
-
-    def open(self, path, flags):
-        return os.open(self._full_path(path), flags)
-
-    def create(self, path, mode, fi=None):
-        return os.open(self._full_path(path, write=True),
-                       os.O_WRONLY | os.O_CREAT, mode)
-
-    def read(self, path, length, offset, fh):
-        os.lseek(fh, offset, os.SEEK_SET)
-        return os.read(fh, length)
-
-    def write(self, path, buf, offset, fh):
-        os.lseek(fh, offset, os.SEEK_SET)
-        return os.write(fh, buf)
-
-    def truncate(self, path, length, fh=None):
-        with open(self._full_path(path), 'r+') as f:
-            f.truncate(length)
-
-    def flush(self, path, fh):
-        return os.fsync(fh)
-
-    def release(self, path, fh):
-        return os.close(fh)
-
-    def fsync(self, path, fdatasync, fh):
-        return self.flush(path, fh)
 
 
 @click.group()
@@ -447,16 +271,6 @@ def run_sync(source: str, storetype: str, destination: str, num_threads: int,
                        'details') from None
 
 
-def run_fuse_operation(read_path, write_path, full_src):
-    try:
-        FUSE(Passthrough(read_path, write_path),
-             full_src,
-             nothreads=True,
-             foreground=False)
-    except Exception as e:
-        print(f"Error in FUSE operation: {e}")
-
-
 def get_storage_mount_script(storetype: str, destination: str,
                              mount_path: str) -> str:
     if storetype == 's3':
@@ -545,14 +359,19 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
                                                  start_new_session=True)
     storage_mount_pid = storage_mount_process.pid
 
-    # Use FUSE to mount both write path and read path to the mountpoint
-    fuse_process = multiprocessing.Process(target=run_fuse_operation,
-                                           args=(csync_read_path,
-                                                 csync_write_path,
-                                                 mountpoint_path))
-    fuse_process.start()
-    fuse_pid = fuse_process.pid
-    _add_running_csync(csync_pid, storage_mount_pid, fuse_pid, mountpoint_path)
+    # Redirect read/write of mountpoint_path by mounting redirection FUSE
+    redirect_mount_cmd = mounting_utils.get_redirect_mount_cmd(mountpoint_path,
+                                                             csync_read_path,
+                                                             csync_write_path)
+    redirect_mount_process = subprocess.Popen(redirect_mount_cmd,
+                                                shell=True,
+                                                stdout=subprocess.PIPE,
+                                                stderr=subprocess.PIPE,
+                                                start_new_session=True)
+    redirect_mount_pid = redirect_mount_process.pid
+    
+    _add_running_csync(csync_pid, storage_mount_pid,
+                       redirect_mount_pid, mountpoint_path)
     while True:
         start_time = time.time()
         delete = False
@@ -616,13 +435,13 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
 
     pid_set = set()
     for csync_pid in csync_pid_set:
-        storage_mount_pid, fuse_pid = _get_storage_mount_and_fuse_pid(csync_pid)
-        pid_set.add((csync_pid, storage_mount_pid, fuse_pid))
+        storage_mount_pid, redirect_mount_pid = _get_storage_and_redirect_mount_pid(csync_pid)
+        pid_set.add((csync_pid, storage_mount_pid, redirect_mount_pid))
 
     return_code = 0
     failed_to_terminate: List[Tuple[int, str, str]] = []
     def _handle_unmount_process(unmount_path: str, csync_pid: int, unmount_target: str):
-        unmount_cmd = f'fusermount -uz {unmount_path}'
+        unmount_cmd = f'sudo fusermount -uz {unmount_path}'
         with subprocess.Popen(unmount_cmd,
                               shell=True,
                               stdout=subprocess.PIPE,
@@ -636,7 +455,7 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
                                             unmount_target))
         return rc
     
-    for csync_pid, storage_mount_pid, fuse_pid in pid_set:
+    for csync_pid, storage_mount_pid, redirect_mount_pid in pid_set:
         # 1.unmount cloud storage from read path
         csync_read_path = os.path.abspath(
             os.path.expanduser(_CSYNC_READ_PATH.format(pid=csync_pid)))
@@ -657,7 +476,7 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
         # of the mount process.
         while True:
             try:
-                process = psutil.Process(fuse_pid)
+                process = psutil.Process(redirect_mount_pid)
                 # Check if process is still running
                 if (process.status() == psutil.STATUS_ZOMBIE or
                         process.status() == psutil.STATUS_DEAD):
