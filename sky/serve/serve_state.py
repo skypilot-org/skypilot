@@ -48,7 +48,6 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         CREATE TABLE IF NOT EXISTS versions (
             version INTEGER PRIMARY KEY AUTOINCREMENT, 
             service_name TEXT,
-            version INTEGER,
             spec BLOB,
             PRIMARY KEY (service_name, version))""")
     conn.commit()
