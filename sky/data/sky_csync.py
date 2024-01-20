@@ -285,6 +285,17 @@ def get_storage_mount_script(storetype: str, destination: str,
         StorageMode.MOUNT, mount_path, mount_cmd, install_cmd)
     return storage_mount_script
 
+def _handle_fuse_process(fuse_cmd: str) -> Tuple[int, int, str]:
+    with subprocess.Popen(fuse_cmd,
+                            shell=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True) as fuse_process:
+        fuse_pid = fuse_process.pid
+        rc = fuse_process.wait()
+        _, stderr = fuse_process.communicate()
+    return fuse_pid, rc, stderr
+
 
 @main.command()
 @click.argument('source', required=True, type=str)
@@ -329,12 +340,13 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
             the source directory.
     """
     mountpoint_path = os.path.abspath(os.path.expanduser(source))
-    # If the given source is already mounted with CSYNC, terminate it.
+    # if the given source is already mounted with CSYNC, terminate it.
     if _get_csync_pid_from_mountpoint_path(mountpoint_path):
         _terminate([mountpoint_path])
     csync_pid = os.getpid()
 
-    # create redirected directories for writing and reading
+    # create directories which mountpoint_path redirects
+    # writing and reading to.
     csync_write_path = os.path.abspath(
         os.path.expanduser(_CSYNC_WRITE_PATH.format(pid=csync_pid)))
     csync_read_path = os.path.abspath(
@@ -346,33 +358,32 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     os.makedirs(csync_write_path, exist_ok=True)
     os.makedirs(csync_read_path, exist_ok=True)
 
-    # Mounting cloud object storage on the read path
-    storage_mount_script = get_storage_mount_script(storetype, destination,
-                                                    csync_read_path)
+    # mounting cloud object storage on the read path
     with tempfile.NamedTemporaryFile(mode='w+', delete=False) as script_file:
+        storage_mount_script = get_storage_mount_script(storetype, destination,
+                                                        csync_read_path)
         script_file.write(storage_mount_script)
-        # Ensure all data is written to the file
+        # ensure all data is written to the file
         script_file.flush()
-        bash = f'bash {script_file.name}'
-        with subprocess.Popen(bash,
-                              shell=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE,
-                              start_new_session=True) as storage_mount_process:
-            storage_mount_pid = storage_mount_process.pid
+        storage_fuse_mount_cmd = f'bash {script_file.name}'
+        storage_fuse_mount_pid, rc, stderr = _handle_fuse_process(
+            storage_fuse_mount_cmd)
+        if rc != 0:
+            #TODO(Doyoung): implement error handling
+            pass
 
-    # Redirect read/write of mountpoint_path by mounting redirection FUSE
+    # redirect read/write of mountpoint_path by mounting redirection FUSE
     redirect_mount_cmd = mounting_utils.get_redirect_mount_cmd(
         mountpoint_path, csync_read_path, csync_write_path)
-    with subprocess.Popen(redirect_mount_cmd,
-                          shell=True,
-                          stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE,
-                          start_new_session=True) as redirect_mount_process:
-        redirect_mount_pid = redirect_mount_process.pid
+    redirect_fuse_mount_pid, rc, stderr = _handle_fuse_process(
+        redirect_mount_cmd)
+    if rc != 0:
+        #TODO(Doyoung): implement error handling
+        pass
 
-    _add_running_csync(csync_pid, storage_mount_pid, redirect_mount_pid,
-                       mountpoint_path)
+    _add_running_csync(csync_pid, storage_fuse_mount_pid,
+                       redirect_fuse_mount_pid, mountpoint_path)
+
     while True:
         start_time = time.time()
         delete = False
@@ -440,37 +451,30 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
             _get_storage_and_redirect_mount_pid(csync_pid))
         pid_set.add((csync_pid, storage_mount_pid, redirect_mount_pid))
 
-    return_code = 0
-    failed_to_terminate: List[Tuple[int, str, str]] = []
-
-    def _handle_unmount_process(unmount_path: str, csync_pid: int,
-                                unmount_target: str):
-        unmount_cmd = f'sudo fusermount -uz {unmount_path}'
-        with subprocess.Popen(unmount_cmd,
-                              shell=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE,
-                              text=True) as unmount_process:
-            rc = unmount_process.wait()
-            if rc != 0:
-                _, stderr = unmount_process.communicate()
-                failed_to_terminate.append((csync_pid, stderr, unmount_target))
-        return rc
-
+    failed_to_terminate: bool = False
+    failed_to_terminate_list: List[Tuple[int, str, str]] = []
+    unmount_cmd = 'sudo fusermount -uz {unmount_path}'
     for csync_pid, storage_mount_pid, redirect_mount_pid in pid_set:
         # 1.unmount cloud storage from read path
         csync_read_path = os.path.abspath(
             os.path.expanduser(_CSYNC_READ_PATH.format(pid=csync_pid)))
-        return_code = _handle_unmount_process(csync_read_path, csync_pid,
-                                              'Storage Mount')
-        if return_code != 0:
+        storage_fuse_unmount_cmd = unmount_cmd.format(unmount_path=csync_read_path)
+        _, rc, stderr = _handle_fuse_process(storage_fuse_unmount_cmd)
+        if rc != 0:
+            failed_to_terminate = True
+            failed_to_terminate_list.append(
+                (csync_pid, stderr, 'Storage Mount FUSE'))
             continue
 
         # 2.unmount redirection FUSE
         mountpoint_path = _get_mountpoint_path_from_csync_pid(csync_pid)
-        return_code = _handle_unmount_process(mountpoint_path, csync_pid,
-                                              'Redirection FUSE')
-        if return_code != 0:
+        redirection_fuse_unmount_cmd = unmount_cmd.format(
+            unmount_path=mountpoint_path)
+        _, rc, stderr = _handle_fuse_process(redirection_fuse_unmount_cmd)
+        if rc != 0:
+            failed_to_terminate = True
+            failed_to_terminate_list.append(
+                (csync_pid, stderr, 'Redirection FUSE'))
             continue
         # If there's any process obtaining the file descriptor of a file in
         # mountpoint, i.e. writing a checkpoint, the mountpoint will remain
@@ -508,7 +512,7 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
         _delete_running_csync(csync_pid)
         print(f'deleted CSYNC mounted on {mountpoint_path!r}')
 
-    if return_code:
+    if failed_to_terminate:
         for csync_pid, stderr, unmount_target in failed_to_terminate:
             err_msg = (
                 f'{unmount_target} failed to terminate for CSYNC process '
@@ -517,7 +521,7 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
             sys.stderr.write(err_msg)
             sys.stderr.flush()
         sys.exit(exceptions.CSYNC_TERMINATE_FAILURE_CODE)
-    return return_code
+    return rc
 
 
 if __name__ == '__main__':
