@@ -118,4 +118,4 @@ If your service might experience long periods of time with no traffic, consider 
 
     # ...
 
-The service will scale down all replicas when there is no traffic to the system and will save costs on idle replicas. In this case, the scale up will be faster when the system has no replicas: it will **scale up immediately if any traffic detected**.
+The service will scale down all replicas when there is no traffic to the system and will save costs on idle replicas. When upscaling from zero, the upscale delay will be ignored in order to bring up the service faster.
