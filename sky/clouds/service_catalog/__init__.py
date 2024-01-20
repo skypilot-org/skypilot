@@ -110,6 +110,22 @@ def list_accelerator_counts(
         ret[gpu] = sorted(counts)
     return ret
 
+def list_accelerators_realtime(
+    clouds: CloudFilter = None,
+) -> Dict[str, str]:
+    """List available and total number of accelerators offered by Sky.
+
+    Returns: A dictionary of canonical accelerator names mapped to a 
+    string available/total counts in fraction form. See usage in cli.py.
+    """
+    total_accelerator_available, total_accelerator_count = _map_clouds_catalog(clouds, 'list_accelerators_realtime', False)
+    # if not isinstance(results, list): # unsure if needed
+    #     results = [results]
+    ret: Dict[str, str] = {}
+    for gpu in total_accelerator_available:
+        ret[gpu] = f"{total_accelerator_available[gpu]}/{total_accelerator_count[gpu]}"
+    return ret
+
 
 def instance_type_exists(instance_type: str,
                          clouds: CloudFilter = None) -> bool:
