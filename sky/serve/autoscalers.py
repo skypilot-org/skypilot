@@ -56,7 +56,8 @@ class AutoscalerDecision:
 class Autoscaler:
     """Abstract class for autoscalers."""
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self, spec: 'service_spec.SkyServiceSpec',
+                 initial_version: int) -> None:
         """Initialize the autoscaler.
 
         Variables:
@@ -64,17 +65,19 @@ class Autoscaler:
             max_replicas: Maximum number of replicas. Default to fixed
                 number of replicas, i.e. min_replicas == max_replicas.
             target_num_replicas: Target number of replicas output by autoscaler.
+            latest_version: latest version of the service.
         """
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = (spec.max_replicas if spec.max_replicas
                                   is not None else spec.min_replicas)
         # Target number of replicas is initialized to min replicas.
-        # TODO(MaoZiming): add init replica numbers in SkyServe spec.
         self.target_num_replicas: int = spec.min_replicas
+        self.latest_version: int = initial_version
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
-        del version  # Unused.
+
+        self.latest_version = version
         self.min_nodes = spec.min_replicas
         self.max_nodes = (spec.max_replicas if spec.max_replicas is not None
                           else spec.min_replicas)
@@ -115,9 +118,8 @@ class RequestRateAutoscaler(Autoscaler):
             scale_up_consecutive_periods: period for scaling up.
             scale_down_consecutive_periods: period for scaling down.
             bootstrap_done: whether bootstrap is done.
-            latest_version: latest version of the service.
         """
-        super().__init__(spec)
+        super().__init__(spec, initial_version)
         self.target_qps_per_replica: Optional[
             float] = spec.target_qps_per_replica
         self.qps_window_size: int = qps_window_size
@@ -139,7 +141,6 @@ class RequestRateAutoscaler(Autoscaler):
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
 
         self.bootstrap_done: bool = False
-        self.latest_version: int = initial_version
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
@@ -158,7 +159,6 @@ class RequestRateAutoscaler(Autoscaler):
         self.scale_down_consecutive_periods = int(
             downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
-        self.latest_version = version
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
