@@ -143,8 +143,8 @@ def bulk_provision(
     """Provisions a cluster and wait until fully provisioned.
 
     Raises:
-        StopFailoverError: If the cluster was ever up and the provisioning
-            process failed.
+        StopFailoverError: Raised when during failover cleanup, tearing
+            down any potentially live cluster failed despite retries
         Cloud specific exceptions: If the provisioning process failed, cloud-
             specific exceptions will be raised by the cloud APIs.
     """
@@ -207,7 +207,7 @@ def bulk_provision(
                         'This can cause resource leakage. Please check the '
                         'failure and the cluster status on the cloud, and '
                         'manually terminate the cluster. '
-                        f'Details: {formatted_exception}')
+                        f'Details: {formatted_exception}') from e
             raise
 
 

@@ -22,7 +22,11 @@ class ProvisionerError(RuntimeError):
 
 
 class StopFailoverError(Exception):
-    """Exception for termination."""
+    """Exception for stopping failover.
+
+    It will be raised when failed to cleaning up resources after a failed
+    provision, so the caller should stop the failover process and raise.
+    """
 
 
 @dataclasses.dataclass
