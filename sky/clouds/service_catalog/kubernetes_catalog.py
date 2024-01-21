@@ -5,6 +5,7 @@ mapping SkyPilot image tags to corresponding container image tags.
 """
 from typing import Dict, List, Optional, Set, Tuple
 
+import collections
 import pandas as pd
 
 from sky import global_user_state
@@ -96,6 +97,52 @@ def list_accelerators(
                                          name_filter, region_filter,
                                          quantity_filter, case_sensitive)
 
+def list_accelerators_realtime(
+    all_regions: bool = False,
+) -> Tuple[Dict[str,int], Dict[str,int]]:
+    k8s_cloud = Kubernetes()
+    del all_regions  # unused
+    if not any(
+            map(k8s_cloud.is_same_cloud, global_user_state.get_enabled_clouds())
+    ) or not kubernetes_utils.check_credentials()[0]:
+        return {}
+
+    has_gpu = kubernetes_utils.detect_gpu_resource()
+    if not has_gpu:
+        return {}
+
+    label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter()
+    if not label_formatter:
+        return {}
+
+    key = label_formatter.get_label_key()
+    nodes = kubernetes_utils.get_kubernetes_nodes()
+    pods = kubernetes_utils.get_kubernetes_pods()
+
+    total_accelerator_available: Dict[str, int] = collections.defaultdict(int)
+    total_accelerator_count: Dict[str, int] = collections.defaultdict(int)
+
+    for node in nodes:
+        if key in node.metadata.labels:
+            name = node.metadata.name
+            accelerator_name = label_formatter.get_accelerator_from_label_value(
+                node.metadata.labels.get(key))
+            accelerator_count = int(
+                node.status.allocatable.get('nvidia.com/gpu', 0))
+
+            used_gpu = 0
+
+            for pod in pods:
+                if pod.spec.node_name == name and pod.status.phase in ['Running', 'Pending'] and pod.metadata.namespace == 'default':
+                    for container in pod.spec.containers:
+                        if container.resources.requests:
+                            used_gpu += int(container.resources.requests.get(
+                                'nvidia.com/gpu', 0))
+            
+            total_accelerator_count[accelerator_name] += accelerator_count
+            total_accelerator_available[accelerator_name] += (accelerator_count - used_gpu)
+
+    return total_accelerator_available, total_accelerator_count
 
 def validate_region_zone(
     region_name: Optional[str],

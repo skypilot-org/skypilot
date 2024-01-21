@@ -3574,8 +3574,12 @@ def show_gpus(
         return ', '.join([str(e) for e in lst])
 
     def _output():
-        gpu_table = log_utils.create_table(
-            ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
+        if cloud == 'kubernetes':
+            gpu_table = log_utils.create_table(
+                ['COMMON_GPU', 'AVAILABLE_QUANTITIES', 'REALTIME_AVAILABILITY'])
+        else:
+            gpu_table = log_utils.create_table(
+                ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
         tpu_table = log_utils.create_table(
             ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
         other_table = log_utils.create_table(
@@ -3595,10 +3599,17 @@ def show_gpus(
                 return
 
             # "Common" GPUs
-            for gpu in service_catalog.get_common_gpus():
-                if gpu in result:
-                    gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
-            yield from gpu_table.get_string()
+            if cloud == 'kubernetes':
+                available_result = service_catalog.list_accelerators_realtime(clouds=cloud)
+                for gpu in service_catalog.get_common_gpus():
+                    if gpu in result and gpu in available_result:
+                        gpu_table.add_row([gpu, _list_to_str(result.pop(gpu)), available_result.pop(gpu)])
+                yield from gpu_table.get_string()
+            else:
+                for gpu in service_catalog.get_common_gpus():
+                    if gpu in result:
+                        gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+                yield from gpu_table.get_string()
 
             # Google TPUs
             for tpu in service_catalog.get_tpus():
@@ -3649,7 +3660,6 @@ def show_gpus(
                                                    clouds=cloud,
                                                    case_sensitive=False,
                                                    all_regions=all_regions)
-
         if len(result) == 0:
             if cloud == 'kubernetes':
                 yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
