@@ -293,7 +293,12 @@ def _handle_fuse_process(fuse_cmd: str) -> Tuple[int, int, str]:
                             text=True) as fuse_process:
         fuse_pid = fuse_process.pid
         rc = fuse_process.wait()
-        _, stderr = fuse_process.communicate()
+        stdout, stderr = fuse_process.communicate()
+        stderr = stdout + stderr
+    if rc != 0:
+        sys.stderr.write(stderr)
+        sys.stderr.flush()
+        sys.exit(exceptions.CSYNC_TERMINATE_FAILURE_CODE)
     return fuse_pid, rc, stderr
 
 
@@ -358,6 +363,7 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     os.makedirs(csync_write_path, exist_ok=True)
     os.makedirs(csync_read_path, exist_ok=True)
 
+    error_msg = 'failed to run {process}'
     # mounting cloud object storage on the read path
     with tempfile.NamedTemporaryFile(mode='w+', delete=False) as script_file:
         storage_mount_script = get_storage_mount_script(storetype, destination,
@@ -368,18 +374,12 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         storage_fuse_mount_cmd = f'bash {script_file.name}'
         storage_fuse_mount_pid, rc, stderr = _handle_fuse_process(
             storage_fuse_mount_cmd)
-        if rc != 0:
-            #TODO(Doyoung): implement error handling
-            pass
 
     # redirect read/write of mountpoint_path by mounting redirection FUSE
     redirect_mount_cmd = mounting_utils.get_redirect_mount_cmd(
         mountpoint_path, csync_read_path, csync_write_path)
     redirect_fuse_mount_pid, rc, stderr = _handle_fuse_process(
         redirect_mount_cmd)
-    if rc != 0:
-        #TODO(Doyoung): implement error handling
-        pass
 
     _add_running_csync(csync_pid, storage_fuse_mount_pid,
                        redirect_fuse_mount_pid, mountpoint_path)
@@ -521,7 +521,7 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
             sys.stderr.write(err_msg)
             sys.stderr.flush()
         sys.exit(exceptions.CSYNC_TERMINATE_FAILURE_CODE)
-    return rc
+    return 0
 
 
 if __name__ == '__main__':
