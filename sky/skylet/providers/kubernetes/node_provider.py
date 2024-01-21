@@ -379,18 +379,20 @@ class KubernetesNodeProvider(NodeProvider):
         # Checks if the default user has sufficient privilege to set up
         # the kubernetes instance pod.
         check_k8s_user_sudo_cmd = [
-            '/bin/sh', '-c',
-            ('if [ $(id -u) -eq 0 ]; then' 
-             # If user is root, create an alias for sudo used in skypilot setup
-             '  echo \'alias sudo=""\' >> ~/.bashrc; ' 
-             'else '
-             '  if command -v sudo >/dev/null 2>&1; then '
-             '    timeout 2 sudo -l >/dev/null 2>&1 || '
-             f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
-             '  else '
-             f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
-             '  fi; '
-             'fi')
+            '/bin/sh',
+            '-c',
+            (
+                'if [ $(id -u) -eq 0 ]; then'
+                # If user is root, create an alias for sudo used in skypilot setup
+                '  echo \'alias sudo=""\' >> ~/.bashrc; '
+                'else '
+                '  if command -v sudo >/dev/null 2>&1; then '
+                '    timeout 2 sudo -l >/dev/null 2>&1 || '
+                f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+                '  else '
+                f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+                '  fi; '
+                'fi')
         ]
 
         for new_node in new_nodes:
@@ -424,7 +426,7 @@ class KubernetesNodeProvider(NodeProvider):
 
         for new_node in new_nodes:
             run_command_on_pods(new_node.metadata.name, self.namespace,
-                                         set_k8s_ssh_cmd)
+                                set_k8s_ssh_cmd)
 
     def _set_env_vars_in_pods(self, new_nodes):
         """Setting environment variables in pods.

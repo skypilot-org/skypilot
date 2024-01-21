@@ -594,7 +594,8 @@ def get_config_schema():
                     'pod_override': {
                         'type': 'object',
                         'required': [],
-                        'additionalProperties': True, # Allow arbitrary keys since validating pod spec is hard.
+                        # Allow arbitrary keys since validating pod spec is hard
+                        'additionalProperties': True,
                     }
                 }
             },

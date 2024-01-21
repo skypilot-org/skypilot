@@ -743,7 +743,7 @@ def _replace_yaml_dicts(
     return common_utils.dump_yaml_str(new_config)
 
 
-def _add_kubernetes_config_fields(yaml_path: str) -> str:
+def _add_kubernetes_config_fields(yaml_path: str) -> None:
     """Adds or updates fields in the YAML with fields from the ~/.sky/config's
     kubernetes.pod_spec dict.
 
@@ -787,6 +787,7 @@ def _add_kubernetes_config_fields(yaml_path: str) -> str:
                         - name: my-secret
         ```
     """
+
     def _merge_dicts(source, destination):
         """Merge two dictionaries.
 
@@ -817,13 +818,19 @@ def _add_kubernetes_config_fields(yaml_path: str) -> str:
     with open(yaml_path, 'r') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
-    kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_override'),
-                                                   {})
-    _merge_dicts(kubernetes_config,
-                yaml_obj['available_node_types']['ray_head_default']['node_config'])
-    _merge_dicts(kubernetes_config,
-                yaml_obj['available_node_types']['ray_worker_default']['node_config'])
-    return common_utils.dump_yaml(yaml_path, yaml_obj)
+    kubernetes_config = skypilot_config.get_nested(
+        ('kubernetes', 'pod_override'), {})
+
+    # Merge the kubernetes config into the YAML for both head and worker nodes.
+    _merge_dicts(
+        kubernetes_config,
+        yaml_obj['available_node_types']['ray_head_default']['node_config'])
+    _merge_dicts(
+        kubernetes_config,
+        yaml_obj['available_node_types']['ray_worker_default']['node_config'])
+
+    # Write the updated YAML back to the file
+    common_utils.dump_yaml(yaml_path, yaml_obj)
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
