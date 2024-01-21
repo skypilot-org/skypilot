@@ -424,6 +424,8 @@ class KubernetesNodeProvider(NodeProvider):
              '$(prefix_cmd) service ssh restart')
         ]
 
+
+        # TODO(romilb): We need logging and surface errors here.
         for new_node in new_nodes:
             run_command_on_pods(new_node.metadata.name, self.namespace,
                                 set_k8s_ssh_cmd)
@@ -521,17 +523,30 @@ class KubernetesNodeProvider(NodeProvider):
         jump_pod = kubernetes.core_api().read_namespaced_pod(
             ssh_jump_pod_name, self.namespace)
         new_nodes_with_jump_pod.append(jump_pod)
+        node_names = [node.metadata.name for node in new_nodes_with_jump_pod]
 
         # Wait until the pods are scheduled and surface cause for error
         # if there is one
+        logger.info(config.log_prefix +
+                    f'Waiting for pods to schedule. Pods: {node_names}')
         self._wait_for_pods_to_schedule(new_nodes_with_jump_pod)
         # Wait until the pods and their containers are up and running, and
         # fail early if there is an error
+        logger.info(config.log_prefix +
+                    f'Waiting for pods to run. Pods: {node_names}')
         self._wait_for_pods_to_run(new_nodes_with_jump_pod)
+        logger.info(config.log_prefix +
+                    f'Checking if user in image has sufficient privileges.')
         self._check_user_privilege(new_nodes)
+        logger.info(config.log_prefix +
+                    f'Setting up SSH in pod.')
         self._setup_ssh_in_pods(new_nodes)
+        logger.info(config.log_prefix +
+                    f'Setting up environment variables in pod.')
         self._set_env_vars_in_pods(new_nodes)
         cluster_name_with_hash = conf['metadata']['labels']['skypilot-cluster']
+        logger.info(config.log_prefix +
+                    f'Fetching and updating ssh username.')
         self._update_ssh_user_config(new_nodes, cluster_name_with_hash)
 
     def terminate_node(self, node_id):

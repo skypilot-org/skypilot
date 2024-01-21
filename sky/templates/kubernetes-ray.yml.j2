@@ -280,7 +280,7 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - sudo apt install gcc patch pciutils rsync fuse curl python3 python3-pip -y;
+  - export DEBIAN_FRONTEND=noninteractive; sudo apt install gcc patch pciutils rsync fuse curl python3 python3-pip -y;
     mkdir -p ~/.ssh; sudo touch ~/.ssh/config;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
