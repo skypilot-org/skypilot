@@ -363,72 +363,12 @@ def get_service_schema():
 
 
 def get_task_schema():
-    return {
-        '$schema': 'https://json-schema.org/draft/2020-12/schema',
-        'type': 'object',
-        'required': [],
-        'additionalProperties': False,
-        'properties': {
-            'name': {
-                'type': 'string',
-            },
-            'workdir': {
-                'type': 'string',
-            },
-            'event_callback': {
-                'type': 'string',
-            },
-            'num_nodes': {
-                'type': 'integer',
-            },
-            # resources config is validated separately using RESOURCES_SCHEMA
-            'resources': {
-                'type': 'object',
-            },
-            # storage config is validated separately using STORAGE_SCHEMA
-            'file_mounts': {
-                'type': 'object',
-            },
-            # service config is validated separately using SERVICE_SCHEMA
-            'service': {
-                'type': 'object',
-            },
-            'setup': {
-                'type': 'string',
-            },
-            'run': {
-                'type': 'string',
-            },
-            'envs': {
-                'type': 'object',
-                'required': [],
-                'patternProperties': {
-                    # Checks env keys are valid env var names.
-                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
-                        'type': 'string'
-                    }
-                },
-                'additionalProperties': False,
-            },
-            # inputs and outputs are experimental
-            'inputs': {
-                'type': 'object',
-                'required': [],
-                'maxProperties': 1,
-                'additionalProperties': {
-                    'type': 'number'
-                }
-            },
-            'outputs': {
-                'type': 'object',
-                'required': [],
-                'maxProperties': 1,
-                'additionalProperties': {
-                    'type': 'number'
-                }
-            },
-        }
-    }
+    """Return Task JSON Schema from file"""
+    # pylint: disable=import-outside-toplevel
+    import json
+    with open('sky/templates/skypilot-task.json', 'r') as file:
+        data = json.load(file)
+    return data
 
 
 def get_cluster_schema():
