@@ -21,6 +21,14 @@ class ProvisionerError(RuntimeError):
     errors: List[Dict[str, str]]
 
 
+class StopFailoverError(Exception):
+    """Exception for stopping failover.
+
+    It will be raised when failed to cleaning up resources after a failed
+    provision, so the caller should stop the failover process and raise.
+    """
+
+
 @dataclasses.dataclass
 class ProvisionConfig:
     """Configuration for provisioning."""
