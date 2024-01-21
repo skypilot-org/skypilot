@@ -29,16 +29,22 @@ html[data-theme="dark"] {
   --pst-color-secondary: var(--pst-color-primary);
   }
 
-.form-control {
+.form-control:focus,:focus-visible {
+  border: none;
+  box-shadow: none;
+  outline: none;
   background-color: var(--pst-color-background);
-  color: var(--pst-color-text-base);
+  color: var(--pst-color-text-muted);
+}
 
-  &:focus,
-  &:focus-visible {
-    border: none;
-    box-shadow: none;
-    outline: none;
-    background-color: var(--pst-color-background);
-    color: var(--pst-color-text-muted);
-  }
+.bd-sidebar:not(:hover) {
+  -ms-overflow-style: none;
+}
+
+.bd-sidebar:not(:hover)::-webkit-scrollbar {
+  background: var(--pst-color-background);
+}
+
+.bd-sidebar:not(:hover)::-webkit-scrollbar-thumb {
+  background: var(--pst-color-background);
 }
