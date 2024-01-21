@@ -48,11 +48,6 @@ RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 # dependencies to optimize rebuild time
 COPY --chown=sky . /skypilot/sky/
 
-# TODO(romilb): Installing SkyPilot may not be necessary since ray up will do it
-RUN cd /skypilot/ && \
-    sudo mv -v sky/setup_files/* . && \
-    pip install ".[aws]"
-
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1
 

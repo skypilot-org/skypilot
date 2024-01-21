@@ -591,6 +591,11 @@ def get_config_schema():
                             for type in kubernetes_enums.KubernetesPortMode
                         ]
                     },
+                    'pod_override': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': True, # Allow arbitrary keys since validating pod spec is hard.
+                    }
                 }
             },
             'oci': {

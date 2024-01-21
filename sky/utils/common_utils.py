@@ -274,6 +274,10 @@ def dump_yaml_str(config):
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
 
+        # Disable anchors and aliases to keep the output clean.
+        # https://github.com/yaml/pyyaml/issues/535
+        ignore_aliases = lambda *args: True
+
         def write_line_break(self, data=None):
             super().write_line_break(data)
             if len(self.indents) == 1:
