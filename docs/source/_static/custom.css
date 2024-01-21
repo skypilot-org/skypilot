@@ -27,4 +27,18 @@ html[data-theme="light"] {
 
 html[data-theme="dark"] {
   --pst-color-secondary: var(--pst-color-primary);
+  }
+
+.form-control {
+  background-color: var(--pst-color-background);
+  color: var(--pst-color-text-base);
+
+  &:focus,
+  &:focus-visible {
+    border: none;
+    box-shadow: none;
+    outline: none;
+    background-color: var(--pst-color-background);
+    color: var(--pst-color-text-muted);
+  }
 }
