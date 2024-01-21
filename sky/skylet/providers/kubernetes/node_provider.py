@@ -380,8 +380,9 @@ class KubernetesNodeProvider(NodeProvider):
         # the kubernetes instance pod.
         check_k8s_user_sudo_cmd = [
             '/bin/sh', '-c',
-            ('if [ $(id -u) -eq 0 ]; then'
-             '  echo \'alias sudo=""\' >> ~/.bashrc; '
+            ('if [ $(id -u) -eq 0 ]; then' 
+             # If user is root, create an alias for sudo used in skypilot setup
+             '  echo \'alias sudo=""\' >> ~/.bashrc; ' 
              'else '
              '  if command -v sudo >/dev/null 2>&1; then '
              '    timeout 2 sudo -l >/dev/null 2>&1 || '
@@ -597,17 +598,12 @@ class KubernetesNodeProvider(NodeProvider):
         docker_config(dict): If set, the docker information of the docker
             container that commands should be run on.
         """
-        # For custom images, the username might differ. Ensure that the 'ssh_user'
-        # reflects the username from the custom image. The cluster configuration
-        # from the yaml is updated during the 'create_node()' process.
+        # For custom images, the username might differ across images.
+        # The 'ssh_user' is updated inplace in the YAML during the
+        # 'create_node()' process. Need to reload the updated auth from YAML.
         cluster_yaml_path = self._recover_cluster_yaml_path(
             cluster_name_with_hash)
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            cluster_yaml_path)
-        credentials_to_keep = [
-            'ssh_user', 'ssh_private_key', 'ssh_proxy_command'
-        ]
-        auth_config = {key: ssh_credentials[key] for key in credentials_to_keep}
+        auth_config = backend_utils.ssh_credential_from_yaml(cluster_yaml_path)
 
         common_args = {
             'log_prefix': log_prefix,
