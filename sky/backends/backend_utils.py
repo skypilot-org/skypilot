@@ -144,6 +144,10 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # Other clouds
     ('provider', 'docker_login_config'),
     ('provider', 'firewall_rule'),
+    # TPU node launched before #2943 does not have the `provider.tpu_node` set,
+    # and our latest code need this field to be set to distinguish the node, so
+    # we need to take this field from the new yaml.
+    ('provider', 'tpu_node'),
     ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
@@ -862,6 +866,12 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
+    # For TPU nodes. TPU VMs do not need TPU_NAME.
+    tpu_node_name = resources_vars.get('tpu_name')
+    if gcp_utils.is_tpu(to_provision) and not gcp_utils.is_tpu_vm(to_provision):
+        if tpu_node_name is None:
+            tpu_node_name = cluster_name
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -897,6 +907,7 @@ def write_cluster_config(
                 # GCP only:
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
+                'tpu_node_name': tpu_node_name,
 
                 # Conda setup
                 'conda_installation_commands':
@@ -973,53 +984,6 @@ def write_cluster_config(
     # Rename the tmp file to the final YAML path.
     os.rename(tmp_yaml_path, yaml_path)
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
-
-    # For TPU nodes. TPU VMs do not need TPU_NAME.
-    if gcp_utils.is_tpu(to_provision) and not gcp_utils.is_tpu_vm(to_provision):
-        tpu_name = resources_vars.get('tpu_name')
-        if tpu_name is None:
-            tpu_name = cluster_name
-
-        user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
-
-        # We do not import the module under sky.skylet.providers globally as we
-        # need to avoid importing ray module (extras like skypilot[aws] has
-        # removed the Ray dependency).
-        # pylint: disable=import-outside-toplevel
-        from sky.skylet.providers.gcp import config as gcp_config
-        config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
-        vpc_name = None
-        try:
-            vpc_name, _ = gcp_config.get_usable_vpc_and_subnet(config)
-        except RuntimeError as e:
-            # Launching a TPU and encountering a bootstrap-phase error, no point
-            # in failover unless:
-            # TODO(zongheng): handle failover when multi-resource is added.
-            with ux_utils.print_exception_no_traceback():
-                raise e
-
-        scripts = []
-        for template_name in ('gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'):
-            script_path = os.path.join(user_file_dir, template_name).replace(
-                '.sh.j2', f'.{cluster_name}.sh')
-            fill_template(
-                template_name,
-                dict(
-                    resources_vars, **{
-                        'tpu_name': tpu_name,
-                        'gcp_project_id': gcp_project_id,
-                        'vpc_name': vpc_name,
-                    }),
-                # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
-                # with cluster yamls.
-                output_path=script_path,
-            )
-            scripts.append(script_path)
-
-        config_dict['tpu-create-script'] = scripts[0]
-        config_dict['tpu-delete-script'] = scripts[1]
-        config_dict['tpu_name'] = tpu_name
     return config_dict
 
 
@@ -1042,6 +1006,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_kubernetes_authentication(config)
     elif isinstance(cloud, clouds.IBM):
         config = auth.setup_ibm_authentication(config)
+    elif isinstance(cloud, clouds.RunPod):
+        config = auth.setup_runpod_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -2050,7 +2016,7 @@ def _update_cluster_status(
         return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _refresh_cluster_record(
+def refresh_cluster_record(
         cluster_name: str,
         *,
         force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
@@ -2120,7 +2086,7 @@ def refresh_cluster_status_handle(
     handle of the cluster.
     Please refer to the docstring of refresh_cluster_record for the details.
     """
-    record = _refresh_cluster_record(
+    record = refresh_cluster_record(
         cluster_name,
         force_refresh_statuses=force_refresh_statuses,
         acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
@@ -2442,7 +2408,7 @@ def get_clusters(
 
     def _refresh_cluster(cluster_name):
         try:
-            record = _refresh_cluster_record(
+            record = refresh_cluster_record(
                 cluster_name,
                 force_refresh_statuses=set(status_lib.ClusterStatus),
                 acquire_per_cluster_status_lock=True)

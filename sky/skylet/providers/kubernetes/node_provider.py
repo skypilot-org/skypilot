@@ -80,8 +80,9 @@ class KubernetesNodeProvider(NodeProvider):
         self.cluster_name = cluster_name
 
         # Kubernetes namespace to user
-        self.namespace = kubernetes_utils.get_current_kube_config_context_namespace(
-        )
+        self.namespace = provider_config.get(
+            'namespace',
+            kubernetes_utils.get_current_kube_config_context_namespace())
 
         # Timeout for resource provisioning. If it takes longer than this
         # timeout, the resource provisioning will be considered failed.
@@ -192,7 +193,7 @@ class KubernetesNodeProvider(NodeProvider):
 
     def _raise_pod_scheduling_errors(self, new_nodes):
         """Raise pod scheduling failure reason.
-        
+
         When a pod fails to schedule in Kubernetes, the reasons for the failure
         are recorded as events. This function retrieves those events and raises
         descriptive errors for better debugging and user feedback.
@@ -265,7 +266,7 @@ class KubernetesNodeProvider(NodeProvider):
 
     def _wait_for_pods_to_schedule(self, new_nodes):
         """Wait for all pods to be scheduled.
-        
+
         Wait for all pods including jump pod to be scheduled, and if it
         exceeds the timeout, raise an exception. If pod's container
         is ContainerCreating, then we can assume that resources have been
@@ -302,7 +303,7 @@ class KubernetesNodeProvider(NodeProvider):
 
     def _wait_for_pods_to_run(self, new_nodes):
         """Wait for pods and their containers to be ready.
-        
+
         Pods may be pulling images or may be in the process of container
         creation.
         """
@@ -346,7 +347,7 @@ class KubernetesNodeProvider(NodeProvider):
 
     def _set_env_vars_in_pods(self, new_nodes):
         """Setting environment variables in pods.
-        
+
         Once all containers are ready, we can exec into them and set env vars.
         Kubernetes automatically populates containers with critical
         environment variables, such as those for discovering services running

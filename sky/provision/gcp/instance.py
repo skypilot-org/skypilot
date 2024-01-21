@@ -119,17 +119,12 @@ def _wait_for_operations(
     If zone is None, then the operation is global.
     """
     op_type = 'global' if zone is None else 'zone'
-    total_polls = 0
     for handler, operations in handlers_to_operations.items():
         for operation in operations:
             logger.debug(
                 f'wait_for_compute_{op_type}_operation: '
                 f'Waiting for operation {operation["name"]} to finish...')
-            while total_polls < constants.MAX_POLLS:
-                if handler.wait_for_operation(operation, project_id, zone):
-                    break
-                time.sleep(constants.POLL_INTERVAL)
-                total_polls += 1
+            handler.wait_for_operation(operation, project_id, zone)
 
 
 def _get_head_instance_id(instances: List) -> Optional[str]:
@@ -290,7 +285,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             config.node_config, labels, to_start_count,
             head_instance_id is None)
         if errors:
-            error = common.ProvisionError('Failed to launch instances.')
+            error = common.ProvisionerError('Failed to launch instances.')
             error.errors = errors
             raise error
         if head_instance_id is None:
@@ -326,6 +321,18 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
                        'or some resource leak.')
 
     assert head_instance_id is not None, 'head_instance_id is None'
+
+    tpu_node = config.provider_config.get('tpu_node')
+    if tpu_node is not None:
+        vpc_name = resource.get_vpc_name(project_id, availability_zone,
+                                         head_instance_id)
+        assert config.count == 1, 'TPU node only supports 1 instance'
+        instance_utils.create_tpu_node(
+            project_id,
+            availability_zone,
+            tpu_node,
+            vpc_name,
+        )
     return common.ProvisionRecord(provider_name='gcp',
                                   region=region,
                                   zone=availability_zone,
@@ -358,7 +365,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             })
         else:
             raise
-        error = common.ProvisionError('Failed to launch instances.')
+        error = common.ProvisionerError('Failed to launch instances.')
         error.errors = errors
         raise error from e
 
@@ -433,6 +440,11 @@ def stop_instances(
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
     label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+
+    tpu_node = provider_config.get('tpu_node')
+    if tpu_node is not None:
+        instance_utils.delete_tpu_node(project_id, zone, tpu_node)
+
     if worker_only:
         label_filters[TAG_RAY_NODE_KIND] = 'worker'
 
@@ -491,6 +503,10 @@ def terminate_instances(
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
     use_tpu_vms = provider_config.get('_has_tpus', False)
+
+    tpu_node = provider_config.get('tpu_node')
+    if tpu_node is not None:
+        instance_utils.delete_tpu_node(project_id, zone, tpu_node)
 
     label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     if worker_only:
@@ -581,9 +597,11 @@ def open_ports(
 
 def cleanup_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    del ports  # Unused.
     assert provider_config is not None, cluster_name_on_cloud
     project_id = provider_config['project_id']
     if 'ports' in provider_config:
@@ -597,3 +615,13 @@ def cleanup_ports(
         firewall_rule_name = provider_config['firewall_rule']
         instance_utils.GCPComputeInstance.delete_firewall_rule(
             project_id, firewall_rule_name)
+
+
+def query_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[common.Endpoint]]:
+    """See sky/provision/__init__.py"""
+    return common.query_ports_passthrough(cluster_name_on_cloud, ports,
+                                          provider_config)

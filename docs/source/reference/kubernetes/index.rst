@@ -4,10 +4,9 @@ Running on Kubernetes
 =============================
 
 .. note::
-    Kubernetes support is in alpha preview and under active development.
-    There may be rough edges and features may change without notice.
-    Please report any `bugs <https://github.com/skypilot-org/skypilot/issues>`_ and
-    `reach out to us <http://slack.skypilot.co>`_ for feature requests.
+    Kubernetes support is under active development. `Please share your feedback <https://forms.gle/KmAtyNhEysiw2ZCR7>`_
+    or `directly reach out to the development team <http://slack.skypilot.co>`_
+    for feature requests and more.
 
 SkyPilot tasks can be run on your private on-prem or cloud Kubernetes clusters.
 The Kubernetes cluster gets added to the list of "clouds" in SkyPilot and SkyPilot
