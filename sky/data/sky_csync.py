@@ -526,7 +526,8 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
             time.sleep(5)
 
         _delete_running_csync(csync_pid)
-        print(f'deleted CSYNC mounted on {mountpoint_path!r}')
+        sys.stdout.write(f'Terminated CSYNC mounted on {mountpoint_path!r}')
+        sys.stdout.flush()
 
     if failed_to_terminate:
         for csync_pid, stderr, unmount_target in failed_to_terminate_list:
