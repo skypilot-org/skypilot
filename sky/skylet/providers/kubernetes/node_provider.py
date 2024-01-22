@@ -17,6 +17,7 @@ from sky.adaptors import kubernetes
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet.providers.kubernetes import config
+from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
 
@@ -214,6 +215,12 @@ class KubernetesNodeProvider(NodeProvider):
         cluster_yaml_path = (os.path.join(
             os.path.expanduser(constants.SKY_USER_FILE_PATH),
             f'{cluster_name}.yml'))
+        # Check if cluster_yaml_path exists. If not, we are running on
+        # the master node in a multi-node setup, in which case we must use the
+        # default ~/.sky/sky_ray.yml path.
+        if not os.path.exists(cluster_yaml_path):
+            cluster_yaml_path = os.path.expanduser(
+                cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH)
         return cluster_yaml_path
 
     def _set_node_tags(self, node_id, tags):
