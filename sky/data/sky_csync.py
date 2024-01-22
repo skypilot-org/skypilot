@@ -1,6 +1,7 @@
 """CSYNC module"""
 import functools
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -179,7 +180,7 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
                    num_threads: int, delete: bool,
                    no_follow_symlinks: bool) -> str:
     """Builds sync command given storetype"""
-
+    source = shlex.quote(source)
     if storetype == 's3':
         # aws s3 sync does not support options to set number of threads
         # so we need a separate command for configuration
@@ -191,6 +192,12 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
 
         # Construct the main sync command
         base_sync_cmd = ['aws', 's3', 'sync', source, f's3://{destination}']
+        excluded_list = ['.git/*', '.*.swp']
+        excludes = ' '.join([
+            f'--exclude {shlex.quote(file_name)}'
+            for file_name in excluded_list
+        ])
+        base_sync_cmd.append(excludes)
         if delete:
             base_sync_cmd.append('--delete')
         if no_follow_symlinks:
@@ -216,7 +223,7 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
             base_sync_cmd.append('-e')
 
         base_sync_cmd.append('-x')
-        excluded_list = [r'\..*\.swp$']
+        excluded_list = [r'^\.git/.*$', r'\..*\.swp$']
         excludes = '|'.join(excluded_list)
         base_sync_cmd.append(excludes)
 
