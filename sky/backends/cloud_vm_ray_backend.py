@@ -4611,8 +4611,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 )
             except exceptions.CommandError as e:
                 mount_path = (f'{colorama.Fore.RED}'
-                                f'{colorama.Style.BRIGHT}{dst}'
-                                f'{colorama.Style.RESET_ALL}')
+                              f'{colorama.Style.BRIGHT}{dst}'
+                              f'{colorama.Style.RESET_ALL}')
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
                     error_msg = (f'Mount path {mount_path} is non-empty.'
                                  f' {mount_path} may be a standard unix '

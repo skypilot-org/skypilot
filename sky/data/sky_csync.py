@@ -194,8 +194,7 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
         base_sync_cmd = ['aws', 's3', 'sync', source, f's3://{destination}']
         excluded_list = ['.git/*', '.*.swp']
         excludes = ' '.join([
-            f'--exclude {shlex.quote(file_name)}'
-            for file_name in excluded_list
+            f'--exclude {shlex.quote(file_name)}' for file_name in excluded_list
         ])
         base_sync_cmd.append(excludes)
         if delete:
@@ -255,11 +254,11 @@ def run_sync(source: str, storetype: str, destination: str, num_threads: int,
     backoff = common_utils.Backoff(int(interval_seconds / 2))
     for i in range(_MAX_SYNC_RETRIES):
         with subprocess.Popen(sync_cmd,
-                                start_new_session=True,
-                                shell=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True) as sync_process:
+                              start_new_session=True,
+                              shell=True,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              text=True) as sync_process:
             _set_running_csync_sync_pid(csync_pid, sync_process.pid)
             stdout, stderr = sync_process.communicate()
             _set_running_csync_sync_pid(csync_pid, -1)
@@ -296,6 +295,7 @@ def get_storage_mount_script(storetype: str, destination: str,
         StorageMode.MOUNT, mount_path, mount_cmd, install_cmd)
     return storage_mount_script
 
+
 def _handle_fuse_process(fuse_cmd: str) -> Tuple[int, int, str]:
     with subprocess.Popen(fuse_cmd,
                           shell=True,
@@ -307,12 +307,12 @@ def _handle_fuse_process(fuse_cmd: str) -> Tuple[int, int, str]:
         rc = fuse_process.returncode
         sys.stdout.write(stdout)
         sys.stdout.flush()
+        stderr = stdout + stderr
     if rc != 0:
         stderr = stdout + stderr
         sys.stderr.write(f'FUSE error: {stderr}')
         sys.stderr.flush()
-        sys.exit(exceptions.CSYNC_TERMINATE_FAILURE_CODE)
-    return fuse_pid
+    return fuse_pid, rc, stderr
 
 
 @main.command()
@@ -384,12 +384,17 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         # ensure all data is written to the file
         script_file.flush()
         storage_fuse_mount_cmd = f'bash {script_file.name}'
-        storage_fuse_mount_pid = _handle_fuse_process(storage_fuse_mount_cmd)
+        storage_fuse_mount_pid, rc, _ = _handle_fuse_process(
+            storage_fuse_mount_cmd)
+    if rc != 0:
+        sys.exit(exceptions.CSYNC_TERMINATE_FAILURE_CODE)
 
     # redirect read/write of mountpoint_path by mounting redirection FUSE
     redirect_mount_cmd = mounting_utils.get_redirect_mount_cmd(
         mountpoint_path, csync_read_path, csync_write_path)
-    redirect_fuse_mount_pid = _handle_fuse_process(redirect_mount_cmd)
+    redirect_fuse_mount_pid, rc, _ = _handle_fuse_process(redirect_mount_cmd)
+    if rc != 0:
+        sys.exit(exceptions.CSYNC_TERMINATE_FAILURE_CODE)
 
     _add_running_csync(csync_pid, storage_fuse_mount_pid,
                        redirect_fuse_mount_pid, mountpoint_path)
@@ -468,7 +473,8 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
         # 1.unmount cloud storage from read path
         csync_read_path = os.path.abspath(
             os.path.expanduser(_CSYNC_READ_PATH.format(pid=csync_pid)))
-        storage_fuse_unmount_cmd = unmount_cmd.format(unmount_path=csync_read_path)
+        storage_fuse_unmount_cmd = unmount_cmd.format(
+            unmount_path=csync_read_path)
         _, rc, stderr = _handle_fuse_process(storage_fuse_unmount_cmd)
         if rc != 0:
             failed_to_terminate = True
@@ -523,7 +529,7 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
         print(f'deleted CSYNC mounted on {mountpoint_path!r}')
 
     if failed_to_terminate:
-        for csync_pid, stderr, unmount_target in failed_to_terminate:
+        for csync_pid, stderr, unmount_target in failed_to_terminate_list:
             err_msg = (
                 f'{unmount_target} failed to terminate for CSYNC process '
                 f'with pid {csync_pid}. '
@@ -531,7 +537,7 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
             sys.stderr.write(err_msg)
             sys.stderr.flush()
         sys.exit(exceptions.CSYNC_TERMINATE_FAILURE_CODE)
-    return 0
+    sys.exit(0)
 
 
 if __name__ == '__main__':
