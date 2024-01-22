@@ -198,6 +198,18 @@ def get_mounting_script(
           echo "Setting up CSYNC on $MOUNT_PATH to source bucket..."
           {install_cmd}
           setsid {mount_cmd} >> {csync_log_path} 2>&1 &
+          # Wait for mount_cmd to complete and check the log file
+          while true; do
+              # Check if the log file contains the completion signal
+              if grep -q "Successfully ran FUSE" {csync_log_path}; then
+                  break
+              fi
+              # Check if the log file contains an error message
+              if grep -q "FUSE error" {csync_log_path}; then
+                  exit {exceptions.CSYNC_FUSE_MOUNT_FAILURE_CODE}
+              fi
+              sleep 1
+          done
           echo "CSYNC is set."
         fi
     """)

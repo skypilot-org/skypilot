@@ -4631,15 +4631,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     log_path=log_path,
                 )
             except exceptions.CommandError as e:
+                mount_path = (f'{colorama.Fore.RED}'
+                                f'{colorama.Style.BRIGHT}{dst}'
+                                f'{colorama.Style.RESET_ALL}')
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
-                    mount_path = (f'{colorama.Fore.RED}'
-                                  f'{colorama.Style.BRIGHT}{dst}'
-                                  f'{colorama.Style.RESET_ALL}')
                     error_msg = (f'Mount path {mount_path} is non-empty.'
                                  f' {mount_path} may be a standard unix '
                                  f'path or may contain files from a previous'
                                  f' task. To fix, change the mount path'
                                  f' to an empty or non-existent path.')
+                    raise RuntimeError(error_msg) from None
+                elif e.returncode == exceptions.CSYNC_FUSE_MOUNT_FAILURE_CODE:
+                    error_msg = ('Failed to run CSYNC related FUSE processes '
+                                 f'at {mount_path}. Please check the CSYNC '
+                                 'log file located at ~/.sky for any error '
+                                 'message.')
                     raise RuntimeError(error_msg) from None
                 else:
                     # By default, raising an error caused from mounting_utils

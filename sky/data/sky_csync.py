@@ -225,7 +225,7 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
         base_sync_cmd.append('-x')
         excluded_list = [r'^\.git/.*$', r'\..*\.swp$']
         excludes = '|'.join(excluded_list)
-        base_sync_cmd.append(excludes)
+        base_sync_cmd.append(shlex.quote(f'({excludes})'))
 
         base_sync_cmd.extend([source, f'gs://{destination}'])
         full_cmd = ' '.join(base_sync_cmd)
@@ -254,24 +254,28 @@ def run_sync(source: str, storetype: str, destination: str, num_threads: int,
     # as initial backoff
     backoff = common_utils.Backoff(int(interval_seconds / 2))
     for i in range(_MAX_SYNC_RETRIES):
-        try:
-            with subprocess.Popen(sync_cmd, start_new_session=True,
-                                  shell=True) as proc:
-                _set_running_csync_sync_pid(csync_pid, proc.pid)
-                proc.wait()
-                _set_running_csync_sync_pid(csync_pid, -1)
-        except subprocess.CalledProcessError:
-            # reset sync pid as the sync process is terminated
+        with subprocess.Popen(sync_cmd,
+                                start_new_session=True,
+                                shell=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True) as sync_process:
+            _set_running_csync_sync_pid(csync_pid, sync_process.pid)
+            stdout, stderr = sync_process.communicate()
             _set_running_csync_sync_pid(csync_pid, -1)
-            wait_time = backoff.current_backoff()
-            logger.warning('Encountered an error while syncing '
-                           f'{source_to_bucket}. Retrying sync '
-                           f'in {wait_time}s. {_MAX_SYNC_RETRIES-i-1} more '
-                           'reattempts remaining. Check the log file '
-                           'in ~/.sky/ for more details.')
-            time.sleep(wait_time)
-        else:
-            # successfully completed sync process
+            sys.stdout.write(stdout)
+            sys.stdout.flush()
+            rc = sync_process.returncode
+            if rc != 0:
+                wait_time = backoff.current_backoff()
+                logger.warning('Encountered an error while syncing '
+                               f'{source_to_bucket}. Retrying sync '
+                               f'in {wait_time}s. {_MAX_SYNC_RETRIES-i-1} more '
+                               'reattempts remaining. Detailed error: '
+                               f'{stderr}')
+                time.sleep(wait_time)
+                continue
+            # successfully completed sync process.
             return
     raise RuntimeError(f'Failed to sync {source_to_bucket} after '
                        f'{_MAX_SYNC_RETRIES} number of retries. Check '
@@ -294,19 +298,21 @@ def get_storage_mount_script(storetype: str, destination: str,
 
 def _handle_fuse_process(fuse_cmd: str) -> Tuple[int, int, str]:
     with subprocess.Popen(fuse_cmd,
-                            shell=True,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True) as fuse_process:
+                          shell=True,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          text=True) as fuse_process:
         fuse_pid = fuse_process.pid
-        rc = fuse_process.wait()
         stdout, stderr = fuse_process.communicate()
-        stderr = stdout + stderr
+        rc = fuse_process.returncode
+        sys.stdout.write(stdout)
+        sys.stdout.flush()
     if rc != 0:
-        sys.stderr.write(stderr)
+        stderr = stdout + stderr
+        sys.stderr.write(f'FUSE error: {stderr}')
         sys.stderr.flush()
         sys.exit(exceptions.CSYNC_TERMINATE_FAILURE_CODE)
-    return fuse_pid, rc, stderr
+    return fuse_pid
 
 
 @main.command()
@@ -370,7 +376,6 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     os.makedirs(csync_write_path, exist_ok=True)
     os.makedirs(csync_read_path, exist_ok=True)
 
-    error_msg = 'failed to run {process}'
     # mounting cloud object storage on the read path
     with tempfile.NamedTemporaryFile(mode='w+', delete=False) as script_file:
         storage_mount_script = get_storage_mount_script(storetype, destination,
@@ -379,18 +384,17 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         # ensure all data is written to the file
         script_file.flush()
         storage_fuse_mount_cmd = f'bash {script_file.name}'
-        storage_fuse_mount_pid, rc, stderr = _handle_fuse_process(
-            storage_fuse_mount_cmd)
+        storage_fuse_mount_pid = _handle_fuse_process(storage_fuse_mount_cmd)
 
     # redirect read/write of mountpoint_path by mounting redirection FUSE
     redirect_mount_cmd = mounting_utils.get_redirect_mount_cmd(
         mountpoint_path, csync_read_path, csync_write_path)
-    redirect_fuse_mount_pid, rc, stderr = _handle_fuse_process(
-        redirect_mount_cmd)
+    redirect_fuse_mount_pid = _handle_fuse_process(redirect_mount_cmd)
 
     _add_running_csync(csync_pid, storage_fuse_mount_pid,
                        redirect_fuse_mount_pid, mountpoint_path)
-
+    sys.stdout.write('Successfully ran FUSE mounting processes.')
+    sys.stdout.flush()
     while True:
         start_time = time.time()
         run_sync(csync_write_path, storetype, destination, num_threads,
