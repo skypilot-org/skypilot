@@ -14,12 +14,14 @@ jobs:
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
       - name: Find the release version
+        id: version
         run: |
           PACKAGE_NAME="skypilot-nightly"
           # Fetch package info from PyPI
           PACKAGE_INFO=$(curl -s https://pypi.org/pypi/$PACKAGE_NAME/json)
           # Parse JSON and get the latest version
           LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Dockerfile
         run: |
@@ -47,6 +49,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: "berkeleyskypilot/skypilot-nightly:latest,berkeleyskypilot/skypilot-nightly:$LATEST_VERSION"
+          tags: "berkeleyskypilot/skypilot-nightly:latest,berkeleyskypilot/skypilot-nightly:${{ steps.version.outputs.latest_version }}"
           cache-from: type=gha
           cache-to: type=gha,mode=max
