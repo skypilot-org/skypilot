@@ -365,7 +365,7 @@ class AbstractStore:
         install_cmd = mounting_utils.get_redirect_mount_install_cmd()
         csync_cmd = (f'python -m sky.data.sky_csync csync {csync_path} '
                      f'{store_type_str} {destination} --interval-seconds '
-                     f'{interval_seconds} --delete --no-follow-symlinks')
+                     f'{interval_seconds} --no-follow-symlinks')
         return mounting_utils.get_mounting_command(StorageMode.CSYNC,
                                                    csync_path,
                                                    csync_cmd,

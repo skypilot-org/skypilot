@@ -393,7 +393,6 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
 
     while True:
         start_time = time.time()
-        delete = False
         run_sync(csync_write_path, storetype, destination, num_threads,
                  interval_seconds, delete, no_follow_symlinks, csync_pid)
         end_time = time.time()
