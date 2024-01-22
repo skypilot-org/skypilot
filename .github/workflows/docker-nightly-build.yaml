@@ -44,9 +44,11 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         with:
           context: .
           push: true
-          tags: "${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:latest,${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:$LATEST_VERSION"
+          tags: "$DOCKER_USERNAME/skypilot-nightly:latest,$DOCKER_USERNAME/skypilot-nightly:$LATEST_VERSION"
           cache-from: type=gha
           cache-to: type=gha,mode=max
