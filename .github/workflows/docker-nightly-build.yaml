@@ -50,6 +50,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: "berkeleyskypilot/skypilot-nightly:latest,berkeleyskypilot/skypilot-nightly:${{ steps.version.outputs.latest_version }}"
+          tags: "${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:latest,${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:${{ steps.version.outputs.latest_version }}"
           cache-from: type=gha
           cache-to: type=gha,mode=max
