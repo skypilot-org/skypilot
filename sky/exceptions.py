@@ -13,8 +13,9 @@ SIGTSTP_CODE = 146
 RSYNC_FILE_NOT_FOUND_CODE = 23
 # Arbitrarily chosen value. Used in SkyPilot's storage mounting scripts
 MOUNT_PATH_NON_EMPTY_CODE = 42
-# Arbitrarily chosen value. Used in SkyPilot's storage mounting scripts
-CSYNC_TERMINATE_FAILURE_CODE = 52
+# Arbitrarily chosen value. Used to error handle CSYNC related processes
+CSYNC_FUSE_MOUNT_FAILURE_CODE = 52
+CSYNC_TERMINATE_FAILURE_CODE = 53
 # Return code when git command is ran in a dir that is not git repo
 GIT_FATAL_EXIT_CODE = 128
 
