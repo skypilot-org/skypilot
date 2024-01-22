@@ -98,16 +98,21 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
     return mount_cmd
 
 
-def get_redirect_mount_cmd(mountpoint_path: str, csync_read_path: str,
-                           csync_write_path: str) -> str:
-    """Returns a command to mount redirection FUSE used by CSYNC."""
-    mount_cmd = ('sudo apt-get install -y libfuse3-dev; '
+def get_redirect_mount_install_cmd() -> str:
+    """Returns a command to install redirectin FUSE utility."""
+    install_cmd = ('sudo apt-get install -y libfuse3-dev; '
                  'command -v redirect-fuse >/dev/null 2>&1 || '
                  '{ sudo wget -nc https://github.com/landscapepainter/'
                  'libfuse/releases/download/test/redirect-fuse '
                  '-O /usr/local/bin/redirect-fuse && '
-                 'sudo chmod +x /usr/local/bin/redirect-fuse; }; '
-                 f'sudo redirect-fuse {mountpoint_path} '
+                 'sudo chmod +x /usr/local/bin/redirect-fuse; };')
+    return install_cmd
+                 
+                 
+def get_redirect_mount_cmd(mountpoint_path: str, csync_read_path: str,
+                           csync_write_path: str) -> str:
+    """Returns a command to mount redirection FUSE used by CSYNC."""
+    mount_cmd = (f'sudo redirect-fuse {mountpoint_path} '
                  f'{csync_read_path} {csync_write_path}')
     return mount_cmd
 
@@ -144,9 +149,6 @@ def get_mounting_script(
                                         'not be defined for MOUNT mode.')
         if version_check_cmd is not None:
             installed_check += f' && {version_check_cmd}'
-    else:
-        assert install_cmd is None, ('Installing commands should '
-                                     'not be defined for CSYNC mode.')
 
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
@@ -194,6 +196,7 @@ def get_mounting_script(
         else
           # running CSYNC cmd
           echo "Setting up CSYNC on $MOUNT_PATH to source bucket..."
+          {install_cmd}
           setsid {mount_cmd} >> {csync_log_path} 2>&1 &
           echo "CSYNC is set."
         fi

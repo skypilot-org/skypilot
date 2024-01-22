@@ -362,13 +362,14 @@ class AbstractStore:
         sync_point = result.path.split('/')[-1]
         log_file_name = f'csync_{store_type_str}_{sync_point}.log'
         log_path = f'~/.sky/{log_file_name}'
-
+        install_cmd = mounting_utils.get_redirect_mount_install_cmd()
         csync_cmd = (f'python -m sky.data.sky_csync csync {csync_path} '
                      f'{store_type_str} {destination} --interval-seconds '
                      f'{interval_seconds} --delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(StorageMode.CSYNC,
                                                    csync_path,
                                                    csync_cmd,
+                                                   install_cmd,
                                                    csync_log_path=log_path)
 
     def __deepcopy__(self, memo):
