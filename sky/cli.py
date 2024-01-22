@@ -787,6 +787,7 @@ def _launch_with_confirm(
     no_setup: bool = False,
     node_type: Optional[str] = None,
     clone_disk_from: Optional[str] = None,
+    auto_exec: bool = False,
 ):
     """Launch a cluster with a Task."""
     if cluster is None:
@@ -798,10 +799,23 @@ def _launch_with_confirm(
         task, _ = backend_utils.check_can_clone_disk_and_override_task(
             clone_disk_from, cluster, task)
 
+    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
+    if maybe_status == status_lib.ClusterStatus.UP and auto_exec:
+        # If the cluster is already up, we can just execute the task.
+        click.secho(
+            f'Cluster {cluster} is UP, skip provisioning and setup '
+            'due to `--auto-exec`.',
+            fg='green')
+        click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
+        sky.exec(task,
+                 backend=backend,
+                 cluster_name=cluster,
+                 detach_run=detach_run)
+        return
+
     with sky.Dag() as dag:
         dag.add(task)
 
-    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
         try:
@@ -1366,38 +1380,47 @@ def cli():
     help=('[Experimental] Clone disk from an existing cluster to launch '
           'a new one. This is useful when the new cluster needs to have '
           'the same data on the boot disk as an existing cluster.'))
+@click.option(
+    '--auto-exec',
+    '--auto',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('Automatically switch to `sky exec` if the cluster is UP. '
+          'If the cluster is UP, the provisioning/setup stages will be '
+          'skipped. Arguments unrelated to `sky exec` will be ignored.'))
 @usage_lib.entrypoint
 def launch(
-    entrypoint: List[str],
-    cluster: Optional[str],
-    dryrun: bool,
-    detach_setup: bool,
-    detach_run: bool,
-    backend_name: Optional[str],
-    name: Optional[str],
-    workdir: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    gpus: Optional[str],
-    cpus: Optional[str],
-    memory: Optional[str],
-    instance_type: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-    ports: Tuple[str],
-    idle_minutes_to_autostop: Optional[int],
-    down: bool,  # pylint: disable=redefined-outer-name
-    retry_until_up: bool,
-    yes: bool,
-    no_setup: bool,
-    clone_disk_from: Optional[str],
-):
+        entrypoint: List[str],
+        cluster: Optional[str],
+        dryrun: bool,
+        detach_setup: bool,
+        detach_run: bool,
+        backend_name: Optional[str],
+        name: Optional[str],
+        workdir: Optional[str],
+        cloud: Optional[str],
+        region: Optional[str],
+        zone: Optional[str],
+        gpus: Optional[str],
+        cpus: Optional[str],
+        memory: Optional[str],
+        instance_type: Optional[str],
+        num_nodes: Optional[int],
+        use_spot: Optional[bool],
+        image_id: Optional[str],
+        env_file: Optional[Dict[str, str]],
+        env: List[Tuple[str, str]],
+        disk_size: Optional[int],
+        disk_tier: Optional[str],
+        ports: Tuple[str],
+        idle_minutes_to_autostop: Optional[int],
+        down: bool,  # pylint: disable=redefined-outer-name
+        retry_until_up: bool,
+        yes: bool,
+        no_setup: bool,
+        clone_disk_from: Optional[str],
+        auto_exec: bool):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1466,16 +1489,25 @@ def launch(
                          down=down,
                          retry_until_up=retry_until_up,
                          no_setup=no_setup,
-                         clone_disk_from=clone_disk_from)
+                         clone_disk_from=clone_disk_from,
+                         auto_exec=auto_exec)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('cluster',
-                required=True,
+                required=False,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
+@click.option(
+    '--cluster',
+    '-c',
+    'cluster_option',
+    hidden=True,
+    type=str,
+    help='This is the same as the positional argument, just for consistency.',
+    **_get_shell_complete_args(_complete_cluster_name))
 @click.argument('entrypoint',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
@@ -1490,8 +1522,9 @@ def launch(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(
-    cluster: str,
-    entrypoint: List[str],
+    cluster: Optional[str],
+    cluster_option: Optional[str],
+    entrypoint: Tuple[str, ...],
     detach_run: bool,
     name: Optional[str],
     cloud: Optional[str],
@@ -1565,6 +1598,16 @@ def exec(
       sky exec mycluster --env WANDB_API_KEY python train_gpu.py
 
     """
+    if cluster_option is None and cluster is None:
+        raise click.UsageError('Missing argument \'[CLUSTER]\' and '
+                               '\'[ENTRYPOINT]...\'')
+    if cluster_option is not None:
+        if cluster is not None:
+            entrypoint = (cluster,) + entrypoint
+        cluster = cluster_option
+    if not entrypoint:
+        raise click.UsageError('Missing argument \'[ENTRYPOINT]...\'')
+
     if ports:
         raise ValueError('`ports` is not supported by `sky exec`.')
 
@@ -3913,6 +3956,12 @@ def spot():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              hidden=True,
+              help=('Alias for --name, the name of the spot job.'))
 @click.option('--cpus',
               default=None,
               type=str,
@@ -3944,6 +3993,14 @@ def spot():
     help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
           '("none" for using the default value). Default: medium'))
 @click.option(
+    '--detach-setup/--no-detach-setup',
+    '-s',
+    default=True,
+    is_flag=True,
+    required=False,
+    help=('The spot job will always have detach setup to be True. This flag '
+          'is just for consistency with the other commands.'))
+@click.option(
     '--detach-run',
     '-d',
     default=False,
@@ -3973,6 +4030,7 @@ def spot():
 def spot_launch(
     entrypoint: List[str],
     name: Optional[str],
+    cluster: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -3990,6 +4048,7 @@ def spot_launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
+    detach_setup: bool,
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
@@ -4008,6 +4067,13 @@ def spot_launch(
 
       sky spot launch 'echo hello!'
     """
+    if not detach_setup:
+        raise click.UsageError(
+            '--no-detach-setup is not supported for managed spot jobs.')
+    if cluster is not None:
+        if name is not None and name != cluster:
+            raise click.UsageError('Cannot specify both --name and --cluster.')
+        name = cluster
     env = _merge_env_vars(env_file, env)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
