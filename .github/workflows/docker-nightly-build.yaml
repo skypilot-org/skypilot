@@ -5,7 +5,6 @@ on:
     # Set the time to be 20 mins after the pypi nightly build
     - cron: '55 10 * * *' # 10:55am UTC, 2:55am PST, 5:55am EST
   workflow_dispatch:
-  push:
   
 jobs:
   
