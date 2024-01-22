@@ -24,7 +24,7 @@ def _skypilot_log_error_and_exit_for_failover(error_code: str,
     """
     # NOTE: keep. The backend looks for this to know no nodes are launched.
     prefix = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
-    error = common.ProvisionError(prefix + error_msg)
+    error = common.ProvisionerError(prefix + error_msg)
     error.errors = [{
         'code': error_code,
         'domain': 'bootstrap_instance',

@@ -32,6 +32,8 @@ from sky.utils import ux_utils
 # which will be customized in sky.provision.logging.
 logger = sky_logging.init_logger('sky.provisioner')
 
+# The maximum number of retries for waiting for instances to be ready and
+# teardown instances when provisioning fails.
 _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 
@@ -135,10 +137,17 @@ def bulk_provision(
     cluster_name: ClusterName,
     num_nodes: int,
     cluster_yaml: str,
-    is_prev_cluster_healthy: bool,
+    prev_cluster_ever_up: bool,
     log_dir: str,
 ) -> provision_common.ProvisionRecord:
-    """Provisions a cluster and wait until fully provisioned."""
+    """Provisions a cluster and wait until fully provisioned.
+
+    Raises:
+        StopFailoverError: Raised when during failover cleanup, tearing
+            down any potentially live cluster failed despite retries
+        Cloud specific exceptions: If the provisioning process failed, cloud-
+            specific exceptions will be raised by the cloud APIs.
+    """
     original_config = common_utils.read_yaml(cluster_yaml)
     head_node_type = original_config['head_node_type']
     bootstrap_config = provision_common.ProvisionConfig(
@@ -169,24 +178,47 @@ def bulk_provision(
                          f'on {cloud} ({zone_str}).')
             logger.debug(f'bulk_provision for {cluster_name!r} '
                          f'failed. Stacktrace:\n{traceback.format_exc()}')
-            # If cluster was previously UP or STOPPED, stop it; otherwise
-            # terminate.
-            # FIXME(zongheng): terminating a potentially live cluster is
-            # scary. Say: users have an existing cluster that got into INIT, do
-            # sky launch, somehow failed, then we may be terminating it here.
-            terminate = not is_prev_cluster_healthy
+            # If the cluster was ever up, stop it; otherwise terminate it.
+            terminate = not prev_cluster_ever_up
             terminate_str = ('Terminating' if terminate else 'Stopping')
             logger.debug(f'{terminate_str} the failed cluster.')
-            teardown_cluster(repr(cloud),
-                             cluster_name,
-                             terminate=terminate,
-                             provider_config=original_config['provider'])
+            retry_cnt = 1
+            while True:
+                try:
+                    teardown_cluster(
+                        repr(cloud),
+                        cluster_name,
+                        terminate=terminate,
+                        provider_config=original_config['provider'])
+                    break
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'{terminate_str} {cluster_name!r} failed.')
+                    logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
+                    retry_cnt += 1
+                    if retry_cnt <= _MAX_RETRY:
+                        logger.debug(f'Retrying {retry_cnt}/{_MAX_RETRY}...')
+                        time.sleep(5)
+                        continue
+                    formatted_exception = common_utils.format_exception(
+                        e, use_bracket=True)
+                    raise provision_common.StopFailoverError(
+                        'During provisioner\'s failover, '
+                        f'{terminate_str.lower()} {cluster_name!r} failed. '
+                        'This can cause resource leakage. Please check the '
+                        'failure and the cluster status on the cloud, and '
+                        'manually terminate the cluster. '
+                        f'Details: {formatted_exception}') from e
             raise
 
 
 def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
                      terminate: bool, provider_config: Dict) -> None:
-    """Deleting or stopping a cluster."""
+    """Deleting or stopping a cluster.
+
+    Raises:
+        Cloud specific exceptions: If the teardown process failed, cloud-
+            specific exceptions will be raised by the cloud APIs.
+    """
     if terminate:
         provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
                                       provider_config)
@@ -295,7 +327,11 @@ def _wait_ssh_connection_indirect(
 
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
                  ssh_credentials: Dict[str, str]):
-    """Wait until SSH is ready."""
+    """Wait until SSH is ready.
+
+    Raises:
+        RuntimeError: If the SSH connection is not ready after timeout.
+    """
     if (cluster_info.has_external_ips() and
             ssh_credentials.get('ssh_proxy_command') is None):
         # If we can access public IPs, then it is more efficient to test SSH
@@ -353,8 +389,10 @@ def _post_provision_setup(
 
     head_instance = cluster_info.get_head_instance()
     if head_instance is None:
-        raise RuntimeError(f'Provision failed for cluster {cluster_name!r}. '
-                           'Could not find any head instance.')
+        raise RuntimeError(
+            f'Provision failed for cluster {cluster_name!r}. '
+            'Could not find any head instance. To fix: refresh '
+            'status with: sky status -r; and retry provisioning.')
 
     # TODO(suquark): Move wheel build here in future PRs.
     ip_list = cluster_info.get_feasible_ips()
@@ -432,7 +470,7 @@ def _post_provision_setup(
                 stream_logs=False,
                 require_outputs=True)
             if returncode:
-                logger.info('Ray cluster on head is not up. Restarting...')
+                logger.debug('Ray cluster on head is not up. Restarting...')
             else:
                 logger.debug('Ray cluster on head is up.')
                 ray_port = common_utils.decode_payload(stdout)['ray_port']
@@ -489,6 +527,9 @@ def post_provision_runtime_setup(
        and other necessary files to the VM.
     3. Run setup commands to install dependencies.
     4. Start ray cluster and skylet.
+
+    Raises:
+        RuntimeError: If the setup process encounters any error.
     """
     with provision_logging.setup_provision_logging(log_dir):
         try:

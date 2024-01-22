@@ -16,9 +16,17 @@ from sky.utils.resources_utils import port_ranges_to_set
 InstanceId = str
 
 
-class ProvisionError(RuntimeError):
-    """Exception for provisioning."""
+class ProvisionerError(RuntimeError):
+    """Exception for provisioner."""
     errors: List[Dict[str, str]]
+
+
+class StopFailoverError(Exception):
+    """Exception for stopping failover.
+
+    It will be raised when failed to cleaning up resources after a failed
+    provision, so the caller should stop the failover process and raise.
+    """
 
 
 @dataclasses.dataclass
