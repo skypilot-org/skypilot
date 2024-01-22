@@ -41,7 +41,7 @@ The values of these variables are filled in by SkyPilot at task YAML parse time.
 Read more at `examples/using_file_mounts_with_env_vars.yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/using_file_mounts_with_env_vars.yaml>`_.
 
 Using in ``setup`` and ``run``
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 All user-specified environment variables are exported to a task's ``setup`` and ``run`` commands (i.e., accessible when they are being run).
 
@@ -61,6 +61,9 @@ For example, this is useful for passing secrets (see below) or passing configura
     $ sky launch --env MODEL_NAME=decapoda-research/llama-7b-hf task.yaml  # Override.
 
 See complete examples at `llm/vllm/serve.yaml <https://github.com/skypilot-org/skypilot/blob/596c1415b5039adec042594f45b342374e5e6a00/llm/vllm/serve.yaml#L4-L5>`_ and `llm/vicuna/train.yaml <https://github.com/skypilot-org/skypilot/blob/596c1415b5039adec042594f45b342374e5e6a00/llm/vicuna/train.yaml#L111-L116>`_.
+
+
+.. _passing-secrets:
 
 Passing secrets
 ~~~~~~~~~~~~~~~~~~~~~~~~

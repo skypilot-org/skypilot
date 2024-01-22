@@ -1,5 +1,6 @@
 """Utils shared between all of sky"""
 
+import difflib
 import functools
 import getpass
 import hashlib
@@ -14,19 +15,31 @@ import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
-import yaml
 
 import colorama
+import jsonschema
+import yaml
 
 from sky import sky_logging
+from sky.skylet import constants
+from sky.utils import ux_utils
+from sky.utils import validator
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
+USER_HASH_LENGTH_IN_CLUSTER_NAME = 4
+
+# We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
+# possibilities. considering the final cluster name contains the prefix as well,
+# we should be fine with 2 chars.
+CLUSTER_NAME_HASH_LENGTH = 2
 
 _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
 _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
+
+_VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 
 logger = sky_logging.init_logger(__name__)
 
@@ -46,7 +59,7 @@ def get_usage_run_id() -> str:
     return _usage_run_id
 
 
-def get_user_hash(default_value: Optional[str] = None) -> str:
+def get_user_hash() -> str:
     """Returns a unique user-machine specific hash as a user id.
 
     We cache the user hash in a file to avoid potential user_name or
@@ -62,7 +75,7 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
             return False
         return len(user_hash) == USER_HASH_LENGTH
 
-    user_hash = default_value
+    user_hash = os.getenv(constants.USER_ID_ENV_VAR)
     if _is_valid_user_hash(user_hash):
         assert user_hash is not None
         return user_hash
@@ -84,6 +97,69 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
     return user_hash
+
+
+def base36_encode(hex_str: str) -> str:
+    """Converts a hex string to a base36 string."""
+    int_value = int(hex_str, 16)
+
+    def _base36_encode(num: int) -> str:
+        if num == 0:
+            return '0'
+        alphabet = '0123456789abcdefghijklmnopqrstuvwxyz'
+        base36 = ''
+        while num != 0:
+            num, i = divmod(num, 36)
+            base36 = alphabet[i] + base36
+        return base36
+
+    return _base36_encode(int_value)
+
+
+def make_cluster_name_on_cloud(cluster_name: str,
+                               max_length: Optional[int] = 15,
+                               add_user_hash: bool = True) -> str:
+    """Generate valid cluster name on cloud that is unique to the user.
+
+    This is to map the cluster name to a valid length for cloud providers, e.g.
+    GCP limits the length of the cluster name to 35 characters. If the cluster
+    name with user hash is longer than max_length:
+      1. Truncate it to max_length - cluster_hash - user_hash_length.
+      2. Append the hash of the cluster name
+
+    Args:
+        cluster_name: The cluster name to be truncated and hashed.
+        max_length: The maximum length of the cluster name. If None, no
+            truncation is performed.
+        add_user_hash: Whether to append user hash to the cluster name.
+    """
+    user_hash = ''
+    if add_user_hash:
+        user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
+        user_hash = f'-{user_hash}'
+    user_hash_length = len(user_hash)
+
+    if (max_length is None or
+            len(cluster_name) <= max_length - user_hash_length):
+        return f'{cluster_name}{user_hash}'
+    # -1 is for the dash between cluster name and cluster name hash.
+    truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH - 1 -
+                                    user_hash_length)
+    truncate_cluster_name = cluster_name[:truncate_cluster_name_length]
+    if truncate_cluster_name.endswith('-'):
+        truncate_cluster_name = truncate_cluster_name.rstrip('-')
+    assert truncate_cluster_name_length > 0, (cluster_name, max_length)
+    cluster_name_hash = hashlib.md5(cluster_name.encode()).hexdigest()
+    # Use base36 to reduce the length of the hash.
+    cluster_name_hash = base36_encode(cluster_name_hash)
+    return (f'{truncate_cluster_name}'
+            f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
+
+
+def cluster_name_in_hint(cluster_name: str, cluster_name_on_cloud: str) -> str:
+    if cluster_name_on_cloud.startswith(cluster_name):
+        return repr(cluster_name)
+    return f'{cluster_name!r} (name on cloud: {cluster_name_on_cloud!r})'
 
 
 def get_global_job_id(job_timestamp: str,
@@ -286,8 +362,8 @@ def retry(method, max_retries=3, initial_backoff=1):
 def encode_payload(payload: Any) -> str:
     """Encode a payload to make it more robust for parsing.
 
-    The make the message transfer more robust to any additional
-    strings added to the message during transfering.
+    This makes message transfer more robust to any additional strings added to
+    the message during transfer.
 
     An example message that is polluted by the system warning:
     "LC_ALL: cannot change locale (en_US.UTF-8)\n<sky-payload>hello, world</sky-payload>" # pylint: disable=line-too-long
@@ -320,7 +396,7 @@ def decode_payload(payload_str: str) -> Any:
     return payload
 
 
-def class_fullname(cls):
+def class_fullname(cls, skip_builtins: bool = True):
     """Get the full name of a class.
 
     Example:
@@ -334,10 +410,13 @@ def class_fullname(cls):
     Returns:
         The full name of the class.
     """
+    module_name = getattr(cls, '__module__', '')
+    if not module_name or (module_name == 'builtins' and skip_builtins):
+        return cls.__name__
     return f'{cls.__module__}.{cls.__name__}'
 
 
-def format_exception(e: Union[Exception, SystemExit],
+def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
                      use_bracket: bool = False) -> str:
     """Format an exception to a string.
 
@@ -400,3 +479,94 @@ def find_free_port(start_port: int) -> int:
             except OSError:
                 pass
     raise OSError('No free ports available.')
+
+
+def is_valid_env_var(name: str) -> bool:
+    """Checks if the task environment variable name is valid."""
+    return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
+
+
+def format_float(num: Union[float, int], precision: int = 1) -> str:
+    """Formats a float to not show decimal point if it is a whole number
+
+    If it is not a whole number, it will show upto precision decimal point."""
+    if isinstance(num, int):
+        return str(num)
+    return '{:.0f}'.format(num) if num.is_integer() else f'{num:.{precision}f}'
+
+
+def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
+    """Validates an object against a given JSON schema.
+
+    Args:
+        obj: The object to validate.
+        schema: The JSON schema against which to validate the object.
+        err_msg_prefix: The string to prepend to the error message if
+          validation fails.
+        skip_none: If True, removes fields with value None from the object
+          before validation. This is useful for objects that will never contain
+          None because yaml.safe_load() loads empty fields as None.
+
+    Raises:
+        ValueError: if the object does not match the schema.
+    """
+    if skip_none:
+        obj = {k: v for k, v in obj.items() if v is not None}
+    err_msg = None
+    try:
+        validator.SchemaValidator(schema).validate(obj)
+    except jsonschema.ValidationError as e:
+        if e.validator == 'additionalProperties':
+            if tuple(e.schema_path) == ('properties', 'envs',
+                                        'additionalProperties'):
+                # Hack. Here the error is Task.envs having some invalid keys. So
+                # we should not print "unsupported field".
+                #
+                # This will print something like:
+                # 'hello world' does not match any of the regexes: <regex>
+                err_msg = (err_msg_prefix +
+                           'The `envs` field contains invalid keys:\n' +
+                           e.message)
+            else:
+                err_msg = err_msg_prefix + 'The following fields are invalid:'
+                known_fields = set(e.schema.get('properties', {}).keys())
+                for field in e.instance:
+                    if field not in known_fields:
+                        most_similar_field = difflib.get_close_matches(
+                            field, known_fields, 1)
+                        if most_similar_field:
+                            err_msg += (f'\nInstead of {field!r}, did you mean '
+                                        f'{most_similar_field[0]!r}?')
+                        else:
+                            err_msg += f'\nFound unsupported field {field!r}.'
+        else:
+            # Example e.json_path value: '$.resources'
+            err_msg = (err_msg_prefix + e.message +
+                       f'. Check problematic field(s): {e.json_path}')
+
+    if err_msg:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(err_msg)
+
+
+def get_cleaned_username(username: str = '') -> str:
+    """Cleans the username as some cloud provider have limitation on
+    characters usage such as dot (.) is not allowed in GCP.
+
+    Clean up includes:
+     1. Making all characters lowercase
+     2. Removing any non-alphanumeric characters (excluding hyphens)
+     3. Removing any numbers and/or hyphens at the start of the username.
+     4. Removing any hyphens at the end of the username
+
+    e.g. 1SkY-PiLot2- becomes sky-pilot2
+
+    Returns:
+      A cleaned username.
+    """
+    username = username or getpass.getuser()
+    username = username.lower()
+    username = re.sub(r'[^a-z0-9-]', '', username)
+    username = re.sub(r'^[0-9-]+', '', username)
+    username = re.sub(r'-$', '', username)
+    return username

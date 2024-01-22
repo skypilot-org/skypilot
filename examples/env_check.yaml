@@ -1,6 +1,4 @@
-num_nodes: 2  
-
-workdir: .
+num_nodes: 2
 
 setup: |
   echo "here"
@@ -15,13 +13,6 @@ run: |
     exit 1
   else
     echo "TEST_VAR is set to ${TEST_VAR}"
-  fi
-
-  if [[ -d ~/sky_workdir/sky ]]; then
-    echo "~/sky_workdir/sky exists"
-  else
-    echo "~/sky_workdir/sky does not exist"
-    exit 1
   fi
 
   if [[ -z "$SKYPILOT_NODE_RANK" ]]; then

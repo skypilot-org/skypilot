@@ -22,9 +22,9 @@ import subprocess
 import tempfile
 import textwrap
 import uuid
-import yaml
 
 from click import testing as cli_testing
+import yaml
 
 from sky import cli
 from sky import global_user_state

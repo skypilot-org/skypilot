@@ -11,6 +11,7 @@ import argparse
 import csv
 import json
 import os
+
 import requests
 
 ENDPOINT = 'https://cloud.lambdalabs.com/api/v1/instance-types'

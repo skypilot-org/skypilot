@@ -18,9 +18,9 @@ jobs:
       matrix:
         python-version: ["3.8"]
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
@@ -29,16 +29,25 @@ jobs:
         pip install yapf==0.32.0
         pip install toml==0.10.2
         pip install black==22.10.0
+        pip install isort==5.12.0
     - name: Running yapf
       run: |
         yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' \
-            --exclude 'sky/skylet/providers/aws/**' \
             --exclude 'sky/skylet/providers/gcp/**' \
             --exclude 'sky/skylet/providers/azure/**' \
             --exclude 'sky/skylet/providers/ibm/**'
     - name: Running black
       run: |
-        black --diff --check sky/skylet/providers/aws/ \
-            sky/skylet/providers/gcp/ \
+        black --diff --check sky/skylet/providers/gcp/ \
             sky/skylet/providers/azure/ \
             sky/skylet/providers/ibm/
+    - name: Running isort for black formatted files
+      run: |
+        isort --diff --check --profile black -l 88 -m 3 \
+            sky/skylet/providers/ibm/
+    - name: Running isort for yapf formatted files
+      run: |
+        isort --diff --check ./ --sg 'sky/skylet/ray_patches/**' \
+            --sg 'sky/skylet/providers/gcp/**' \
+            --sg 'sky/skylet/providers/azure/**' \
+            --sg 'sky/skylet/providers/ibm/**'

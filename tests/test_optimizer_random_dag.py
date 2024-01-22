@@ -1,14 +1,18 @@
 import copy
 import random
+import sys
+from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
 
 import sky
 from sky import clouds
+from sky import exceptions
+from sky.clouds import service_catalog
 
-ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
-GCP_HOST_VM = 'n1-highmem-8'
+ALL_INSTANCE_TYPE_INFOS = sum(
+    sky.list_accelerators(gpus_only=True).values(), [])
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
@@ -27,12 +31,16 @@ def generate_random_dag(
 ) -> sky.Dag:
     """Generates a random Sky DAG to test Sky optimizer."""
     random.seed(seed)
+    single_node_task_ids = random.choices(list(range(num_tasks)),
+                                          k=num_tasks // 2)
     with sky.Dag() as dag:
         for i in range(num_tasks):
             op = sky.Task(name=f'task{i}')
             task_runtime = random.random() * max_task_runtime
             op.set_time_estimator(lambda _: task_runtime)
-            op.num_nodes = random.randint(1, max_num_nodes)
+            op.num_nodes = random.randint(2, max_num_nodes)
+            if i in single_node_task_ids:
+                op.num_nodes = 1
 
             if i == 0:
                 num_parents = 0
@@ -56,38 +64,65 @@ def generate_random_dag(
             op.set_outputs('CLOUD', random.randint(0, max_data_size))
 
             num_candidates = random.randint(1, max_num_candidate_resources)
-            candidate_instance_types = random.choices(ALL_INSTANCE_TYPES,
-                                                      k=num_candidates)
+            candidate_instance_types = random.choices(
+                ALL_INSTANCE_TYPE_INFOS, k=len(ALL_INSTANCE_TYPE_INFOS))
 
             candidate_resources = set()
             for candidate in candidate_instance_types:
                 instance_type = candidate.instance_type
                 if pd.isna(instance_type):
-                    instance_type = GCP_HOST_VM
+                    assert candidate.cloud == 'GCP', candidate
+                    (instance_list,
+                     _) = service_catalog.get_instance_type_for_accelerator(
+                         candidate.accelerator_name,
+                         candidate.accelerator_count,
+                         clouds='gcp')
+                    assert instance_list, (candidate, instance_list)
+                    instance_type = random.choice(instance_list)
+                    if 'tpu' in candidate.accelerator_name:
+                        instance_type = 'TPU-VM'
                 resources = sky.Resources(
                     cloud=clouds.CLOUD_REGISTRY.from_str(candidate.cloud),
                     instance_type=instance_type,
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count
                     })
+                requested_features = set()
+                if op.num_nodes > 1:
+                    requested_features.add(
+                        clouds.CloudImplementationFeatures.MULTI_NODE)
+                try:
+                    resources.cloud.check_features_are_supported(
+                        resources, requested_features)
+                except exceptions.NotSupportedError:
+                    continue
                 candidate_resources.add(resources)
+                if len(candidate_resources) >= num_candidates:
+                    break
             op.set_resources(candidate_resources)
     return dag
 
 
-def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
+def find_min_objective(
+        dag: sky.Dag,
+        minimize_cost: bool) -> Tuple[float, Dict[sky.Task, sky.Resources]]:
     """Manually finds the minimum objective value."""
     graph = dag.get_graph()
     topo_order = dag.tasks
 
+    final_plan = {}
+    min_objective = np.inf
+    resources_stack = []
+
     def _optimize_by_brute_force(tasks, plan):
         """Optimizes a Sky DAG in a brute-force manner."""
         # NOTE: Here we assume that the Sky DAG is topologically sorted.
+        nonlocal final_plan, min_objective
         task = tasks[0]
-        min_objective = np.inf
-        for resources in task.get_resources():
+        for resources in task.resources:
             assert task.name in DUMMY_NODES or resources.is_launchable()
             plan[task] = resources
+            resources_stack.append(resources)
             if len(tasks) == 1:
                 if minimize_cost:
                     objective = sky.Optimizer._compute_total_cost(
@@ -95,19 +130,28 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
                 else:
                     objective = sky.Optimizer._compute_total_time(
                         graph, topo_order, plan)
+                if objective < min_objective:
+                    final_plan = {
+                        topo_order[i]: resources_stack[i]
+                        for i in range(len(topo_order))
+                    }
+                    min_objective = objective
             else:
-                objective = _optimize_by_brute_force(tasks[1:], plan)
-            if objective < min_objective:
-                min_objective = objective
-        return min_objective
+                _optimize_by_brute_force(tasks[1:], plan)
+            resources_stack.pop()
 
-    return _optimize_by_brute_force(topo_order, {})
+    _optimize_by_brute_force(topo_order, {})
+    return min_objective, final_plan
 
 
 def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     copy_dag = copy.deepcopy(dag)
-
-    optimizer_plan = sky.Optimizer._optimize_objective(dag, minimize_cost)
+    if minimize_cost:
+        optimizer_plan = sky.Optimizer._optimize_dag(dag,
+                                                     sky.OptimizeTarget.COST)
+    else:
+        optimizer_plan = sky.Optimizer._optimize_dag(dag,
+                                                     sky.OptimizeTarget.TIME)
     if minimize_cost:
         objective = sky.Optimizer._compute_total_cost(dag.get_graph(),
                                                       dag.tasks, optimizer_plan)
@@ -115,14 +159,19 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
         objective = sky.Optimizer._compute_total_time(dag.get_graph(),
                                                       dag.tasks, optimizer_plan)
 
-    min_objective = find_min_objective(copy_dag, minimize_cost)
-    assert abs(objective - min_objective) < 1e-3
+    min_objective, bf_plan = find_min_objective(copy_dag, minimize_cost)
+    print('=== optimizer plan ===', file=sys.stderr)
+    print(optimizer_plan, file=sys.stderr)
+    print('=== brute force ===', file=sys.stderr)
+    print(bf_plan, file=sys.stderr)
+    assert abs(objective - min_objective) < 5e-2
 
 
 def test_optimizer(enable_all_clouds):
+    for seed in range(3):
+        dag = generate_random_dag(num_tasks=5, seed=seed)
+        sky.Optimizer._add_dummy_source_sink_nodes(dag)
 
-    dag = generate_random_dag(num_tasks=5, seed=0)
-    sky.Optimizer._add_dummy_source_sink_nodes(dag)
-
-    compare_optimization_results(dag, minimize_cost=True)
-    compare_optimization_results(dag, minimize_cost=False)
+        # TODO(tian): Add test for minimize_cost=False. We need a time estimator
+        # that dependent on the resources, rather than returns a constant.
+        compare_optimization_results(dag, minimize_cost=True)

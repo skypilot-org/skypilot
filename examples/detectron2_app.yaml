@@ -11,7 +11,7 @@ setup: |
   if [ $? -eq 0 ]; then
     echo "conda env exists"
   else
-    conda create -n d2 python=3.7 -y
+    conda create -n d2 python=3.8 -y
     conda activate d2
     pip install torch torchvision
     git clone https://github.com/facebookresearch/detectron2

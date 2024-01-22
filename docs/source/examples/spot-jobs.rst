@@ -3,6 +3,10 @@
 Managed Spot Jobs
 ================================================
 
+.. tip::
+
+  This feature is great for scaling out: running a single job for long durations, or running many jobs.
+
 SkyPilot supports managed spot jobs that can **automatically recover from preemptions**.
 This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances practical for long-running jobs.
 
@@ -185,6 +189,10 @@ cost savings from spot instances without worrying about preemption or losing pro
 
   $ sky spot launch -n bert-qa bert_qa.yaml
 
+.. tip::
+
+  Try copy-paste this example and adapt it to your own job.
+
 
 Useful CLIs
 -----------
@@ -267,26 +275,109 @@ you can still tear it down manually with
 Customizing spot controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You may customize the resources of the spot controller for the following reasons:
+You may want to customize the resources of the spot controller for several reasons:
 
-1. Enforcing the spot controller to run on a specific location. (Default: cheapest location)
-2. Changing the maximum number of spot jobs that can be run concurrently. (Default: 16)
-3. Changing the disk_size of the spot controller to store more logs. (Default: 50GB)
+1. Use a lower-cost controller (if you have a low number of concurrent spot jobs).
+2. Enforcing the spot controller to run on a specific location. (Default: cheapest location)
+3. Changing the maximum number of spot jobs that can be run concurrently, which is 2x the vCPUs of the controller. (Default: 16)
+4. Changing the disk_size of the spot controller to store more logs. (Default: 50GB)
 
 To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
 
 .. code-block:: yaml
 
   spot:
+    # NOTE: these settings only take effect for a new spot controller, not if
+    # you have an existing one.
     controller:
       resources:
-        # All configs below are optional
-        # 1. Specify the location of the spot controller.
+        # All configs below are optional.
+        # Specify the location of the spot controller.
         cloud: gcp
         region: us-central1
-        # 2. Specify the maximum number of spot jobs that can be run concurrently.
+        # Specify the maximum number of spot jobs that can be run concurrently.
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
-        # 3. Specify the disk_size of the spot controller.
+        # Specify the disk_size in GB of the spot controller.
         disk_size: 100
 
 The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
+
+.. note::
+  These settings will not take effect if you have an existing controller (either
+  stopped or live).  For them to take effect, tear down the existing controller
+  first, which requires all in-progress spot jobs to finish or be canceled.
+
+
+Spot Pipeline
+-------------------------
+
+Spot Pipeline is a feature that allows you to submit a spot job that contains a sequence of spot tasks running one after another.
+This is useful for running a sequence of jobs that depend on each other, e.g., training a model and then running inference on it.
+This allows the multiple tasks to have different resource requirements to fully utilize the resources and save cost, while keeping the burden of managing the tasks off the user. 
+
+.. note::
+  A spot job is either a single task or a pipeline of tasks. A spot job is submitted by :code:`sky spot launch`.
+  
+  All tasks in a pipeline will be run on spot instances.
+
+To use Spot Pipeline, you can specify the sequence of jobs in a YAML file. Here is an example:
+
+.. code-block:: yaml
+
+  name: pipeline
+
+  ---
+  
+  name: train
+
+  resources:
+    accelerators: V100:8
+
+  file_mounts:
+    /checkpoint:
+      name: train-eval # NOTE: Fill in your bucket name
+      mode: MOUNT
+
+  setup: |
+    echo setup for training
+
+  run: |
+    echo run for training
+    echo save checkpoints to /checkpoint
+
+  ---
+
+  name: eval
+
+  resources:
+    accelerators: T4:1
+
+  file_mounts:
+    /checkpoint:
+      name: train-eval # NOTE: Fill in your bucket name
+      mode: MOUNT
+
+  setup: |
+    echo setup for eval
+
+  run: |
+    echo load trained model from /checkpoint
+    echo eval model on test set
+
+
+The above YAML file defines a pipeline with two tasks. The first :code:`name: pipeline` names the pipeline. The first task has name :code:`train` and the second task has name :code:`eval`. The tasks are separated by a line with three dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and :code:`run` sections. The :code:`setup` and :code:`run` sections are executed sequentially.
+
+To submit the pipeline, the same command :code:`sky spot launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky spot queue` or :code:`sky spot dashboard`.
+
+.. code-block:: console
+
+  $ sky spot launch -n pipeline pipeline.yaml
+  $ sky spot queue
+  Fetching managed spot job statuses...
+  Managed spot jobs
+  In progress tasks: 1 PENDING, 1 RECOVERING
+  ID  TASK  NAME           RESOURCES        SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS     
+  8         pipeline       -                50 mins ago  47m 45s        -             1            RECOVERING   
+   ↳  0     train          1x [V100:8]      50 mins ago  47m 45s        -             1            RECOVERING 
+   ↳  1     eval           1x [T4:1]        -            -              -             0            PENDING 
+

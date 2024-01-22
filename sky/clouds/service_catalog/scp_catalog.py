@@ -88,7 +88,8 @@ def get_instance_type_for_accelerator(
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
@@ -126,11 +127,12 @@ def list_accelerators(
     region_filter: Optional[str],
     quantity_filter: Optional[int],
     case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in SCP offering GPUs."""
     return common.list_accelerators_impl('scp', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
-                                         case_sensitive)
+                                         case_sensitive, all_regions)
 
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:

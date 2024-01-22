@@ -3,8 +3,8 @@ import typing
 from typing import Dict, Generic, Optional
 
 import sky
-from sky.utils import timeline
 from sky.usage import usage_lib
+from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -66,8 +66,8 @@ class Backend(Generic[_ResourceHandleType]):
     def sync_file_mounts(
         self,
         handle: _ResourceHandleType,
-        all_file_mounts: Dict[Path, Path],
-        storage_mounts: Dict[Path, 'storage_lib.Storage'],
+        all_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Optional[Dict[Path, 'storage_lib.Storage']],
     ) -> None:
         return self._sync_file_mounts(handle, all_file_mounts, storage_mounts)
 
@@ -82,12 +82,20 @@ class Backend(Generic[_ResourceHandleType]):
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('execute')
-    def execute(self, handle: _ResourceHandleType, task: 'task_lib.Task',
-                detach_run: bool) -> None:
+    def execute(self,
+                handle: _ResourceHandleType,
+                task: 'task_lib.Task',
+                detach_run: bool,
+                dryrun: bool = False) -> Optional[int]:
+        """Execute the task on the cluster.
+
+        Returns:
+            Job id if the task is submitted to the cluster, None otherwise.
+        """
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
-        return self._execute(handle, task, detach_run)
+        return self._execute(handle, task, detach_run, dryrun)
 
     @timeline.event
     def post_execute(self, handle: _ResourceHandleType, down: bool) -> None:
@@ -127,8 +135,8 @@ class Backend(Generic[_ResourceHandleType]):
     def _sync_file_mounts(
         self,
         handle: _ResourceHandleType,
-        all_file_mounts: Dict[Path, Path],
-        storage_mounts: Dict[Path, 'storage_lib.Storage'],
+        all_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Optional[Dict[Path, 'storage_lib.Storage']],
     ) -> None:
         raise NotImplementedError
 
@@ -136,8 +144,11 @@ class Backend(Generic[_ResourceHandleType]):
                detach_setup: bool) -> None:
         raise NotImplementedError
 
-    def _execute(self, handle: _ResourceHandleType, task: 'task_lib.Task',
-                 detach_run: bool) -> None:
+    def _execute(self,
+                 handle: _ResourceHandleType,
+                 task: 'task_lib.Task',
+                 detach_run: bool,
+                 dryrun: bool = False) -> Optional[int]:
         raise NotImplementedError
 
     def _post_execute(self, handle: _ResourceHandleType, down: bool) -> None:

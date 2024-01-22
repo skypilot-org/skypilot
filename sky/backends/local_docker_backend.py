@@ -5,15 +5,15 @@ import typing
 from typing import Any, Dict, Optional, Tuple, Union
 
 import colorama
-from rich import console as rich_console
 
 from sky import backends
-from sky.adaptors import docker
 from sky import global_user_state
 from sky import sky_logging
+from sky.adaptors import docker
 from sky.backends import backend_utils
 from sky.backends import docker_utils
 from sky.data import storage as storage_lib
+from sky.utils import rich_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -21,7 +21,6 @@ if typing.TYPE_CHECKING:
 
 Path = str
 
-console = rich_console.Console()
 logger = sky_logging.init_logger(__name__)
 
 _DOCKER_RUN_FOREVER_CMD = 'tail -f /dev/null'
@@ -104,7 +103,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     }
 
     def __init__(self, use_gpu: Union[bool, str] = 'auto'):
-        """
+        """Local docker backend.
+
         Args:
             use_gpu: Whether to use GPUs. Either of True, False or 'auto'.
               Sets container runtime to 'nvidia' if set to True, else uses the
@@ -138,8 +138,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             cluster_name: str,
             retry_until_up: bool = False
     ) -> Optional[LocalDockerResourceHandle]:
-        """
-        Builds docker image for the task and returns the cluster name as handle.
+        """Builds docker image for the task and returns cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
         docker.
@@ -160,16 +159,16 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         handle = LocalDockerResourceHandle(cluster_name)
         logger.info(f'Building docker image for task {task.name}. '
                     'This might take some time.')
-        with console.status('[bold cyan]Building Docker image[/]'):
+        with rich_utils.safe_status('[bold cyan]Building Docker image[/]'):
             image_tag, metadata = docker_utils.build_dockerimage_from_task(task)
         self.images[handle] = (image_tag, metadata)
         logger.info(f'Image {image_tag} built.')
         logger.info('Provisioning complete.')
-        global_user_state.add_or_update_cluster(
-            cluster_name,
-            cluster_handle=handle,
-            requested_resources=task.resources,
-            ready=False)
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                cluster_handle=handle,
+                                                requested_resources=set(
+                                                    task.resources),
+                                                ready=False)
         return handle
 
     def _sync_workdir(self, handle: LocalDockerResourceHandle,
@@ -186,8 +185,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     def _sync_file_mounts(
         self,
         handle: LocalDockerResourceHandle,
-        all_file_mounts: Dict[Path, Path],
-        storage_mounts: Dict[Path, storage_lib.Storage],
+        all_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
     ) -> None:
         """File mounts in Docker are implemented with volume mounts (-v)."""
         assert not storage_mounts, \
@@ -259,14 +258,17 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             f'-it {container.name} /bin/bash{style.RESET_ALL}.\n'
             f'You can debug the image by running: {style.BRIGHT}docker run -it '
             f'{image_tag} /bin/bash{style.RESET_ALL}.\n')
-        global_user_state.add_or_update_cluster(
-            cluster_name,
-            cluster_handle=handle,
-            requested_resources=task.resources,
-            ready=True)
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                cluster_handle=handle,
+                                                requested_resources=set(
+                                                    task.resources),
+                                                ready=True)
 
-    def _execute(self, handle: LocalDockerResourceHandle, task: 'task_lib.Task',
-                 detach_run: bool) -> None:
+    def _execute(self,
+                 handle: LocalDockerResourceHandle,
+                 task: 'task_lib.Task',
+                 detach_run: bool,
+                 dryrun: bool = False) -> None:
         """ Launches the container."""
 
         if detach_run:
@@ -281,6 +283,10 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         # Handle a basic task
         if task.run is None:
             logger.info(f'Nothing to run; run command not specified:\n{task}')
+            return
+
+        if dryrun:
+            logger.info(f'Dryrun complete. Would have run:\n{task}')
             return
 
         self._execute_task_one_node(handle, task)
@@ -332,8 +338,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     # --- Utilities ---
 
     def _update_state(self):
-        """
-        Updates local state of the backend object.
+        """Updates local state of the backend object.
 
         Queries the docker daemon to get the list of running containers, and
         populates the self.images and self.containers attributes from metadata

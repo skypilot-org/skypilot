@@ -1,6 +1,7 @@
 """Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
 import multiprocessing
+import os
 import pathlib
 import time
 import traceback
@@ -21,8 +22,10 @@ from sky.spot import spot_state
 from sky.spot import spot_utils
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
@@ -48,7 +51,6 @@ class SpotController:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(self._dag)
-
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
@@ -74,8 +76,24 @@ class SpotController:
                 job_id_env_vars)
             task.update_envs(task_envs)
 
+    def _download_log_and_stream(
+            self,
+            handle: cloud_vm_ray_backend.CloudVmRayResourceHandle) -> None:
+        """Downloads and streams the logs of the latest job of a spot cluster.
+
+        We do not stream the logs from the spot cluster directly, as the
+        donwload and stream should be faster, and more robust against
+        preemptions or ssh disconnection during the streaming.
+        """
+        spot_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                         'spot_jobs')
+        controller_utils.download_and_stream_latest_job_log(
+            self._backend, handle, spot_job_logs_dir)
+        logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring spot cluster status and handling recovery.
+
         When the task is successfully completed, this function returns True,
         and will terminate the spot cluster before returning.
 
@@ -237,13 +255,8 @@ class SpotController:
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
-                    # TODO(zhwu): Download the logs, and stream them from the
-                    # local disk, instead of streaming them from the spot
-                    # cluster, to make it faster and more reliable.
-                    returncode = self._backend.tail_logs(
-                        handle, None, spot_job_id=self._job_id)
-                    logger.info(f'\n== End of logs (ID: {self._job_id}, '
-                                f'tail_logs returncode: {returncode}) ==')
+
+                    self._download_log_and_stream(handle)
                     spot_status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         spot_status_to_set = spot_state.SpotStatus.FAILED_SETUP
@@ -329,7 +342,8 @@ class SpotController:
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.error(traceback.format_exc())
+            with ux_utils.enable_traceback():
+                logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: '
                    f'{common_utils.format_exception(e, use_bracket=True)}')
             logger.error(msg)

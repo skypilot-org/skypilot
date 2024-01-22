@@ -1,18 +1,28 @@
-"""Interfaces: clouds, regions, and zones."""
+"""Interfaces: clouds, regions, and zones.
+
+clouds.Cloud is lightweight stateless objects. SkyPilot may create multiple such
+objects; therefore, subclasses should take care to make methods inexpensive to
+call, and should not store heavy state. If state needs to be queried from the
+cloud provider and cached, create a module in sky/clouds/utils/ and probably add
+caches for the return value (e.g., sky/clouds/utils/gcp_utils), so they can be
+reused across cloud object creation.
+"""
 import collections
 import enum
 import re
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple, Type
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
+from sky import skypilot_config
 from sky.clouds import service_catalog
+from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
     from sky import status_lib
-    from sky import resources
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -20,14 +30,17 @@ class CloudImplementationFeatures(enum.Enum):
 
     Used by Cloud.check_features_are_supported().
 
-    Note: If any new feature is added, please check and update
+    NOTE: If any new feature is added, please check and update
     _cloud_unsupported_features in all clouds to make sure the
     check_features_are_supported() works as expected.
     """
-    STOP = 'stop'
-    AUTOSTOP = 'autostop'
+    STOP = 'stop'  # Includes both stop and autostop.
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
+    DOCKER_IMAGE = 'docker_image'
+    SPOT_INSTANCE = 'spot_instance'
+    CUSTOM_DISK_TIER = 'custom_disk_tier'
+    OPEN_PORTS = 'open_ports'
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -48,26 +61,33 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     region: Region
 
 
-class _CloudRegistry(dict):
-    """Registry of clouds."""
+class ProvisionerVersion(enum.Enum):
+    """The version of the provisioner.
 
-    def from_str(self, name: Optional[str]) -> Optional['Cloud']:
-        if name is None:
-            return None
-        if name.lower() not in self:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Cloud {name!r} is not a valid cloud among '
-                                 f'{list(self.keys())}')
-        return self.get(name.lower())
+    1: [Deprecated] ray node provider based implementation
+    2: [Deprecated] ray node provider for provisioning and SkyPilot provisioner
+    for stopping and termination
+    3: SkyPilot provisioner for both provisioning and stopping
+    """
+    RAY_AUTOSCALER = 1
+    RAY_PROVISIONER_SKYPILOT_TERMINATOR = 2
+    SKYPILOT = 3
 
-    def register(self, cloud_cls: Type['Cloud']) -> Type['Cloud']:
-        name = cloud_cls.__name__.lower()
-        assert name not in self, f'{name} already registered'
-        self[name] = cloud_cls()
-        return cloud_cls
+    def __ge__(self, other):
+        return self.value >= other.value
 
 
-CLOUD_REGISTRY = _CloudRegistry()
+class StatusVersion(enum.Enum):
+    """The version of the status query.
+
+    1: [Deprecated] cloud-CLI based implementation
+    2: SkyPilot provisioner based implementation
+    """
+    CLOUD_CLI = 1
+    SKYPILOT = 2
+
+    def __ge__(self, other):
+        return self.value >= other.value
 
 
 class Cloud:
@@ -76,22 +96,14 @@ class Cloud:
     _REPR = '<Cloud>'
     _DEFAULT_DISK_TIER = 'medium'
 
-    @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[CloudImplementationFeatures, str]:
-        """The features not supported by the cloud implementation.
-
-        This method is used by check_features_are_supported() to check if the
-        cloud implementation supports all the requested features.
-
-        Returns:
-            A dict of {feature: reason} for the features not supported by the
-            cloud implementation.
-        """
-        raise NotImplementedError
+    # The version of provisioner and status query. This is used to determine
+    # the code path to use for each cloud in the backend.
+    # NOTE: new clouds being added should use the latest version, i.e. SKYPILOT.
+    PROVISIONER_VERSION = ProvisionerVersion.RAY_AUTOSCALER
+    STATUS_VERSION = StatusVersion.CLOUD_CLI
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         """Returns the maximum length limit of a cluster name.
 
         This method is used by check_cluster_name_is_valid() to check if the
@@ -207,7 +219,7 @@ class Cloud:
         """Returns the hourly on-demand price for accelerators."""
         raise NotImplementedError
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         """Returns the egress cost.
 
         TODO: takes into account "per month" accumulation per account.
@@ -219,7 +231,8 @@ class Cloud:
 
     def make_deploy_resources_variables(
         self,
-        resources: 'resources.Resources',
+        resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
         region: 'Region',
         zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
@@ -285,16 +298,61 @@ class Cloud:
                                                   region,
                                                   clouds=cls._REPR.lower())
 
-    def get_feasible_launchable_resources(self, resources):
-        """Returns a list of feasible and launchable resources.
+    def get_feasible_launchable_resources(
+        self,
+        resources: 'resources_lib.Resources',
+        num_nodes: int = 1
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        """Returns ([feasible and launchable resources], [fuzzy candidates]).
 
         Feasible resources refer to an offering respecting the resource
         requirements.  Currently, this function implements "filtering" the
         cloud's offerings only w.r.t. accelerators constraints.
 
         Launchable resources require a cloud and an instance type be assigned.
+
+        Fuzzy candidates example: when the requested GPU is A100:1 but is not
+        available in a cloud/region, the fuzzy candidates are results of a fuzzy
+        search in the catalog that are offered in the location. E.g.,
+          ['A100-80GB:1', 'A100-80GB:2', 'A100-80GB:4', 'A100:8']
         """
+        if resources.is_launchable():
+            self._check_instance_type_accelerators_combination(resources)
+        resources_required_features = resources.get_required_cloud_features()
+        if num_nodes > 1:
+            resources_required_features.add(
+                CloudImplementationFeatures.MULTI_NODE)
+
+        try:
+            self.check_features_are_supported(resources,
+                                              resources_required_features)
+        except exceptions.NotSupportedError:
+            # TODO(zhwu): The resources are now silently filtered out. We
+            # should have some logging telling the user why the resources
+            # are not considered.
+            return ([], [])
+        return self._get_feasible_launchable_resources(resources)
+
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        """See get_feasible_launchable_resources()."""
         raise NotImplementedError
+
+    def get_reservations_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> Dict[str, int]:
+        """"
+        Returns the number of available resources per reservation for the given
+        instance type in the given region/zone.
+        Default implementation returns 0 for non-implemented clouds.
+        """
+        del instance_type, region, zone
+        return {reservation: 0 for reservation in specific_reservations}
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -369,7 +427,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         """Check the image size from the cloud.
 
         Returns: the image size in GB.
@@ -381,8 +440,17 @@ class Cloud:
         """Returns whether the instance type exists for this cloud."""
         raise NotImplementedError
 
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        """Validates the region and zone."""
+    def validate_region_zone(
+            self, region: Optional[str],
+            zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        """Validates whether region and zone exist in the catalog.
+
+        Returns:
+            A tuple of region and zone, if validated.
+
+        Raises:
+            ValueError: If region or zone is invalid or not supported.
+        """
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds=self._REPR.lower())
@@ -395,8 +463,8 @@ class Cloud:
         """Returns whether the accelerator is valid in the region or zone."""
         raise NotImplementedError
 
-    def need_cleanup_after_preemption(self,
-                                      resource: 'resources.Resources') -> bool:
+    def need_cleanup_after_preemption(
+            self, resource: 'resources_lib.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption.
 
         In most cases, spot resources do not need cleanup after preemption,
@@ -410,19 +478,37 @@ class Cloud:
 
     @classmethod
     def check_features_are_supported(
-            cls, requested_features: Set[CloudImplementationFeatures]) -> None:
+            cls, resources: 'resources_lib.Resources',
+            requested_features: Set[CloudImplementationFeatures]) -> None:
         """Errors out if the cloud does not support all requested features.
 
-        For instance, Lambda Cloud does not support autostop, so
-        Lambda.check_features_are_supported({
-            CloudImplementationFeatures.AUTOSTOP
+        For instance, Lambda Cloud does not support stop, so
+        Lambda.check_features_are_supported(to_provision, {
+            CloudImplementationFeatures.STOP
         }) raises the exception.
+
+        Resources are also passed as some features may depend on the resources
+        requested. For example, some clouds support stopping normal instances,
+        but not spot instances, e.g., AWS; or, GCP supports stopping TPU VMs but
+        not TPU VM pods.
 
         Raises:
             exceptions.NotSupportedError: If the cloud does not support all the
             requested features.
         """
-        unsupported_features2reason = cls._cloud_unsupported_features()
+        unsupported_features2reason = cls._unsupported_features_for_resources(
+            resources)
+
+        # Docker image is not compatible with ssh proxy command.
+        if skypilot_config.get_nested(
+            (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
+            unsupported_features2reason.update({
+                CloudImplementationFeatures.DOCKER_IMAGE: (
+                    f'Docker image is currently not supported on {cls._REPR} '
+                    'when proxy command is set. Please remove proxy command in '
+                    'the config.'),
+            })
+
         unsupported_features = set(unsupported_features2reason.keys())
         unsupported_features = requested_features.intersection(
             unsupported_features)
@@ -437,6 +523,22 @@ class Cloud:
                     '\n\t' + table.get_string().replace('\n', '\n\t'))
 
     @classmethod
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[CloudImplementationFeatures, str]:
+        """The features not supported based on the resources provided.
+
+        This method is used by check_features_are_supported() to check if the
+        cloud implementation supports all the requested features.
+
+        Returns:
+            A dict of {feature: reason} for the features not supported by the
+            cloud implementation.
+        """
+        del resources
+        raise NotImplementedError
+
+    @classmethod
     def check_cluster_name_is_valid(cls, cluster_name: str) -> None:
         """Errors out on invalid cluster names not supported by cloud providers.
 
@@ -449,8 +551,7 @@ class Cloud:
         """
         if cluster_name is None:
             return
-        max_cluster_name_len_limit = cls._max_cluster_name_length()
-        valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
+        valid_regex = constants.CLUSTER_NAME_VALID_REGEX
         if re.fullmatch(valid_regex, cluster_name) is None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InvalidClusterNameError(
@@ -458,14 +559,6 @@ class Cloud:
                     'ensure it is fully matched by regex (e.g., '
                     'only contains lower letters, numbers and dash): '
                     f'{valid_regex}')
-        if (max_cluster_name_len_limit is not None and
-                len(cluster_name) > max_cluster_name_len_limit):
-            cloud_name = '' if cls is Cloud else f' on {cls._REPR}'
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
-                    'chars; maximum length is '
-                    f'{max_cluster_name_len_limit} chars{cloud_name}.')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
@@ -478,23 +571,68 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    # pylint: disable=unused-argument
-    def check_quota_available(cls,
-                              region: str,
-                              instance_type: str,
-                              use_spot: bool = False) -> bool:
-        """Check if quota is available for `instance_type` in `region`.
+    def _check_instance_type_accelerators_combination(
+            cls, resources: 'resources_lib.Resources') -> None:
+        """Errors out if the accelerator is not supported by the instance type.
 
-        (Currently, check_quota_available is only implemented for AWS.)
+        This function is overridden by GCP for host-accelerator logic.
+
+        Raises:
+            ResourcesMismatchError: If the accelerator is not supported.
+        """
+        assert resources.is_launchable(), resources
+
+        def _equal_accelerators(
+                acc_requested: Optional[Dict[str, int]],
+                acc_from_instance_type: Optional[Dict[str, int]]) -> bool:
+            """Check the requested accelerators equals to the instance type
+
+            Check the requested accelerators equals to the accelerators
+            from the instance type (both the accelerator type and the
+            count).
+            """
+            if acc_requested is None:
+                return acc_from_instance_type is None
+            if acc_from_instance_type is None:
+                return False
+
+            for acc in acc_requested:
+                if acc not in acc_from_instance_type:
+                    return False
+                if acc_requested[acc] != acc_from_instance_type[acc]:
+                    return False
+            return True
+
+        acc_from_instance_type = (cls.get_accelerators_from_instance_type(
+            resources.instance_type))
+        if not _equal_accelerators(resources.accelerators,
+                                   acc_from_instance_type):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'Infeasible resource demands found:'
+                    '\n  Instance type requested: '
+                    f'{resources.instance_type}\n'
+                    f'  Accelerators for {resources.instance_type}: '
+                    f'{acc_from_instance_type}\n'
+                    f'  Accelerators requested: {resources.accelerators}\n'
+                    f'To fix: either only specify instance_type, or '
+                    'change the accelerators field to be consistent.')
+
+    @classmethod
+    def check_quota_available(cls,
+                              resources: 'resources_lib.Resources') -> bool:
+        """Check if quota is available based on `resources`.
 
         The _retry_zones function in cloud_vm_ray_backend goes through different
-        candidate regions and attempts to provision the requested instance_type
-        accelerators in the region, until a successful provisioning happens
-        or all regions with the requested accelerator have been looked at.
-        Previously, SkyPilot would attempt to provision resources in all of
-        these regions. However, many regions would have a zero quota or
-        inadequate quota, meaning these attempted provisions were destined
-        to fail from the get-go.
+        candidate regions and attempts to provision the requested
+        `instance_type` or `accelerator` accelerators in the `region`
+        (the `instance_type` or `accelerator`, and `region`, as defined in
+        `resources`) until a successful provisioning happens or all regions
+        with the requested accelerator have been looked at. Previously,
+        SkyPilot would attempt to provision resources in all of these regions.
+        However, many regions would have a zero quota or inadequate quota,
+        meaning these attempted provisions were destined to fail from
+        the get-go.
 
         Checking the quota is substantially faster than attempting a failed
         provision (~1 second vs 30+ seconds) so this function attempts to
@@ -506,7 +644,7 @@ class Cloud:
         quota utilization because many cloud providers' APIs don't have a
         built-in command for checking the real-time utilization. Checking
         real-time utilization is a more difficult endeavor that involves
-        monitoring etc., so we are holding off on that for now.
+        observability etc., so we are holding off on that for now.
 
         If for at any point the function fails, whether it's because we can't
         import the necessary dependencies or a query using a cloud provider's
@@ -526,6 +664,7 @@ class Cloud:
         Returns:
             False if the quota is found to be zero, and true otherwise.
         """
+        del resources  # unused
 
         return True
 
@@ -543,6 +682,10 @@ class Cloud:
         Returns:
             A list of ClusterStatus representing the status of all the
             alive nodes in the cluster.
+
+        Raises:
+            exceptions.ClusterStatusFetchingError: raised if the status of the
+                cluster cannot be fetched.
         """
         raise NotImplementedError
 
@@ -557,8 +700,8 @@ class Cloud:
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
         """Creates an image from the cluster.
 
@@ -567,7 +710,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def maybe_move_image(cls, image_name: str, source_region: str,
+    def maybe_move_image(cls, image_id: str, source_region: str,
                          target_region: str, source_zone: Optional[str],
                          target_zone: Optional[str]) -> str:
         """Move an image if required.
@@ -588,3 +731,9 @@ class Cloud:
 
     def __repr__(self):
         return self._REPR
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('PROVISIONER_VERSION', None)
+        state.pop('STATUS_VERSION', None)
+        return state

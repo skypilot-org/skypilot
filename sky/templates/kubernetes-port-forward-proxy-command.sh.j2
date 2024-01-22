@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# Checks if socat is installed
+if ! command -v socat > /dev/null; then
+  echo "Using 'port-forward' mode to run ssh session on Kubernetes instances requires 'socat' to be installed. Please install 'socat'" >&2
+  exit
+fi
+
+# Checks if netcat is installed (may not be present in many docker images)
+if ! command -v nc > /dev/null; then
+  echo "Using 'port-forward' mode to run ssh session on Kubernetes instances requires 'nc' to be installed. Please install 'nc' (netcat)." >&2
+  exit
+fi
+
+# Establishes connection between local port and the ssh jump pod using kube port-forward
+# Instead of specifying a port, we let kubectl select a random port.
+# This is preferred because of socket re-use issues in kubectl port-forward,
+# see - https://github.com/kubernetes/kubernetes/issues/74551#issuecomment-769185879
+KUBECTL_OUTPUT=$(mktemp)
+kubectl port-forward svc/{{ ssh_jump_name }} :22 > "${KUBECTL_OUTPUT}" 2>&1 &
+
+# Capture the PID for the backgrounded kubectl command
+K8S_PORT_FWD_PID=$!
+
+# Wait until kubectl port-forward is ready
+while ! grep -q "Forwarding from 127.0.0.1" "${KUBECTL_OUTPUT}"; do
+    sleep 0.1
+done
+
+# Extract the local port number assigned by kubectl.
+local_port=$(awk -F: '/Forwarding from 127.0.0.1/{print $2}' "${KUBECTL_OUTPUT}" | awk -F' ' '{print $1}')
+
+# Clean up the temporary file
+rm -f "${KUBECTL_OUTPUT}"
+
+# Add handler to terminate the port-forward process when this script exits.
+trap "[[ -e /proc/$K8S_PORT_FWD_PID ]] && kill $K8S_PORT_FWD_PID" EXIT
+
+# Checks if a connection to local_port of 127.0.0.1:[local_port] is established
+while ! nc -z 127.0.0.1 "${local_port}"; do
+    sleep 0.1
+done
+
+# To avoid errors when many concurrent requests are sent (see https://github.com/skypilot-org/skypilot/issues/2628),
+# we add a random delay before establishing the socat connection.
+# Empirically, this needs to be at least 1 second. We set this to be random between 1 and 2 seconds.
+sleep $(shuf -i 10-20 -n 1 | awk '{printf "%f", $1/10}')
+
+# Establishes two directional byte streams to handle stdin/stdout between
+# terminal and the jump pod.
+# socat process terminates when port-forward terminates.
+socat - tcp:127.0.0.1:"${local_port}"

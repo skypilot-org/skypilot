@@ -7,22 +7,24 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Any
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky import provision as provision_lib
 from sky import sky_logging
-from sky import status_lib
+from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
 from sky.utils import common_utils
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
+    from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -47,6 +49,15 @@ _CREDENTIAL_FILES = [
 ]
 
 DEFAULT_AMI_GB = 45
+
+# Temporary measure, as deleting per-cluster SGs is too slow.
+# See https://github.com/skypilot-org/skypilot/pull/742.
+# Generate the name of the security group we're looking for.
+# (username, last 4 chars of hash of hostname): for uniquefying
+# users on shared-account scenarios.
+DEFAULT_SECURITY_GROUP_NAME = f'sky-sg-{common_utils.user_and_hostname_hash()}'
+# Security group to use when user specified ports in their resources.
+USER_PORTS_SECURITY_GROUP_NAME = 'sky-sg-{}'
 
 
 class AWSIdentityType(enum.Enum):
@@ -84,31 +95,40 @@ class AWS(clouds.Cloud):
     _REPR = 'AWS'
 
     # AWS has a limit of the tag value length to 256 characters.
-    # By testing, the actual limit is 256 - 12 = 244 characters
-    # (ray adds additional `ray-` and `-worker`), due to the
+    # By testing, the actual limit is 256 - 8 = 248 characters
+    # (our provisioner adds additional `-worker`), due to the
     # maximum length of DescribeInstances API filter value.
     # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # pylint: disable=line-too-long
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 244
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 248
 
     _regions: List[clouds.Region] = []
 
     _INDENT_PREFIX = '    '
     _STATIC_CREDENTIAL_HELP_STR = (
         'Run the following commands:'
-        f'\n{_INDENT_PREFIX}  $ pip install boto3'
         f'\n{_INDENT_PREFIX}  $ aws configure'
         f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
         f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
-    @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        if resources.use_spot:
+            return {
+                clouds.CloudImplementationFeatures.STOP:
+                    ('Stopping spot instances is currently not supported on'
+                     f' {cls._REPR}.'),
+            }
+        return {}
+
+    @classmethod
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -155,6 +175,11 @@ class AWS(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[List[clouds.Zone]]:
+        # TODO(suquark): Now we can return one zone at a time,
+        # like other clouds,
+        # because the new provisioner can failover to other zones pretty fast.
+        # This will simplify our provision logic a lot.
+
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         regions = cls.regions_with_offering(instance_type,
@@ -222,7 +247,8 @@ class AWS(clouds.Cloud):
                     f'No image found for region {region_name}')
         return image_id_str
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
@@ -239,8 +265,10 @@ class AWS(clouds.Cloud):
             return DEFAULT_AMI_GB
         except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Image {image_id!r} not found in '
-                                 f'AWS region {region}') from None
+                raise ValueError(
+                    f'Image {image_id!r} not found in AWS region {region}.\n'
+                    f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+                    'Example: ami-0729d913a335efca7') from None
         return image_size
 
     @classmethod
@@ -333,7 +361,8 @@ class AWS(clouds.Cloud):
                                                                 clouds='aws')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
+            self, resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str, region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Any]:
         assert zones is not None, (region, zones)
 
@@ -348,7 +377,25 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_id = self._get_image_id(r.image_id, region_name, r.instance_type)
+        if r.extract_docker_image() is not None:
+            image_id_to_use = None
+        else:
+            image_id_to_use = r.image_id
+        image_id = self._get_image_id(image_id_to_use, region_name,
+                                      r.instance_type)
+
+        user_security_group = skypilot_config.get_nested(
+            ('aws', 'security_group_name'), None)
+        if resources.ports is not None:
+            # Already checked in Resources._try_validate_ports
+            assert user_security_group is None
+            security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
+                cluster_name_on_cloud)
+        elif user_security_group is not None:
+            assert resources.ports is None
+            security_group = user_security_group
+        else:
+            security_group = DEFAULT_SECURITY_GROUP_NAME
 
         return {
             'instance_type': r.instance_type,
@@ -357,11 +404,13 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
+            'security_group': security_group,
             **AWS._get_disk_specs(r.disk_tier)
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
@@ -417,6 +466,13 @@ class AWS(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
+        dependency_installation_hints = (
+            'AWS dependencies are not installed. '
+            'Run the following commands:'
+            f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
+            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
+            f'{cls._STATIC_CREDENTIAL_HELP_STR}')
+
         # Checks if the AWS CLI is installed properly
         proc = subprocess.run('aws --version',
                               shell=True,
@@ -424,17 +480,19 @@ class AWS(clouds.Cloud):
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False, (
-                'AWS CLI is not installed properly. '
-                'Run the following commands:'
-                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
-                f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
-                f'{cls._STATIC_CREDENTIAL_HELP_STR}')
+            return False, dependency_installation_hints
+        try:
+            # Checks if aws boto is installed properly
+            # pylint: disable=import-outside-toplevel, unused-import
+            import boto3
+            import botocore
+        except ImportError:
+            return False, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            cls.get_current_user_identity()
+            identity_str = cls.get_current_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
@@ -471,9 +529,20 @@ class AWS(clouds.Cloud):
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
         # Fetch the AWS catalogs
-        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import aws_catalog
+
         # Trigger the fetch of the availability zones mapping.
-        aws_catalog.get_default_instance_type()
+        try:
+            aws_catalog.get_default_instance_type()
+        except RuntimeError as e:
+            return False, (
+                'Failed to fetch the availability zones for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the minimal permission required for AWS: '
+                'https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         return True, hints
 
     @classmethod
@@ -698,14 +767,14 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def check_quota_available(cls,
-                              region: str,
-                              instance_type: str,
-                              use_spot: bool = False) -> bool:
-        """Check if AWS quota is available for `instance_type` in `region`.
+                              resources: 'resources_lib.Resources') -> bool:
+        """Check if AWS quota is available based on `resources`.
 
-        AWS-specific implementation of check_quota_available. The function works by
-        matching the instance_type to the corresponding AWS quota code, and then using
-        the boto3 Python API to query the region for the specific quota code.
+        AWS-specific implementation of check_quota_available. The function
+        works by matching the `instance_type` to the corresponding AWS quota
+        code, and then using the boto3 Python API to query the `region` for
+        the specific quota code (the `instance_type` and `region` as defined
+        by `resources`).
 
         Returns:
             False if the quota is found to be zero, and True otherwise.
@@ -714,7 +783,12 @@ class AWS(clouds.Cloud):
             botocore.exceptions.ClientError: error in Boto3 client request.
         """
 
-        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+        instance_type = resources.instance_type
+        region = resources.region
+        use_spot = resources.use_spot
+
+        # pylint: disable=import-outside-toplevel,unused-import
+        from sky.clouds.service_catalog import aws_catalog
 
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 
@@ -738,79 +812,31 @@ class AWS(clouds.Cloud):
         return True
 
     @classmethod
-    def _query_instance_property_with_retries(
-        cls,
-        tag_filters: Dict[str, str],
-        region: str,
-        query: str,
-    ) -> Tuple[int, str, str]:
-        filter_str = ' '.join(f'Name=tag:{key},Values={value}'
-                              for key, value in tag_filters.items())
-        query_cmd = (f'aws ec2 describe-instances --filters {filter_str} '
-                     f'--region {region} --query "{query}" --output json')
-        returncode, stdout, stderr = subprocess_utils.run_with_retries(
-            query_cmd,
-            retry_returncode=[255],
-            retry_stderrs=[
-                'Unable to locate credentials. You can configure credentials by '
-                'running "aws configure"'
-            ])
-        return returncode, stdout, stderr
-
-    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
-        del zone  # unused
-        status_map = {
-            'pending': status_lib.ClusterStatus.INIT,
-            'running': status_lib.ClusterStatus.UP,
-            # TODO(zhwu): stopping and shutting-down could occasionally fail
-            # due to internal errors of AWS. We should cover that case.
-            'stopping': status_lib.ClusterStatus.STOPPED,
-            'stopped': status_lib.ClusterStatus.STOPPED,
-            'shutting-down': None,
-            'terminated': None,
-        }
-
-        assert region is not None, (tag_filters, region)
-        returncode, stdout, stderr = cls._query_instance_property_with_retries(
-            tag_filters, region, query='Reservations[].Instances[].State.Name')
-
-        if returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query AWS cluster {name!r} status: '
-                    f'{stdout + stderr}')
-
-        original_statuses = json.loads(stdout.strip())
-
-        statuses = []
-        for s in original_statuses:
-            node_status = status_map[s]
-            if node_status is not None:
-                statuses.append(node_status)
-        return statuses
+        # TODO(suquark): deprecate this method
+        assert False, 'This code path should not be used.'
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
+        assert region is not None, (cluster_name, cluster_name_on_cloud, region)
         del zone  # unused
-        assert region is not None, (tag_filters, region)
+
         image_name = f'skypilot-{cluster_name}-{int(time.time())}'
-        returncode, stdout, stderr = cls._query_instance_property_with_retries(
-            tag_filters, region, query='Reservations[].Instances[].InstanceId')
 
-        subprocess_utils.handle_returncode(
-            returncode,
-            '',
-            error_msg='Failed to find the source cluster on AWS.',
-            stderr=stderr,
-            stream_logs=False)
+        status = provision_lib.query_instances('AWS', cluster_name_on_cloud,
+                                               {'region': region})
+        instance_ids = list(status.keys())
+        if not instance_ids:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to find the source cluster {cluster_name!r} on '
+                    'AWS.')
 
-        instance_ids = json.loads(stdout.strip())
         if len(instance_ids) != 1:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
@@ -834,14 +860,14 @@ class AWS(clouds.Cloud):
             stderr=stderr,
             stream_logs=True)
 
-        log_utils.force_update_rich_status(
+        rich_utils.force_update_status(
             f'Waiting for the source image {cluster_name!r} from {region} to be available on AWS.'
         )
         # Wait for the image to be available
         wait_image_cmd = (
             f'aws ec2 wait image-available --region {region} --image-ids {image_id}'
         )
-        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+        returncode, _, stderr = subprocess_utils.run_with_retries(
             wait_image_cmd,
             retry_returncode=[255],
         )
@@ -881,7 +907,7 @@ class AWS(clouds.Cloud):
             stderr=stderr,
             stream_logs=True)
 
-        log_utils.force_update_rich_status(
+        rich_utils.force_update_status(
             f'Waiting for the target image {target_image_id!r} on {target_region} to be '
             'available on AWS.')
         wait_image_cmd = (
@@ -903,7 +929,7 @@ class AWS(clouds.Cloud):
         sky_logging.print(
             f'The target image {target_image_id!r} is created successfully.')
 
-        log_utils.force_update_rich_status('Deleting the source image.')
+        rich_utils.force_update_status('Deleting the source image.')
         cls.delete_image(image_id, source_region)
         return target_image_id
 

@@ -1,26 +1,25 @@
 import logging
 import os
-import time
 from threading import RLock
+import time
 from typing import Any, Dict, List, Optional
 
 from ray.autoscaler.node_provider import NodeProvider
-from ray.autoscaler.tags import (
-    TAG_RAY_CLUSTER_NAME,
-    TAG_RAY_USER_NODE_TYPE,
-    TAG_RAY_NODE_NAME,
-    TAG_RAY_NODE_STATUS,
-    STATUS_UP_TO_DATE,
-    TAG_RAY_NODE_KIND,
-    NODE_KIND_WORKER,
-    NODE_KIND_HEAD,
-)
-from sky.skylet.providers.lambda_cloud import lambda_utils
+from ray.autoscaler.tags import NODE_KIND_HEAD
+from ray.autoscaler.tags import NODE_KIND_WORKER
+from ray.autoscaler.tags import STATUS_UP_TO_DATE
+from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
+from ray.autoscaler.tags import TAG_RAY_NODE_KIND
+from ray.autoscaler.tags import TAG_RAY_NODE_NAME
+from ray.autoscaler.tags import TAG_RAY_NODE_STATUS
+from ray.autoscaler.tags import TAG_RAY_USER_NODE_TYPE
+
 from sky import authentication as auth
+from sky.clouds.utils import lambda_utils
 from sky.utils import command_runner
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.utils import common_utils
 
 _TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
 _REMOTE_SSH_KEY_NAME = '~/.lambda_cloud/ssh_key_name'

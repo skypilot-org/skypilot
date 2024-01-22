@@ -1,7 +1,8 @@
 """GCP cloud adaptors"""
 
 # pylint: disable=import-outside-toplevel
-from functools import wraps
+import functools
+import json
 
 googleapiclient = None
 google = None
@@ -9,13 +10,13 @@ google = None
 
 def import_package(func):
 
-    @wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global googleapiclient, google
         if googleapiclient is None or google is None:
             try:
-                import googleapiclient as _googleapiclient
                 import google as _google
+                import googleapiclient as _googleapiclient
                 googleapiclient = _googleapiclient
                 google = _google
             except ImportError:
@@ -82,3 +83,25 @@ def credential_error_exception():
     """CredentialError exception."""
     from google.auth import exceptions
     return exceptions.DefaultCredentialsError
+
+
+@import_package
+def get_credentials(cred_type: str, credentials_field: str):
+    """Get GCP credentials."""
+    from google.oauth2 import service_account
+    from google.oauth2.credentials import Credentials as OAuthCredentials
+
+    if cred_type == 'service_account':
+        # If parsing the gcp_credentials failed, then the user likely made a
+        # mistake in copying the credentials into the config yaml.
+        try:
+            service_account_info = json.loads(credentials_field)
+        except json.decoder.JSONDecodeError as e:
+            raise RuntimeError('gcp_credentials found in cluster yaml file but '
+                               'formatted improperly.') from e
+        credentials = service_account.Credentials.from_service_account_info(
+            service_account_info)
+    elif cred_type == 'credentials_token':
+        # Otherwise the credentials type must be credentials_token.
+        credentials = OAuthCredentials(credentials_field)
+    return credentials

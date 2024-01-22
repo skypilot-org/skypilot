@@ -10,7 +10,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 
-@clouds.CLOUD_REGISTRY.register
+# TODO(skypilot): remove Local now that we're using Kubernetes.
 class Local(clouds.Cloud):
     """Local/on-premise cloud.
 
@@ -30,19 +30,24 @@ class Local(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP:
             ('Local cloud does not support stopping instances.'),
-        clouds.CloudImplementationFeatures.AUTOSTOP:
-            ('Local cloud does not support stopping instances.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             ('Migrating disk is not supported for Local.'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            ('Docker image is not supported in Local. '
+             'You can try running docker command inside the '
+             '`run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            ('Opening ports is not supported for Local.'),
     }
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return None
 
     @classmethod
@@ -130,12 +135,13 @@ class Local(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         return {}
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.disk_tier is not None:
             return ([], [])
         # The entire local cluster's resources is considered launchable, as the
@@ -184,10 +190,11 @@ class Local(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         # Returns true if the region name is same as Local cloud's
         # one and only region: 'Local'.
-        assert zone is None
+        if zone is not None:
+            raise ValueError('Local cloud does not support zones.')
         if region is None or region != Local.LOCAL_REGION.name:
             raise ValueError(f'Region {region!r} does not match the Local'
-                             ' cloud region {Local.LOCAL_REGION.name!r}.')
+                             f' cloud region {Local.LOCAL_REGION.name!r}.')
         return region, zone
 
     @classmethod

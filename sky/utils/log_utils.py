@@ -1,59 +1,15 @@
 """Logging utils."""
 import enum
-import threading
-from typing import Optional, List
-
-import rich.console as rich_console
+from typing import List, Optional
 
 import colorama
 import pendulum
 import prettytable
 
 from sky import sky_logging
+from sky.utils import rich_utils
 
 logger = sky_logging.init_logger(__name__)
-
-console = rich_console.Console()
-_status = None
-
-
-class _NoOpConsoleStatus:
-    """An empty class for multi-threaded console.status."""
-
-    def __enter__(self):
-        pass
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-    def update(self, text):
-        pass
-
-    def stop(self):
-        pass
-
-    def start(self):
-        pass
-
-
-def safe_rich_status(msg: str):
-    """A wrapper for multi-threaded console.status."""
-    if (threading.current_thread() is threading.main_thread() and
-            not sky_logging.is_silent()):
-        global _status
-        if _status is None:
-            _status = console.status(msg)
-        _status.update(msg)
-        return _status
-    return _NoOpConsoleStatus()
-
-
-def force_update_rich_status(msg: str):
-    """Update the status message even if sky_logging.is_silent() is true."""
-    if threading.current_thread() is threading.main_thread():
-        global _status
-        if _status is not None:
-            _status.update(msg)
 
 
 class LineProcessor(object):
@@ -76,22 +32,90 @@ class RayUpLineProcessor(LineProcessor):
     class ProvisionStatus(enum.Enum):
         LAUNCH = 0
         RUNTIME_SETUP = 1
+        PULLING_DOCKER_IMAGES = 2
 
     def __enter__(self):
         self.state = self.ProvisionStatus.LAUNCH
-        self.status_display = safe_rich_status('[bold cyan]Launching')
+        self.status_display = rich_utils.safe_status('[bold cyan]Launching')
         self.status_display.start()
 
     def process_line(self, log_line):
-        if ('Shared connection to' in log_line and
+        if ('Success.' in log_line and
                 self.state == self.ProvisionStatus.LAUNCH):
-            self.status_display.stop()
             logger.info(f'{colorama.Fore.GREEN}Head node is up.'
                         f'{colorama.Style.RESET_ALL}')
-            self.status_display.start()
             self.status_display.update(
                 '[bold cyan]Launching - Preparing SkyPilot runtime')
             self.state = self.ProvisionStatus.RUNTIME_SETUP
+        if ('Pulling from' in log_line and
+                self.state == self.ProvisionStatus.RUNTIME_SETUP):
+            self.status_display.update(
+                '[bold cyan]Launching - Pulling docker images')
+            self.state = self.ProvisionStatus.PULLING_DOCKER_IMAGES
+        if ('Status: Downloaded newer image' in log_line and
+                self.state == self.ProvisionStatus.PULLING_DOCKER_IMAGES):
+            logger.info(f'{colorama.Fore.GREEN}Docker image is downloaded.'
+                        f'{colorama.Style.RESET_ALL}')
+            self.status_display.update(
+                '[bold cyan]Launching - Preparing SkyPilot runtime')
+            self.state = self.ProvisionStatus.RUNTIME_SETUP
+
+    def __exit__(self, except_type, except_value, traceback):
+        del except_type, except_value, traceback  # unused
+        self.status_display.stop()
+
+
+class SkyLocalUpLineProcessor(LineProcessor):
+    """A processor for `sky local up` log lines."""
+
+    def __enter__(self):
+        status = rich_utils.safe_status('[bold cyan]Creating local cluster - '
+                                        'initializing Kubernetes')
+        self.status_display = status
+        self.status_display.start()
+
+    def process_line(self, log_line):
+        if 'Kind cluster created.' in log_line:
+            logger.info(f'{colorama.Fore.GREEN}Kubernetes is running.'
+                        f'{colorama.Style.RESET_ALL}')
+        if 'Installing NVIDIA GPU operator...' in log_line:
+            self.status_display.update('[bold cyan]Creating local cluster - '
+                                       'Installing NVIDIA GPU operator')
+        if 'Starting wait for GPU operator installation...' in log_line:
+            self.status_display.update(
+                '[bold cyan]Creating local cluster - '
+                'waiting for NVIDIA GPU operator installation to complete')
+            logger.info('To check NVIDIA GPU operator status, '
+                        'see pods: kubectl get pods -n gpu-operator')
+        if 'GPU operator installed' in log_line:
+            logger.info(f'{colorama.Fore.GREEN}NVIDIA GPU Operator installed.'
+                        f'{colorama.Style.RESET_ALL}')
+        if 'Pulling SkyPilot GPU image...' in log_line:
+            self.status_display.update('[bold cyan]Creating local cluster - '
+                                       'pulling and loading SkyPilot GPU image')
+        if 'SkyPilot GPU image loaded into kind cluster' in log_line:
+            logger.info(f'{colorama.Fore.GREEN}SkyPilot GPU image pulled.'
+                        f'{colorama.Style.RESET_ALL}')
+        if 'Labelling nodes with GPUs...' in log_line:
+            self.status_display.update('[bold cyan]Creating local cluster - '
+                                       'launching GPU labelling jobs')
+        if ('Starting wait for SkyPilot GPU labeling jobs to complete'
+                in log_line):
+            self.status_display.update(
+                '[bold cyan]Creating local cluster - '
+                'waiting for GPU labelling jobs to complete')
+            logger.info(
+                'To check GPU labelling status, see jobs: '
+                'kubectl get jobs -n kube-system -l job=sky-gpu-labeler')
+        if 'All SkyPilot GPU labeling jobs completed' in log_line:
+            logger.info(f'{colorama.Fore.GREEN}GPU labelling complete.'
+                        f'{colorama.Style.RESET_ALL}')
+        if 'Pulling SkyPilot CPU image...' in log_line:
+            self.status_display.update('[bold cyan]Creating local cluster - '
+                                       'pulling and loading SkyPilot CPU image')
+        if 'SkyPilot CPU image loaded into kind cluster' in log_line:
+            logger.info(f'{colorama.Fore.GREEN}SkyPilot CPU image pulled.'
+                        f'{colorama.Style.RESET_ALL}')
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused

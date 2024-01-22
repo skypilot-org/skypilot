@@ -1,25 +1,24 @@
-"""
-Oracle Cloud Infrastructure (OCI)
+"""Oracle Cloud Infrastructure (OCI)
 
 History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
  - Hysun He (hysun.he@oracle.com) @ May 4, 2023: Support use the default
    image_id (configurable) if no image_id specified in the task yaml.
 """
-import os
 import json
-import typing
 import logging
+import os
+import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
 from sky import status_lib
+from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
+from sky.clouds.utils import oci_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
-from sky.adaptors import oci as oci_adaptor
-from sky.skylet.providers.oci.config import oci_conf
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -32,7 +31,7 @@ _tenancy_prefix = None
 
 @clouds.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
-    """ OCI: Oracle Cloud Infrastructure """
+    """OCI: Oracle Cloud Infrastructure """
 
     _REPR = 'OCI'
 
@@ -43,15 +42,27 @@ class OCI(clouds.Cloud):
     _INDENT_PREFIX = '    '
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return {
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
-                (f'Migrating disk is not supported in {cls._REPR}.'),
+                (f'Migrating disk is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+                (f'Docker image is currently not supported on {cls._REPR}. '
+                 'You can try running docker command inside the '
+                 '`run` section in task.yaml.'),
+            clouds.CloudImplementationFeatures.OPEN_PORTS:
+                (f'Opening ports is currently not supported on {cls._REPR}.'),
         }
+        if resources.use_spot:
+            features[clouds.CloudImplementationFeatures.STOP] = (
+                f'Stopping spot instances is currently not supported on '
+                f'{cls._REPR}.')
+        return features
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -122,8 +133,9 @@ class OCI(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
-        """
-        https://www.oracle.com/cis/cloud/networking/pricing/
+        """Get the egress cost for the given number of gigabytes.
+
+        Reference: https://www.oracle.com/cis/cloud/networking/pricing/
         """
         # Free for first 10T (per month)
         if num_gigabytes <= 10 * 1024:
@@ -174,8 +186,9 @@ class OCI(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud  # Unused.
         assert region is not None, resources
 
         acc_dict = self.get_accelerators_from_instance_type(
@@ -187,7 +200,7 @@ class OCI(clouds.Cloud):
 
         image_str = self._get_image_id(resources.image_id, region.name,
                                        resources.instance_type)
-        image_cols = image_str.split(oci_conf.IMAGE_TAG_SPERATOR)
+        image_cols = image_str.split(oci_utils.oci_config.IMAGE_TAG_SPERATOR)
         if len(image_cols) == 3:
             image_id = image_cols[0]
             listing_id = image_cols[1]
@@ -199,7 +212,7 @@ class OCI(clouds.Cloud):
 
         cpus = resources.cpus
         instance_type_arr = resources.instance_type.split(
-            oci_conf.INSTANCE_TYPE_RES_SPERATOR)
+            oci_utils.oci_config.INSTANCE_TYPE_RES_SPERATOR)
         instance_type = instance_type_arr[0]
 
         # Improvement:
@@ -218,8 +231,8 @@ class OCI(clouds.Cloud):
                     memory=mems,
                 )
             if cpus is None and resources.instance_type.startswith(
-                    oci_conf.VM_PREFIX):
-                cpus = f'{oci_conf.DEFAULT_NUM_VCPUS}'
+                    oci_utils.oci_config.VM_PREFIX):
+                cpus = f'{oci_utils.oci_config.DEFAULT_NUM_VCPUS}'
 
         zone = resources.zone
         if zone is None:
@@ -239,11 +252,13 @@ class OCI(clouds.Cloud):
         if _tenancy_prefix is None:
             try:
                 identity_client = oci_adaptor.get_identity_client(
-                    region=region.name, profile=oci_conf.get_profile())
+                    region=region.name,
+                    profile=oci_utils.oci_config.get_profile())
 
                 ad_list = identity_client.list_availability_domains(
                     compartment_id=oci_adaptor.get_oci_config(
-                        profile=oci_conf.get_profile())['tenancy']).data
+                        profile=oci_utils.oci_config.get_profile())
+                    ['tenancy']).data
 
                 first_ad = ad_list[0]
                 _tenancy_prefix = str(first_ad.name).split(':')[0]
@@ -275,8 +290,9 @@ class OCI(clouds.Cloud):
             'use_spot': resources.use_spot
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
@@ -373,9 +389,10 @@ class OCI(clouds.Cloud):
 
         try:
             user = oci_adaptor.get_identity_client(
-                region=None, profile=oci_conf.get_profile()).get_user(
-                    oci_adaptor.get_oci_config(
-                        profile=oci_conf.get_profile())['user']).data
+                region=None,
+                profile=oci_utils.oci_config.get_profile()).get_user(
+                    oci_adaptor.get_oci_config(profile=oci_utils.oci_config.
+                                               get_profile())['user']).data
             del user
             # TODO[Hysun]: More privilege check can be added
             return True, None
@@ -394,10 +411,11 @@ class OCI(clouds.Cloud):
         oci_cfg_file = oci_adaptor.get_config_file()
         # Pass-in a profile parameter so that multiple profile in oci
         # config file is supported (2023/06/09).
-        oci_cfg = oci_adaptor.get_oci_config(profile=oci_conf.get_profile())
+        oci_cfg = oci_adaptor.get_oci_config(
+            profile=oci_utils.oci_config.get_profile())
         api_key_file = oci_cfg[
             'key_file'] if 'key_file' in oci_cfg else 'BadConf'
-        sky_cfg_file = oci_conf.get_sky_user_config_file()
+        sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
 
         # OCI config and API key file are mandatory
         credential_files = [oci_cfg_file, api_key_file]
@@ -436,7 +454,8 @@ class OCI(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'oci')
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         # We ignore checking the image size because most of situations the
         # boot volume size is larger than the image size. For specific rare
         # situations, the configuration/setup commands should make sure the
@@ -479,13 +498,13 @@ class OCI(clouds.Cloud):
         acc = self.get_accelerators_from_instance_type(instance_type)
 
         if acc is None:
-            image_tag = oci_conf.get_default_image_tag()
+            image_tag = oci_utils.oci_config.get_default_image_tag()
             image_id_str = service_catalog.get_image_id_from_tag(image_tag,
                                                                  region_name,
                                                                  clouds='oci')
         else:
             assert len(acc) == 1, acc
-            image_tag = oci_conf.get_default_gpu_image_tag()
+            image_tag = oci_utils.oci_config.get_default_gpu_image_tag()
             image_id_str = service_catalog.get_image_id_from_tag(image_tag,
                                                                  region_name,
                                                                  clouds='oci')
@@ -511,31 +530,34 @@ class OCI(clouds.Cloud):
 
     def get_vpu_from_disktier(self, cpus: Optional[float],
                               disk_tier: Optional[str]) -> int:
-        vpu = oci_conf.BOOT_VOLUME_VPU[disk_tier]
+        vpu = oci_utils.oci_config.BOOT_VOLUME_VPU[disk_tier]
         if cpus is None:
             return vpu
 
         if cpus <= 2:
-            vpu = oci_conf.DISK_TIER_LOW if disk_tier is None else vpu
-            if vpu > oci_conf.DISK_TIER_LOW:
+            if disk_tier is None:
+                vpu = oci_utils.oci_config.DISK_TIER_LOW
+            if vpu > oci_utils.oci_config.DISK_TIER_LOW:
                 # If only 1 OCPU is configured, best to use the OCI default
                 # VPU (10) for the boot volume. Even if the VPU is configured
                 # to higher value (no error to launch the instance), we cannot
                 # fully achieve its IOPS/throughput performance.
                 logger.warning(
-                    f'Automatically set the VPU to {oci_conf.DISK_TIER_LOW}'
-                    f' as only 2x vCPU is configured.')
-                vpu = oci_conf.DISK_TIER_LOW
+                    'Automatically set the VPU to '
+                    f'{oci_utils.oci_config.DISK_TIER_LOW} as only 2x vCPU is '
+                    'configured.')
+                vpu = oci_utils.oci_config.DISK_TIER_LOW
         elif cpus < 8:
             # If less than 4 OCPU is configured, best not to set the disk_tier
             # to 'high' (vpu=100). Even if the disk_tier is configured to high
             # (no error to launch the instance), we cannot fully achieve its
             # IOPS/throughput performance.
-            if vpu > oci_conf.DISK_TIER_MEDIUM:
+            if vpu > oci_utils.oci_config.DISK_TIER_MEDIUM:
                 logger.warning(
-                    f'Automatically set the VPU to {oci_conf.DISK_TIER_MEDIUM}'
-                    f' as less than 8x vCPU is configured.')
-                vpu = oci_conf.DISK_TIER_MEDIUM
+                    'Automatically set the VPU to '
+                    f'{oci_utils.oci_config.DISK_TIER_MEDIUM} as less than 8x '
+                    'vCPU is configured.')
+                vpu = oci_utils.oci_config.DISK_TIER_MEDIUM
         return vpu
 
     @classmethod

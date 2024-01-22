@@ -4,30 +4,38 @@ import json
 import os
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+                    Union)
 
+import colorama
 import yaml
 
 import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky.backends import backend_utils
-from sky.data import storage as storage_lib
+import sky.dag
 from sky.data import data_utils
+from sky.data import storage as storage_lib
+from sky.provision import docker_utils
+from sky.serve import service_spec
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
+logger = sky_logging.init_logger(__name__)
+
 # A lambda generating commands (node rank_i, node addrs -> cmd_i).
 CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
-_VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
                      ' uppercase letters, digits, underscores, periods,'
                      ' and dashes. Must start and end with alphanumeric'
@@ -38,7 +46,7 @@ _RUN_FN_CHECK_FAIL_MSG = (
     'a list of node ip addresses (List[str]). Got {run_sig}')
 
 
-def _is_valid_name(name: str) -> bool:
+def _is_valid_name(name: Optional[str]) -> bool:
     """Checks if the task name is valid.
 
     Valid is defined as either NoneType or str with ASCII characters which may
@@ -62,11 +70,6 @@ def _is_valid_name(name: str) -> bool:
     if name is None:
         return True
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
-
-
-def _is_valid_env_var(name: str) -> bool:
-    """Checks if the task environment variable name is valid."""
-    return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
 
 
 def _fill_in_env_vars_in_file_mounts(
@@ -103,6 +106,63 @@ def _fill_in_env_vars_in_file_mounts(
     return json.loads(file_mounts_str)
 
 
+def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
+    """Checks if there is a valid docker login config in task_envs.
+
+    If any of the docker login env vars is set, all of them must be set.
+
+    Raises:
+        ValueError: if any of the docker login env vars is set, but not all of
+            them are set.
+    """
+    all_keys = constants.DOCKER_LOGIN_ENV_VARS
+    existing_keys = all_keys & set(task_envs.keys())
+    if not existing_keys:
+        return False
+    if len(existing_keys) != len(all_keys):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'If any of {", ".join(all_keys)} is set, all of them must '
+                f'be set. Missing envs: {all_keys - existing_keys}')
+    return True
+
+
+def _with_docker_login_config(
+    resources: Union[Set['resources_lib.Resources'],
+                     List['resources_lib.Resources']],
+    task_envs: Dict[str, str],
+) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
+    if not _check_docker_login_config(task_envs):
+        return resources
+    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(
+        task_envs)
+
+    def _add_docker_login_config(resources: 'resources_lib.Resources'):
+        docker_image = resources.extract_docker_image()
+        if docker_image is None:
+            logger.warning(f'{colorama.Fore.YELLOW}Docker login configs '
+                           f'{", ".join(constants.DOCKER_LOGIN_ENV_VARS)} '
+                           'are provided, but no docker image is specified '
+                           'in `image_id`. The login configs will be '
+                           f'ignored.{colorama.Style.RESET_ALL}')
+            return resources
+        # Already checked in extract_docker_image
+        assert len(resources.image_id) == 1, resources.image_id
+        region = list(resources.image_id.keys())[0]
+        # We automatically add the server prefix to the image name if
+        # the user did not add it.
+        server_prefix = f'{docker_login_config.server}/'
+        if not docker_image.startswith(server_prefix):
+            docker_image = f'{server_prefix}{docker_image}'
+        return resources.copy(image_id={region: 'docker:' + docker_image},
+                              _docker_login_config=docker_login_config)
+
+    new_resources = []
+    for r in resources:
+        new_resources.append(_add_docker_login_config(r))
+    return type(resources)(new_resources)
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
@@ -118,6 +178,7 @@ class Task:
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
+        blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
     ):
         """Initializes a Task.
 
@@ -127,7 +188,7 @@ class Task:
 
         Optionally, call ``Task.set_resources()`` to set the resource
         requirements for this task.  If not set, a default CPU-only requirement
-        is assumed (the same as ``sky cpunode``).
+        is assumed (the same as ``sky launch``).
 
         All setters of this class, ``Task.set_*()``, return ``self``, i.e.,
         they are fluent APIs and can be chained together.
@@ -172,6 +233,7 @@ class Task:
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
+          blocked_resources: A set of resources that this task cannot run on.
         """
         self.name = name
         self.run = run
@@ -188,12 +250,17 @@ class Task:
         # https://github.com/python/mypy/issues/3004
         self.num_nodes = num_nodes  # type: ignore
 
-        self.inputs = None
-        self.outputs = None
-        self.estimated_inputs_size_gigabytes = None
-        self.estimated_outputs_size_gigabytes = None
+        self.inputs: Optional[str] = None
+        self.outputs: Optional[str] = None
+        self.estimated_inputs_size_gigabytes: Optional[float] = None
+        self.estimated_outputs_size_gigabytes: Optional[float] = None
         # Default to CPUNode
-        self.resources = {sky.Resources()}
+        self.resources: Union[List[sky.Resources],
+                              Set[sky.Resources]] = {sky.Resources()}
+        self._service: Optional[service_spec.SkyServiceSpec] = None
+        # Resources that this task cannot run on.
+        self.blocked_resources = blocked_resources
+
         self.time_estimator_func: Optional[Callable[['sky.Resources'],
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
@@ -201,6 +268,9 @@ class Task:
         # Only set when 'self' is a spot controller task: 'self.spot_dag' is
         # the underlying managed spot dag (sky.Dag object).
         self.spot_dag: Optional['sky.Dag'] = None
+
+        # Only set when 'self' is a sky serve controller task.
+        self.service_name: Optional[str] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
@@ -290,8 +360,8 @@ class Task:
         if envs is not None and isinstance(envs, dict):
             config['envs'] = {str(k): str(v) for k, v in envs.items()}
 
-        backend_utils.validate_schema(config, schemas.get_task_schema(),
-                                      'Invalid task YAML: ')
+        common_utils.validate_schema(config, schemas.get_task_schema(),
+                                     'Invalid task YAML: ')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
@@ -362,10 +432,15 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
-        resources = config.pop('resources', None)
-        resources = sky.Resources.from_yaml_config(resources)
+        # Parse resources field.
+        resources_config = config.pop('resources', None)
+        task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
-        task.set_resources({resources})
+        service = config.pop('service', None)
+        if service is not None:
+            service = service_spec.SkyServiceSpec.from_yaml_config(service)
+        task.set_service(service)
+
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -385,7 +460,7 @@ class Task:
           ValueError: if the path gets loaded into a str instead of a dict; or
             if there are any other parsing errors.
         """
-        with open(os.path.expanduser(yaml_path), 'r') as f:
+        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
             # TODO(zongheng): use
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
             # to raise errors on duplicate keys.
@@ -446,7 +521,7 @@ class Task:
                 if not isinstance(key, str):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError('Env keys must be strings.')
-                if not _is_valid_env_var(key):
+                if not common_utils.is_valid_env_var(key):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Invalid env key: {key}')
         else:
@@ -455,6 +530,12 @@ class Task:
                     'envs must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{envs}')
         self._envs.update(envs)
+        # If the update_envs() is called after set_resources(), we need to
+        # manually update docker login config in task resources, in case the
+        # docker login envs are newly added.
+        if _check_docker_login_config(self._envs):
+            self.resources = _with_docker_login_config(self.resources,
+                                                       self._envs)
         return self
 
     @property
@@ -465,16 +546,17 @@ class Task:
     def use_spot(self) -> bool:
         return any(r.use_spot for r in self.resources)
 
-    def set_inputs(self, inputs, estimated_size_gigabytes) -> 'Task':
+    def set_inputs(self, inputs: str,
+                   estimated_size_gigabytes: float) -> 'Task':
         # E.g., 's3://bucket', 'gs://bucket', or None.
         self.inputs = inputs
         self.estimated_inputs_size_gigabytes = estimated_size_gigabytes
         return self
 
-    def get_inputs(self):
+    def get_inputs(self) -> Optional[str]:
         return self.inputs
 
-    def get_estimated_inputs_size_gigabytes(self):
+    def get_estimated_inputs_size_gigabytes(self) -> Optional[float]:
         return self.estimated_inputs_size_gigabytes
 
     def get_inputs_cloud(self):
@@ -484,23 +566,27 @@ class Task:
             return clouds.AWS()
         elif self.inputs.startswith('gs:'):
             return clouds.GCP()
+        elif self.inputs.startswith('cos:'):
+            return clouds.IBM()
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'cloud path not supported: {self.inputs}')
 
-    def set_outputs(self, outputs, estimated_size_gigabytes) -> 'Task':
+    def set_outputs(self, outputs: str,
+                    estimated_size_gigabytes: float) -> 'Task':
         self.outputs = outputs
         self.estimated_outputs_size_gigabytes = estimated_size_gigabytes
         return self
 
-    def get_outputs(self):
+    def get_outputs(self) -> Optional[str]:
         return self.outputs
 
-    def get_estimated_outputs_size_gigabytes(self):
+    def get_estimated_outputs_size_gigabytes(self) -> Optional[float]:
         return self.estimated_outputs_size_gigabytes
 
     def set_resources(
         self, resources: Union['resources_lib.Resources',
+                               List['resources_lib.Resources'],
                                Set['resources_lib.Resources']]
     ) -> 'Task':
         """Sets the required resources to execute this task.
@@ -509,21 +595,44 @@ class Task:
         requirements will be used (8 vCPUs).
 
         Args:
-          resources: either a sky.Resources, or a set of them.  The latter case
-            is EXPERIMENTAL and indicates asking the optimizer to "pick the
+          resources: either a sky.Resources, a set of them, or a list of them.
+            A set or a list of resources asks the optimizer to "pick the
             best of these resources" to run this task.
-
         Returns:
           self: The current task, with resources set.
         """
         if isinstance(resources, sky.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
-        self.resources = resources
+        self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
-    def get_resources(self):
-        return self.resources
+    def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
+        """Sets the override parameters for the resources."""
+        new_resources_list = []
+        for res in list(self.resources):
+            new_resources = res.copy(**override_params)
+            new_resources_list.append(new_resources)
+
+        self.set_resources(type(self.resources)(new_resources_list))
+        return self
+
+    @property
+    def service(self) -> Optional[service_spec.SkyServiceSpec]:
+        return self._service
+
+    def set_service(self,
+                    service: Optional[service_spec.SkyServiceSpec]) -> 'Task':
+        """Sets the service spec for this task.
+
+        Args:
+          service: a SkyServiceSpec object.
+
+        Returns:
+          self: The current task, with service set.
+        """
+        self._service = service
+        return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
@@ -592,8 +701,9 @@ class Task:
                     raise ValueError(
                         'File mount destination paths cannot be cloud storage')
             if not data_utils.is_cloud_store_url(source):
-                if not os.path.exists(
-                        os.path.abspath(os.path.expanduser(source))):
+                if (not os.path.exists(
+                        os.path.abspath(os.path.expanduser(source))) and
+                        not source.startswith('skypilot:')):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
                             f'File mount source {source!r} does not exist '
@@ -744,7 +854,10 @@ class Task:
         #  3. if not specified or the task's cloud does not support storage,
         #     use the first enabled storage cloud.
         # This should be refactored and moved to the optimizer.
-        assert len(self.resources) == 1, self.resources
+
+        # This check is not needed to support multiple accelerators;
+        # We just need to get the storage_cloud.
+        # assert len(self.resources) == 1, self.resources
         storage_cloud = None
 
         backend_utils.check_public_cloud_enabled()
@@ -764,6 +877,7 @@ class Task:
         if storage_cloud is None:
             storage_cloud = clouds.CLOUD_REGISTRY.from_str(
                 enabled_storage_clouds[0])
+            assert storage_cloud is not None, enabled_storage_clouds[0]
 
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
         return store_type
@@ -820,6 +934,19 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.IBM:
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('cos://'):
+                        # source is a cos bucket's uri
+                        blob_path = storage.source
+                    else:
+                        # source is a bucket name.
+                        assert storage.name is not None, storage
+                        # extract region from rclone.conf
+                        cos_region = data_utils.Rclone.get_region_from_rclone(
+                            storage.name, data_utils.Rclone.RcloneClouds.IBM)
+                        blob_path = f'cos://{cos_region}/{storage.name}'
+                    self.update_file_mounts({mnt_path: blob_path})
                 elif store_type is storage_lib.StoreType.AZURE:
                     # TODO when Azure Blob is done: sync ~/.azure
                     raise NotImplementedError('Azure Blob not mountable yet')
@@ -877,10 +1004,21 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        if self.resources is not None:
-            assert len(self.resources) == 1
-            resources = list(self.resources)[0]
-            add_if_not_none('resources', resources.to_yaml_config())
+        tmp_resource_config = {}
+        if len(self.resources) > 1:
+            resource_list = []
+            for r in self.resources:
+                resource_list.append(r.to_yaml_config())
+            key = 'ordered' if isinstance(self.resources, list) else 'any_of'
+            tmp_resource_config[key] = resource_list
+        else:
+            tmp_resource_config = list(self.resources)[0].to_yaml_config()
+
+        add_if_not_none('resources', tmp_resource_config)
+
+        if self.service is not None:
+            add_if_not_none('service', self.service.to_yaml_config())
+
         add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:
@@ -913,8 +1051,6 @@ class Task:
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
-        if self.name and self.name != 'sky-cmd':  # CLI launch with a command
-            return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
             if len(run_msg) > 20:
@@ -926,7 +1062,10 @@ class Task:
         else:
             run_msg = 'run=<fn>'
 
-        s = f'Task({run_msg})'
+        name_str = ''
+        if self.name is not None:
+            name_str = f'<name={self.name}>'
+        s = f'Task{name_str}({run_msg})'
         if self.inputs is not None:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
@@ -934,10 +1073,13 @@ class Task:
         if self.num_nodes > 1:
             s += f'\n  nodes: {self.num_nodes}'
         if len(self.resources) > 1:
-            s += f'\n  resources: {self.resources}'
-        elif len(
-                self.resources) == 1 and not list(self.resources)[0].is_empty():
-            s += f'\n  resources: {list(self.resources)[0]}'
+            resources_str = ('{' + ', '.join(
+                r.repr_with_region_zone for r in self.resources) + '}')
+            s += f'\n  resources: {resources_str}'
+        elif (len(self.resources) == 1 and
+              not list(self.resources)[0].is_empty()):
+            s += (f'\n  resources: '
+                  f'{list(self.resources)[0].repr_with_region_zone}')
         else:
             s += '\n  resources: default instances'
         return s

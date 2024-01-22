@@ -99,6 +99,16 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
                     "iam:GetInstanceProfile"
                 ],
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
+            },
+            {
+            "Effect": "Allow",
+            "Action": "iam:CreateServiceLinkedRole",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "iam:AWSServiceName": "spot.amazonaws.com"
+                }
+            }
             }
         ]
     }
@@ -117,22 +127,35 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
                 "Resource": "*"
             }
 
-5. Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
-6. Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
+5. **Optional**: To enable opening ports on AWS cluster, you need to add the following permissions to the policy above as well.
+
+.. code-block:: json
+
+           {
+                "Effect": "Allow",
+                "Action": [
+                    "ec2:DeleteSecurityGroup",
+                    "ec2:ModifyInstanceAttribute"
+                ],
+                "Resource": "arn:aws:ec2:*:<account-ID-without-hyphens>:*"
+            }
+
+6. Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
+7. Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
 
 .. image:: ../../images/screenshots/aws/aws-add-policy.png
     :width: 80%
     :align: center
     :alt: AWS Add Policy
 
-7. **Optional**: If you would like to have your users access S3 buckets: You can additionally attach S3 access, such as the "AmazonS3FullAccess" policy.
+8. **Optional**: If you would like to have your users access S3 buckets: You can additionally attach S3 access, such as the "AmazonS3FullAccess" policy.
 
 .. image:: ../../images/screenshots/aws/aws-s3-policy.png
     :width: 80%
     :align: center
     :alt: AWS Add S3 Policy
 
-8. Click on **Next** and follow the instructions to create the user.
+9. Click on **Next** and follow the instructions to create the user.
 
 With the steps above you are almost ready to have the users in your organization to use SkyPilot with the minimal permissions.
 
@@ -197,3 +220,23 @@ IAM Role Creation
 4. **Optional**: If you would like to let the user access S3 buckets on the VM they created, you can additionally attach the s3 access permission to the IAM role, such as the "AmazonS3FullAccess" policy.
 5. Click **Next**, and name your role "skypilot-v1". Click **Create role**.
 
+
+Using a specific VPC
+-----------------------
+By default, SkyPilot uses the "default" VPC in each region.
+
+To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
+file ``~/.sky/config.yaml`` to specify the VPC name in the ``aws.vpc_name``
+field:
+
+.. code-block:: yaml
+
+    aws:
+      vpc_name: my-vpc-name
+
+See details in :ref:`config-yaml`.  Example use cases include using a private VPC or a
+VPC with fine-grained constraints, typically created via Terraform or manually.
+
+To manually create a private VPC (i.e., all nodes will have internal IPs only),
+you can use the AWS console; see instructions `here
+<https://github.com/skypilot-org/skypilot/pull/1512>`_.

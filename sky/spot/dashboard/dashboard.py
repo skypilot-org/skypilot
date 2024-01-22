@@ -8,9 +8,9 @@ comment).
 """
 import datetime
 import pathlib
-import yaml
 
 import flask
+import yaml
 
 import sky
 from sky import spot

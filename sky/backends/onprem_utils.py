@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import click
 from packaging import version
-import rich.console as rich_console
 import yaml
 
 from sky import global_user_state
@@ -19,12 +18,12 @@ from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
 
 # Placeholder variable for generated cluster config when
 # `sky admin deploy` is run.
@@ -74,9 +73,9 @@ def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
         with open(path, 'r') as f:
             yaml_config = yaml.safe_load(f)
             if not suppress_error:
-                backend_utils.validate_schema(yaml_config,
-                                              schemas.get_cluster_schema(),
-                                              'Invalid cluster YAML: ')
+                common_utils.validate_schema(yaml_config,
+                                             schemas.get_cluster_schema(),
+                                             'Invalid cluster YAML: ')
             user_config = yaml_config['auth']
             cluster_name = yaml_config['cluster']['name']
         sky_local_path = SKY_USER_LOCAL_CONFIG_PATH
@@ -106,7 +105,7 @@ def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
     # Remove clusters that are in global user state but are not in
     # ~/.sky/local.
     records = backend_utils.get_clusters(
-        include_reserved=False,
+        include_controller=False,
         refresh=False,
         cloud_filter=backend_utils.CloudFilter.LOCAL)
     saved_clusters = [r['name'] for r in records]
@@ -140,8 +139,10 @@ def get_python_executable(cluster_name: str) -> str:
     return config['python']
 
 
-def get_job_owner(cluster_yaml: str) -> str:
+def get_job_owner(cluster_yaml: str, docker_user: Optional[str] = None) -> str:
     """Get the owner of the job."""
+    if docker_user is not None:
+        return docker_user
     cluster_config = common_utils.read_yaml(os.path.expanduser(cluster_yaml))
     # User name is guaranteed to exist (on all jinja files)
     return cluster_config['auth']['ssh_user']
@@ -357,7 +358,7 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
             worker_ips, *ssh_credentials)
 
     # Stops all running Ray instances on all nodes
-    with console.status('[bold cyan]Stopping ray cluster'):
+    with rich_utils.safe_status('[bold cyan]Stopping ray cluster'):
 
         def _stop_ray_workers(runner: command_runner.SSHCommandRunner):
             backend_utils.run_command_and_handle_ssh_failure(
@@ -377,7 +378,7 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
                 f'--resources={head_resources!r} --num-gpus={head_gpu_count} '
                 f'--temp-dir {constants.SKY_REMOTE_RAY_TEMPDIR}')
 
-    with console.status('[bold cyan]Launching ray cluster on head'):
+    with rich_utils.safe_status('[bold cyan]Launching ray cluster on head'):
         backend_utils.run_command_and_handle_ssh_failure(
             head_runner,
             head_cmd,
@@ -405,7 +406,7 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
                 f'{ray_dashboard_port}:localhost:{ray_dashboard_port} '
                 f'{ssh_options} {ssh_user}@{head_ip} '
                 '\'while true; do sleep 86400; done\'')
-    with console.status('[bold cyan]Waiting for workers.'):
+    with rich_utils.safe_status('[bold cyan]Waiting for workers.'):
 
         def _start_ray_workers(
                 runner_tuple: Tuple[command_runner.SSHCommandRunner, int]):
@@ -496,7 +497,7 @@ def check_local_cloud_args(cloud: Optional[str] = None,
         yaml_config: User's task yaml loaded into a JSON dictionary.
     """
     yaml_cloud = None
-    if yaml_config is not None and 'resources' in yaml_config:
+    if yaml_config is not None and yaml_config.get('resources') is not None:
         yaml_cloud = yaml_config['resources'].get('cloud')
 
     if (cluster_name is not None and check_if_local_cloud(cluster_name)):
@@ -546,7 +547,7 @@ def do_filemounts_and_setup_on_local_workers(
     setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
 
     worker_runners = command_runner.SSHCommandRunner.make_runner_list(
-        worker_ips, **ssh_credentials)
+        worker_ips, port_list=None, **ssh_credentials)
 
     # Uploads setup script to the worker node
     with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:

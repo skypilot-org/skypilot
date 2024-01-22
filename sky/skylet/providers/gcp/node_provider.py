@@ -12,7 +12,10 @@ from sky.skylet.providers.gcp.config import (
     construct_clients_from_provider_config,
     get_node_type,
 )
+from sky.skylet.providers.command_runner import SkyDockerCommandRunner
+from sky.provision import docker_utils
 
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler.tags import (
     TAG_RAY_LAUNCH_CONFIG,
     TAG_RAY_NODE_KIND,
@@ -283,6 +286,9 @@ class GCPNodeProvider(NodeProvider):
                     count -= len(reuse_node_ids)
             if count:
                 results = resource.create_instances(base_config, labels, count)
+                if "sourceMachineImage" in base_config:
+                    for _, instance_id in results:
+                        resource.resize_disk(base_config, instance_id)
                 result_dict.update(
                     {instance_id: result for result, instance_id in results}
                 )
@@ -364,3 +370,31 @@ class GCPNodeProvider(NodeProvider):
     @staticmethod
     def bootstrap_config(cluster_config):
         return bootstrap_gcp(cluster_config)
+
+    def get_command_runner(
+        self,
+        log_prefix,
+        node_id,
+        auth_config,
+        cluster_name,
+        process_runner,
+        use_internal_ip,
+        docker_config=None,
+    ):
+        common_args = {
+            "log_prefix": log_prefix,
+            "node_id": node_id,
+            "provider": self,
+            "auth_config": auth_config,
+            "cluster_name": cluster_name,
+            "process_runner": process_runner,
+            "use_internal_ip": use_internal_ip,
+        }
+        if docker_config and docker_config["container_name"] != "":
+            if "docker_login_config" in self.provider_config:
+                docker_config["docker_login_config"] = docker_utils.DockerLoginConfig(
+                    **self.provider_config["docker_login_config"]
+                )
+            return SkyDockerCommandRunner(docker_config, **common_args)
+        else:
+            return SSHCommandRunner(**common_args)

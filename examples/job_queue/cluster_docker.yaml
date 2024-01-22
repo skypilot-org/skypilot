@@ -1,0 +1,11 @@
+# A dummy task for cluster creation.
+#
+# Runs a dummy task that provision a cluster.
+#
+# Usage:
+#   sky launch -c djq cluster_docker.yaml
+#   sky exec djq job_docker.yaml
+
+resources:
+  accelerators: T4
+  image_id: docker:ubuntu:20.04

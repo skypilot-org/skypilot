@@ -1,3 +1,5 @@
+from sky import skypilot_config
+
 SKYPILOT_VPC_NAME = "skypilot-vpc"
 
 # Below parameters are from the default VPC on GCP.
@@ -9,6 +11,7 @@ VPC_TEMPLATE = {
     "mtu": 1460,
     "routingConfig": {"routingMode": "GLOBAL"},
 }
+
 # Required firewall rules for SkyPilot to work.
 FIREWALL_RULES_REQUIRED = [
     # Allow internal connections between GCP VMs for Ray multi-node cluster.
@@ -29,9 +32,13 @@ FIREWALL_RULES_REQUIRED = [
                 "ports": ["22"],
             }
         ],
+        # Some users have reported that this conflicts with their network
+        # security policy. A custom VPC can be specified in ~/.sky/config.yaml
+        # allowing for restriction of source ranges bypassing this requirement.
         "sourceRanges": ["0.0.0.0/0"],
     },
 ]
+
 # Template when creating firewall rules for a new VPC.
 FIREWALL_RULES_TEMPLATE = [
     {
@@ -61,6 +68,8 @@ FIREWALL_RULES_TEMPLATE = [
                 "ports": ["22"],
             }
         ],
+        # TODO(skypilot): some users reported that this should be relaxed (e.g.,
+        # allowlisting only certain IPs to have ssh access).
         "sourceRanges": ["0.0.0.0/0"],
     },
     {
@@ -80,7 +89,7 @@ FIREWALL_RULES_TEMPLATE = [
 ]
 
 # A list of permissions required to run SkyPilot on GCP.
-# Keep this in sync with https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp # pylint: disable=line-too-long
+# Keep this in sync with https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html # pylint: disable=line-too-long
 VM_MINIMAL_PERMISSIONS = [
     "compute.disks.create",
     "compute.disks.list",
@@ -113,6 +122,11 @@ VM_MINIMAL_PERMISSIONS = [
     "resourcemanager.projects.get",
     "resourcemanager.projects.getIamPolicy",
 ]
+# If specifying custom VPC, permissions to modify network are not necessary
+# unless opening ports (e.g., via `resources.ports`).
+if skypilot_config.get_nested(("gcp", "vpc_name"), ""):
+    remove = ("compute.firewalls.create", "compute.firewalls.delete")
+    VM_MINIMAL_PERMISSIONS = [p for p in VM_MINIMAL_PERMISSIONS if p not in remove]
 
 TPU_MINIMAL_PERMISSIONS = [
     "tpu.nodes.create",

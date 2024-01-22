@@ -43,13 +43,14 @@ then:
 """
 import copy
 import os
+import pprint
 from typing import Any, Dict, Iterable
 
 import yaml
 
 from sky import sky_logging
-from sky import clouds
 from sky.utils import common_utils
+from sky.utils import schemas
 
 # The config path is discovered in this order:
 #
@@ -72,6 +73,7 @@ logger = sky_logging.init_logger(__name__)
 
 # The loaded config.
 _dict = None
+_loaded_config_path = None
 
 
 def get_nested(keys: Iterable[str], default_value: Any) -> Any:
@@ -125,27 +127,8 @@ def to_dict() -> Dict[str, Any]:
     return {}
 
 
-def _syntax_check_for_ssh_proxy_command(cloud: str) -> None:
-    ssh_proxy_command_config = get_nested((cloud.lower(), 'ssh_proxy_command'),
-                                          None)
-    if ssh_proxy_command_config is None or isinstance(ssh_proxy_command_config,
-                                                      str):
-        return
-
-    if isinstance(ssh_proxy_command_config, dict):
-        for region, cmd in ssh_proxy_command_config.items():
-            if cmd and not isinstance(cmd, str):
-                raise ValueError(
-                    f'Invalid ssh_proxy_command config for region {region!r} '
-                    f'(expected a str): {cmd!r}')
-        return
-    raise ValueError(
-        'Invalid ssh_proxy_command config (expected a str or a dict with '
-        f'region names as keys): {ssh_proxy_command_config!r}')
-
-
 def _try_load_config() -> None:
-    global _dict
+    global _dict, _loaded_config_path
     config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if config_path_via_env_var is not None:
         config_path = config_path_via_env_var
@@ -154,14 +137,19 @@ def _try_load_config() -> None:
     config_path = os.path.expanduser(config_path)
     if os.path.exists(config_path):
         logger.debug(f'Using config path: {config_path}')
+        _loaded_config_path = config_path
         try:
             _dict = common_utils.read_yaml(config_path)
-            logger.debug(f'Config loaded: {_dict}')
+            logger.debug(f'Config loaded:\n{pprint.pformat(_dict)}')
         except yaml.YAMLError as e:
             logger.error(f'Error in loading config file ({config_path}):', e)
+        if _dict is not None:
+            common_utils.validate_schema(
+                _dict,
+                schemas.get_config_schema(),
+                f'Invalid config YAML ({config_path}): ',
+                skip_none=False)
 
-        for cloud in clouds.CLOUD_REGISTRY:
-            _syntax_check_for_ssh_proxy_command(cloud)
         logger.debug('Config syntax check passed.')
 
 

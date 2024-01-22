@@ -1,0 +1,43 @@
+# A example yaml for serving Mixtral model from Mistral.ai with an OpenAI API.
+# Usage:
+#  1. Launch on a single instance: `sky launch mixtral ./serve.yaml`
+#  2. Scale up to multiple instances with a single endpoint:
+#     `sky serve up -n mixtral ./serve.yaml`
+service:
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: mistralai/Mixtral-8x7B-Instruct-v0.1
+      messages:
+        - role: user
+          content: Hello! What is your name?
+    initial_delay_seconds: 1200
+  replica_policy:
+    min_replicas: 2
+
+resources: 
+  accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+  ports: 8000
+  disk_tier: high
+
+setup: |
+  conda activate mixtral
+  if [ $? -ne 0 ]; then
+    conda create -n mixtral -y python=3.10
+    conda activate mixtral
+  fi
+  # We have to manually install Torch otherwise apex & xformers won't build
+  pip list | grep torch || pip install "torch>=2.0.0"
+
+  pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git"
+  pip install git+https://github.com/huggingface/transformers
+  pip list | grep megablocks || pip install megablocks
+
+run: |
+  conda activate mixtral
+  export PATH=$PATH:/sbin
+  python -u -m vllm.entrypoints.openai.api_server \
+                --host 0.0.0.0 \
+                --model mistralai/Mixtral-8x7B-Instruct-v0.1 \
+                --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE | tee ~/openai_api_server.log
+

@@ -13,11 +13,11 @@ import pickle
 import sqlite3
 import time
 import typing
-from typing import Any, Dict, List, Tuple, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
-from sky import status_lib
 from sky import clouds
+from sky import status_lib
 from sky.adaptors import cloudflare
 from sky.data import storage as storage_lib
 from sky.utils import common_utils
@@ -56,7 +56,13 @@ def create_table(cursor, conn):
         handle BLOB,
         last_use TEXT,
         status TEXT,
-        autostop INTEGER DEFAULT -1)""")
+        autostop INTEGER DEFAULT -1,
+        metadata TEXT DEFAULT "{}",
+        to_down INTEGER DEFAULT 0,
+        owner TEXT DEFAULT null,
+        cluster_hash TEXT DEFAULT null,
+        storage_mounts_metadata BLOB DEFAULT null,
+        cluster_ever_up INTEGER DEFAULT 0)""")
 
     # Table for Cluster History
     # usage_intervals: List[Tuple[int, int]]
@@ -110,6 +116,22 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
 
+    db_utils.add_column_to_table(cursor, conn, 'clusters',
+                                 'storage_mounts_metadata', 'BLOB DEFAULT null')
+    db_utils.add_column_to_table(
+        cursor,
+        conn,
+        'clusters',
+        'cluster_ever_up',
+        'INTEGER DEFAULT 0',
+        # Set the value to 1 so that all the existing clusters before #2977
+        # are considered as ever up, i.e:
+        #   existing cluster's default (null) -> 1;
+        #   new cluster's default -> 0;
+        # This is conservative for the existing clusters: even if some INIT
+        # clusters were never really UP, setting it to 1 means they won't be
+        # auto-deleted during any failover.
+        value_to_replace_existing_entries=1)
     conn.commit()
 
 
@@ -163,10 +185,6 @@ def add_or_update_cluster(cluster_name: str,
             cluster_launched_at = int(time.time())
         usage_intervals.append((cluster_launched_at, None))
 
-    if requested_resources:
-        assert len(requested_resources) == 1, requested_resources
-        requested_resources = list(requested_resources)[0]
-
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
         # All the fields need to exist here, even if they don't need
@@ -174,7 +192,8 @@ def add_or_update_cluster(cluster_name: str,
         # the field of the existing row with the default value if not
         # specified.
         '(name, launched_at, handle, last_use, status, '
-        'autostop, to_down, metadata, owner, cluster_hash) '
+        'autostop, to_down, metadata, owner, cluster_hash, '
+        'storage_mounts_metadata, cluster_ever_up) '
         'VALUES ('
         # name
         '?, '
@@ -206,7 +225,12 @@ def add_or_update_cluster(cluster_name: str,
         'COALESCE('
         '(SELECT owner FROM clusters WHERE name=?), null),'
         # cluster_hash
-        '?'
+        '?,'
+        # storage_mounts_metadata
+        'COALESCE('
+        '(SELECT storage_mounts_metadata FROM clusters WHERE name=?), null), '
+        # cluster_ever_up
+        '((SELECT cluster_ever_up FROM clusters WHERE name=?) OR ?)'
         ')',
         (
             # name
@@ -233,6 +257,11 @@ def add_or_update_cluster(cluster_name: str,
             cluster_name,
             # cluster_hash
             cluster_hash,
+            # storage_mounts_metadata
+            cluster_name,
+            # cluster_ever_up
+            cluster_name,
+            int(ready),
         ))
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
@@ -368,7 +397,7 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     return None
 
 
-def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
+def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
                               (cluster_name,))
     for (metadata,) in rows:
@@ -378,11 +407,37 @@ def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
+def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
     _DB.cursor.execute('UPDATE clusters SET metadata=(?) WHERE name=(?)', (
         json.dumps(metadata),
         cluster_name,
     ))
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
+
+
+def get_cluster_storage_mounts_metadata(
+        cluster_name: str) -> Optional[Dict[str, Any]]:
+    rows = _DB.cursor.execute(
+        'SELECT storage_mounts_metadata FROM clusters WHERE name=(?)',
+        (cluster_name,))
+    for (storage_mounts_metadata,) in rows:
+        if storage_mounts_metadata is None:
+            return None
+        return pickle.loads(storage_mounts_metadata)
+    return None
+
+
+def set_cluster_storage_mounts_metadata(
+        cluster_name: str, storage_mounts_metadata: Dict[str, Any]) -> None:
+    _DB.cursor.execute(
+        'UPDATE clusters SET storage_mounts_metadata=(?) WHERE name=(?)', (
+            pickle.dumps(storage_mounts_metadata),
+            cluster_name,
+        ))
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count
@@ -507,6 +562,14 @@ def _load_owner(record_owner: Optional[str]) -> Optional[List[str]]:
         return [record_owner]
 
 
+def _load_storage_mounts_metadata(
+    record_storage_mounts_metadata: Optional[bytes]
+) -> Optional[Dict[str, 'Storage.StorageMetadata']]:
+    if not record_storage_mounts_metadata:
+        return None
+    return pickle.loads(record_storage_mounts_metadata)
+
+
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
@@ -516,7 +579,8 @@ def get_cluster_from_name(
         # we can add new fields to the database in the future without
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner, cluster_hash) = row[:10]
+         to_down, owner, cluster_hash, storage_mounts_metadata,
+         cluster_ever_up) = row[:12]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -529,6 +593,9 @@ def get_cluster_from_name(
             'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
+            'storage_mounts_metadata':
+                _load_storage_mounts_metadata(storage_mounts_metadata),
+            'cluster_ever_up': bool(cluster_ever_up),
         }
         return record
     return None
@@ -540,9 +607,9 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner, cluster_hash) = row[:10]
+         to_down, owner, cluster_hash, storage_mounts_metadata,
+         cluster_ever_up) = row[:12]
         # TODO: use namedtuple instead of dict
-
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -554,6 +621,9 @@ def get_clusters() -> List[Dict[str, Any]]:
             'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
+            'storage_mounts_metadata':
+                _load_storage_mounts_metadata(storage_mounts_metadata),
+            'cluster_ever_up': bool(cluster_ever_up),
         }
 
         records.append(record)

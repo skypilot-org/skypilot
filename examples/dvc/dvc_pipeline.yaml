@@ -1,0 +1,21 @@
+# adapted from https://alex000kim.com/posts/2023-08-10-ml-experiments-in-cloud-skypilot-dvc/
+name: dvc-pipeline
+resources:
+  accelerators: T4:1
+  cloud: aws
+  region: us-east-2
+workdir: .
+file_mounts: 
+  ~/.ssh/id_rsa: ~/.ssh/id_rsa
+  ~/.ssh/id_rsa.pub: ~/.ssh/id_rsa.pub
+  ~/.gitconfig: ~/.gitconfig
+setup: |
+  pip install -r requirements.txt
+  pip install dvc[s3]
+run: |
+  # pull data versioned by DVC from DVC remote
+  dvc pull 
+  # run DVC pipeline as an experiment
+  dvc exp run --pull --allow-missing
+  # push experiment results to DVC remote
+  dvc exp push origin 

@@ -39,10 +39,72 @@ TASK_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
 # lifetime of the job.
 TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 
-SKYLET_VERSION = '2'
+# The version of skylet. MUST bump this version whenever we need the skylet to
+# be restarted on existing clusters updated with the new version of SkyPilot,
+# e.g., when we add new events to skylet, we fix a bug in skylet, or skylet
+# needs to load the new version of SkyPilot code to handle the autostop when the
+# cluster yaml is updated.
+#
+# TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
+SKYLET_VERSION = '6'
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky spot dashboard`-related
 #
 # Port on the remote spot controller that the dashboard is running on.
 SPOT_DASHBOARD_REMOTE_PORT = 5000
+
+# Docker default options
+DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
+DEFAULT_DOCKER_PORT = 10022
+DOCKER_USERNAME_ENV_VAR = 'SKYPILOT_DOCKER_USERNAME'
+DOCKER_PASSWORD_ENV_VAR = 'SKYPILOT_DOCKER_PASSWORD'
+DOCKER_SERVER_ENV_VAR = 'SKYPILOT_DOCKER_SERVER'
+DOCKER_LOGIN_ENV_VARS = {
+    DOCKER_USERNAME_ENV_VAR,
+    DOCKER_PASSWORD_ENV_VAR,
+    DOCKER_SERVER_ENV_VAR,
+}
+
+# Install conda on the remote cluster if it is not already installed.
+# We do not install the latest conda with python 3.11 because ray has not
+# officially supported it yet.
+# https://github.com/ray-project/ray/issues/31606
+# We use python 3.10 to be consistent with the python version of the
+# AWS's Deep Learning AMI's default conda environment.
+CONDA_INSTALLATION_COMMANDS = (
+    'which conda > /dev/null 2>&1 || '
+    '(wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
+    'bash Miniconda3-Linux-x86_64.sh -b && '
+    'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
+    'conda config --set auto_activate_base true); '
+    'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;')
+
+# The name for the environment variable that stores SkyPilot user hash, which
+# is mainly used to make sure sky commands runs on a VM launched by SkyPilot
+# will be recognized as the same user (e.g., spot controller or sky serve
+# controller).
+USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
+
+# The name for the environment variable that stores SkyPilot user name.
+# Similar to USER_ID_ENV_VAR, this is mainly used to make sure sky commands
+# runs on a VM launched by SkyPilot will be recognized as the same user.
+USER_ENV_VAR = 'SKYPILOT_USER'
+
+# In most clouds, cluster names can only contain lowercase letters, numbers
+# and hyphens. We use this regex to validate the cluster name.
+CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'
+
+# Used for translate local file mounts to cloud storage. Please refer to
+# sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
+# more details.
+WORKDIR_BUCKET_NAME = 'skypilot-workdir-{username}-{id}'
+FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-folder-{username}-{id}'
+FILE_MOUNTS_FILE_ONLY_BUCKET_NAME = 'skypilot-filemounts-files-{username}-{id}'
+FILE_MOUNTS_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
+FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
+
+# The default idle timeout for SkyPilot controllers. This include spot
+# controller and sky serve controller.
+# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
+CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10

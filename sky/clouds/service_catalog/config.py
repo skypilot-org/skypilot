@@ -8,8 +8,8 @@ _thread_local_config = threading.local()
 
 
 @contextlib.contextmanager
-def _set_use_default_catalog(value: bool):
-    old_value = get_use_default_catalog()
+def _set_use_default_catalog_if_failed(value: bool):
+    old_value = get_use_default_catalog_if_failed()
     _thread_local_config.use_default_catalog = value
     try:
         yield
@@ -17,13 +17,18 @@ def _set_use_default_catalog(value: bool):
         _thread_local_config.use_default_catalog = old_value
 
 
-# Whether the caller requires the catalog to be narrowed down
-# to the account-specific catalog (e.g., removing regions not
-# enabled for the current account) or just the raw catalog
-# fetched from SkyPilot catalog service. The former is used
-# for launching clusters, while the latter for commands like
-# `show-gpus`.
-def get_use_default_catalog() -> bool:
+def get_use_default_catalog_if_failed() -> bool:
+    """Whether to use default catalog if failed to fetch account-specific one.
+
+    Whether the caller requires the catalog to be narrowed down to the account-
+    specific catalog (e.g., removing regions not enabled for the current account
+    or use zone name assigned to the AWS account).
+
+    When set to True, the caller allows to use the default service catalog,
+    which may have inaccurate information (e.g., AWS's zone names are account-
+    specific), but it is ok for the read-only operators, such as `show-gpus` or
+    `sky status`.
+    """
     if not hasattr(_thread_local_config, 'use_default_catalog'):
         # Should not set it globally, as the global assignment
         # will be executed only once if the module is imported
@@ -33,8 +38,8 @@ def get_use_default_catalog() -> bool:
     return _thread_local_config.use_default_catalog
 
 
-def use_default_catalog(func):
-    """Decorator: disable fetching account-specific catalog.
+def fallback_to_default_catalog(func):
+    """Decorator: allow failure for fetching account-specific catalog.
 
     The account-specific catalog requires the credentials of the
     cloud to be set.
@@ -42,7 +47,7 @@ def use_default_catalog(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        with _set_use_default_catalog(True):
+        with _set_use_default_catalog_if_failed(True):
             return func(*args, **kwargs)
 
     return wrapper

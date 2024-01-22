@@ -4,31 +4,30 @@ This module inherits NodeProvider interface
 to provide the functions accessing SCP nodes
 """
 
-import logging
-import os
-import time
-from threading import RLock
-from typing import Any, Dict, List, Optional
 import copy
 from functools import wraps
+import logging
+import os
+from threading import RLock
+import time
+from typing import Any, Dict, List, Optional
 
-from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler._private.cli_logger import cli_logger
-from ray.autoscaler.tags import (
-    TAG_RAY_CLUSTER_NAME,
-    TAG_RAY_USER_NODE_TYPE,
-    TAG_RAY_NODE_NAME,
-    TAG_RAY_LAUNCH_CONFIG,
-    TAG_RAY_NODE_STATUS,
-    STATUS_UP_TO_DATE,
-    TAG_RAY_NODE_KIND,
-    NODE_KIND_WORKER,
-    NODE_KIND_HEAD,
-)
 from ray.autoscaler._private.util import hash_launch_conf
-from sky.skylet.providers.scp import scp_utils
+from ray.autoscaler.node_provider import NodeProvider
+from ray.autoscaler.tags import NODE_KIND_HEAD
+from ray.autoscaler.tags import NODE_KIND_WORKER
+from ray.autoscaler.tags import STATUS_UP_TO_DATE
+from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
+from ray.autoscaler.tags import TAG_RAY_LAUNCH_CONFIG
+from ray.autoscaler.tags import TAG_RAY_NODE_KIND
+from ray.autoscaler.tags import TAG_RAY_NODE_NAME
+from ray.autoscaler.tags import TAG_RAY_NODE_STATUS
+from ray.autoscaler.tags import TAG_RAY_USER_NODE_TYPE
+
+from sky.clouds.utils import scp_utils
+from sky.clouds.utils.scp_utils import SCPCreationFailError
 from sky.skylet.providers.scp.config import ZoneConfig
-from sky.skylet.providers.scp.scp_utils import SCPCreationFailError
 from sky.utils import common_utils
 
 TAG_PATH_PREFIX = '~/.sky/generated/scp/metadata'

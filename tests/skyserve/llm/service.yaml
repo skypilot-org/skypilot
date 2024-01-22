@@ -1,0 +1,37 @@
+service:
+  readiness_probe: /v1/models
+  replicas: 1
+
+resources:
+  ports: 8087
+  cloud: gcp
+  accelerators: T4
+  memory: 32+
+
+setup: |
+  conda activate chatbot
+  if [ $? -ne 0 ]; then
+    conda create -n chatbot python=3.9 -y
+    conda activate chatbot
+  fi
+
+  # Install dependencies
+  pip install "fschat[model_worker,webui]==0.2.24"
+  pip install sentencepiece protobuf
+
+run: |
+  conda activate chatbot
+
+  echo 'Starting controller...'
+  python -u -m fastchat.serve.controller > ~/controller.log 2>&1 &
+  sleep 10
+  echo 'Starting model worker...'
+  python -u -m fastchat.serve.model_worker \
+            --model-path lmsys/fastchat-t5-3b-v1.0 2>&1 \
+            | tee model_worker.log &
+
+  echo 'Waiting for model worker to start...'
+  while ! `cat model_worker.log | grep -q 'Uvicorn running on'`; do sleep 1; done
+
+  echo 'Starting openai api server...'
+  python -u -m fastchat.serve.openai_api_server --host 0.0.0.0 --port 8087 | tee ~/openai_api_server.log

@@ -1,6 +1,6 @@
 import os
-import time
 import shutil
+import time
 
 from sky.backends import wheel_utils
 

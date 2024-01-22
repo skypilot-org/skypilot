@@ -1,6 +1,7 @@
-import pytest
-import tempfile
 from typing import List
+
+import common  # TODO(zongheng): for some reason isort places it here.
+import pytest
 
 # Usage: use
 #   @pytest.mark.slow
@@ -17,9 +18,11 @@ from typing import List
 # To only run tests for a specific cloud (as well as generic tests), use
 # --aws, --gcp, --azure, or --lambda.
 #
-# To only run tests for managed spot (without generic tests), use --managed-spot.
+# To only run tests for managed spot (without generic tests), use
+# --managed-spot.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci'
+    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
+    'kubernetes'
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -35,6 +38,7 @@ cloud_to_pytest_keyword = {
     'ibm': 'ibm',
     'scp': 'scp',
     'oci': 'oci',
+    'kubernetes': 'kubernetes'
 }
 
 
@@ -53,6 +57,14 @@ def pytest_addoption(parser):
                      action='store_true',
                      default=False,
                      help='Only run tests for managed spot.')
+    parser.addoption('--sky-serve',
+                     action='store_true',
+                     default=False,
+                     help='Only run tests for sky serve.')
+    parser.addoption('--tpu',
+                     action='store_true',
+                     default=False,
+                     help='Only run tests for TPU.')
     parser.addoption(
         '--generic-cloud',
         type=str,
@@ -101,6 +113,10 @@ def pytest_collection_modifyitems(config, items):
     skip_marks['slow'] = pytest.mark.skip(reason='need --runslow option to run')
     skip_marks['managed_spot'] = pytest.mark.skip(
         reason='skipped, because --managed-spot option is set')
+    skip_marks['sky_serve'] = pytest.mark.skip(
+        reason='skipped, because --sky-serve option is set')
+    skip_marks['tpu'] = pytest.mark.skip(
+        reason='skipped, because --tpu option is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -127,26 +143,36 @@ def pytest_collection_modifyitems(config, items):
         if (not 'managed_spot'
                 in item.keywords) and config.getoption('--managed-spot'):
             item.add_marker(skip_marks['managed_spot'])
+        if (not 'tpu' in item.keywords) and config.getoption('--tpu'):
+            item.add_marker(skip_marks['tpu'])
+        if (not 'sky_serve'
+                in item.keywords) and config.getoption('--sky-serve'):
+            item.add_marker(skip_marks['sky_serve'])
 
+    # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
     # launch API to one launch every 10 seconds.
-    serial_mark = pytest.mark.xdist_group(name='serial_lambda_cloud')
+    # We run Kubernetes tests serially because the Kubernetes cluster may have
+    # limited resources (e.g., just 8 cpus).
+    serial_mark = pytest.mark.xdist_group(
+        name=f'serial_{generic_cloud_keyword}')
     # Handle generic tests
-    if generic_cloud == 'lambda':
+    if generic_cloud in ['lambda', 'kubernetes']:
         for item in items:
             if (_is_generic_test(item) and
-                    'no_lambda_cloud' not in item.keywords):
+                    f'no_{generic_cloud_keyword}' not in item.keywords):
                 item.add_marker(serial_mark)
                 # Adding the serial mark does not update the item.nodeid,
                 # but item.nodeid is important for pytest.xdist_group, e.g.
                 #   https://github.com/pytest-dev/pytest-xdist/blob/master/src/xdist/scheduler/loadgroup.py
                 # This is a hack to update item.nodeid
-                item._nodeid = f'{item.nodeid}@serial_lambda_cloud'
-    # Handle Lambda Cloud specific tests
+                item._nodeid = f'{item.nodeid}@serial_{generic_cloud_keyword}'
+    # Handle generic cloud specific tests
     for item in items:
-        if 'lambda_cloud' in item.keywords:
-            item.add_marker(serial_mark)
-            item._nodeid = f'{item.nodeid}@serial_lambda_cloud'  # See comment on item.nodeid above
+        if generic_cloud in ['lambda', 'kubernetes']:
+            if generic_cloud_keyword in item.keywords:
+                item.add_marker(serial_mark)
+                item._nodeid = f'{item.nodeid}@serial_{generic_cloud_keyword}'  # See comment on item.nodeid above
 
 
 def _is_generic_test(item) -> bool:
@@ -170,33 +196,12 @@ def generic_cloud(request) -> str:
 
 
 @pytest.fixture
-def enable_all_clouds(monkeypatch):
-    from sky import clouds
-    # Monkey-patching is required because in the test environment, no cloud is
-    # enabled. The optimizer checks the environment to find enabled clouds, and
-    # only generates plans within these clouds. The tests assume that all three
-    # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
-    # to return all three clouds. We also monkeypatch `sky.check.check` so that
-    # when the optimizer tries calling it to update enabled_clouds, it does not
-    # raise exceptions.
-    enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
-    monkeypatch.setattr(
-        'sky.global_user_state.get_enabled_clouds',
-        lambda: enabled_clouds,
-    )
-    monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
-    config_file_backup = tempfile.NamedTemporaryFile(
-        prefix='tmp_backup_config_default', delete=False)
-    monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
-                        config_file_backup.name)
-    monkeypatch.setattr(
-        'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
-        config_file_backup.name)
-    monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
+def enable_all_clouds(monkeypatch: pytest.MonkeyPatch):
+    common.enable_all_clouds_in_monkeypatch(monkeypatch)
 
 
 @pytest.fixture
-def aws_config_region(monkeypatch) -> str:
+def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
     from sky import skypilot_config
     region = 'us-west-2'
     if skypilot_config.loaded():

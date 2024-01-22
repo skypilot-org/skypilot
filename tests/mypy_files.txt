@@ -2,7 +2,6 @@ sky
 
 --exclude sky/benchmark
 --exclude sky/callbacks
---exclude sky/skylet/providers/aws
 --exclude sky/skylet/providers/gcp
 --exclude sky/skylet/providers/azure
 --exclude sky/resources.py

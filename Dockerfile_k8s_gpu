@@ -1,0 +1,61 @@
+# TODO(romilb) - The base image used here (ray) is very large (11.4GB).
+#  as a result, this built image is about 13.5GB. We need to pick a lighter base
+#  image.
+FROM rayproject/ray:2.4.0-py310-gpu
+
+# Initialize conda for root user, install ssh and other local dependencies
+# We remove cuda lists to avoid conflicts with the cuda version installed by ray
+RUN sudo rm -rf /etc/apt/sources.list.d/cuda* && \
+    sudo apt update -y && \
+    sudo apt install gcc rsync sudo patch openssh-server pciutils nano fuse unzip -y && \
+    sudo rm -rf /var/lib/apt/lists/* && \
+    sudo apt remove -y python3 && \
+    conda init
+
+# Setup new user named sky and add to sudoers. \
+# Also add /opt/conda/bin to sudo path and give sky user access to /home/ray
+RUN sudo useradd -m -s /bin/bash sky && \
+    sudo /bin/bash -c 'echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers' && \
+    sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky" && \
+    sudo chmod -R a+rwx /home/ray
+
+# Switch to sky user
+USER sky
+
+# Set HOME environment variable for sky user, otherwise Ray base image HOME overrides
+ENV HOME /home/sky
+
+# Setup SSH and generate hostkeys
+RUN sudo mkdir -p /var/run/sshd && \
+    sudo chmod 0755 /var/run/sshd && \
+    sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sudo sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
+    cd /etc/ssh/ && \
+    ssh-keygen -A
+
+# Install SkyPilot pip dependencies
+RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
+    pip install networkx oauth2client pandas pendulum PrettyTable && \
+    pip install rich tabulate filelock && \
+    pip install packaging 'protobuf<4.0.0' pulp && \
+    pip install awscli boto3 pycryptodome==3.12.0 && \
+    pip install docker kubernetes
+
+# Add /home/sky/.local/bin/ to PATH
+RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+
+# Install SkyPilot. This is purposely separate from installing SkyPilot
+# dependencies to optimize rebuild time
+COPY --chown=sky . /skypilot/sky/
+
+# TODO(romilb): Installing SkyPilot may not be necessary since ray up will do it
+RUN cd /skypilot/ && \
+    sudo mv -v sky/setup_files/* . && \
+    pip install ".[aws]"
+
+# Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
+ENV PYTHONUNBUFFERED=1
+
+# Set WORKDIR and initialize conda for sky user
+WORKDIR /home/sky
+RUN conda init

@@ -52,6 +52,7 @@ query_range:
   parallelise_shardable_queries: true
 
 limits_config:
+  max_query_series: 5000
   ingestion_rate_strategy: local # Default: global
   max_global_streams_per_user: 5000
   max_query_length: 0h # Default: 721h

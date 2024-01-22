@@ -4,15 +4,17 @@ for Ray's cluster. used by the node_provider module to group the
 nodes under the same subnet, tagged by the same cluster name.
 """
 
-from concurrent.futures import ThreadPoolExecutor
-import uuid
 import copy
-import time
-import requests
 import json
 import textwrap
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+
+import requests
+
 from sky.adaptors import ibm
-from sky.skylet.providers.ibm.utils import get_logger, RAY_RECYCLABLE
+from sky.skylet.providers.ibm.utils import RAY_RECYCLABLE, get_logger
 
 # pylint: disable=line-too-long
 logger = get_logger("vpc_provider_")

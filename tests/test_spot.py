@@ -29,8 +29,8 @@ def test_spot_nonexist_strategy():
             sky.Task.from_yaml(f.name)
 
 
-class TestReservedClustersOperations:
-    """Test operations on reserved clusters."""
+class TestControllerOperations:
+    """Test operations on controllers."""
 
     @pytest.fixture
     def _mock_db_conn(self, monkeypatch, tmp_path):
@@ -45,6 +45,7 @@ class TestReservedClustersOperations:
         assert 'state.db' not in global_user_state._DB.db_path
         handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster1',
+            cluster_name_on_cloud='test-cluster1',
             cluster_yaml='/tmp/cluster1.yaml',
             launched_nodes=2,
             launched_resources=sky.Resources(sky.AWS(),
@@ -58,6 +59,7 @@ class TestReservedClustersOperations:
             ready=True)
         handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster2',
+            cluster_name_on_cloud='test-cluster2',
             cluster_yaml='/tmp/cluster2.yaml',
             launched_nodes=1,
             launched_resources=sky.Resources(sky.GCP(),
@@ -72,6 +74,7 @@ class TestReservedClustersOperations:
             ready=True)
         handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster3',
+            cluster_name_on_cloud='test-cluster3',
             cluster_yaml='/tmp/cluster3.yaml',
             launched_nodes=4,
             launched_resources=sky.Resources(sky.Azure(),
@@ -85,6 +88,7 @@ class TestReservedClustersOperations:
             ready=False)
         handle = backends.CloudVmRayResourceHandle(
             cluster_name=spot.SPOT_CONTROLLER_NAME,
+            cluster_name_on_cloud=spot.SPOT_CONTROLLER_NAME,
             cluster_yaml='/tmp/spot_controller.yaml',
             launched_nodes=1,
             launched_resources=sky.Resources(sky.AWS(),
@@ -143,9 +147,8 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.stop, [spot.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
-        assert (
-            f'Stopping reserved cluster(s) \'{spot.SPOT_CONTROLLER_NAME}\' is '
-            'currently not supported' in result.output)
+        assert (f'Stopping controller(s) \'{spot.SPOT_CONTROLLER_NAME}\' is '
+                'currently not supported' in result.output)
 
         result = cli_runner.invoke(cli.stop, ['sky-spot-con*'])
         assert not result.exception
@@ -160,7 +163,7 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.autostop, [spot.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
-        assert ('Scheduling autostop on reserved cluster(s) '
+        assert ('Scheduling autostop on controller(s) '
                 f'\'{spot.SPOT_CONTROLLER_NAME}\' is currently not supported'
                 in result.output)
 

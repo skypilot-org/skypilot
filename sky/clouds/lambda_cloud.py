@@ -3,11 +3,13 @@ import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import requests
+
 from sky import clouds
 from sky import exceptions
 from sky import status_lib
 from sky.clouds import service_catalog
-from sky.skylet.providers.lambda_cloud import lambda_utils
+from sky.clouds.utils import lambda_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -34,17 +36,25 @@ class Lambda(clouds.Cloud):
     # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is currently not supported on {_REPR}.',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
+            f'Docker image is currently not supported on {_REPR}. '
+            'You can try running docker command inside the `run` section in task.yaml.'
+        ),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is currently not supported on {_REPR}.',
     }
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del resources  # unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -145,8 +155,10 @@ class Lambda(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
+            self, resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str, region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud  # Unused.
         assert zones is None, 'Lambda does not support zones.'
 
         r = resources
@@ -162,10 +174,9 @@ class Lambda(clouds.Cloud):
             'region': region.name,
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
-        if resources.use_spot or resources.disk_tier is not None:
-            return ([], [])
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in Lambda Cloud
@@ -227,6 +238,10 @@ class Lambda(clouds.Cloud):
                            'to generate API key and add the line\n    '
                            '  api_key = [YOUR API KEY]\n    '
                            'to ~/.lambda_cloud/lambda_keys')
+        except requests.exceptions.ConnectionError:
+            return False, ('Failed to verify Lambda Cloud credentials. '
+                           'Check your network connection '
+                           'and try again.')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

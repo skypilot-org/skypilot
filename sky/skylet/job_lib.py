@@ -3,10 +3,10 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
+import getpass
 import json
 import os
 import pathlib
-import psutil
 import shlex
 import subprocess
 import time
@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 import filelock
-import getpass
+import psutil
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -251,7 +251,8 @@ def _create_ray_job_submission_client():
         logger.error('Failed to import ray')
         raise
     try:
-        from ray import job_submission  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from ray import job_submission
     except ImportError:
         logger.error(
             f'Failed to import job_submission with ray=={ray.__version__}')
@@ -367,10 +368,16 @@ def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
 
 def load_statuses_payload(
         statuses_payload: str) -> Dict[Optional[int], Optional[JobStatus]]:
-    statuses = common_utils.decode_payload(statuses_payload)
-    for job_id, status in statuses.items():
-        if status is not None:
-            statuses[job_id] = JobStatus(status)
+    original_statuses = common_utils.decode_payload(statuses_payload)
+    statuses = dict()
+    for job_id, status in original_statuses.items():
+        # json.dumps will convert all keys to strings. Integers will
+        # become string representations of integers, e.g. "1" instead of 1;
+        # `None` will become "null" instead of None. Here we use
+        # json.loads to convert them back to their original values.
+        # See docstr of core::job_status for the meaning of `statuses`.
+        statuses[json.loads(job_id)] = (JobStatus(status)
+                                        if status is not None else None)
     return statuses
 
 
@@ -453,6 +460,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
 def _get_jobs(
         username: Optional[str],
         status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
+    """Returns jobs with the given fields, sorted by job_id, descending."""
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [status.value for status in status_list]
@@ -701,23 +709,38 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
-    """Cancel the jobs.
+def cancel_jobs_encoded_results(job_owner: str,
+                                jobs: Optional[List[int]],
+                                cancel_all: bool = False) -> str:
+    """Cancel jobs.
 
     Args:
-        jobs: The job ids to cancel. If None, cancel all the jobs.
+        jobs: Job IDs to cancel. (See `cancel_all` for special semantics.)
+        cancel_all: Whether to cancel all jobs. If True, asserts `jobs` is
+            set to None. If False and `jobs` is None, cancel the latest
+            running job.
+
+    Returns:
+        Encoded job IDs that are actually cancelled. Caller should use
+        common_utils.decode_payload() to parse.
     """
-    # Update the status of the jobs to avoid setting the status of stale
-    # jobs to CANCELLED.
-    if jobs is None:
+    if cancel_all:
+        # Cancel all in-progress jobs.
+        assert jobs is None, ('If cancel_all=True, usage is to set jobs=None')
         job_records = _get_jobs(
             None, [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
     else:
-        job_records = _get_jobs_by_ids(jobs)
+        if jobs is None:
+            # Cancel the latest (largest job ID) running job.
+            job_records = _get_jobs(None, [JobStatus.RUNNING])[:1]
+        else:
+            # Cancel jobs with specified IDs.
+            job_records = _get_jobs_by_ids(jobs)
 
     # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
     job_client = _create_ray_job_submission_client()
+    cancelled_ids = []
 
     # Sequentially cancel the jobs to avoid the resource number bug caused by
     # ray cluster (tracked in #1262).
@@ -739,8 +762,10 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
                     JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
             ]:
                 _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
+                cancelled_ids.append(job['job_id'])
 
         scheduler.schedule_step()
+    return common_utils.encode_payload(cancelled_ids)
 
 
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
@@ -820,8 +845,17 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs(cls, job_owner: str, job_ids: Optional[List[int]]) -> str:
-        code = [f'job_lib.cancel_jobs({job_owner!r},{job_ids!r})']
+    def cancel_jobs(cls,
+                    job_owner: str,
+                    job_ids: Optional[List[int]],
+                    cancel_all: bool = False) -> str:
+        """See job_lib.cancel_jobs()."""
+        code = [
+            (f'cancelled = job_lib.cancel_jobs_encoded_results({job_owner!r},'
+             f' {job_ids!r}, {cancel_all})'),
+            # Print cancelled IDs. Caller should parse by decoding.
+            'print(cancelled, flush=True)',
+        ]
         return cls._build(code)
 
     @classmethod

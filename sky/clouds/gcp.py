@@ -2,24 +2,27 @@
 import functools
 import json
 import os
+import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
+
+import colorama
 
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
-from sky.skylet import log_lib
+from sky.clouds.utils import gcp_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+    from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -77,6 +80,22 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
 
 # TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
+
+# Firewall rule name for user opened ports.
+USER_PORTS_FIREWALL_RULE_NAME = 'sky-ports-{}'
+
+# UX message when image not found in GCP.
+# pylint: disable=line-too-long
+_IMAGE_NOT_FOUND_UX_MESSAGE = (
+    'Image {image_id!r} not found in GCP.\n'
+    '\nTo find GCP images: https://cloud.google.com/compute/docs/images\n'
+    f'Format: {colorama.Style.BRIGHT}projects/<project-id>/global/images/<image-name>{colorama.Style.RESET_ALL}\n'
+    'Example: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310\n'
+    '\nTo find machine images: https://cloud.google.com/compute/docs/machine-images\n'
+    f'Format: {colorama.Style.BRIGHT}projects/<project-id>/global/machineImages/<machine-image-name>{colorama.Style.RESET_ALL}\n'
+    f'\nYou can query image id using: {colorama.Style.BRIGHT}gcloud compute images list --project <project-id> --no-standard-images{colorama.Style.RESET_ALL}'
+    f'\nTo query common AI images: {colorama.Style.BRIGHT}gcloud compute images list --project deeplearning-platform-release | less{colorama.Style.RESET_ALL}'
+)
 
 
 def _run_output(cmd):
@@ -141,13 +160,30 @@ class GCP(clouds.Cloud):
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        if gcp_utils.is_tpu_vm_pod(resources):
+            return {
+                clouds.CloudImplementationFeatures.STOP: (
+                    'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
+                )
+            }
+        if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
+            # TPU node does not support multi-node.
+            return {
+                clouds.CloudImplementationFeatures.MULTI_NODE:
+                    ('TPU node does not support multi-node. Please set '
+                     'num_nodes to 1.')
+            }
         return {}
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     #### Regions/Zones ####
@@ -256,7 +292,7 @@ class GCP(clouds.Cloud):
                                                            zone=zone,
                                                            clouds='gcp')
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         # In general, query this from the cloud:
         #   https://cloud.google.com/storage/pricing#network-pricing
         # NOTE: egress to worldwide (excl. China, Australia).
@@ -270,8 +306,14 @@ class GCP(clouds.Cloud):
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
-        del region  # unused
+    @classmethod
+    def _is_machine_image(cls, image_id: str) -> bool:
+        find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
+        return find_machine is not None
+
+    @classmethod
+    @functools.lru_cache(maxsize=1)
+    def _get_image_size(cls, image_id: str) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
         try:
@@ -279,17 +321,34 @@ class GCP(clouds.Cloud):
                                 'v1',
                                 credentials=None,
                                 cache_discovery=False)
-        except gcp.credential_error_exception() as e:
+        except gcp.credential_error_exception():
             return DEFAULT_GCP_IMAGE_GB
         try:
             image_attrs = image_id.split('/')
             if len(image_attrs) == 1:
-                raise ValueError(f'Image {image_id!r} not found in GCP.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        _IMAGE_NOT_FOUND_UX_MESSAGE.format(image_id=image_id))
             project = image_attrs[1]
             image_name = image_attrs[-1]
-            image_infos = compute.images().get(project=project,
-                                               image=image_name).execute()
-            return float(image_infos['diskSizeGb'])
+            # We support both GCP's Machine Images and Custom Images, both
+            # of which are specified with the image_id field. We will
+            # distinguish them by checking if the image_id contains
+            # 'machineImages'.
+            if cls._is_machine_image(image_id):
+                image_infos = compute.machineImages().get(
+                    project=project, machineImage=image_name).execute()
+                # The VM launching in a different region than the machine
+                # image is supported by GCP, so we do not need to check the
+                # storageLocations.
+                return float(
+                    image_infos['instanceProperties']['disks'][0]['diskSizeGb'])
+            else:
+                start = time.time()
+                image_infos = compute.images().get(project=project,
+                                                   image=image_name).execute()
+                logger.debug(f'GCP image get took {time.time() - start:.2f}s')
+                return float(image_infos['diskSizeGb'])
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:
                 with ux_utils.print_exception_no_traceback():
@@ -297,9 +356,15 @@ class GCP(clouds.Cloud):
                                      f'{image_id!r}') from None
             if e.resp.status == 404:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Image {image_id!r} not found in '
-                                     'GCP.') from None
+                    raise ValueError(
+                        _IMAGE_NOT_FOUND_UX_MESSAGE.format(
+                            image_id=image_id)) from None
             raise
+
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        del region  # Unused.
+        return cls._get_image_size(image_id)
 
     @classmethod
     def get_default_instance_type(
@@ -313,7 +378,8 @@ class GCP(clouds.Cloud):
                                                          clouds='gcp')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources', region: 'clouds.Region',
+            self, resources: 'resources.Resources', cluster_name_on_cloud: str,
+            region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         assert zones is not None, (region, zones)
 
@@ -325,7 +391,7 @@ class GCP(clouds.Cloud):
         # --no-standard-images
         # We use the debian image, as the ubuntu image has some connectivity
         # issue when first booted.
-        image_id = 'skypilot:cpu-debian-10'
+        image_id = 'skypilot:cpu-debian-11'
 
         r = resources
         # Find GPU spec, if any.
@@ -351,15 +417,16 @@ class GCP(clouds.Cloud):
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
 
-                resources_vars['tpu_vm'] = r.accelerator_args.get('tpu_vm')
+                resources_vars['tpu_vm'] = r.accelerator_args.get(
+                    'tpu_vm', True)
                 resources_vars['runtime_version'] = r.accelerator_args[
                     'runtime_version']
                 resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                if acc == 'A100-80GB':
-                    # A100-80GB has a different name pattern.
+                if acc in ('A100-80GB', 'L4'):
+                    # A100-80GB and L4 have a different name pattern.
                     resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
@@ -371,13 +438,11 @@ class GCP(clouds.Cloud):
                     # CUDA driver version 470.57.02, CUDA Library 11.4
                     image_id = 'skypilot:k80-debian-10'
                 else:
-                    # Though the image is called cu113, it actually has later
-                    # versions of CUDA as noted below.
-                    # CUDA driver version 510.47.03, CUDA Library 11.6
-                    # Does not support torch==1.13.0 with cu117
-                    image_id = 'skypilot:gpu-debian-10'
+                    # CUDA driver version 535.86.10, CUDA Library 12.2
+                    image_id = 'skypilot:gpu-debian-11'
 
-        if resources.image_id is not None:
+        if resources.image_id is not None and resources.extract_docker_image(
+        ) is None:
             if None in resources.image_id:
                 image_id = resources.image_id[None]
             else:
@@ -389,12 +454,25 @@ class GCP(clouds.Cloud):
 
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
+        resources_vars['machine_image'] = None
+
+        if self._is_machine_image(image_id):
+            resources_vars['machine_image'] = image_id
+            resources_vars['image_id'] = None
 
         resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
 
+        firewall_rule = None
+        if resources.ports is not None:
+            firewall_rule = (
+                USER_PORTS_FIREWALL_RULE_NAME.format(cluster_name_on_cloud))
+        resources_vars['firewall_rule'] = firewall_rule
+
         return resources_vars
 
-    def get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources.Resources'
+    ) -> Tuple[List['resources.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return ([resources], [])
@@ -417,14 +495,11 @@ class GCP(clouds.Cloud):
                 )
                 return ([r], [])
 
-        use_tpu_vm = False
-        if resources.accelerator_args is not None:
-            use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
-
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
                   ) == 1, 'cannot handle more than one accelerator candidates.'
         acc, acc_count = list(resources.accelerators.items())[0]
+        use_tpu_vm = gcp_utils.is_tpu_vm(resources)
 
         # For TPU VMs, the instance type is fixed to 'TPU-VM'. However, we still
         # need to call the below function to get the fuzzy candidate list.
@@ -526,8 +601,8 @@ class GCP(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
-            from google import auth  # type: ignore
             # Check google-api-python-client installation.
+            from google import auth  # type: ignore
             import googleapiclient
 
             # Check the installation of google-cloud-sdk.
@@ -631,29 +706,28 @@ class GCP(clouds.Cloud):
                   'some time.')
 
         # pylint: disable=import-outside-toplevel,unused-import
-        import googleapiclient.discovery
         import google.auth
-        from sky.skylet.providers.gcp import constants
+        import googleapiclient.discovery
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
         service = googleapiclient.discovery.build('cloudresourcemanager',
                                                   'v1',
                                                   credentials=credentials)
-        permissions = {'permissions': constants.VM_MINIMAL_PERMISSIONS}
+        gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
+        permissions = {'permissions': gcp_minimal_permissions}
         request = service.projects().testIamPermissions(resource=project,
                                                         body=permissions)
         ret_permissions = request.execute().get('permissions', [])
 
-        diffs = set(constants.VM_MINIMAL_PERMISSIONS).difference(
-            set(ret_permissions))
+        diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
         if len(diffs) > 0:
             identity_str = identity[0] if identity else None
             return False, (
                 'The following permissions are not enabled for the current '
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
-                'For more details, visit: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp')  # pylint: disable=line-too-long
+                'For more details, visit: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -747,9 +821,7 @@ class GCP(clouds.Cloud):
         # you must delete it and create a new one ..."
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
 
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import tpu_utils
-        return tpu_utils.is_tpu_vm(resources)
+        return gcp_utils.is_tpu_vm(resources)
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
@@ -766,18 +838,12 @@ class GCP(clouds.Cloud):
         return project_id
 
     @staticmethod
-    def check_host_accelerator_compatibility(
-            instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
-        service_catalog.check_host_accelerator_compatibility(
-            instance_type, accelerators, 'gcp')
-
-    @staticmethod
-    def check_accelerator_attachable_to_host(
-            instance_type: str,
-            accelerators: Optional[Dict[str, int]],
-            zone: Optional[str] = None) -> None:
+    def _check_instance_type_accelerators_combination(
+            resources: 'resources.Resources') -> None:
+        assert resources.is_launchable(), resources
         service_catalog.check_accelerator_attachable_to_host(
-            instance_type, accelerators, zone, 'gcp')
+            resources.instance_type, resources.accelerators, resources.zone,
+            'gcp')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
@@ -799,88 +865,106 @@ class GCP(clouds.Cloud):
         return ' '.join(f'labels.{k}={v}' for k, v in tag_filters.items())
 
     @classmethod
+    def check_quota_available(cls, resources: 'resources.Resources') -> bool:
+        """Check if GCP quota is available based on `resources`.
+
+        GCP-specific implementation of check_quota_available. The function works by
+        matching the `accelerator` to the a corresponding GCP keyword, and then using
+        the GCP CLI commands to query for the specific quota (the `accelerator` as
+        defined by `resources`).
+
+        Returns:
+            False if the quota is found to be zero, and True otherwise.
+        Raises:
+            CalledProcessError: error with the GCP CLI command.
+        """
+
+        if not resources.accelerators:
+            # TODO(hriday): We currently only support checking quotas for GPUs.
+            # For CPU-only instances, we need to try provisioning to check quotas.
+            return True
+
+        accelerator = list(resources.accelerators.keys())[0]
+        use_spot = resources.use_spot
+        region = resources.region
+
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import gcp_catalog
+
+        quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
+
+        if quota_code is None:
+            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            return True
+
+        command = f'gcloud compute regions describe {region} |grep -B 1 "{quota_code}" | awk \'/limit/ {{print; exit}}\''
+        try:
+            proc = subprocess_utils.run(cmd=command,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
+
+        except subprocess.CalledProcessError as e:
+            logger.warning(f'Quota check command failed with error: '
+                           f'{e.stderr.decode()}')
+            return True
+
+        # Extract quota from output
+        # Example output:  "- limit: 16.0"
+        out = proc.stdout.decode()
+        try:
+            quota = int(float(out.split('limit:')[-1].strip()))
+        except (ValueError, IndexError, AttributeError) as e:
+            logger.warning('Parsing the subprocess output failed '
+                           f'with error: {e}')
+            return True
+
+        if quota == 0:
+            return False
+        # Quota found to be greater than zero, try provisioning
+        return True
+
+    def get_reservations_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> Dict[str, int]:
+        del region  # Unused
+        if zone is None:
+            # For backward compatibility, the cluster in INIT state launched
+            # before #2352 may not have zone information. In this case, we
+            # return 0 for all reservations.
+            return {reservation: 0 for reservation in specific_reservations}
+        reservations = gcp_utils.list_reservations_for_instance_type_in_zone(
+            instance_type, zone)
+
+        return {
+            r.name: r.available_resources
+            for r in reservations
+            if r.is_consumable(specific_reservations)
+        }
+
+    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
         """Query the status of a cluster."""
-        del region  # unused
-
-        from sky.utils import tpu_utils  # pylint: disable=import-outside-toplevel
-        use_tpu_vm = kwargs.pop('use_tpu_vm', False)
-
-        label_filter_str = cls._label_filter_str(tag_filters)
-        if use_tpu_vm:
-            # TPU VM's state definition is different from compute VM
-            # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
-            status_map = {
-                'CREATING': status_lib.ClusterStatus.INIT,
-                'STARTING': status_lib.ClusterStatus.INIT,
-                'RESTARTING': status_lib.ClusterStatus.INIT,
-                'READY': status_lib.ClusterStatus.UP,
-                'REPAIRING': status_lib.ClusterStatus.INIT,
-                # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
-                'STOPPING': status_lib.ClusterStatus.STOPPED,
-                'STOPPED': status_lib.ClusterStatus.STOPPED,
-                'DELETING': None,
-                'PREEMPTED': None,
-            }
-            tpu_utils.check_gcp_cli_include_tpu_vm()
-            query_cmd = ('gcloud compute tpus tpu-vm list '
-                         f'--zone {zone} '
-                         f'--filter="({label_filter_str})" '
-                         '--format="value(state)"')
-        else:
-            # Ref: https://cloud.google.com/compute/docs/instances/instance-life-cycle
-            status_map = {
-                'PROVISIONING': status_lib.ClusterStatus.INIT,
-                'STAGING': status_lib.ClusterStatus.INIT,
-                'RUNNING': status_lib.ClusterStatus.UP,
-                'REPAIRING': status_lib.ClusterStatus.INIT,
-                # 'TERMINATED' in GCP means stopped, with disk preserved.
-                'STOPPING': status_lib.ClusterStatus.STOPPED,
-                'TERMINATED': status_lib.ClusterStatus.STOPPED,
-                # 'SUSPENDED' in GCP means stopped, with disk and OS memory
-                # preserved.
-                'SUSPENDING': status_lib.ClusterStatus.STOPPED,
-                'SUSPENDED': status_lib.ClusterStatus.STOPPED,
-            }
-            # TODO(zhwu): The status of the TPU attached to the cluster should
-            # also be checked, since TPUs are not part of the VMs.
-            query_cmd = ('gcloud compute instances list '
-                         f'--filter="({label_filter_str})" '
-                         '--format="value(status)"')
-        returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
-                                                          '/dev/null',
-                                                          require_outputs=True,
-                                                          shell=True)
-        logger.debug(f'{query_cmd} returned {returncode}.\n'
-                     '**** STDOUT ****\n'
-                     f'{stdout}\n'
-                     '**** STDERR ****\n'
-                     f'{stderr}')
-
-        if returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query GCP cluster {name!r} status: '
-                    f'{stdout + stderr}')
-
-        status_list = []
-        for line in stdout.splitlines():
-            status = status_map.get(line.strip())
-            if status is None:
-                continue
-            status_list.append(status)
-
-        return status_list
+        # TODO(suquark): deprecate this method
+        assert False, 'This code path should not be used.'
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
         del region  # unused
         assert zone is not None
+        # TODO(zhwu): This assumes the cluster is created with the
+        # `ray-cluster-name` tag, which is guaranteed by the current `ray`
+        # backend. Once the `provision.query_instances` is implemented for GCP,
+        # we should be able to get rid of this assumption.
+        tag_filters = {'ray-cluster-name': cluster_name_on_cloud}
         label_filter_str = cls._label_filter_str(tag_filters)
         instance_name_cmd = ('gcloud compute instances list '
                              f'--filter="({label_filter_str})" '

@@ -8,7 +8,7 @@ with resource specific information, these functions are called with the filled
 in ray yaml config as input,
 1. Replace the placeholders in the ray yaml file `skypilot:ssh_user` and
    `skypilot:ssh_public_key_content` with the actual username and public key
-   content, i.e., `_replace_ssh_info_in_config`.
+   content, i.e., `configure_ssh_info`.
 2. Setup the `authorized_keys` on the remote VM with the public key content,
    by cloud-init or directly using cloud provider's API.
 
@@ -19,6 +19,7 @@ using SkyPilot, e.g., the node is used as a spot controller. (Lambda cloud
 is an exception, due to the limitation of the cloud provider. See the
 comments in setup_lambda_authentication)
 """
+import base64
 import copy
 import functools
 import os
@@ -30,18 +31,23 @@ from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.backends import default_backend
 import yaml
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import gcp, ibm
+from sky import skypilot_config
+from sky.adaptors import gcp
+from sky.adaptors import ibm
+from sky.adaptors import runpod
+from sky.clouds.utils import lambda_utils
 from sky.utils import common_utils
+from sky.utils import kubernetes_enums
+from sky.utils import kubernetes_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.skylet.providers.lambda_cloud import lambda_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -64,11 +70,12 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
     private_key = key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.NoEncryption()).decode('utf-8')
+        encryption_algorithm=serialization.NoEncryption()).decode(
+            'utf-8').strip()
 
     public_key = key.public_key().public_bytes(
         serialization.Encoding.OpenSSH,
-        serialization.PublicFormat.OpenSSH).decode('utf-8')
+        serialization.PublicFormat.OpenSSH).decode('utf-8').strip()
 
     return public_key, private_key
 
@@ -107,22 +114,16 @@ def get_or_generate_keys() -> Tuple[str, str]:
     return private_key_path, public_key_path
 
 
-def _replace_ssh_info_in_config(config: Dict[str, Any],
-                                public_key: str) -> Dict[str, Any]:
+def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read().strip()
     config_str = common_utils.dump_yaml_str(config)
     config_str = config_str.replace('skypilot:ssh_user',
                                     config['auth']['ssh_user'])
     config_str = config_str.replace('skypilot:ssh_public_key_content',
                                     public_key)
     config = yaml.safe_load(config_str)
-    return config
-
-
-def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read()
-    config = _replace_ssh_info_in_config(config, public_key)
     return config
 
 
@@ -135,8 +136,6 @@ def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 @common_utils.retry
 def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read()
     config = copy.deepcopy(config)
 
     project_id = config['provider']['project_id']
@@ -262,24 +261,48 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
                                                'Failed to enable ssh port.',
                                                proc.stderr.decode('utf-8'))
-    return _replace_ssh_info_in_config(config, public_key)
+    return configure_ssh_info(config)
 
 
+# In Azure, cloud-init script must be encoded in base64. See
+# https://learn.microsoft.com/en-us/azure/virtual-machines/custom-data
+# for more information. Here we decode it and replace the ssh user
+# and public key content, then encode it back.
 def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r') as f:
-        public_key = f.read()
-    return _replace_ssh_info_in_config(config, public_key)
+        public_key = f.read().strip()
+    for node_type in config['available_node_types']:
+        node_config = config['available_node_types'][node_type]['node_config']
+        cloud_init = (
+            node_config['azure_arm_parameters']['cloudInitSetupCommands'])
+        cloud_init = base64.b64decode(cloud_init).decode('utf-8')
+        cloud_init = cloud_init.replace('skypilot:ssh_user',
+                                        config['auth']['ssh_user'])
+        cloud_init = cloud_init.replace('skypilot:ssh_public_key_content',
+                                        public_key)
+        cloud_init = base64.b64encode(
+            cloud_init.encode('utf-8')).decode('utf-8')
+        node_config['azure_arm_parameters']['cloudInitSetupCommands'] = (
+            cloud_init)
+    config_str = common_utils.dump_yaml_str(config)
+    config_str = config_str.replace('skypilot:ssh_user',
+                                    config['auth']['ssh_user'])
+    config_str = config_str.replace('skypilot:ssh_public_key_content',
+                                    public_key)
+    config = yaml.safe_load(config_str)
+    return config
 
 
 def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+
     get_or_generate_keys()
 
     # Ensure ssh key is registered with Lambda Cloud
     lambda_client = lambda_utils.LambdaCloudClient()
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     with open(public_key_path, 'r') as f:
-        public_key = f.read()
+        public_key = f.read().strip()
     prefix = f'sky-key-{common_utils.get_user_hash()}'
     name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
     if not exists:
@@ -317,7 +340,7 @@ def setup_ibm_authentication(config):
     with open(os.path.abspath(os.path.expanduser(public_key_path)),
               'r',
               encoding='utf-8') as file:
-        ssh_key_data = file.read()
+        ssh_key_data = file.read().strip()
     # pylint: disable=E1136
     try:
         res = client.create_key(public_key=ssh_key_data,
@@ -358,17 +381,86 @@ def setup_ibm_authentication(config):
     return config
 
 
-# Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    # Default ssh session is established with kubectl port-forwarding with
+    # ClusterIP service.
+    nodeport_mode = kubernetes_enums.KubernetesNetworkingMode.NODEPORT
+    port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
+    network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
+                                                  port_forward_mode.value)
+    try:
+        network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
+            network_mode_str)
+    except ValueError as e:
+        # Add message saying "Please check: ~/.sky/config.yaml" to the error
+        # message.
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
+                from None
+    get_or_generate_keys()
+
+    # Run kubectl command to add the public key to the cluster.
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
+    cmd = f'kubectl create secret generic {key_label} ' \
+          f'--from-file=ssh-publickey={public_key_path}'
+    try:
+        subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
+    except subprocess.CalledProcessError as e:
+        output = e.output.decode('utf-8')
+        suffix = f'\nError message: {output}'
+        if 'already exists' in output:
+            logger.debug(
+                f'Key {key_label} already exists in the cluster, using it...')
+        elif any(err in output for err in ['connection refused', 'timeout']):
+            with ux_utils.print_exception_no_traceback():
+                raise ConnectionError(
+                    'Failed to connect to the cluster. Check if your '
+                    'cluster is running, your kubeconfig is correct '
+                    'and you can connect to it using: '
+                    f'kubectl get namespaces.{suffix}') from e
+        else:
+            logger.error(suffix)
+            raise
+
+    ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
+    if network_mode == nodeport_mode:
+        service_type = kubernetes_enums.KubernetesServiceType.NODEPORT
+    elif network_mode == port_forward_mode:
+        kubernetes_utils.check_port_forward_mode_dependencies()
+        # Using `kubectl port-forward` creates a direct tunnel to jump pod and
+        # does not require opening any ports on Kubernetes nodes. As a result,
+        # the service can be a simple ClusterIP service which we access with
+        # `kubectl port-forward`.
+        service_type = kubernetes_enums.KubernetesServiceType.CLUSTERIP
+    else:
+        # This should never happen because we check for this in from_str above.
+        raise ValueError(f'Unsupported networking mode: {network_mode_str}')
+    # Setup service for SSH jump pod. We create the SSH jump service here
+    # because we need to know the service IP address and port to set the
+    # ssh_proxy_command in the autoscaler config.
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, service_type)
+
+    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+        PRIVATE_SSH_KEY_PATH, ssh_jump_name, network_mode, namespace,
+        clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH,
+        clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
+
+    config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
+
+    return config
+
+
+# ---------------------------------- RunPod ---------------------------------- #
+def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for RunPod.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's RunPod account.
+    """
     _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read()
+    with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
+        public_key = pub_key_file.read().strip()
+        runpod.runpod().cli.groups.ssh.functions.add_ssh_key(public_key)
 
-    return _replace_ssh_info_in_config(config, public_key)
-
-
-def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read()
-    return _replace_ssh_info_in_config(config, public_key)
+    return configure_ssh_info(config)

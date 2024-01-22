@@ -20,7 +20,7 @@ See the Vicuna SkyPilot YAMLs: for [training](train.yaml) and for [serving](serv
 
 ## Serve the official Vicuna model by yourself with SkyPilot
 
-1. Start the serving the Vicuna-7B model on a single A100 GPU:
+1. Start serving the Vicuna-7B model on a single A100 GPU:
 ```bash
 sky launch -c vicuna-serve -s serve.yaml
 ```
@@ -39,6 +39,11 @@ sky launch -c vicuna-serve-v100 -s serve.yaml --gpus V100
 4. [Optional] Serve the 13B model instead of the default 7B:
 ```bash
 sky launch -c vicuna-serve -s serve.yaml --env MODEL_SIZE=13
+```
+
+5. [Optional] Serve the OpenAI API Compatible Endpoint:
+```bash
+sky launch -c vicuna-openai-api -s serve-openai-api-endpoint.yaml
 ```
 
 

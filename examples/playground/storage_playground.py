@@ -2,7 +2,8 @@
 # These are not exhaustive tests. Actual Tests are in tests/test_storage.py and
 # tests/test_smoke.py.
 
-from sky.data import storage, StoreType
+from sky.data import storage
+from sky.data import StoreType
 
 
 def get_args():

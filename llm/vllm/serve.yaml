@@ -1,8 +1,8 @@
-resources:
-  accelerators: A100-80GB:8
-
 envs:
   MODEL_NAME: decapoda-research/llama-65b-hf
+
+resources:
+  accelerators: A100-80GB:8
 
 setup: |
   conda activate vllm
@@ -12,6 +12,9 @@ setup: |
   fi
 
   git clone https://github.com/vllm-project/vllm.git || true
+  # Install fschat and accelerate for chat completion
+  pip install fschat
+  pip install accelerate
 
   cd vllm
   pip list | grep vllm || pip install .

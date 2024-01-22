@@ -1,6 +1,6 @@
 """Runner for commands to be executed on the cluster."""
-import getpass
 import enum
+import getpass
 import hashlib
 import os
 import pathlib
@@ -9,8 +9,10 @@ import time
 from typing import List, Optional, Tuple, Union
 
 from sky import sky_logging
-from sky.utils import common_utils, subprocess_utils
+from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import common_utils
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -40,15 +42,22 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
-def ssh_options_list(ssh_private_key: Optional[str],
-                     ssh_control_name: Optional[str],
-                     *,
-                     ssh_proxy_command: Optional[str] = None,
-                     timeout: int = 30) -> List[str]:
+def ssh_options_list(
+    ssh_private_key: Optional[str],
+    ssh_control_name: Optional[str],
+    *,
+    ssh_proxy_command: Optional[str] = None,
+    docker_ssh_proxy_command: Optional[str] = None,
+    timeout: int = 30,
+    port: int = 22,
+    disable_control_master: Optional[bool] = False,
+) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
     arg_dict = {
+        # SSH port
+        'Port': port,
         # Supresses initial fingerprint verification.
         'StrictHostKeyChecking': 'no',
         # SSH IP and fingerprint pairs no longer added to known_hosts.
@@ -71,7 +80,15 @@ def ssh_options_list(ssh_private_key: Optional[str],
         # Agent forwarding for git.
         'ForwardAgent': 'yes',
     }
-    if ssh_control_name is not None:
+    # SSH Control will have a severe delay when using docker_ssh_proxy_command.
+    # TODO(tian): Investigate why.
+    # We also do not use ControlMaster when we use `kubectl port-forward`
+    # to access Kubernetes pods over SSH+Proxycommand. This is because the
+    # process running ProxyCommand is kept running as long as the ssh session
+    # is running and the ControlMaster keeps the session, which results in
+    # 'ControlPersist' number of seconds delay per ssh commands ran.
+    if (ssh_control_name is not None and docker_ssh_proxy_command is None and
+            not disable_control_master):
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
@@ -84,6 +101,12 @@ def ssh_options_list(ssh_private_key: Optional[str],
         ssh_private_key,
     ] if ssh_private_key is not None else []
 
+    if docker_ssh_proxy_command is not None:
+        logger.debug(f'--- Docker SSH Proxy: {docker_ssh_proxy_command} ---')
+        arg_dict.update({
+            'ProxyCommand': shlex.quote(docker_ssh_proxy_command),
+        })
+
     if ssh_proxy_command is not None:
         logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
         arg_dict.update({
@@ -91,6 +114,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
             # must quote this value.
             'ProxyCommand': shlex.quote(ssh_proxy_command),
         })
+
     return ssh_key_option + [
         x for y in (['-o', f'{k}={v}']
                     for k, v in arg_dict.items()
@@ -119,6 +143,9 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
+        port: int = 22,
+        docker_user: Optional[str] = None,
+        disable_control_master: Optional[bool] = False,
     ):
         """Initialize SSHCommandRunner.
 
@@ -138,14 +165,37 @@ class SSHCommandRunner:
             ssh_proxy_command: Optional, the value to pass to '-o
                 ProxyCommand'. Useful for communicating with clusters without
                 public IPs using a "jump server".
+            port: The port to use for ssh.
+            docker_user: The docker user to use for ssh. If specified, the
+                command will be run inside a docker container which have a ssh
+                server running at port sky.skylet.constants.DEFAULT_DOCKER_PORT
+            disable_control_master: bool; specifies either or not the ssh
+                command will utilize ControlMaster. We currently disable
+                it for k8s instance.
         """
-        self.ip = ip
-        self.ssh_user = ssh_user
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
+        self.disable_control_master = disable_control_master
+        if docker_user is not None:
+            assert port is None or port == 22, (
+                f'port must be None or 22 for docker_user, got {port}.')
+            # Already checked in resources
+            assert ssh_proxy_command is None, (
+                'ssh_proxy_command is not supported when using docker.')
+            self.ip = 'localhost'
+            self.ssh_user = docker_user
+            self.port = constants.DEFAULT_DOCKER_PORT
+            self._docker_ssh_proxy_command = lambda ssh: ' '.join(
+                ssh + ssh_options_list(ssh_private_key, None
+                                      ) + ['-W', '%h:%p', f'{ssh_user}@{ip}'])
+        else:
+            self.ip = ip
+            self.ssh_user = ssh_user
+            self.port = port
+            self._docker_ssh_proxy_command = None
 
     @staticmethod
     def make_runner_list(
@@ -154,11 +204,18 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None,
+        disable_control_master: Optional[bool] = False,
+        port_list: Optional[List[int]] = None,
+        docker_user: Optional[str] = None,
     ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
+        if not port_list:
+            port_list = [22] * len(ip_list)
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
-                             ssh_proxy_command) for ip in ip_list
+                             ssh_proxy_command, port, docker_user,
+                             disable_control_master)
+            for ip, port in zip(ip_list, port_list)
         ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,
@@ -177,11 +234,19 @@ class SSHCommandRunner:
                 logger.info(
                     f'Forwarding port {local} to port {remote} on localhost.')
                 ssh += ['-L', f'{remote}:localhost:{local}']
+        if self._docker_ssh_proxy_command is not None:
+            docker_ssh_proxy_command = self._docker_ssh_proxy_command(ssh)
+        else:
+            docker_ssh_proxy_command = None
         return ssh + ssh_options_list(
             self.ssh_private_key,
             self.ssh_control_name,
             ssh_proxy_command=self._ssh_proxy_command,
-        ) + [f'{self.ssh_user}@{self.ip}']
+            docker_ssh_proxy_command=docker_ssh_proxy_command,
+            port=self.port,
+            disable_control_master=self.disable_control_master) + [
+                f'{self.ssh_user}@{self.ip}'
+            ]
 
     def run(
             self,
@@ -326,16 +391,26 @@ class SSHCommandRunner:
             resolved_source = pathlib.Path(source).expanduser().resolve()
             if (resolved_source / GIT_EXCLUDE).exists():
                 # Ensure file exists; otherwise, rsync will error out.
+                #
+                # We shlex.quote() because the path may contain spaces:
+                #   'my dir/.git/info/exclude'
+                # Without quoting rsync fails.
                 rsync_command.append(
                     RSYNC_EXCLUDE_OPTION.format(
-                        str(resolved_source / GIT_EXCLUDE)))
+                        shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
+        if self._docker_ssh_proxy_command is not None:
+            docker_ssh_proxy_command = self._docker_ssh_proxy_command(['ssh'])
+        else:
+            docker_ssh_proxy_command = None
         ssh_options = ' '.join(
             ssh_options_list(
                 self.ssh_private_key,
                 self.ssh_control_name,
                 ssh_proxy_command=self._ssh_proxy_command,
-            ))
+                docker_ssh_proxy_command=docker_ssh_proxy_command,
+                port=self.port,
+                disable_control_master=self.disable_control_master))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.
         # rsync doesn't support '~' in a quoted local path, but it is ok to

@@ -4,24 +4,29 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-from sky.clouds.service_catalog.constants import (
-    HOSTED_CATALOG_DIR_URL,
-    CATALOG_SCHEMA_VERSION,
-    LOCAL_CATALOG_DIR,
-)
-from sky.clouds.service_catalog.config import use_default_catalog
+from sky.clouds.service_catalog.config import fallback_to_default_catalog
+from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
+from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
+from sky.clouds.service_catalog.constants import LOCAL_CATALOG_DIR
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
     from sky.clouds.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
-_ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci')
+ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
+              'kubernetes', 'runpod')
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if clouds is None:
-        clouds = list(_ALL_CLOUDS)
+        clouds = list(ALL_CLOUDS)
+
+        # TODO(hemil): Remove this once the common service catalog
+        # functions are refactored from clouds/kubernetes.py to
+        # kubernetes_catalog.py
+        if method_name != 'list_accelerators':
+            clouds.remove('kubernetes')
     single = isinstance(clouds, str)
     if single:
         clouds = [clouds]  # type: ignore
@@ -47,7 +52,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     return results
 
 
-@use_default_catalog
+@fallback_to_default_catalog
 def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
@@ -55,6 +60,7 @@ def list_accelerators(
     quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
     case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
     """List the names of all accelerators offered by Sky.
 
@@ -66,7 +72,7 @@ def list_accelerators(
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
                                   name_filter, region_filter, quantity_filter,
-                                  case_sensitive)
+                                  case_sensitive, all_regions)
     if not isinstance(results, list):
         results = [results]
     ret: Dict[str,
@@ -213,7 +219,8 @@ def get_instance_type_for_accelerator(
     zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
@@ -260,22 +267,6 @@ def get_region_zones_for_accelerators(
                                acc_name, acc_count, use_spot)
 
 
-def check_host_accelerator_compatibility(instance_type: str,
-                                         accelerators: Optional[Dict[str, int]],
-                                         clouds: CloudFilter = None) -> None:
-    """GCP only: Check if host VM type is compatible with the accelerators.
-
-    This function is invoked whenever a Resources object is created.
-    This function ensures that TPUs and GPUs (except A100) are attached to N1,
-    and A100 GPUs are attached to A2 machines. However, it does NOT check
-    the maximum vCPU count and maximum memory limits for the accelerators
-    because any Resources like GCP(n1-highmem-64, {'V100': 0.01}) can be valid
-    for sky exec/launch on an existing cluster.
-    """
-    _map_clouds_catalog(clouds, 'check_host_accelerator_compatibility',
-                        instance_type, accelerators)
-
-
 def check_accelerator_attachable_to_host(instance_type: str,
                                          accelerators: Optional[Dict[str, int]],
                                          zone: Optional[str] = None,
@@ -297,7 +288,9 @@ def get_common_gpus() -> List[str]:
         'A10G',
         'A100',
         'A100-80GB',
+        'H100',
         'K80',
+        'L4',
         'M60',
         'P100',
         'T4',
@@ -345,7 +338,7 @@ __all__ = [
     'get_image_id_from_tag',
     'is_image_tag_valid',
     # Configuration
-    'use_default_catalog',
+    'fallback_to_default_catalog',
     # Constants
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',

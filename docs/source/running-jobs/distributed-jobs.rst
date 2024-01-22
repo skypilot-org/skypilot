@@ -9,7 +9,7 @@ provisioning and distributed execution on many VMs.
 For example, here is a simple PyTorch Distributed training example:
 
 .. code-block:: yaml
-   :emphasize-lines: 6-6
+   :emphasize-lines: 6-6,21-22,24-25
 
    name: resnet-distributed-app
 
@@ -33,13 +33,18 @@ For example, here is a simple PyTorch Distributed training example:
 
      num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
      master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
-     python3 -m torch.distributed.launch --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
-       --nnodes=$num_nodes --node_rank=${SKYPILOT_NODE_RANK} --master_addr=$master_addr \
-       --master_port=8008 resnet_ddp.py --num_epochs 20
+     python3 -m torch.distributed.launch \
+       --nproc_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
+       --node_rank=${SKYPILOT_NODE_RANK} \
+       --nnodes=$num_nodes \
+       --master_addr=$master_addr \
+       --master_port=8008 \
+       resnet_ddp.py --num_epochs 20
 
-In the above, :code:`num_nodes: 2` specifies that this task is to be run on 2
-nodes, with each node having 4 V100s.
+In the above,
 
+- :code:`num_nodes: 2` specifies that this task is to be run on 2 nodes, with each node having 4 V100s;
+- The highlighted lines in the ``run`` section show common environment variables that are useful for launching distributed training, explained below.
 
 Environment variables
 -----------------------------------------
