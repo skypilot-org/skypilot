@@ -11,8 +11,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v4
       - name: Find the release version
         id: version
         run: |
