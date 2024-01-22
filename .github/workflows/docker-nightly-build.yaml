@@ -35,7 +35,7 @@ jobs:
               apt install rsync vim -y && \
               rm -rf /var/lib/apt/lists/*
           
-          RUN pip install "skypilot-nightly[aws,gcp,azure,kubernetes]==$LATEST_VERSION" --no-cache-dir
+          RUN pip install "skypilot-nightly[aws,gcp,azure,kubernetes]==${{ steps.version.outputs.latest_version }}" --no-cache-dir
           EOF
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
