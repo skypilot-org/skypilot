@@ -47,6 +47,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: "$DOCKER_USERNAME/skypilot-nightly:latest,$DOCKER_USERNAME/skypilot-nightly:$LATEST_VERSION"
+          tags: "${{ secrets.DOCKERHUB_USERNAME }}/skypilot-nightly:latest,${{ secrets.DOCKERHUB_USERNAME }}/skypilot-nightly:$LATEST_VERSION"
           cache-from: type=gha
           cache-to: type=gha,mode=max
