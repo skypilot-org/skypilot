@@ -74,6 +74,7 @@ html_theme_options = {
     'path_to_docs': 'docs/source',
     'pygment_light_style': 'tango',
     'pygment_dark_style': 'monokai',
+    'primary_sidebar_end': [],
 }
 
 # The name for this set of Sphinx documents.  If None, it defaults to
@@ -93,11 +94,6 @@ html_show_sourcelink = False
 # of the sidebar.
 html_logo = '_static/SkyPilot_wide_light.svg'
 
-html_sidebars = {
-    '**': [
-        'navbar-logo.html', 'icon-links.html', 'search-button-field.html', 'sbt-sidebar-nav.html'
-    ]
-}
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs. This file should be a Windows icon file (.ico), 16x16 or 32x32 pixels.
