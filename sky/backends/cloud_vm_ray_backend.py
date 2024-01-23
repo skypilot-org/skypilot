@@ -84,6 +84,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Local: 90,
     clouds.OCI: 300,
     clouds.Kubernetes: 300,
+    clouds.Vsphere: 240,
 }
 
 # Time gap between retries after failing to provision in all possible places.
@@ -150,6 +151,7 @@ def _get_cluster_config_template(cloud):
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
+        clouds.Vsphere: 'vsphere-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
@@ -1536,6 +1538,9 @@ class RetryingVmProvisioner(object):
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
                     return config_dict
+                except provision_common.StopFailoverError:
+                    with ux_utils.print_exception_no_traceback():
+                        raise
                 except Exception as e:  # pylint: disable=broad-except
                     # NOTE: We try to cleanup the cluster even if the previous
                     # cluster does not exist. Also we are fast at
