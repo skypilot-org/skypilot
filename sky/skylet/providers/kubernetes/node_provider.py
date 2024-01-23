@@ -623,11 +623,14 @@ class KubernetesNodeProvider(NodeProvider):
             container that commands should be run on.
         """
         # For custom images, the username might differ across images.
-        # The 'ssh_user' is updated inplace in the YAML during the
-        # 'create_node()' process. Need to reload the updated auth from YAML.
+        # The 'ssh_user' is updated inplace in the YAML at the end of the
+        # 'create_node()' process in _update_ssh_user_config.
+        # Since the node provider is initialized with stale auth information,
+        # we need to reload the updated user from YAML.
         cluster_yaml_path = self._recover_cluster_yaml_path(
             cluster_name_with_hash)
-        auth_config = backend_utils.ssh_credential_from_yaml(cluster_yaml_path)
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml_path)
+        auth_config['ssh_user'] = ssh_credentials['ssh_user']
 
         common_args = {
             'log_prefix': log_prefix,
