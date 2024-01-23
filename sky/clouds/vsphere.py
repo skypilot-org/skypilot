@@ -12,6 +12,7 @@ from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.vsphere_utils import get_vsphere_credentials
 from sky.provision.vsphere.vsphere_utils import initialize_vsphere_data
 from sky.utils import common_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -142,7 +143,7 @@ class Vsphere(clouds.Cloud):
         cls,
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
-        disk_tier: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
     ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,

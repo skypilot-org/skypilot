@@ -1004,7 +1004,8 @@ class Resources:
             # cluster's tier. Therefore, we don't need to check the tier
             # if it is BEST.
             if self.disk_tier != resources_utils.DiskTier.BEST:
-                if not (self.disk_tier <= other.disk_tier):
+                # Add parenthesis for better readability.
+                if not (self.disk_tier <= other.disk_tier):  # pylint: disable=superfluous-parens
                     return False
 
         if check_ports:
