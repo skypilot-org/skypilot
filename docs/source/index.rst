@@ -1,11 +1,17 @@
 Welcome to SkyPilot!
 =========================
 
-.. figure:: ./images/skypilot-wide-light-1k.png
+.. image:: ./_static/SkyPilot_wide_light.svg
   :width: 60%
   :align: center
   :alt: SkyPilot
-  :class: no-scaled-link
+  :class: no-scaled-link, only-light
+
+.. image:: ./_static/SkyPilot_wide_dark.svg
+  :width: 60%
+  :align: center
+  :alt: SkyPilot
+  :class: no-scaled-link, only-dark
 
 .. raw:: html
 
@@ -144,7 +150,7 @@ Documentation
    reference/faq
 
 .. toctree::
-   :maxdepth: 0
+   :maxdepth: 1
    :caption: Developer Guides
 
    developers/CONTRIBUTING
