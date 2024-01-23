@@ -516,7 +516,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         logger.info(f'Launching replica {replica_id}...')
         cluster_name = serve_utils.generate_replica_cluster_name(
             self._service_name, replica_id)
-        log_file_name = serve_utils.generate_replica_log_file_name(
+        log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
@@ -548,6 +548,14 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
 
         def _download_and_stream_logs(info: ReplicaInfo):
+            launch_log_file_name = (
+                serve_utils.generate_replica_launch_log_file_name(
+                    self._service_name, replica_id))
+            # Write launch log to replica log file
+            with open(log_file_name,
+                      'w') as replica_log_file, open(launch_log_file_name,
+                                                     'r') as launch_file:
+                replica_log_file.write(launch_file.read())
             logger.info(f'Syncing down logs for replica {replica_id}...')
             backend = backends.CloudVmRayBackend()
             handle = global_user_state.get_handle_from_cluster_name(
@@ -587,12 +595,6 @@ class SkyPilotReplicaManager(ReplicaManager):
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         p.start()
-        down_log_file_name = serve_utils.generate_replica_down_log_file_name(
-            self._service_name, replica_id)
-        # Create down file to indicate replica is being terminated. Will
-        # be used when user is looking to tail logs
-        with open(down_log_file_name, 'w'):
-            pass
         self._down_process_pool[replica_id] = p
 
     def scale_down(self, replica_id: int) -> None:
