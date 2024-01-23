@@ -48,15 +48,13 @@ In the above,
 
 .. note::
 
-    If you encounter the error `[Errno 24] Too many open files`, this indicates that your process has exceeded the maximum number of open file descriptors allowed by the system. This often occurs in high-load scenarios where your application opens more files simultaneously than the system's limit permits.
+    If you encounter the error :code:`[Errno 24] Too many open files`, this indicates that your process has exceeded the maximum number of open file descriptors allowed by the system. This often occurs in high-load scenarios, e.g., launching significant amount number of nodes, such as 100.
 
-    To resolve this issue, you can increase the `ulimit` in your shell. Run the following command:
+    To resolve this issue, run the following command, and try again:
 
     ::
 
         ulimit -n 65535
-
-    This command sets the limit of open files to 65535 for the current shell session. Note that this change is temporary and only applies to the current session. For a more permanent solution, you might need to adjust the system's configuration files or consult the documentation for your operating system.
 
 
 Environment variables
