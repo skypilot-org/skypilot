@@ -17,9 +17,9 @@ class SkyServiceSpec:
 
     def __init__(
         self,
-        readiness_path: str,
-        initial_delay_seconds: int,
-        min_replicas: int,
+        readiness_path: Optional[str] = None,
+        initial_delay_seconds: Optional[int] = None,
+        min_replicas: Optional[int] = None,
         max_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
@@ -33,6 +33,19 @@ class SkyServiceSpec:
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
     ) -> None:
+        missing_fields = []
+        if readiness_path is None:
+            missing_fields.append('readiness_path')
+        if initial_delay_seconds is None:
+            missing_fields.append('initial_delay_seconds')
+        if min_replicas is None:
+            missing_fields.append('min_replicas')
+        if missing_fields:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Missing required fields: {", ".join(missing_fields)}')
+        assert (readiness_path is not None and
+                initial_delay_seconds is not None and min_replicas is not None)
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('min_replicas must be greater or equal to 0')

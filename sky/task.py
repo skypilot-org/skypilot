@@ -340,6 +340,7 @@ class Task:
     @staticmethod
     def from_yaml_config(
         config: Dict[str, Any],
+        services_overrides: Optional[Dict[str, Any]] = None,
         env_overrides: Optional[List[Tuple[str, str]]] = None,
     ) -> 'Task':
         if env_overrides is not None:
@@ -436,10 +437,13 @@ class Task:
         resources_config = config.pop('resources', None)
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
-        service = config.pop('service', None)
-        if service is not None:
-            service = service_spec.SkyServiceSpec.from_yaml_config(service)
-        task.set_service(service)
+        service_config = config.pop('service', {})
+        if services_overrides is not None:
+            service_config.update(services_overrides)
+        if service_config:
+            service = service_spec.SkyServiceSpec.from_yaml_config(
+                service_config)
+            task.set_service(service)
 
         assert not config, f'Invalid task args: {config.keys()}'
         return task
