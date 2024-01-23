@@ -34,6 +34,9 @@ setup: |
   pip list | grep megablocks || pip install megablocks
 
 run: |
+  # Remove the default nccl.conf which causes failure on Azure
+  sudo mv /etc/nccl.conf /etc/nccl.conf.bak || true
+
   conda activate mixtral
   export PATH=$PATH:/sbin
   python -u -m vllm.entrypoints.openai.api_server \
