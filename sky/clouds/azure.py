@@ -60,6 +60,8 @@ class Azure(clouds.Cloud):
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
     _BEST_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.BEST
+    # Azure does not support high disk tier.
+    _SUPPORTED_DISK_TIERS = (set(resources_utils.DiskTier) - {resources_utils.DiskTier.HIGH})
 
     _INDENT_PREFIX = ' ' * 4
 

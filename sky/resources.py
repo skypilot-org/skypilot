@@ -169,7 +169,14 @@ class Resources:
         self._is_image_managed = _is_image_managed
 
         if isinstance(disk_tier, str):
-            disk_tier = resources_utils.DiskTier(str(disk_tier).lower())
+            disk_tier_str = str(disk_tier).lower()
+            supported_tiers = [tier.value for tier in resources_utils.DiskTier]
+            if disk_tier_str not in supported_tiers:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid disk_tier {disk_tier_str!r}. '
+                                     f'Disk tier must be one of '
+                                     f'{", ".join(supported_tiers)}.')
+            disk_tier = resources_utils.DiskTier(disk_tier_str)
         self._disk_tier = disk_tier
 
         if ports is not None:
