@@ -1,3 +1,4 @@
+import importlib
 import tempfile
 from typing import List, Optional
 
@@ -43,6 +44,10 @@ def enable_all_clouds_in_monkeypatch(
     monkeypatch.setattr(
         'sky.clouds.service_catalog.aws_catalog._get_az_mappings',
         _get_az_mappings)
+
+    monkeypatch.setattr(
+        'sky.clouds.service_catalog.vsphere_catalog._LOCAL_CATALOG',
+        'tests/default_vsphere_vms.csv')
 
     monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
                         lambda _: None)

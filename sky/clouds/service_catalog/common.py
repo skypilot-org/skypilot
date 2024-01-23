@@ -487,6 +487,7 @@ def list_accelerators_impl(
         'SpotPrice',
         'Region',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
+
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter,
                                                    case=case_sensitive,
