@@ -337,7 +337,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
                                                                    path='serve')
 
     code = serve_utils.ServeCodeGen.add_version(service_name)
-    returncode, version_stirng, stderr = backend.run_on_head(
+    returncode, version_string_payload, stderr = backend.run_on_head(
         handle,
         code,
         require_outputs=True,
@@ -352,11 +352,12 @@ def update(task: 'sky.Task', service_name: str) -> None:
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
+    version_string = serve_utils.load_version_string(version_string_payload)
     try:
-        current_version = int(version_stirng)
+        current_version = int(version_string)
     except ValueError as e:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Failed to parse version: {version_stirng}; '
+            raise ValueError(f'Failed to parse version: {version_string}; '
                              f'Returncode: {returncode}') from e
 
     print(f'New version: {current_version}')

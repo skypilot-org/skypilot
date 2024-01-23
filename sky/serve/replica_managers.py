@@ -454,8 +454,10 @@ class ReplicaManager:
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
                     f'Post data: {spec.post_data}')
 
+        # Newest version among the currently provisioned and launched replicas
         self.latest_version: int = serve_constants.INITIAL_VERSION
-        self.oldest_version: int = serve_constants.INITIAL_VERSION
+        # Oldest version among the currently provisioned and launched replicas
+        self.least_recent_version: int = serve_constants.INITIAL_VERSION
         serve_state.add_or_update_version(self._service_name,
                                           self.latest_version, spec)
 
@@ -766,11 +768,12 @@ class SkyPilotReplicaManager(ReplicaManager):
 
         # Clean old version
         replica_infos = serve_state.get_replica_infos(self._service_name)
-        current_oldest_version = min([
+        current_least_recent_version = min([
             info.version for info in replica_infos
-        ]) if replica_infos else self.oldest_version
-        if self.oldest_version < current_oldest_version:
-            for version in range(self.oldest_version, current_oldest_version):
+        ]) if replica_infos else self.least_recent_version
+        if self.least_recent_version < current_least_recent_version:
+            for version in range(self.least_recent_version,
+                                 current_least_recent_version):
                 task_yaml = serve_utils.generate_task_yaml_file_name(
                     self._service_name, version)
                 # Delete old version metadata.
@@ -778,7 +781,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # Delete storage buckets of older versions.
                 service.cleanup_storage(task_yaml)
             # newest version will be cleaned in serve down
-            self.oldest_version = current_oldest_version
+            self.least_recent_version = current_least_recent_version
 
     def _process_pool_refresher(self) -> None:
         """Periodically refresh the launch/down process pool."""
@@ -999,6 +1002,10 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
+        if version <= self.latest_version:
+            logger.error(f'Invalid version: {version}, '
+                         f'latest version: {self.latest_version}')
+            return
         task_yaml_path = serve_utils.generate_task_yaml_file_name(
             self._service_name, version)
         serve_state.add_or_update_version(self._service_name, version, spec)

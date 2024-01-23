@@ -120,7 +120,6 @@ class SkyServeController:
 
                 self._replica_manager.update_version(version, service)
                 self._autoscaler.update_version(version, service)
-                serve_state.set_service_version(self._service_name, version)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in update_service: '

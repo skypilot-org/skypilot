@@ -268,7 +268,7 @@ def update_service_status() -> None:
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-def update_service(service_name: str, version: int) -> str:
+def update_service_encoded(service_name: str, version: int) -> str:
     service_status = _get_service_status(service_name)
     if service_status is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
@@ -285,7 +285,9 @@ def update_service(service_name: str, version: int) -> str:
                          'it first and relaunch the service. ')
     elif resp.status_code != 200:
         raise ValueError(f'Failed to update service: {resp.text}')
-    return resp.json()['message']
+
+    service_msg = resp.json()['message']
+    return common_utils.encode_payload(service_msg)
 
 
 def _get_service_status(
@@ -337,6 +339,15 @@ def load_service_status(payload: str) -> List[Dict[str, Any]]:
             for k, v in service_status.items()
         })
     return service_statuses
+
+
+def add_version_encoded(service_name: str) -> str:
+    new_version = serve_state.add_version(service_name)
+    return common_utils.encode_payload(new_version)
+
+
+def load_version_string(payload: str) -> str:
+    return common_utils.decode_payload(payload)
 
 
 def _terminate_failed_services(
@@ -822,7 +833,7 @@ class ServeCodeGen:
     @classmethod
     def add_version(cls, service_name: str) -> str:
         code = [
-            f'msg = serve_state.add_version({service_name!r})',
+            f'msg = serve_utils.add_version_encoded({service_name!r})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
@@ -876,7 +887,7 @@ class ServeCodeGen:
     @classmethod
     def update_service(cls, service_name: str, version: int) -> str:
         code = [
-            f'msg = serve_utils.update_service({service_name!r}, '
+            f'msg = serve_utils.update_service_encoded({service_name!r}, '
             f'{version})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)

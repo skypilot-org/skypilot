@@ -75,7 +75,10 @@ class Autoscaler:
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
-
+        if version <= self.latest_version:
+            logger.error(f'Invalid version: {version}, '
+                         f'latest version: {self.latest_version}')
+            return
         self.latest_version = version
         self.min_nodes = spec.min_replicas
         self.max_nodes = (spec.max_replicas if spec.max_replicas is not None

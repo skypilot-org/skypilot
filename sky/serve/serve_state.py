@@ -45,11 +45,11 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         replica_info BLOB,
         PRIMARY KEY (service_name, replica_id))""")
     cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS versions (
-            version INTEGER, 
-            service_name TEXT,
-            spec BLOB,
-            PRIMARY KEY (service_name, version))""")
+        CREATE TABLE IF NOT EXISTS version_specs (
+        version INTEGER, 
+        service_name TEXT,
+        spec BLOB,
+        PRIMARY KEY (service_name, version))""")
     conn.commit()
 
 
@@ -255,15 +255,6 @@ def set_service_status(service_name: str, status: ServiceStatus) -> None:
     _DB.conn.commit()
 
 
-def set_service_version(service_name: str, version: int) -> None:
-    """Sets the service version."""
-    _DB.cursor.execute(
-        """\
-        UPDATE services SET
-        current_version=(?) WHERE name=(?)""", (version, service_name))
-    _DB.conn.commit()
-
-
 def set_service_controller_port(service_name: str,
                                 controller_port: int) -> None:
     """Sets the controller port of a service."""
@@ -419,45 +410,30 @@ def add_version(service_name: str) -> int:
 
     _DB.cursor.execute(
         """\
-        SELECT MAX(version) FROM versions
-        WHERE service_name=(?)""", (service_name,))
-
-    # add_version is only called during update.
-    new_version = _DB.cursor.fetchone()[0] + 1
-
-    _DB.cursor.execute(
-        """\
-        INSERT INTO versions
+        INSERT INTO version_specs
         (version, service_name, spec)
-        VALUES (?, ?, ?)""", (new_version, service_name, pickle.dumps(None)))
+        VALUES (
+            (SELECT COALESCE(MAX(version), 0) + 1 FROM
+            version_specs WHERE service_name = ?), ?, ?)
+        RETURNING version""", (service_name, service_name, pickle.dumps(None)))
+
+    inserted_version = _DB.cursor.fetchone()[0]
     _DB.conn.commit()
 
-    return new_version
+    return inserted_version
 
 
 def add_or_update_version(service_name: str, version: int,
                           spec: 'service_spec.SkyServiceSpec') -> None:
-    # Check if the entry with the specified service_name and version exists
     _DB.cursor.execute(
-        """SELECT * FROM versions WHERE service_name=? AND version=?""",
-        (service_name, version))
-    existing_entry = _DB.cursor.fetchone()
-
-    if existing_entry:
-        _DB.cursor.execute(
-            """\
-            UPDATE versions SET spec=?
-            WHERE service_name=? AND version=?""", (
-                pickle.dumps(spec),
-                service_name,
-                version,
-            ))
-    else:
-        _DB.cursor.execute(
-            """\
-            INSERT INTO versions
-            (service_name, version, spec)
-            VALUES (?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
+        """\
+        INSERT or REPLACE INTO version_specs
+        (service_name, version, spec)
+        VALUES (?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
+    _DB.cursor.execute(
+        """\
+        UPDATE services SET
+        current_version=(?) WHERE name=(?)""", (version, service_name))
     _DB.conn.commit()
 
 
@@ -465,7 +441,7 @@ def remove_service_versions(service_name: str) -> None:
     """Removes a replica from the database."""
     _DB.cursor.execute(
         """\
-        DELETE FROM versions
+        DELETE FROM version_specs
         WHERE service_name=(?)""", (service_name,))
     _DB.conn.commit()
 
@@ -475,7 +451,7 @@ def get_spec(service_name: str,
     """Gets spec from the database."""
     rows = _DB.cursor.execute(
         """\
-        SELECT spec FROM versions
+        SELECT spec FROM version_specs
         WHERE service_name=(?)
         AND version=(?)""", (service_name, version)).fetchall()
     for row in rows:
@@ -487,7 +463,7 @@ def delete_version(service_name: str, version: int) -> None:
     """Deletes a version from the database."""
     _DB.cursor.execute(
         """\
-        DELETE FROM versions
+        DELETE FROM version_specs
         WHERE service_name=(?)
         AND version=(?)""", (service_name, version))
     _DB.conn.commit()
