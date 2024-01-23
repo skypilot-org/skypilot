@@ -529,7 +529,6 @@ def stream_replica_logs(service_name: str,
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
 
-    # todo: rename the skip_down bool name (and don't forget to rename in the string codegen as well)
     if not skip_replica_log_file_check and os.path.exists(log_file_name):
         # When sync down, we set skip_replica_log_file_check to False, so it
         # won't detect the just created log file. Otherwise, it indicates the
