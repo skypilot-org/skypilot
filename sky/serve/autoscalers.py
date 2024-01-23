@@ -232,16 +232,18 @@ class RequestRateAutoscaler(Autoscaler):
         override dict. Active migration could require returning both SCALE_UP
         and SCALE_DOWN.
         """
-        launched_new_replica_infos, ready_new_replica_infos = [], []
-        old_replicas_infos = []
+        provisioning_and_launched_new_replica: List[
+            'replica_managers.ReplicaInfo'] = []
+        ready_new_replica: List['replica_managers.ReplicaInfo'] = []
+        old_replicas: List['replica_managers.ReplicaInfo'] = []
         for info in replica_infos:
             if info.version == self.latest_version:
                 if info.is_launched:
-                    launched_new_replica_infos.append(info)
+                    provisioning_and_launched_new_replica.append(info)
                 if info.is_ready:
-                    ready_new_replica_infos.append(info)
+                    ready_new_replica.append(info)
             else:
-                old_replicas_infos.append(info)
+                old_replicas.append(info)
 
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
@@ -251,7 +253,7 @@ class RequestRateAutoscaler(Autoscaler):
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_consecutive_periods} '
             'Number of launched latest replicas: '
-            f'{len(launched_new_replica_infos)}')
+            f'{len(provisioning_and_launched_new_replica)}')
 
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
@@ -260,7 +262,7 @@ class RequestRateAutoscaler(Autoscaler):
 
             status_order = serve_state.ReplicaStatus.scale_down_decision_order()
             launched_replica_infos_sorted = sorted(
-                launched_new_replica_infos,
+                provisioning_and_launched_new_replica,
                 key=lambda info: status_order.index(info.status)
                 if info.status in status_order else len(status_order))
 
@@ -270,26 +272,30 @@ class RequestRateAutoscaler(Autoscaler):
         # Case 1. Once there is min_replicas number of
         # ready new replicas, we will direct all traffic to them,
         # we can scale down all old replicas.
-        if len(ready_new_replica_infos) >= self.min_replicas:
-            for info in old_replicas_infos:
+        if len(ready_new_replica) >= self.min_replicas:
+            for info in old_replicas:
                 all_replica_ids_to_scale_down.append(info.replica_id)
 
-        # Case 2. when launched_new_replica_infos is less
+        # Case 2. when provisioning_and_launched_new_replica is less
         # than target_num_replicas, we always scale up new replicas.
-        if len(launched_new_replica_infos) < self.target_num_replicas:
-            num_replicas_to_scale_up = (self.target_num_replicas -
-                                        len(launched_new_replica_infos))
+        if len(provisioning_and_launched_new_replica
+              ) < self.target_num_replicas:
+            num_replicas_to_scale_up = (
+                self.target_num_replicas -
+                len(provisioning_and_launched_new_replica))
 
             for _ in range(num_replicas_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=None))
 
-        # Case 3: when launched_new_replica_infos is more
+        # Case 3: when provisioning_and_launched_new_replica is more
         # than target_num_replicas, we scale down new replicas.
-        if len(launched_new_replica_infos) > self.target_num_replicas:
-            num_replicas_to_scale_down = (len(launched_new_replica_infos) -
-                                          self.target_num_replicas)
+        if len(provisioning_and_launched_new_replica
+              ) > self.target_num_replicas:
+            num_replicas_to_scale_down = (
+                len(provisioning_and_launched_new_replica) -
+                self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
                 _get_replica_ids_to_scale_down(
                     num_limit=num_replicas_to_scale_down))
