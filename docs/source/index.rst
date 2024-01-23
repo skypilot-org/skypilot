@@ -47,8 +47,8 @@ Current supported providers (AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, IBM, Sa
 
    <p align="center">
    <picture>
-      <a href="https://skypilot.readthedocs.io/en/latest/getting-started/installation.html">
-      <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%></a>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png">
+      <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%>
    </picture>
    </p>
 
