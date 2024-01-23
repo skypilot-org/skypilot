@@ -6,7 +6,7 @@ import sky
 num_nodes = 2
 
 # The setup command.  Will be run under the working directory.
-setup = 'echo \"alias python=python3\" >> ~/.bashrc && pip3 install --upgrade pip && \
+setup = 'echo "alias python=python3" >> ~/.bashrc && pip3 install --upgrade pip && \
     [ -d pytorch-distributed-resnet ] || \
     (git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet && \
     cd pytorch-distributed-resnet && pip3 install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113 && \
@@ -33,22 +33,24 @@ train = sky.Task(
     run=run_fn,
 )
 
-train.set_resources({
-    ##### Fully specified
-    sky.Resources(sky.AWS(), 'p3.2xlarge'),
-    # sky.Resources(sky.GCP(), 'n1-standard-16'),
-    #sky.Resources(
-    #     sky.GCP(),
-    #     'n1-standard-8',
-    # Options: 'V100', {'V100': <num>}.
-    #     'V100',
-    #),
-    ##### Partially specified
-    #sky.Resources(accelerators='V100'),
-    # sky.Resources(accelerators='tpu-v3-8'),
-    # sky.Resources(sky.AWS(), accelerators={'V100': 4}),
-    # sky.Resources(sky.AWS(), accelerators='V100'),
-})
+train.set_resources(
+    {
+        ##### Fully specified
+        sky.Resources(sky.AWS(), 'p3.2xlarge'),
+        # sky.Resources(sky.GCP(), 'n1-standard-16'),
+        # sky.Resources(
+        #     sky.GCP(),
+        #     'n1-standard-8',
+        # Options: 'V100', {'V100': <num>}.
+        #     'V100',
+        # ),
+        ##### Partially specified
+        # sky.Resources(accelerators='V100'),
+        # sky.Resources(accelerators='tpu-v3-8'),
+        # sky.Resources(sky.AWS(), accelerators={'V100': 4}),
+        # sky.Resources(sky.AWS(), accelerators='V100'),
+    }
+)
 
 sky.launch(train, cluster_name='dth')
 # sky.exec(train, cluster_name='dth')

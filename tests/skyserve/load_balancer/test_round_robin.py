@@ -8,10 +8,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='SkyServe Smoke Test Client')
     parser.add_argument('--endpoint', type=str, required=True)
     parser.add_argument('--replica-num', type=int, required=True)
-    parser.add_argument('--replica-ips',
-                        type=str,
-                        nargs='*',
-                        help="All replica ips")
+    parser.add_argument('--replica-ips', type=str, nargs='*', help='All replica ips')
     args = parser.parse_args()
 
     replica_ips = []

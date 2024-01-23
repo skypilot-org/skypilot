@@ -20,12 +20,16 @@ with sky.Dag() as dag:
         setup=setup,
         run=run,
     )
-    train.set_resources({
-        sky.Resources(accelerators='tpu-v3-8',
-                      accelerator_args={
-                          'runtime_version': '2.12.0',
-                          'tpu_name': 'weilin-bert-test-big'
-                      }),
-    })
+    train.set_resources(
+        {
+            sky.Resources(
+                accelerators='tpu-v3-8',
+                accelerator_args={
+                    'runtime_version': '2.12.0',
+                    'tpu_name': 'weilin-bert-test-big',
+                },
+            ),
+        }
+    )
 
 sky.launch(dag)

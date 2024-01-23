@@ -1,5 +1,5 @@
 # formatting
-yapf==0.32.0
+ruff==0.1.11
 pylint==2.8.2
 # formatting the node_providers code from upstream ray-project/ray project
 black==22.10.0

@@ -31,8 +31,9 @@ def resnet50_estimate_runtime(resources):
         # print('****** trying 1/3 util for v100')
         utilized_flops = 120 * (10**12) / 3
 
-        estimated_step_time_seconds = flops_for_one_batch / utilized_flops \
-          + communication_slack
+        estimated_step_time_seconds = (
+            flops_for_one_batch / utilized_flops + communication_slack
+        )
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
         return estimated_run_time_seconds
 
@@ -79,13 +80,13 @@ def resnet50_estimate_runtime(resources):
         utilized_flops = tpu_v3_8_flops * known_resnet50_utilization
         estimated_step_time_seconds = flops_for_one_batch / utilized_flops
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
-        logger.debug('  tpu-v3-8 estimated_step_time_seconds %f',
-                     estimated_step_time_seconds)
+        logger.debug(
+            '  tpu-v3-8 estimated_step_time_seconds %f', estimated_step_time_seconds
+        )
         return estimated_run_time_seconds
 
     else:
-        assert False, 'not supported cloud in prototype: {}'.format(
-            resources.cloud)
+        assert False, 'not supported cloud in prototype: {}'.format(resources.cloud)
 
 
 def resnet50_infer_estimate_runtime(resources):
@@ -119,8 +120,7 @@ def resnet50_infer_estimate_runtime(resources):
         # estimated_run_time_seconds = estimated_step_time_seconds * total_steps
 
         # TODO: this ignores offline vs. online.  It's a huge batch.
-        estimated_run_time_seconds = \
-            flops_for_one_image * num_images / utilized_flops
+        estimated_run_time_seconds = flops_for_one_image * num_images / utilized_flops
     elif instance == 'inf1.2xlarge':
         # Inferentia: 1 chip = 128T[F?]OPS
         # Each AWS Inferentia chip supports up to 128 TOPS (trillions of
@@ -129,8 +129,7 @@ def resnet50_infer_estimate_runtime(resources):
         # TODO: also assume 1/3 utilization
         utilized_flops = 128 * (10**12) / 3
         # TODO: this ignores offline vs. online.  It's a huge batch.
-        estimated_run_time_seconds = \
-            flops_for_one_image * num_images / utilized_flops
+        estimated_run_time_seconds = flops_for_one_image * num_images / utilized_flops
     elif resources.accelerators is not None:
         accs = resources.accelerators
         for acc, acc_count in accs.items():
@@ -138,8 +137,7 @@ def resnet50_infer_estimate_runtime(resources):
         assert acc == 'T4' and acc_count == 1, resources
         # T4 GPU: 65 TFLOPS fp16
         utilized_flops = 65 * (10**12) / 3
-        estimated_run_time_seconds = \
-            flops_for_one_image * num_images / utilized_flops
+        estimated_run_time_seconds = flops_for_one_image * num_images / utilized_flops
     else:
         assert False, resources
 

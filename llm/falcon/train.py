@@ -46,8 +46,9 @@ class ScriptArguments:
     These arguments vary depending on how many GPUs you have, what their capacity and features are, and what size model you want to train.
     """
 
-    local_rank: Optional[int] = field(default=-1,
-                                      metadata={"help": "Used for multi-gpu"})
+    local_rank: Optional[int] = field(
+        default=-1, metadata={'help': 'Used for multi-gpu'}
+    )
 
     per_device_train_batch_size: Optional[int] = field(default=4)
     per_device_eval_batch_size: Optional[int] = field(default=1)
@@ -60,81 +61,82 @@ class ScriptArguments:
     lora_r: Optional[int] = field(default=64)
     max_seq_length: Optional[int] = field(default=512)
     model_name: Optional[str] = field(
-        default="tiiuae/falcon-7b",
+        default='tiiuae/falcon-7b',
         metadata={
-            "help": "The model that you want to train from the Hugging Face hub. E.g. gpt2, gpt2-xl, bert, etc."
+            'help': 'The model that you want to train from the Hugging Face hub. E.g. gpt2, gpt2-xl, bert, etc.'
         },
     )
     dataset_name: Optional[str] = field(
-        default="timdettmers/openassistant-guanaco",
-        metadata={"help": "The preference dataset to use."},
+        default='timdettmers/openassistant-guanaco',
+        metadata={'help': 'The preference dataset to use.'},
     )
     use_4bit: Optional[bool] = field(
         default=True,
-        metadata={"help": "Activate 4bit precision base model loading"},
+        metadata={'help': 'Activate 4bit precision base model loading'},
     )
     use_nested_quant: Optional[bool] = field(
         default=False,
-        metadata={"help": "Activate nested quantization for 4bit base models"},
+        metadata={'help': 'Activate nested quantization for 4bit base models'},
     )
     bnb_4bit_compute_dtype: Optional[str] = field(
-        default="float16",
-        metadata={"help": "Compute dtype for 4bit base models"},
+        default='float16',
+        metadata={'help': 'Compute dtype for 4bit base models'},
     )
     bnb_4bit_quant_type: Optional[str] = field(
-        default="nf4",
-        metadata={"help": "Quantization type fp4 or nf4"},
+        default='nf4',
+        metadata={'help': 'Quantization type fp4 or nf4'},
     )
     num_train_epochs: Optional[int] = field(
         default=1,
-        metadata={
-            "help": "The number of training epochs for the reward model."
-        },
+        metadata={'help': 'The number of training epochs for the reward model.'},
     )
     fp16: Optional[bool] = field(
         default=False,
-        metadata={"help": "Enables fp16 training."},
+        metadata={'help': 'Enables fp16 training.'},
     )
     bf16: Optional[bool] = field(
         default=False,
-        metadata={"help": "Enables bf16 training."},
+        metadata={'help': 'Enables bf16 training.'},
     )
     packing: Optional[bool] = field(
         default=False,
-        metadata={"help": "Use packing dataset creating."},
+        metadata={'help': 'Use packing dataset creating.'},
     )
     gradient_checkpointing: Optional[bool] = field(
         default=True,
-        metadata={"help": "Enables gradient checkpointing."},
+        metadata={'help': 'Enables gradient checkpointing.'},
     )
     optim: Optional[str] = field(
-        default="paged_adamw_32bit",
-        metadata={"help": "The optimizer to use."},
+        default='paged_adamw_32bit',
+        metadata={'help': 'The optimizer to use.'},
     )
     lr_scheduler_type: str = field(
-        default="constant",
+        default='constant',
         metadata={
-            "help": "Learning rate schedule. Constant a bit better than cosine, and has advantage for analysis"
+            'help': 'Learning rate schedule. Constant a bit better than cosine, and has advantage for analysis'
         },
     )
     max_steps: int = field(
-        default=10000,
-        metadata={"help": "How many optimizer update steps to take"})
+        default=10000, metadata={'help': 'How many optimizer update steps to take'}
+    )
     warmup_ratio: float = field(
-        default=0.03, metadata={"help": "Fraction of steps to do a warmup for"})
+        default=0.03, metadata={'help': 'Fraction of steps to do a warmup for'}
+    )
     group_by_length: bool = field(
         default=True,
         metadata={
-            "help": "Group sequences into batches with same length. Saves memory and speeds up training considerably."
+            'help': 'Group sequences into batches with same length. Saves memory and speeds up training considerably.'
         },
     )
     save_steps: int = field(
-        default=10, metadata={"help": "Save checkpoint every X updates steps."})
-    logging_steps: int = field(default=10,
-                               metadata={"help": "Log every X updates steps."})
+        default=10, metadata={'help': 'Save checkpoint every X updates steps.'}
+    )
+    logging_steps: int = field(
+        default=10, metadata={'help': 'Log every X updates steps.'}
+    )
     output_dir: Optional[str] = field(
-        default="/results",
-        metadata={"help": "Directory where model checkpoints will be stored."},
+        default='/results',
+        metadata={'help': 'Directory where model checkpoints will be stored.'},
     )
 
 
@@ -155,35 +157,38 @@ def create_and_prepare_model(args):
     if compute_dtype == torch.float16 and args.use_4bit:
         major, _ = torch.cuda.get_device_capability()
         if major >= 8:
-            print("=" * 80)
+            print('=' * 80)
             print(
-                "Your GPU supports bfloat16, you can accelerate training with the argument --bf16"
+                'Your GPU supports bfloat16, you can accelerate training with the argument --bf16'
             )
-            print("=" * 80)
+            print('=' * 80)
 
-    device_map = {"": 0}
+    device_map = {'': 0}
 
-    model = AutoModelForCausalLM.from_pretrained(args.model_name,
-                                                 quantization_config=bnb_config,
-                                                 device_map=device_map,
-                                                 trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name,
+        quantization_config=bnb_config,
+        device_map=device_map,
+        trust_remote_code=True,
+    )
 
     peft_config = LoraConfig(
         lora_alpha=script_args.lora_alpha,
         lora_dropout=script_args.lora_dropout,
         r=script_args.lora_r,
-        bias="none",
-        task_type="CAUSAL_LM",
+        bias='none',
+        task_type='CAUSAL_LM',
         target_modules=[
-            "query_key_value",
-            "dense",
-            "dense_h_to_4h",
-            "dense_4h_to_h",
+            'query_key_value',
+            'dense',
+            'dense_h_to_4h',
+            'dense_4h_to_h',
         ],  # , "word_embeddings", "lm_head"],
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(script_args.model_name,
-                                              trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        script_args.model_name, trust_remote_code=True
+    )
     tokenizer.pad_token = tokenizer.eos_token
 
     return model, peft_config, tokenizer
@@ -208,13 +213,13 @@ training_arguments = TrainingArguments(
 
 model, peft_config, tokenizer = create_and_prepare_model(script_args)
 model.config.use_cache = False
-dataset = load_dataset(script_args.dataset_name, split="train")
+dataset = load_dataset(script_args.dataset_name, split='train')
 
 trainer = SFTTrainer(
     model=model,
     train_dataset=dataset,
     peft_config=peft_config,
-    dataset_text_field="text",
+    dataset_text_field='text',
     max_seq_length=script_args.max_seq_length,
     tokenizer=tokenizer,
     args=training_arguments,
@@ -225,10 +230,10 @@ for name, module in trainer.model.named_modules():
     if isinstance(module, LoraLayer):
         if script_args.bf16:
             module = module.to(torch.bfloat16)
-    if "norm" in name:
+    if 'norm' in name:
         module = module.to(torch.float32)
-    if "lm_head" in name or "embed_tokens" in name:
-        if hasattr(module, "weight"):
+    if 'lm_head' in name or 'embed_tokens' in name:
+        if hasattr(module, 'weight'):
             if script_args.bf16 and module.weight.dtype == torch.float32:
                 module = module.to(torch.bfloat16)
 
