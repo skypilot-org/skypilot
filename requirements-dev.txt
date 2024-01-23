@@ -16,6 +16,7 @@ types-PyYAML
 types-requests<2.31
 types-setuptools
 types-cachetools
+types-pyvmomi
 
 # testing
 pytest

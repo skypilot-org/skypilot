@@ -64,12 +64,12 @@ from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
-from sky.utils import env_options
 from sky.utils import kubernetes_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
@@ -3564,7 +3564,7 @@ def show_gpus(
             '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
-    clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and accelerator_str is not None:
@@ -3590,14 +3590,22 @@ def show_gpus(
                 region_filter=region,
             )
 
-            if len(result) == 0 and cloud == 'kubernetes':
+            if (len(result) == 0 and cloud_obj is not None and
+                    cloud_obj.is_same_cloud(clouds.Kubernetes())):
                 yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
                 return
 
             # "Common" GPUs
-            for gpu in service_catalog.get_common_gpus():
-                if gpu in result:
+            # If cloud is kubernetes, we want to show all GPUs here, even if
+            # they are not listed as common in SkyPilot.
+            if (cloud_obj is not None and
+                    cloud_obj.is_same_cloud(clouds.Kubernetes())):
+                for gpu, _ in sorted(result.items()):
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+            else:
+                for gpu in service_catalog.get_common_gpus():
+                    if gpu in result:
+                        gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             yield from gpu_table.get_string()
 
             # Google TPUs
@@ -5387,11 +5395,21 @@ def local():
     pass
 
 
+@click.option('--gpus/--no-gpus',
+              default=True,
+              is_flag=True,
+              help='Launch cluster without GPU support even '
+              'if GPUs are detected on the host.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
-def local_up():
+def local_up(gpus: bool):
     """Creates a local cluster."""
     cluster_created = False
+
+    # Check if GPUs are available on the host
+    local_gpus_available = backend_utils.check_local_gpus()
+    gpus = gpus and local_gpus_available
+
     # Check if ~/.kube/config exists:
     if os.path.exists(os.path.expanduser('~/.kube/config')):
         curr_context = kubernetes_utils.get_current_kube_config_context_name()
@@ -5401,46 +5419,112 @@ def local_up():
                 f'Current context in kube config: {curr_context}'
                 '\nWill automatically switch to kind-skypilot after the local '
                 'cluster is created.')
-    with rich_utils.safe_status('Creating local cluster...'):
-        path_to_package = os.path.dirname(os.path.dirname(__file__))
-        up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
-                                      'create_cluster.sh')
-        # Get directory of script and run it from there
-        cwd = os.path.dirname(os.path.abspath(up_script_path))
-        # Run script and don't print output
-        try:
-            subprocess_utils.run(up_script_path, cwd=cwd, capture_output=True)
-            cluster_created = True
-        except subprocess.CalledProcessError as e:
-            # Check if return code is 100
-            if e.returncode == 100:
-                click.echo('\nLocal cluster already exists. '
-                           'Run `sky local down` to delete it.')
-            else:
-                stderr = e.stderr.decode('utf-8')
-                click.echo(f'\nFailed to create local cluster. {stderr}')
-                if env_options.Options.SHOW_DEBUG_INFO.get():
-                    stdout = e.stdout.decode('utf-8')
-                    click.echo(f'Logs:\n{stdout}')
-                sys.exit(1)
+    message_str = 'Creating local cluster{}...'
+    message_str = message_str.format((' with GPU support (this may take up '
+                                      'to 15 minutes)') if gpus else '')
+    path_to_package = os.path.dirname(os.path.dirname(__file__))
+    up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+                                  'create_cluster.sh')
+
+    # Get directory of script and run it from there
+    cwd = os.path.dirname(os.path.abspath(up_script_path))
+    run_command = up_script_path + ' --gpus' if gpus else up_script_path
+    run_command = shlex.split(run_command)
+
+    # Setup logging paths
+    run_timestamp = backend_utils.get_run_timestamp()
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
+                            'local_up.log')
+    tail_cmd = 'tail -n100 -f ' + log_path
+
+    click.echo(message_str)
+    style = colorama.Style
+    click.echo('To view detailed progress: '
+               f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+
+    returncode, _, stderr = log_lib.run_with_log(
+        cmd=run_command,
+        log_path=log_path,
+        require_outputs=True,
+        stream_logs=False,
+        line_processor=log_utils.SkyLocalUpLineProcessor(),
+        cwd=cwd)
+
+    # Kind always writes to stderr even if it succeeds.
+    # If the failure happens after the cluster is created, we need
+    # to strip all stderr of "No kind clusters found.", which is
+    # printed when querying with kind get clusters.
+    stderr = stderr.replace('No kind clusters found.\n', '')
+
+    if returncode == 0:
+        cluster_created = True
+    elif returncode == 100:
+        click.echo(f'{style.BRIGHT}Local cluster already '
+                   f'exists.{style.RESET_ALL} '
+                   'Run `sky local down` to delete it.')
+    else:
+        click.echo('Failed to create local cluster. '
+                   f'Full log: {log_path}'
+                   f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
+        sys.exit(1)
     # Run sky check
-    with rich_utils.safe_status('Running sky check...'):
+    with rich_utils.safe_status('[bold cyan]Running sky check...'):
         sky_check.check(quiet=True)
     if cluster_created:
+        # Prepare completion message which shows CPU and GPU count
         # Get number of CPUs
         p = subprocess_utils.run(
             'kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'',
             capture_output=True)
         num_cpus = int(p.stdout.decode('utf-8'))
+
+        # GPU count/type parsing
+        gpu_message = ''
+        gpu_hint = ''
+        if gpus:
+            # Get GPU model by querying the node labels
+            label_name_escaped = 'skypilot.co/accelerator'.replace('.', '\\.')
+            gpu_type_cmd = f'kubectl get node skypilot-control-plane -o jsonpath=\"{{.metadata.labels[\'{label_name_escaped}\']}}\"'  # pylint: disable=line-too-long
+            try:
+                # Run the command and capture the output
+                gpu_count_output = subprocess.check_output(gpu_type_cmd,
+                                                           shell=True,
+                                                           text=True)
+                gpu_type_str = gpu_count_output.strip() + ' '
+            except subprocess.CalledProcessError as e:
+                output = str(e.output.decode('utf-8'))
+                logger.warning(f'Failed to get GPU type: {output}')
+                gpu_type_str = ''
+
+            # Get number of GPUs (sum of nvidia.com/gpu resources)
+            gpu_count_command = 'kubectl get nodes -o=jsonpath=\'{range .items[*]}{.status.allocatable.nvidia\\.com/gpu}{\"\\n\"}{end}\' | awk \'{sum += $1} END {print sum}\''  # pylint: disable=line-too-long
+            try:
+                # Run the command and capture the output
+                gpu_count_output = subprocess.check_output(gpu_count_command,
+                                                           shell=True,
+                                                           text=True)
+                gpu_count = gpu_count_output.strip(
+                )  # Remove any extra whitespace
+                gpu_message = f' and {gpu_count} {gpu_type_str}GPUs'
+            except subprocess.CalledProcessError as e:
+                output = str(e.output.decode('utf-8'))
+                logger.warning(f'Failed to get GPU count: {output}')
+                gpu_message = f' with {gpu_type_str}GPU support'
+
+            gpu_hint = (
+                '\nHint: To see the list of GPUs in the cluster, '
+                'run \'sky show-gpus --cloud kubernetes\'') if gpus else ''
+
         if num_cpus < 2:
             click.echo('Warning: Local cluster has less than 2 CPUs. '
                        'This may cause issues with running tasks.')
         click.echo(
-            'Local Kubernetes cluster created successfully with '
-            f'{num_cpus} CPUs. `sky launch` can now run tasks locally.'
+            f'{style.BRIGHT}Local Kubernetes cluster created successfully with '
+            f'{num_cpus} CPUs{gpu_message}. `sky launch` can now run tasks '
+            f'locally.{style.RESET_ALL}'
             '\nHint: To change the number of CPUs, change your docker '
             'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
-        )
+            f'{gpu_hint}')
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
@@ -5448,28 +5532,45 @@ def local_up():
 def local_down():
     """Deletes a local cluster."""
     cluster_removed = False
-    with rich_utils.safe_status('Removing local cluster...'):
-        path_to_package = os.path.dirname(os.path.dirname(__file__))
-        down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
-                                        'delete_cluster.sh')
-        try:
-            subprocess_utils.run(down_script_path, capture_output=True)
+
+    path_to_package = os.path.dirname(os.path.dirname(__file__))
+    down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+                                    'delete_cluster.sh')
+
+    cwd = os.path.dirname(os.path.abspath(down_script_path))
+    run_command = shlex.split(down_script_path)
+
+    # Setup logging paths
+    run_timestamp = backend_utils.get_run_timestamp()
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
+                            'local_down.log')
+    tail_cmd = 'tail -n100 -f ' + log_path
+
+    with rich_utils.safe_status('[bold cyan]Removing local cluster...'):
+        style = colorama.Style
+        click.echo('To view detailed progress: '
+                   f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+        returncode, stdout, stderr = log_lib.run_with_log(cmd=run_command,
+                                                          log_path=log_path,
+                                                          require_outputs=True,
+                                                          stream_logs=False,
+                                                          cwd=cwd)
+        stderr = stderr.replace('No kind clusters found.\n', '')
+
+        if returncode == 0:
             cluster_removed = True
-        except subprocess.CalledProcessError as e:
-            # Check if return code is 100
-            if e.returncode == 100:
-                click.echo('\nLocal cluster does not exist.')
-            else:
-                stderr = e.stderr.decode('utf-8')
-                click.echo(f'\nFailed to delete local cluster. {stderr}')
-                if env_options.Options.SHOW_DEBUG_INFO.get():
-                    stdout = e.stdout.decode('utf-8')
-                    click.echo(f'Logs:\n{stdout}')
+        elif returncode == 100:
+            click.echo('\nLocal cluster does not exist.')
+        else:
+            click.echo('Failed to create local cluster. '
+                       f'Stdout: {stdout}'
+                       f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
+            sys.exit(1)
     if cluster_removed:
         # Run sky check
-        with rich_utils.safe_status('Running sky check...'):
+        with rich_utils.safe_status('[bold cyan]Running sky check...'):
             sky_check.check(quiet=True)
-        click.echo('Local cluster removed.')
+        click.echo(f'{style.BRIGHT}Local cluster removed.{style.RESET_ALL}')
 
 
 # TODO(skypilot): remove the below in v0.5.

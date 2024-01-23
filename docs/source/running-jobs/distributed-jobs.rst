@@ -46,6 +46,17 @@ In the above,
 - :code:`num_nodes: 2` specifies that this task is to be run on 2 nodes, with each node having 4 V100s;
 - The highlighted lines in the ``run`` section show common environment variables that are useful for launching distributed training, explained below.
 
+.. note::
+
+    If you encounter the error :code:`[Errno 24] Too many open files`, this indicates that your process has exceeded the maximum number of open file descriptors allowed by the system. This often occurs in high-load scenarios, e.g., launching significant amount number of nodes, such as 100.
+
+    To resolve this issue, run the following command, and try again:
+
+    ::
+
+        ulimit -n 65535
+
+
 Environment variables
 -----------------------------------------
 
