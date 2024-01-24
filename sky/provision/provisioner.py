@@ -280,6 +280,7 @@ def _wait_ssh_connection_direct(ip: str,
                                 ssh_control_name: Optional[str] = None,
                                 ssh_proxy_command: Optional[str] = None,
                                 **kwargs) -> bool:
+    del kwargs  # unused
     assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
         with socket.create_connection((ip, ssh_port), timeout=1) as s:
@@ -310,7 +311,7 @@ def _wait_ssh_connection_indirect(ip: str,
                                   ssh_control_name: Optional[str] = None,
                                   ssh_proxy_command: Optional[str] = None,
                                   **kwargs) -> bool:
-    del ssh_control_name
+    del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
     proc = subprocess.run(command,
