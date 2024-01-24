@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from sky import clouds
-from sky.provision.kubernetes import kubernetes_utils
+from sky.provision.kubernetes import utils
 
 
 def enable_all_clouds_in_monkeypatch(
@@ -65,9 +65,9 @@ def enable_all_clouds_in_monkeypatch(
     # Monkey patch Kubernetes resource detection since it queries
     # the cluster to detect available cluster resources.
     monkeypatch.setattr(
-        'sky.utils.kubernetes_utils.detect_gpu_label_formatter',
-        lambda *_args, **_kwargs: [kubernetes_utils.SkyPilotLabelFormatter, {}])
-    monkeypatch.setattr('sky.utils.kubernetes_utils.detect_gpu_resource',
+        'sky.provision.kubernetes.utils.detect_gpu_label_formatter',
+        lambda *_args, **_kwargs: [utils.SkyPilotLabelFormatter, {}])
+    monkeypatch.setattr('sky.provision.kubernetes.utils.detect_gpu_resource',
                         lambda *_args, **_kwargs: [True, []])
-    monkeypatch.setattr('sky.utils.kubernetes_utils.check_instance_fits',
+    monkeypatch.setattr('sky.provision.kubernetes.utils.check_instance_fits',
                         lambda *_args, **_kwargs: [True, ''])

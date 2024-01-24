@@ -43,7 +43,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
-from sky.provision.kubernetes import kubernetes_utils
+from sky.provision.kubernetes import utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
@@ -427,7 +427,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     if network_mode == nodeport_mode:
         service_type = kubernetes_enums.KubernetesServiceType.NODEPORT
     elif network_mode == port_forward_mode:
-        kubernetes_utils.check_port_forward_mode_dependencies()
+        utils.check_port_forward_mode_dependencies()
         # Using `kubectl port-forward` creates a direct tunnel to jump pod and
         # does not require opening any ports on Kubernetes nodes. As a result,
         # the service can be a simple ClusterIP service which we access with
@@ -439,10 +439,10 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Setup service for SSH jump pod. We create the SSH jump service here
     # because we need to know the service IP address and port to set the
     # ssh_proxy_command in the autoscaler config.
-    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-    kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, service_type)
+    namespace = utils.get_current_kube_config_context_namespace()
+    utils.setup_ssh_jump_svc(ssh_jump_name, namespace, service_type)
 
-    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+    ssh_proxy_cmd = utils.get_ssh_proxy_command(
         PRIVATE_SSH_KEY_PATH, ssh_jump_name, network_mode, namespace,
         clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH,
         clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)

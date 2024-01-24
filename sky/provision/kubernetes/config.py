@@ -6,7 +6,7 @@ from typing import Any, Dict, Union
 
 from sky.adaptors import kubernetes
 from sky.provision import common
-from sky.provision.kubernetes import kubernetes_utils
+from sky.provision.kubernetes import utils
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ def bootstrap_instances(
         region: str, cluster_name: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     del region, cluster_name  # unused
-    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    namespace = utils.get_current_kube_config_context_namespace()
 
     _configure_services(namespace, config.provider_config)
 
@@ -174,9 +174,9 @@ def _get_resource(container_resources: Dict[str, Any], resource_name: str,
     resource_key = matching_keys.pop()
     resource_quantity = resources[resource_key]
     if resource_name == 'memory':
-        return kubernetes_utils.parse_memory_resource(resource_quantity)
+        return utils.parse_memory_resource(resource_quantity)
     else:
-        return kubernetes_utils.parse_cpu_or_gpu_resource(resource_quantity)
+        return utils.parse_cpu_or_gpu_resource(resource_quantity)
 
 
 def _configure_autoscaler_service_account(
@@ -308,7 +308,7 @@ def _configure_ssh_jump(namespace, config: common.ProvisionConfig):
     #  and available before we create the SSH jump pod. If for any reason the
     #  service is missing, we should raise an error.
 
-    kubernetes_utils.setup_ssh_jump_pod(ssh_jump_name, ssh_jump_image,
+    utils.setup_ssh_jump_pod(ssh_jump_name, ssh_jump_image,
                                         ssh_key_secret_name, namespace)
     return config
 
