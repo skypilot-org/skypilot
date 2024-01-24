@@ -241,7 +241,7 @@ extras_require: Dict[str, List[str]] = {
         # vsphere-automation-sdk is also required, but it does not have
         # pypi release, which cause failure of our pypi release.
         # https://peps.python.org/pep-0440/#direct-references
-        # We have the instruction for installation in our
+        # We have the instruction for its installation in our
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0'
     ],
