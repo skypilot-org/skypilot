@@ -1178,13 +1178,23 @@ def wait_until_ray_cluster_ready(
     return True, docker_user  # success
 
 
-def ssh_credential_from_yaml(cluster_yaml: str,
-                             docker_user: Optional[str] = None
-                            ) -> Dict[str, Any]:
-    """Returns ssh_user, ssh_private_key and ssh_control name."""
+def ssh_credential_from_yaml(
+    cluster_yaml: str,
+    docker_user: Optional[str] = None,
+    ssh_user: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Returns ssh_user, ssh_private_key and ssh_control name.
+
+    Args:
+        cluster_yaml: path to the cluster yaml.
+        docker_user: when using custom docker image, use this user to ssh into
+            the docker container.
+        ssh_user: override the ssh_user in the cluster yaml.
+    """
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
-    ssh_user = auth_section['ssh_user'].strip()
+    if ssh_user is None:
+        ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')

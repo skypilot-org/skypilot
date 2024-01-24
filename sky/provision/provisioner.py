@@ -398,7 +398,9 @@ def _post_provision_setup(
     # TODO(suquark): Move wheel build here in future PRs.
     ip_list = cluster_info.get_feasible_ips()
     port_list = cluster_info.get_ssh_ports()
-    ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
+    # We don't set docker_user here, as we are configuring the VM itself.
+    ssh_credentials = backend_utils.ssh_credential_from_yaml(
+        cluster_yaml, ssh_user=cluster_info.ssh_user)
 
     with rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for SSH access[/]') as status:

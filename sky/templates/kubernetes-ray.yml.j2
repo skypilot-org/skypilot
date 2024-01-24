@@ -192,10 +192,6 @@ available_node_types:
             name: dev-fuse
           securityContext:          # Required for FUSE mounting. TODO(romilb): See if we can grant a reduced set of privileges.
             privileged: true
-          lifecycle:
-            postStart:
-              exec:
-                command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
           resources:
             requests:
               cpu: {{cpus}}
@@ -211,12 +207,13 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - mkdir -p ~/.ssh; touch ~/.ssh/config;
+  - sudo DEBIAN_FRONTEND=noninteractive apt install gcc patch pciutils rsync fuse curl python3 python3-pip -y;
+    mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
     source ~/.bashrc;
-    mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && sudo touch ~/.sudo_as_admin_successful;
     (pip3 list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null || pip3 install --exists-action w -U ray[default]=={{ray_version}});
     (pip3 list | grep "skypilot " && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[remote]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';

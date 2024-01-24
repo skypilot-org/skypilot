@@ -61,9 +61,6 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker image is not '
-                                                         'supported in '
-                                                         'Kubernetes.',
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
@@ -213,15 +210,16 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else None
 
-        # Select image based on whether we are using GPUs or not.
-        image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
-        # Get the container image ID from the service catalog.
-        # TODO(romilb): Note that currently we do not support custom images,
-        #  so the image_id should start with 'skypilot:'.
-        #  In the future we may want to get image_id from the resources object.
-        assert image_id.startswith('skypilot:')
-        image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                         clouds='kubernetes')
+        if resources.image_id is not None:
+            # Use custom image specified in resources
+            image_id_with_region = resources.image_id['kubernetes']
+            image_id = image_id_with_region.lstrip('docker:')
+        else:
+            # Select image based on whether we are using GPUs or not.
+            image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+            # Get the container image ID from the service catalog.
+            image_id = service_catalog.get_image_id_from_tag(
+                image_id, clouds='kubernetes')
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')
