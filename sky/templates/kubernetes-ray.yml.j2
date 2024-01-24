@@ -14,7 +14,9 @@ idle_timeout_minutes: 60
 # created by your cluster administrator.
 provider:
     type: external
-    module: sky.skylet.providers.kubernetes.KubernetesNodeProvider
+    module: sky.provision.kubernetes
+
+    region: kubernetes
 
     # The namespace to create the Ray cluster in.
     namespace: {{k8s_namespace}}

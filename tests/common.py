@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from sky import clouds
-from sky.utils import kubernetes_utils
+from sky.provision.kubernetes import kubernetes_utils
 
 
 def enable_all_clouds_in_monkeypatch(

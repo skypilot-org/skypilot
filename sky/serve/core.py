@@ -124,8 +124,8 @@ def up(
             ),
         }
         common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
-                                    vars_to_fill,
-                                    output_path=controller_file.name)
+                                   vars_to_fill,
+                                   output_path=controller_file.name)
         controller_task = task_lib.Task.from_yaml(controller_file.name)
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)

@@ -9,9 +9,9 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
+from sky.provision.kubernetes import kubernetes_utils
 from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
-from sky.utils import kubernetes_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.

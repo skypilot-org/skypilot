@@ -1,6 +1,7 @@
 """Kubernetes provisioner for SkyPilot."""
 
 from sky.provision.kubernetes.config import bootstrap_instances
+from sky.provision.kubernetes.instance import get_cluster_info
 from sky.provision.kubernetes.instance import run_instances
 from sky.provision.kubernetes.instance import stop_instances
 from sky.provision.kubernetes.instance import terminate_instances

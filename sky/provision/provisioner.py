@@ -273,13 +273,13 @@ def _shlex_join(command: List[str]) -> str:
     return ' '.join(shlex.quote(arg) for arg in command)
 
 
-def _wait_ssh_connection_direct(
-        ip: str,
-        ssh_port: int,
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = None,
-        ssh_proxy_command: Optional[str] = None) -> bool:
+def _wait_ssh_connection_direct(ip: str,
+                                ssh_port: int,
+                                ssh_user: str,
+                                ssh_private_key: str,
+                                ssh_control_name: Optional[str] = None,
+                                ssh_proxy_command: Optional[str] = None,
+                                **kwargs) -> bool:
     assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
         with socket.create_connection((ip, ssh_port), timeout=1) as s:
@@ -303,13 +303,13 @@ def _wait_ssh_connection_direct(
     return False
 
 
-def _wait_ssh_connection_indirect(
-        ip: str,
-        ssh_port: int,
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = None,
-        ssh_proxy_command: Optional[str] = None) -> bool:
+def _wait_ssh_connection_indirect(ip: str,
+                                  ssh_port: int,
+                                  ssh_user: str,
+                                  ssh_private_key: str,
+                                  ssh_control_name: Optional[str] = None,
+                                  ssh_proxy_command: Optional[str] = None,
+                                  **kwargs) -> bool:
     del ssh_control_name
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)

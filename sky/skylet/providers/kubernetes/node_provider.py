@@ -11,9 +11,9 @@ from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from ray.autoscaler.tags import TAG_RAY_NODE_KIND
 
 from sky.adaptors import kubernetes
+from sky.provision.kubernetes import kubernetes_utils
 from sky.skylet.providers.kubernetes import config
 from sky.utils import common_utils
-from sky.utils import kubernetes_utils
 
 logger = logging.getLogger(__name__)
 

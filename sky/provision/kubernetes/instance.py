@@ -11,9 +11,9 @@ from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
-from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 5
@@ -366,16 +366,17 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
         jump_pod = kubernetes.core_api().read_namespaced_pod(
             ssh_jump_pod_name, namespace)
-        created_pods[jump_pod.metadata.name] = jump_pod
+        wait_pods = list(created_pods.values())
+        wait_pods.append(jump_pod)
 
         # Wait until the pods are scheduled and surface cause for error
         # if there is one
-        _wait_for_pods_to_schedule(namespace, created_pods.values(),
+        _wait_for_pods_to_schedule(namespace, wait_pods,
                                    provider_config['timeout'])
         # Wait until the pods and their containers are up and running, and
         # fail early if there is an error
-        _wait_for_pods_to_run(namespace, created_pods.values())
-        _set_env_vars_in_pods(namespace, created_pods.values())
+        _wait_for_pods_to_run(namespace, wait_pods)
+        _set_env_vars_in_pods(namespace, wait_pods)
 
     assert head_pod_name is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(
@@ -404,7 +405,7 @@ def stop_instances(
 
 def _terminate_node(namespace: str, pod_name: str) -> None:
     """Terminate a pod."""
-    logger.info('terminate_instances: calling delete_namespaced_pod')
+    logger.debug('terminate_instances: calling delete_namespaced_pod')
     try:
         kubernetes_utils.clean_zombie_ssh_jump_pod(namespace, pod_name)
     except Exception as e:  # pylint: disable=broad-except
@@ -449,7 +450,7 @@ def terminate_instances(
         return pod.metadata.labels[TAG_RAY_NODE_KIND] == 'head'
 
     for pod_name, pod in pods.items():
-        logger.info(f'Terminating instance {pod_name}: {pod}')
+        logger.debug(f'Terminating instance {pod_name}: {pod}')
         if _is_head(pod) and worker_only:
             continue
         _terminate_node(namespace, pod_name)
@@ -466,7 +467,7 @@ def get_cluster_info(
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
 
-    running_pods = _filter_pods(namespace, tag_filters, ['RUNNING'])
+    running_pods = _filter_pods(namespace, tag_filters, ['Running'])
     pods: Dict[str, List[common.InstanceInfo]] = {}
     head_pod_name = None
 

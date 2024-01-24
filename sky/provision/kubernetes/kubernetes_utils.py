@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import jinja2
 import yaml
 
+import sky
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
@@ -997,7 +998,6 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
 
 def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
                            ssh_jump_name: str, service_type: str) -> Dict:
-    import sky
     template_path = os.path.join(sky.__root_dir__, 'templates',
                                  'kubernetes-ssh-jump.yml.j2')
     if not os.path.exists(template_path):

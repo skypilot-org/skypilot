@@ -6,7 +6,7 @@ from typing import Any, Dict, Union
 
 from sky.adaptors import kubernetes
 from sky.provision import common
-from sky.utils import kubernetes_utils
+from sky.provision.kubernetes import kubernetes_utils
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def fillout_resources_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
 
         node_config = node_types[node_type]['node_config']
         # The next line is for compatibility with configs which define pod specs
-        # cf. KubernetesNodeProvider.create_node().
+        # cf.create_node().
         pod = node_config.get('pod', node_config)
         container_data = pod['spec']['containers'][0]
 
