@@ -2,6 +2,7 @@
 
 Responsible for autoscaling and replica management.
 """
+
 import logging
 import threading
 import time
@@ -13,9 +14,9 @@ import uvicorn
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
-from sky.serve import constants
 from sky.serve import replica_managers
 from sky.serve import serve_state
+from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -46,9 +47,7 @@ class SkyServeController:
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.RequestRateAutoscaler(
-                service_spec,
-                qps_window_size=constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS))
+            autoscalers.RequestRateAutoscaler(service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -103,6 +102,29 @@ class SkyServeController:
                 'ready_replica_urls':
                     self._replica_manager.get_ready_replica_urls()
             }
+
+        @self._app.post('/controller/update_service')
+        async def update_service(request: fastapi.Request):
+            request_data = await request.json()
+            try:
+                version = request_data.get('version', None)
+                if version is None:
+                    return {'message': 'Error: version is not specified.'}
+                # The yaml with the name latest_task_yaml will be synced
+                # See sky/serve/core.py::update
+                latest_task_yaml = serve_utils.generate_task_yaml_file_name(
+                    self._service_name, version)
+                service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
+                logger.info(
+                    f'Update to new version version {version}: {service}')
+
+                self._replica_manager.update_version(version, service)
+                self._autoscaler.update_version(version, service)
+                return {'message': 'Success'}
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error in update_service: '
+                             f'{common_utils.format_exception(e)}')
+                return {'message': 'Error'}
 
         @self._app.on_event('startup')
         def configure_logger():
