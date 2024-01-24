@@ -1,4 +1,5 @@
 """Utility functions for resources."""
+import enum
 import itertools
 import re
 import typing
@@ -14,6 +15,32 @@ _PORT_RANGE_HINT_MSG = ('Invalid port range {}. Please use the format '
 _PORT_HINT_MSG = ('Invalid port {}. '
                   'Please use a port number between 1 and 65535.')
 _DEFAULT_MESSAGE_HANDLE_INITIALIZING = '<initializing>'
+
+
+class DiskTier(enum.Enum):
+    """All disk tiers supported by SkyPilot."""
+    LOW = 'low'
+    MEDIUM = 'medium'
+    HIGH = 'high'
+    BEST = 'best'
+
+    @classmethod
+    def supported_tiers(cls) -> List[str]:
+        # 'none' is a special tier for overriding
+        # the tier specified in task YAML.
+        return [tier.value for tier in cls] + ['none']
+
+    @classmethod
+    def cli_help_message(cls) -> str:
+        return (
+            f'OS disk tier. Could be one of {", ".join(cls.supported_tiers())}'
+            f'. If {cls.BEST.value} is specified, use the best possible disk '
+            'tier. If none is specified, enforce to use default value and '
+            f'override the option in task YAML. Default: {cls.MEDIUM.value}')
+
+    def __le__(self, other: 'DiskTier') -> bool:
+        types = list(DiskTier)
+        return types.index(self) <= types.index(other)
 
 
 def check_port_str(port: str) -> None:

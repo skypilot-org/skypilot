@@ -57,6 +57,7 @@ from sky.data import storage as storage_lib
 from sky.data.data_utils import Rclone
 from sky.skylet import events
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
@@ -2609,23 +2610,23 @@ def test_aws_disk_tier():
                 f'--filters Name=attachment.instance-id,Values={instance_id} '
                 f'--query Volumes[*].{field} | grep {expected} ; ')
 
-    for disk_tier in ['low', 'medium', 'high']:
+    for disk_tier in list(resources_utils.DiskTier):
         specs = AWS._get_disk_specs(disk_tier)
-        name = _get_cluster_name() + '-' + disk_tier
+        name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.AWS.max_cluster_name_length())
         region = 'us-east-2'
         test = Test(
-            'aws-disk-tier',
+            'aws-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud aws --region {region} '
-                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'--disk-tier {disk_tier.value} echo "hello sky"',
                 f'id=`aws ec2 describe-instances --region {region} --filters '
                 f'Name=tag:ray-cluster-name,Values={name_on_cloud} --query '
                 f'Reservations[].Instances[].InstanceId --output text`; ' +
                 _get_aws_query_command(region, '$id', 'VolumeType',
                                        specs['disk_tier']) +
-                ('' if disk_tier == 'low' else
+                ('' if disk_tier == resources_utils.DiskTier.LOW else
                  (_get_aws_query_command(region, '$id', 'Iops',
                                          specs['disk_iops']) +
                   _get_aws_query_command(region, '$id', 'Throughput',
@@ -2639,17 +2640,17 @@ def test_aws_disk_tier():
 
 @pytest.mark.gcp
 def test_gcp_disk_tier():
-    for disk_tier in ['low', 'medium', 'high']:
+    for disk_tier in list(resources_utils.DiskTier):
         type = GCP._get_disk_type(disk_tier)
-        name = _get_cluster_name() + '-' + disk_tier
+        name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
         region = 'us-west2'
         test = Test(
-            'gcp-disk-tier',
+            'gcp-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud gcp --region {region} '
-                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'--disk-tier {disk_tier.value} echo "hello sky"',
                 f'name=`gcloud compute instances list --filter='
                 f'"labels.ray-cluster-name:{name_on_cloud}" '
                 '--format="value(name)"`; '
@@ -2664,17 +2665,20 @@ def test_gcp_disk_tier():
 
 @pytest.mark.azure
 def test_azure_disk_tier():
-    for disk_tier in ['low', 'medium']:
+    for disk_tier in list(resources_utils.DiskTier):
+        if disk_tier == resources_utils.DiskTier.HIGH:
+            # Azure does not support high disk tier.
+            continue
         type = Azure._get_disk_type(disk_tier)
-        name = _get_cluster_name() + '-' + disk_tier
+        name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.Azure.max_cluster_name_length())
         region = 'westus2'
         test = Test(
-            'azure-disk-tier',
+            'azure-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud azure --region {region} '
-                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'--disk-tier {disk_tier.value} echo "hello sky"',
                 f'az resource list --tag ray-cluster-name={name_on_cloud} --query '
                 f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
                 f'--output tsv | grep {type}'
@@ -2683,6 +2687,28 @@ def test_azure_disk_tier():
             timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
         )
         run_one_test(test)
+
+
+@pytest.mark.azure
+def test_azure_best_tier_failover():
+    type = Azure._get_disk_type(resources_utils.DiskTier.LOW)
+    name = _get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Azure.max_cluster_name_length())
+    region = 'westus2'
+    test = Test(
+        'azure-best-tier-failover',
+        [
+            f'sky launch -y -c {name} --cloud azure --region {region} '
+            f'--disk-tier best --instance-type Standard_D8_v5 echo "hello sky"',
+            f'az resource list --tag ray-cluster-name={name_on_cloud} --query '
+            f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
+            f'--output tsv | grep {type}',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
+    )
+    run_one_test(test)
 
 
 # ------ Testing Zero Quota Failover ------
