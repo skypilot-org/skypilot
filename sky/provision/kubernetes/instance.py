@@ -44,7 +44,7 @@ def _get_namespace(provider_config: Dict[str, Any]) -> str:
 
 
 def _filter_pods(namespace: str, tag_filters: Dict[str, str],
-                      status_filters: Optional[List[str]]) -> Dict[str, Any]:
+                 status_filters: Optional[List[str]]) -> Dict[str, Any]:
     """Filters pods by tags and status."""
     non_included_pod_statuses = POD_STATUSES.copy()
 

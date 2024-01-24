@@ -16,7 +16,6 @@ import uuid
 
 import colorama
 import filelock
-import jinja2
 from packaging import version
 import requests
 from requests import adapters
@@ -165,25 +164,6 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
         prefix).expanduser().resolve() / f'{cluster_name}.yml'
     os.makedirs(output_path.parents[0], exist_ok=True)
     return str(output_path)
-
-
-def fill_template(template_name: str, variables: Dict,
-                  output_path: str) -> None:
-    """Create a file from a Jinja template and return the filename."""
-    assert template_name.endswith('.j2'), template_name
-    template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
-    with open(template_path) as fin:
-        template = fin.read()
-    output_path = os.path.abspath(os.path.expanduser(output_path))
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    # Write out yaml config.
-    j2_template = jinja2.Template(template)
-    content = j2_template.render(**variables)
-    with open(output_path, 'w') as fout:
-        fout.write(content)
 
 
 def _optimize_file_mounts(yaml_path: str) -> None:
