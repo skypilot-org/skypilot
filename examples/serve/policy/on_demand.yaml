@@ -1,3 +1,5 @@
+# SkyServe YAML to launch a service with only on-demand instances
+
 service:
   readiness_probe:
     path: /health

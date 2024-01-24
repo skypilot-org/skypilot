@@ -196,9 +196,12 @@ def _get_use_spot_override(task_yaml: str,
             assert isinstance(use_spot_override, bool)
             return use_spot_override
     task = sky.Task.from_yaml(task_yaml)
-    assert len(task.resources) == 1, task
-    task_resources = list(task.resources)[0]
-    return task_resources.use_spot
+    spot_use_resources = [
+        1 if resources.use_spot else 0 for resources in task.resources
+    ]
+    # Either resources all use spot or none use spot.
+    assert sum(spot_use_resources) in [0, len(spot_use_resources)]
+    return spot_use_resources == len(task.resources)
 
 
 def _get_zone_override(

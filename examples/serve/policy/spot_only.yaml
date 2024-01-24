@@ -1,4 +1,4 @@
-# SkyServe YAML to launch a service with mixed spot and on-demand instances
+# SkyServe YAML to launch a service with spot instances
 
 service:
   readiness_probe:
@@ -8,7 +8,8 @@ service:
     max_replicas: 3
     num_overprovision: 1
     target_qps_per_replica: 1
-    spot_policy: SpotHedge
+    spot_placer: DynamicFailover
+    autoscaler: SpotRequestRateAutoscaler
 
 resources:
   any_of:

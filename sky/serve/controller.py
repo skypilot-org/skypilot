@@ -48,7 +48,7 @@ class SkyServeController:
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.RequestRateAutoscaler(service_spec))
+            autoscalers.Autoscaler.from_spec(service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
 
