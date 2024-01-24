@@ -107,6 +107,7 @@ class ClusterInfo:
     docker_user: Optional[str] = None
     # Override the ssh_user from the cluster config.
     ssh_user: Optional[str] = None
+    custom_ray_options: Optional[Dict[str, Any]] = None
 
     @property
     def num_instances(self) -> int:

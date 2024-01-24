@@ -565,6 +565,8 @@ def get_cluster_info(
     if not provider_config.get('use_internal_ips', False):
         port = utils.get_head_ssh_port(cluster_name_on_cloud, namespace)
 
+    head_pod_name = None
+    cpu_request = None
     for pod_name, pod in running_pods.items():
         internal_ip = pod.status.pod_ip
         pods[pod_name] = [
@@ -579,6 +581,11 @@ def get_cluster_info(
         ]
         if pod.metadata.labels[TAG_RAY_NODE_KIND] == 'head':
             head_pod_name = pod_name
+            head_spec = pod.spec
+            assert head_spec is not None, pod
+            cpu_request = head_spec.containers[0].resources.requests['cpu']
+
+    assert cpu_request is not None, 'cpu_request should not be None'
 
     ssh_user = 'sky'
     get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
@@ -593,7 +600,13 @@ def get_cluster_info(
         instances=pods,
         head_instance_id=head_pod_name,
         ssh_user=ssh_user,
-    )
+        # We manually set object-store-memory=500000000 to avoid ray from
+        # allocating a very large object store in each pod that may cause
+        # problems for other pods.
+        custom_ray_options={
+            'object-store-memory': 500000000,
+            'num-cpus': cpu_request,
+        })
 
 
 def query_instances(
