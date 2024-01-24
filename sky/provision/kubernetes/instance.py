@@ -254,8 +254,10 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     """
     set_k8s_env_var_cmd = [
         '/bin/sh', '-c',
-        ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-         'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
+        ('prefix_cmd() '
+         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+         'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > '
+         '~/k8s_env_var.sh && '
          'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
          '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
     ]
@@ -325,7 +327,8 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
         '/bin/sh',
         '-c',
         (
-            'prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+            'prefix_cmd() '
+            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
             'export DEBIAN_FRONTEND=noninteractive;'
             '$(prefix_cmd) apt-get update;'
             '$(prefix_cmd) apt install openssh-server rsync -y; '
@@ -333,8 +336,9 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             '$(prefix_cmd) '
             'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
             '/etc/ssh/sshd_config; '
-            '$(prefix_cmd) sed "s@session\\s*required\\s*pam_loginuid.so@session '
-            'optional pam_loginuid.so@g" -i /etc/pam.d/sshd; '
+            '$(prefix_cmd) sed '
+            '"s@session\\s*required\\s*pam_loginuid.so@session optional '
+            'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
             'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
             '$(prefix_cmd) mkdir -p ~/.ssh; '
             '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey '
@@ -344,7 +348,7 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             # Eliminate the error
             # `mesg: ttyname failed: inappropriate ioctl for device`.
             # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
-            '$(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;')
+            '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
     ]
     # TODO(romilb): We need logging and surface errors here.
     for new_node in new_nodes:
