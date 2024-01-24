@@ -61,7 +61,7 @@ def _handle_signal(service_name: str) -> None:
     raise error_type(f'User signal received: {user_signal.value}')
 
 
-def _cleanup_storage(task_yaml: str) -> bool:
+def cleanup_storage(task_yaml: str) -> bool:
     """Clean up the storage for the service.
 
     Args:
@@ -101,10 +101,12 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
             replica_managers.ProcessStatus.RUNNING)
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
         logger.info(f'Terminating replica {info.replica_id} ...')
+    versions = set()
     for info, p in info2proc.items():
         p.join()
         if p.exitcode == 0:
             serve_state.remove_replica(service_name, info.replica_id)
+            versions.add(info.version)
             logger.info(f'Replica {info.replica_id} terminated successfully.')
         else:
             # Set replica status to `FAILED_CLEANUP`
@@ -114,7 +116,14 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
-    success = _cleanup_storage(task_yaml)
+    serve_state.remove_service_versions(service_name)
+    success = True
+    for version in versions:
+        logger.info(f'Cleaning up storage for version {version}, '
+                    f'task_yaml: {task_yaml}')
+        task_yaml = serve_utils.generate_task_yaml_file_name(
+            service_name, version)
+        success = success and cleanup_storage(task_yaml)
     if not success:
         failed = True
     return failed
@@ -132,19 +141,20 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     assert task.service is not None, task
     service_spec = task.service
     if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
-        _cleanup_storage(tmp_task_yaml)
+        cleanup_storage(tmp_task_yaml)
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Max number of services reached.')
     success = serve_state.add_service(
         service_name,
         controller_job_id=job_id,
         policy=service_spec.policy_str(),
+        version=constants.INITIAL_VERSION,
         requested_resources_str=backend_utils.get_task_resources_str(task),
         status=serve_state.ServiceStatus.CONTROLLER_INIT)
     # Directly throw an error here. See sky/serve/api.py::up
     # for more details.
     if not success:
-        _cleanup_storage(tmp_task_yaml)
+        cleanup_storage(tmp_task_yaml)
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name} already exists.')
 
@@ -159,7 +169,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     # don't want the new file mounts to overwrite the old one, so we
     # sync to a tmp file first and then copy it to the final name
     # if there is no name conflict.
-    task_yaml = serve_utils.generate_task_yaml_file_name(service_name)
+    task_yaml = serve_utils.generate_task_yaml_file_name(
+        service_name, constants.INITIAL_VERSION)
     shutil.copy(tmp_task_yaml, task_yaml)
 
     # Generate load balancer log file name.

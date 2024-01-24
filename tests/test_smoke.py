@@ -3014,6 +3014,29 @@ def test_skyserve_cancel():
     run_one_test(test)
 
 
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_update():
+    """Test skyserve with update"""
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-update',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/update/old.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} -y tests/skyserve/update/new.yaml',
+            # sleep before update is registered.
+            'sleep 20',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, new SkyPilot here!"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
 # ------- Testing user ray cluster --------
 def test_user_ray_cluster(generic_cloud: str):
     name = _get_cluster_name()
