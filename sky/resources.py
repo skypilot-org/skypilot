@@ -159,10 +159,10 @@ class Resources:
         # The key is None if the same image_id applies for all regions.
         self._image_id = image_id
         if isinstance(image_id, str):
-            self._image_id = {self._region: image_id.strip()}
+            self._image_id = {None: image_id.strip()}
         elif isinstance(image_id, dict):
             if None in image_id:
-                self._image_id = {self._region: image_id[None].strip()}
+                self._image_id = {None: image_id[None].strip()}
             else:
                 self._image_id = {
                     k.strip(): v.strip() for k, v in image_id.items()
@@ -761,10 +761,15 @@ class Resources:
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
             return None
-        if len(self.image_id) == 1 and self.region in self.image_id:
-            image_id = self.image_id[self.region]
-            if image_id.startswith('docker:'):
-                return image_id[len('docker:'):]
+        if len(self.image_id) == 1:
+            image_id = None
+            if self.region in self.image_id:
+                image_id = self.image_id[self.region]
+            elif None in self.image_id:
+                image_id = self.image_id[None]
+            if image_id is not None:
+                if image_id.startswith('docker:'):
+                    return image_id[len('docker:'):]
         return None
 
     def _try_validate_image_id(self) -> None:
@@ -801,19 +806,25 @@ class Resources:
                     'explicitly specify the cloud.')
 
         if self._region is not None:
-            if self._region not in self._image_id:
+            if (self._region not in self._image_id and
+                    None not in self._image_id):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'image_id {self._image_id} should contain the image '
-                        f'for the specified region {self._region}.')
-            # Narrow down the image_id to the specified region.
-            self._image_id = {self._region: self._image_id[self._region]}
+                        f'for the specified region {self._region} or None.')
+            # Narrow down the image_id to the specified region, if multiple
+            # regions are specified.
+            if len(self._image_id) > 1:
+                self._image_id = {self._region: self._image_id[self._region]}
 
         # Check the image_id's are valid.
         for region, image_id in self._image_id.items():
+            # For None, narrow down to self._region to check.
+            if region is None:
+                region = self._region
             if (image_id.startswith('skypilot:') and
                     not self._cloud.is_image_tag_valid(image_id, region)):
-                region_str = f' ({region})' if region else ''
+                region_str = f' ({region})' if region is not None else ''
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Image tag {image_id!r} is not valid, please make sure'
@@ -828,6 +839,9 @@ class Resources:
 
         # Validate the image exists and the size is smaller than the disk size.
         for region, image_id in self._image_id.items():
+            # For None, narrow down to self._region to check.
+            if region is None:
+                region = self._region
             # Check the image exists and get the image size.
             # It will raise ValueError if the image does not exist.
             image_size = self.cloud.get_image_size(image_id, region)
