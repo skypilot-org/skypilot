@@ -294,8 +294,8 @@ def _configure_ssh_jump(namespace, config):
     #  and available before we create the SSH jump pod. If for any reason the
     #  service is missing, we should raise an error.
 
-    utils.setup_ssh_jump_pod(ssh_jump_name, ssh_jump_image,
-                                        ssh_key_secret_name, namespace)
+    utils.setup_ssh_jump_pod(ssh_jump_name, ssh_jump_image, ssh_key_secret_name,
+                             namespace)
     return config
 
 

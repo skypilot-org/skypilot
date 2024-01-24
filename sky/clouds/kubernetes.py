@@ -9,8 +9,8 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
-from sky.provision.kubernetes import utils
 from sky.provision.kubernetes import network_utils
+from sky.provision.kubernetes import utils
 from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
@@ -155,8 +155,7 @@ class Kubernetes(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        inst = utils.KubernetesInstanceType.from_instance_type(
-            instance_type)
+        inst = utils.KubernetesInstanceType.from_instance_type(instance_type)
         return {
             inst.accelerator_type: inst.accelerator_count
         } if (inst.accelerator_count is not None and
@@ -166,8 +165,7 @@ class Kubernetes(clouds.Cloud):
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         """Returns the #vCPUs and memory that the instance type offers."""
-        k = utils.KubernetesInstanceType.from_instance_type(
-            instance_type)
+        k = utils.KubernetesInstanceType.from_instance_type(instance_type)
         return k.cpus, k.memory
 
     @classmethod
@@ -244,8 +242,7 @@ class Kubernetes(clouds.Cloud):
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             'timeout': str(self.TIMEOUT),
-            'k8s_namespace':
-                utils.get_current_kube_config_context_namespace(),
+            'k8s_namespace': utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
@@ -303,14 +300,12 @@ class Kubernetes(clouds.Cloud):
             gpu_task_memory = (float(resources.memory.strip('+')) if
                                resources.memory is not None else gpu_task_cpus *
                                self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
-            chosen_instance_type = (
-                utils.KubernetesInstanceType.from_resources(
-                    gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
+            chosen_instance_type = (utils.KubernetesInstanceType.from_resources(
+                gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
 
         # Check if requested instance type will fit in the cluster.
         # TODO(romilb): This will fail early for autoscaling clusters.
-        fits, reason = utils.check_instance_fits(
-            chosen_instance_type)
+        fits, reason = utils.check_instance_fits(chosen_instance_type)
         if not fits:
             logger.debug(f'Instance type {chosen_instance_type} does '
                          'not fit in the Kubernetes cluster. '

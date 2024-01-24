@@ -39,8 +39,7 @@ def to_label_selector(tags):
 
 def _get_namespace(provider_config: Dict[str, Any]) -> str:
     return provider_config.get(
-        'namespace',
-        utils.get_current_kube_config_context_namespace())
+        'namespace', utils.get_current_kube_config_context_namespace())
 
 
 def _filter_pods(namespace: str, tag_filters: Dict[str, str],
@@ -131,8 +130,7 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
                     raise config_lib.KubernetesError(
                         lack_resource_msg.format(resource='memory'))
                 gpu_lf_keys = [
-                    lf.get_label_key()
-                    for lf in utils.LABEL_FORMATTER_REGISTRY
+                    lf.get_label_key() for lf in utils.LABEL_FORMATTER_REGISTRY
                 ]
                 if pod.spec.node_selector:
                     for label_key in pod.spec.node_selector.keys():
@@ -479,8 +477,7 @@ def get_cluster_info(
     external_ip = utils.get_external_ip(network_mode)
     port = 22
     if not provider_config.get('use_internal_ips', False):
-        port = utils.get_head_ssh_port(cluster_name_on_cloud,
-                                                  namespace)
+        port = utils.get_head_ssh_port(cluster_name_on_cloud, namespace)
     for pod_name, pod in running_pods.items():
         internal_ip = pod.status.pod_ip
         pods[pod_name] = [
