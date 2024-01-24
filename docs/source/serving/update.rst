@@ -43,7 +43,7 @@ Service ``http-server`` has an initial version of 1. Suppose we want to update t
 
     $ sky serve update http-server examples/serve/http_server/task.yaml
 
-SkyServe will first launch two new replicas with 4 CPUs. When the number of new replicas reaches the ``min_replicas`` (i.e., 2) required for the service, SkyServe will scale down old replicas to save cost. The service's version is updated from 1 to 2. The replicas with ID 3 and 4 are the new replicas with 4 CPUs. The replicas with ID 1 and 2 are the old replicas with 2 CPUs.
+SkyServe will first launch two new replicas with 4 CPUs. When the number of new replicas reaches the ``min_replicas`` (i.e., 2) required for the service, SkyServe will scale down old replicas to save cost. The service's version is updated from 1 to 2. The replicas with ID 3 and 4 are the new replicas with 4 CPUs. The replicas with ID 1 and 2 are the old replicas with 2 CPUs. When the new replicas are still provisioning, SkyServe will send traffic to the old replicas.
 
 .. code-block:: console
 
