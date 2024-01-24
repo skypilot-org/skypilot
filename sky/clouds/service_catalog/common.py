@@ -470,7 +470,7 @@ def list_accelerators_impl(
         gpu_info_df = df['GpuInfo'].apply(ast.literal_eval)
         df['DeviceMemoryGiB'] = gpu_info_df.apply(
             lambda row: row['Gpus'][0]['MemoryInfo']['SizeInMiB']) / 1024.0
-    except ValueError:
+    except (ValueError, SyntaxError):
         # TODO(zongheng,woosuk): GCP/Azure catalogs do not have well-formed
         # GpuInfo fields. So the above will throw:
         #  ValueError: malformed node or string: <_ast.Name object at ..>
@@ -487,6 +487,7 @@ def list_accelerators_impl(
         'SpotPrice',
         'Region',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
+
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter,
                                                    case=case_sensitive,

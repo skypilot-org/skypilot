@@ -27,3 +27,11 @@ class KubernetesServiceType(enum.Enum):
     """Enum for the different types of services."""
     NODEPORT = 'NodePort'
     CLUSTERIP = 'ClusterIP'
+
+
+class KubernetesPortMode(enum.Enum):
+    """Enum for the different types of modes supported for opening
+    ports on Kubernetes.
+    """
+    INGRESS = 'ingress'
+    LOADBALANCER = 'loadbalancer'

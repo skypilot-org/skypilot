@@ -261,3 +261,7 @@ class AWSAzFetchingError(Exception):
 class ServeUserTerminatedError(Exception):
     """Raised by serve controller when a user tear down the service."""
     pass
+
+
+class PortDoesNotExistError(Exception):
+    """Raised when the port does not exist."""

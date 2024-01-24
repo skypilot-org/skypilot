@@ -17,7 +17,9 @@ from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.local import Local
 from sky.clouds.oci import OCI
+from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
+from sky.clouds.vsphere import Vsphere
 
 __all__ = [
     'IBM',
@@ -28,7 +30,9 @@ __all__ = [
     'Lambda',
     'Local',
     'SCP',
+    'RunPod',
     'OCI',
+    'Vsphere',
     'Kubernetes',
     'CloudImplementationFeatures',
     'Region',
