@@ -314,6 +314,7 @@ def _wait_ssh_connection_indirect(ip: str,
     del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
+    logger.debug(f'Waiting for SSH using command: {_shlex_join(command)}')
     proc = subprocess.run(command,
                           shell=False,
                           check=False,
