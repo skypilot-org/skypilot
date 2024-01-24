@@ -7,13 +7,11 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -69,6 +67,9 @@ class Kubernetes(clouds.Cloud):
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
     IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
+
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -360,42 +361,6 @@ class Kubernetes(clouds.Cloud):
             return True
         except exceptions.ResourcesUnavailableError:
             return False
-
-    @classmethod
-    def query_status(cls, name: str, tag_filters: Dict[str, str],
-                     region: Optional[str], zone: Optional[str],
-                     **kwargs) -> List['status_lib.ClusterStatus']:
-        del tag_filters, region, zone, kwargs  # Unused.
-        namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-
-        # Get all the pods with the label skypilot-cluster: <cluster_name>
-        try:
-            pods = kubernetes.core_api().list_namespaced_pod(
-                namespace,
-                label_selector=f'skypilot-cluster={name}',
-                _request_timeout=kubernetes.API_TIMEOUT).items
-        except kubernetes.max_retry_error():
-            with ux_utils.print_exception_no_traceback():
-                ctx = kubernetes_utils.get_current_kube_config_context_name()
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query cluster {name!r} status. '
-                    'Network error - check if the Kubernetes cluster in '
-                    f'context {ctx} is up and accessible.') from None
-        except Exception as e:  # pylint: disable=broad-except
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query Kubernetes cluster {name!r} status: '
-                    f'{common_utils.format_exception(e)}')
-
-        # Check if the pods are running or pending
-        cluster_status = []
-        for pod in pods:
-            if pod.status.phase == 'Running':
-                cluster_status.append(status_lib.ClusterStatus.UP)
-            elif pod.status.phase == 'Pending':
-                cluster_status.append(status_lib.ClusterStatus.INIT)
-        # If pods are not found, we don't add them to the return list
-        return cluster_status
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

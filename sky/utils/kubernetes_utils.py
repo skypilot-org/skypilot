@@ -438,7 +438,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
 
 
 def get_head_ssh_port(cluster_name: str, namespace: str) -> int:
-    svc_name = f'{cluster_name}-ray-head-ssh'
+    svc_name = f'{cluster_name}-head-ssh'
     return get_port(svc_name, namespace)
 
 

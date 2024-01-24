@@ -61,7 +61,7 @@ SSHCommandRunner.run = run_override_timeout
 
 def head_service_selector(cluster_name: str) -> Dict[str, str]:
     """Selector for Operator-configured head service."""
-    return {RAY_COMPONENT_LABEL: f'{cluster_name}-ray-head'}
+    return {RAY_COMPONENT_LABEL: f'{cluster_name}-head'}
 
 
 def to_label_selector(tags):
@@ -133,11 +133,11 @@ class KubernetesNodeProvider(NodeProvider):
 
     def external_port(self, node_id):
         # Extract the NodePort of the head node's SSH service
-        # Node id is str e.g., example-cluster-ray-head-v89lb
+        # Node id is str e.g., example-cluster-head-v89lb
 
         # TODO(romilb): Implement caching here for performance.
         # TODO(romilb): Multi-node would need more handling here.
-        cluster_name = node_id.split('-ray-head')[0]
+        cluster_name = node_id.split('-head')[0]
         return kubernetes_utils.get_head_ssh_port(cluster_name, self.namespace)
 
     def internal_ip(self, node_id):
