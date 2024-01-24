@@ -8,8 +8,7 @@ service:
     max_replicas: 3
     num_overprovision: 1
     target_qps_per_replica: 1
-    spot_placer: DynamicFailover
-    autoscaler: SpotRequestRateAutoscaler
+    spot_policy: SpotOnly
 
 resources:
   any_of:

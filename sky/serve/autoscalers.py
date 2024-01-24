@@ -397,9 +397,11 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         self.target_num_replicas = self._get_desired_num_replicas()
         num_launched_spot, num_ready_spot = 0, 0
         for info in provisioning_and_launched_new_replica:
-            if info.status == serve_state.ReplicaStatus.READY:
-                num_ready_spot += 1
-            num_launched_spot += 1
+            if info.is_spot:
+                if info.status == serve_state.ReplicaStatus.READY:
+                    num_ready_spot += 1
+                num_launched_spot += 1
+
         logger.info(f'Number of alive spot instances: {num_launched_spot}, '
                     f'Number of ready spot instances: {num_ready_spot}')
 

@@ -15,6 +15,7 @@ from sky.utils import ux_utils
 
 _policy_to_autoscaler_placer = {
     'SpotHedge': ('SpotOnDemandRequestRateAutoscaler', 'DynamicFailover'),
+    'SpotOnly': ('SpotRequestRateAutoscaler', 'DynamicFailover'),
 }
 
 
