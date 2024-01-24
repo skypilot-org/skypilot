@@ -1,0 +1,14 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replicas: 1
+
+resources:
+  ports: 8080
+  cloud: gcp
+  cpus: 2+
+
+workdir: tests/skyserve/update
+
+run: python3 new_server.py --port 8080
