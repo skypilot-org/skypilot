@@ -43,9 +43,9 @@ def _get_namespace(provider_config: Dict[str, Any]) -> str:
         kubernetes_utils.get_current_kube_config_context_namespace())
 
 
-def _filter_instances(namespace: str, tag_filters: Dict[str, str],
+def _filter_pods(namespace: str, tag_filters: Dict[str, str],
                       status_filters: Optional[List[str]]) -> Dict[str, Any]:
-    """Filters instances by tags and status."""
+    """Filters pods by tags and status."""
     non_included_pod_statuses = POD_STATUSES.copy()
 
     field_selector = ''
@@ -66,13 +66,13 @@ def _filter_instances(namespace: str, tag_filters: Dict[str, str],
     return {pod.metadata.name: pod for pod in pods}
 
 
-def _get_head_pod_name(instances: Dict[str, Any]) -> Optional[str]:
-    head_instance_id = None
-    for inst_id, inst in instances.items():
-        if inst.metadata.labels[TAG_RAY_NODE_KIND] == 'head':
-            head_instance_id = inst_id
+def _get_head_pod_name(pods: Dict[str, Any]) -> Optional[str]:
+    head_pod_name = None
+    for pod_name, pod in pods.items():
+        if pod.metadata.labels[TAG_RAY_NODE_KIND] == 'head':
+            head_pod_name = pod_name
             break
-    return head_instance_id
+    return head_pod_name
 
 
 def head_service_selector(cluster_name: str) -> Dict[str, str]:
@@ -295,13 +295,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     else:
         pod_spec['metadata']['labels'] = tags
 
-    running_pods = _filter_instances(namespace, tags, ['Pending', 'Running'])
+    running_pods = _filter_pods(namespace, tags, ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
 
     to_start_count = config.count - len(running_pods)
     if to_start_count < 0:
         raise RuntimeError(
-            'The number of running+pending instances '
+            'The number of running+pending pods '
             f'({config.count - to_start_count}) in cluster '
             f'"{cluster_name_on_cloud}" is greater than the number '
             f'requested by the user ({config.count}). '
@@ -362,7 +362,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 new_svcs.append(svc)
 
         # Adding the jump pod to the new_nodes list as well so it can be
-        # checked if it's scheduled and running along with other pod instances.
+        # checked if it's scheduled and running along with other pods.
         ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
         jump_pod = kubernetes.core_api().read_namespaced_pod(
             ssh_jump_pod_name, namespace)
@@ -443,7 +443,7 @@ def terminate_instances(
     tag_filters = {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
-    pods = _filter_instances(namespace, tag_filters, None)
+    pods = _filter_pods(namespace, tag_filters, None)
 
     def _is_head(pod) -> bool:
         return pod.metadata.labels[TAG_RAY_NODE_KIND] == 'head'
@@ -466,8 +466,8 @@ def get_cluster_info(
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
 
-    running_instances = _filter_instances(namespace, tag_filters, ['RUNNING'])
-    instances: Dict[str, List[common.InstanceInfo]] = {}
+    running_pods = _filter_pods(namespace, tag_filters, ['RUNNING'])
+    pods: Dict[str, List[common.InstanceInfo]] = {}
     head_pod_name = None
 
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
@@ -476,8 +476,8 @@ def get_cluster_info(
     network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
         network_mode_str)
     external_ip = kubernetes_utils.get_external_ip(network_mode)
-    for pod_name, pod in running_instances.items():
-        instances[pod_name] = [
+    for pod_name, pod in running_pods.items():
+        pods[pod_name] = [
             common.InstanceInfo(
                 instance_id=pod_name,
                 internal_ip=pod.status.pod_ip,
@@ -491,7 +491,7 @@ def get_cluster_info(
             head_pod_name = pod_name
 
     return common.ClusterInfo(
-        instances=instances,
+        instances=pods,
         head_instance_id=head_pod_name,
     )
 
