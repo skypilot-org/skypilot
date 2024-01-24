@@ -9,7 +9,9 @@ SkyServe supports rolling update for your services. Use ``sky serve update`` to 
 
     $ sky serve update service-name new_service.yaml
 
-SkyServe will launch new replicas described by ``new_service.yaml``. When the number of new replicas reaches the minimum number of replicas (``min_replicas``) required for the service, SkyServe will scale down old replicas to save cost. SkyServe allows users to update ``replica_policy`` parameters, such as ``target_qps_per_replica``. SkyServe also allows users to update ``resources`` parameters, such as ``cpu`` and ``memory``, so that new replicas can be launched on VMs of different type.  SkyServe, by default, does not mix traffic from old and new replicas. In other words, SkyServe will not send traffic to new replicas until all old replicas are scaled down. 
+SkyServe will launch new replicas described by ``new_service.yaml``. When the number of new replicas reaches the minimum number of replicas (``min_replicas``) required for the service, SkyServe will scale down old replicas to save cost. SkyServe allows users to update ``replica_policy`` parameters, such as ``target_qps_per_replica``. SkyServe also allows users to update ``resources`` parameters, such as ``cpu`` and ``memory``, so that new replicas can be launched on VMs of different types.  
+
+SkyServe does not mix traffic from old and new replicas and will not send traffic to new replicas until ``min_replicas`` new replicas are ready to serve user requests. Before that, SkyServe will only send traffic to the old replicas. 
 
 :code:`sky serve status` will highlight the latest service version and each replica's version. 
 
@@ -43,7 +45,7 @@ Service ``http-server`` has an initial version of 1. Suppose we want to update t
 
     $ sky serve update http-server examples/serve/http_server/task.yaml
 
-SkyServe will first launch two new replicas with 4 CPUs. When the number of new replicas reaches the ``min_replicas`` (i.e., 2) required for the service, SkyServe will scale down old replicas to save cost. The service's version is updated from 1 to 2. The replicas with ID 3 and 4 are the new replicas with 4 CPUs. The replicas with ID 1 and 2 are the old replicas with 2 CPUs. When the new replicas are still provisioning, SkyServe will send traffic to the old replicas.
+SkyServe will first launch two new replicas with 4 CPUs. When the number of new replicas reaches the ``min_replicas`` (i.e., 2) required for the service, SkyServe will scale down old replicas to save cost. The service's version is updated from 1 to 2. The replicas with ID 3 and 4 are the new replicas with 4 CPUs. The replicas with ID 1 and 2 are the old replicas with 2 CPUs. When the new replicas are still provisioning, SkyServe will only send traffic to the old replicas.
 
 .. code-block:: console
 
