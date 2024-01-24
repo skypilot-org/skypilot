@@ -343,7 +343,7 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             '$(prefix_cmd) mkdir -p ~/.ssh; '
             '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey '
             '~/.ssh/authorized_keys; '
-            '$(prefix_cmd) chwon -R $(whoami) ~/.ssh;'
+            '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
             '$(prefix_cmd) chmod 700 ~/.ssh; '
             '$(prefix_cmd) chmod 600 ~/.ssh/authorized_keys; '
             '$(prefix_cmd) service ssh restart; '
