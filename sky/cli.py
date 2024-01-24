@@ -72,6 +72,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import kubernetes_utils
 from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
@@ -237,14 +238,13 @@ def _interactive_node_cli_command(cli_func):
                              type=int,
                              required=False,
                              help=('OS disk size in GBs.'))
-    disk_tier = click.option(
-        '--disk-tier',
-        default=None,
-        type=click.Choice(['low', 'medium', 'high', 'none'],
-                          case_sensitive=False),
-        required=False,
-        help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
-              '("none" for using the default value). Default: medium'))
+    disk_tier = click.option('--disk-tier',
+                             default=None,
+                             type=click.Choice(
+                                 resources_utils.DiskTier.supported_tiers(),
+                                 case_sensitive=False),
+                             required=False,
+                             help=resources_utils.DiskTier.cli_help_message())
     ports = click.option(
         '--ports',
         required=False,
@@ -322,6 +322,9 @@ def _interactive_node_cli_command(cli_func):
         instance_type_option,
         cpus,
         memory,
+        disk_size,
+        disk_tier,
+        ports,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
@@ -330,9 +333,6 @@ def _interactive_node_cli_command(cli_func):
         # Attach options
         screen_option,
         tmux_option,
-        disk_size,
-        disk_tier,
-        ports,
     ]
     decorator = functools.reduce(lambda res, f: f(res),
                                  reversed(click_decorators), cli_func)
@@ -406,6 +406,34 @@ _TASK_OPTIONS = [
         help=('Number of nodes to execute the task on. '
               'Overrides the "num_nodes" config in the YAML if both are '
               'supplied.')),
+    click.option(
+        '--cpus',
+        default=None,
+        type=str,
+        required=False,
+        help=('Number of vCPUs each instance must have (e.g., '
+              '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
+              'This is used to automatically select the instance type.')),
+    click.option(
+        '--memory',
+        default=None,
+        type=str,
+        required=False,
+        help=(
+            'Amount of memory each instance must have in GB (e.g., '
+            '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'
+        )),
+    click.option('--disk-size',
+                 default=None,
+                 type=int,
+                 required=False,
+                 help=('OS disk size in GBs.')),
+    click.option('--disk-tier',
+                 default=None,
+                 type=click.Choice(resources_utils.DiskTier.supported_tiers(),
+                                   case_sensitive=False),
+                 required=False,
+                 help=resources_utils.DiskTier.cli_help_message()),
     click.option(
         '--use-spot/--no-use-spot',
         required=False,
@@ -1050,6 +1078,25 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     return is_yaml, result
 
 
+def _pop_and_ignore_fields_in_override_params(
+        params: Dict[str, Any], field_to_ignore: List[str]) -> None:
+    """Pops and ignores fields in override params.
+
+    Args:
+        params: Override params.
+        field_to_ignore: Fields to ignore.
+
+    Returns:
+        Override params with fields ignored.
+    """
+    if field_to_ignore is not None:
+        for field in field_to_ignore:
+            field_value = params.pop(field, None)
+            if field_value is not None:
+                click.secho(f'Override param {field}={field_value} is ignored.',
+                            fg='yellow')
+
+
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
@@ -1071,6 +1118,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     disk_tier: Optional[str] = None,
     ports: Optional[Tuple[str]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
+    field_to_ignore: Optional[List[str]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
 ) -> Union[sky.Task, sky.Dag]:
@@ -1114,6 +1162,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
                                              ports=ports)
+    if field_to_ignore is not None:
+        _pop_and_ignore_fields_in_override_params(override_params,
+                                                  field_to_ignore)
 
     if is_yaml:
         assert entrypoint is not None
@@ -1282,32 +1333,6 @@ def cli():
               default=False,
               help='If used, runs locally inside a docker container.')
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
-@click.option('--cpus',
-              default=None,
-              type=str,
-              required=False,
-              help=('Number of vCPUs each instance must have (e.g., '
-                    '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
-                    'This is used to automatically select the instance type.'))
-@click.option(
-    '--memory',
-    default=None,
-    type=str,
-    required=False,
-    help=('Amount of memory each instance must have in GB (e.g., '
-          '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'))
-@click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
-@click.option(
-    '--disk-tier',
-    default=None,
-    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
-    required=False,
-    help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
-          '("none" for using the default value). Default: medium'))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1339,19 +1364,20 @@ def cli():
     default=False,
     is_flag=True,
     required=False,
-    # Disabling quote check here, as there seems to be a bug in pylint,
-    # which incorrectly recognizes the help string as a docstring.
-    # pylint: disable=bad-docstring-quotes
     help=('Whether to retry provisioning infinitely until the cluster is up, '
           'if we fail to launch the cluster on any possible region/cloud due '
           'to unavailability errors.'),
 )
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
+@click.option(
+    '--yes',
+    '-y',
+    is_flag=True,
+    default=False,
+    required=False,
+    # Disabling quote check here, as there seems to be a bug in pylint,
+    # which incorrectly recognizes the help string as a docstring.
+    # pylint: disable=bad-docstring-quotes
+    help='Skip confirmation prompt.')
 @click.option('--no-setup',
               is_flag=True,
               default=False,
@@ -1506,6 +1532,10 @@ def exec(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
@@ -1565,9 +1595,6 @@ def exec(
       sky exec mycluster --env WANDB_API_KEY python train_gpu.py
 
     """
-    if ports:
-        raise ValueError('`ports` is not supported by `sky exec`.')
-
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
@@ -1590,13 +1617,17 @@ def exec(
         region=region,
         zone=zone,
         gpus=gpus,
-        cpus=None,
-        memory=None,
+        cpus=cpus,
+        memory=memory,
         instance_type=instance_type,
         use_spot=use_spot,
         image_id=image_id,
         num_nodes=num_nodes,
         env=env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+        field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
     )
 
     if isinstance(task_or_dag, sky.Dag):
@@ -3913,36 +3944,10 @@ def spot():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
-@click.option('--cpus',
-              default=None,
-              type=str,
-              required=False,
-              help=('Number of vCPUs each instance must have (e.g., '
-                    '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
-                    'This is used to automatically select the instance type.'))
-@click.option(
-    '--memory',
-    default=None,
-    type=str,
-    required=False,
-    help=('Amount of memory each instance must have in GB (e.g., '
-          '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'))
 @click.option('--spot-recovery',
               default=None,
               type=str,
               help='Spot recovery strategy to use for the managed spot task.')
-@click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
-@click.option(
-    '--disk-tier',
-    default=None,
-    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
-    required=False,
-    help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
-          '("none" for using the default value). Default: medium'))
 @click.option(
     '--detach-run',
     '-d',
@@ -4865,18 +4870,6 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
     help=('Ports to open on the cluster. '
           'If specified, overrides the "ports" config in the YAML. '),
 )
-@click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
-@click.option(
-    '--disk-tier',
-    default=None,
-    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
-    required=False,
-    help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
-          '("none" for using the default value). Default: medium'))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -4911,6 +4904,8 @@ def benchmark_launch(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    cpus: Optional[str],
+    memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
@@ -5017,11 +5012,15 @@ def benchmark_launch(
                                              region=region,
                                              zone=zone,
                                              gpus=override_gpu,
+                                             cpus=cpus,
+                                             memory=memory,
                                              use_spot=use_spot,
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
                                              ports=ports)
+    _pop_and_ignore_fields_in_override_params(
+        override_params, field_to_ignore=['cpus', 'memory'])
     resources_config.update(override_params)
     if 'cloud' in resources_config:
         cloud = resources_config.pop('cloud')

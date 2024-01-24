@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Tuple
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.service_catalog import common
 from sky.clouds.utils import oci_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -105,9 +106,10 @@ def get_hourly_cost(instance_type: str,
                                        region, zone)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None:
         cpus = f'{oci_utils.oci_config.DEFAULT_NUM_VCPUS}+'
