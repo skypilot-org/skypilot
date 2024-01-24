@@ -479,14 +479,16 @@ def get_cluster_info(
     external_ip = kubernetes_utils.get_external_ip(network_mode)
     port = 22
     if not provider_config.get('use_internal_ips', False):
-        port = kubernetes_utils.get_head_ssh_port(network_mode, namespace)
+        port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
+                                                  namespace)
     for pod_name, pod in running_pods.items():
         internal_ip = pod.status.pod_ip
         pods[pod_name] = [
             common.InstanceInfo(
                 instance_id=pod_name,
                 internal_ip=internal_ip,
-                external_ip=None if network_mode == port_forward_mode else external_ip,
+                external_ip=None
+                if network_mode == port_forward_mode else external_ip,
                 ssh_port=port,
                 tags=pod.metadata.labels,
             )

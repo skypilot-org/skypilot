@@ -4506,7 +4506,7 @@ def serve_update(service_name: str, service_yaml: List[str], yes: bool):
                       abort=True,
                       show_default=True)
 
-    serve_lib.update(task, service_name)
+    serve_core.update(task, service_name)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
