@@ -123,7 +123,7 @@ def up(
                 remote_user_config_path=remote_config_yaml_path,
             ),
         }
-        backend_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
+        common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
                                     vars_to_fill,
                                     output_path=controller_file.name)
         controller_task = task_lib.Task.from_yaml(controller_file.name)

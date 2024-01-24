@@ -238,7 +238,7 @@ def _wait_for_pods_to_run(namespace, new_nodes):
         time.sleep(1)
 
 
-def _set_env_vars_in_pods(self, new_nodes):
+def _set_env_vars_in_pods(namespace: str, new_pods: List):
     """Setting environment variables in pods.
 
     Once all containers are ready, we can exec into them and set env vars.
@@ -262,11 +262,11 @@ def _set_env_vars_in_pods(self, new_nodes):
          'sudo mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
     ]
 
-    for new_node in new_nodes:
+    for new_pod in new_pods:
         kubernetes.stream()(
             kubernetes.core_api().connect_get_namespaced_pod_exec,
-            new_node.metadata.name,
-            self.namespace,
+            new_pod.metadata.name,
+            namespace,
             command=set_k8s_env_var_cmd,
             stderr=True,
             stdin=False,
