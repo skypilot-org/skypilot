@@ -1,7 +1,7 @@
 import tempfile
 import textwrap
 import time
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Set
 
 import common  # TODO(zongheng): for some reason isort places it here.
 import pytest
@@ -9,6 +9,8 @@ import pytest
 import sky
 from sky import clouds
 from sky import exceptions
+from sky import optimizer
+from sky.utils import resources_utils
 
 
 def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
@@ -731,3 +733,44 @@ def test_ordered_resources(enable_all_clouds, monkeypatch):
     dag = sky.optimize(dag)
     # 'V100' is picked because it is the first in the list.
     assert 'V100' in repr(task.best_resources)
+
+
+def test_disk_tier_mismatch(enable_all_clouds):
+    for cloud in clouds.CLOUD_REGISTRY.values():
+        for tier in cloud._SUPPORTED_DISK_TIERS:
+            sky.Resources(cloud=cloud, disk_tier=tier)
+        for unsupported_tier in (set(resources_utils.DiskTier) -
+                                 cloud._SUPPORTED_DISK_TIERS):
+            with pytest.raises(exceptions.NotSupportedError) as e:
+                sky.Resources(cloud=cloud, disk_tier=unsupported_tier)
+            assert f'is not supported' in str(e.value), str(e.value)
+
+
+def test_optimize_disk_tier(enable_all_clouds):
+
+    def _get_all_candidate_cloud(r: sky.Resources) -> Set[clouds.Cloud]:
+        task = sky.Task()
+        task.set_resources(r)
+        _, per_cloud_candidates, _ = optimizer._fill_in_launchable_resources(
+            task, blocked_resources=None)
+        return set(per_cloud_candidates.keys())
+
+    # All cloud supports BEST disk tier.
+    best_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.BEST)
+    best_tier_candidates = _get_all_candidate_cloud(best_tier_resources)
+    assert best_tier_candidates == set(
+        clouds.CLOUD_REGISTRY.values()), best_tier_candidates
+
+    # Only AWS, GCP, Azure, OCI supports LOW disk tier.
+    low_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.LOW)
+    low_tier_candidates = _get_all_candidate_cloud(low_tier_resources)
+    assert low_tier_candidates == set(
+        map(clouds.CLOUD_REGISTRY.get,
+            ['aws', 'gcp', 'azure', 'oci'])), low_tier_candidates
+
+    # Only AWS, GCP, OCI supports HIGH disk tier.
+    high_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.HIGH)
+    high_tier_candidates = _get_all_candidate_cloud(high_tier_resources)
+    assert high_tier_candidates == set(
+        map(clouds.CLOUD_REGISTRY.get,
+            ['aws', 'gcp', 'oci'])), high_tier_candidates

@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from sky import clouds as cloud_lib
 from sky.clouds import Azure
 from sky.clouds.service_catalog import common
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 # The frequency of pulling the latest catalog from the cloud provider.
@@ -103,9 +104,10 @@ def _get_instance_family(instance_type: str) -> str:
     return instance_family
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
     if memory is None:
