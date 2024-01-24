@@ -140,13 +140,14 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
                             # TODO(romilb): We may have additional node
                             #  affinity selectors in the future - in that
                             #  case we will need to update this logic.
-                            if ('Insufficient nvidia.com/gpu' in event_message
-                                    or
+                            if (('Insufficient nvidia.com/gpu'
+                                 in event_message) or
                                 ('didn\'t match Pod\'s node affinity/selector'
                                  in event_message)):
+                                msg = lack_resource_msg.format(resource='GPU')
                                 raise config_lib.KubernetesError(
-                                    f'{lack_resource_msg.format(resource="GPU")} '
-                                    f'Verify if {pod.spec.node_selector[label_key]}'
+                                    f'{msg} Verify if '
+                                    f'{pod.spec.node_selector[label_key]}'
                                     ' is available in the cluster.')
             raise config_lib.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status}'
@@ -222,7 +223,8 @@ def _wait_for_pods_to_run(namespace, new_nodes):
                     # See list of possible reasons for waiting here:
                     # https://stackoverflow.com/a/57886025
                     waiting = container_status.state.waiting
-                    if waiting is not None and waiting.reason != 'ContainerCreating':
+                    if (waiting is not None and
+                            waiting.reason != 'ContainerCreating'):
                         raise config_lib.KubernetesError(
                             'Failed to create container while launching '
                             'the node. Error details: '
@@ -319,11 +321,12 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             pod_uuid = str(uuid.uuid4())[:4]
             pod_name = f'{cluster_name_on_cloud}-{pod_uuid}'
             pod_spec['metadata']['name'] = f'{pod_name}-worker'
-            # For multi-node support, we put a soft-constraint to schedule worker
-            # pods on different nodes than the head pod.
-            # This is not set as a hard constraint because if different nodes are
-            # not available, we still want to be able to schedule worker pods on
-            # larger nodes which may be able to fit multiple SkyPilot "nodes".
+            # For multi-node support, we put a soft-constraint to schedule
+            # worker pods on different nodes than the head pod.
+            # This is not set as a hard constraint because if different nodes
+            # are not available, we still want to be able to schedule worker
+            # pods on larger nodes which may be able to fit multiple SkyPilot
+            # "nodes".
             pod_spec['spec']['affinity'] = {
                 'podAntiAffinity': {
                     'requiredDuringSchedulingIgnoredDuringExecution': [{
@@ -527,7 +530,7 @@ def query_instances(
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query Kubernetes cluster {cluster_name_on_cloud!r} '
-                'status: {common_utils.format_exception(e)}')
+                f'status: {common_utils.format_exception(e)}')
 
     # Check if the pods are running or pending
     cluster_status = {}

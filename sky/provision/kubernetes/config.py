@@ -214,7 +214,8 @@ def _configure_autoscaler_role(namespace: str,
                                provider_config: Dict[str, Any]) -> None:
     role_field = 'autoscaler_role'
     if role_field not in provider_config:
-        logger.info(log_prefix + not_provided_msg(role_field))
+        logger.info('_configure_autoscaler_role: '
+                    f'{not_provided_msg(role_field)}')
         return
 
     role = provider_config[role_field]
@@ -229,19 +230,22 @@ def _configure_autoscaler_role(namespace: str,
         namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
-        logger.info(log_prefix + using_existing_msg(role_field, name))
+        logger.info('_configure_autoscaler_role: '
+                    f'{using_existing_msg(role_field, name)}')
         return
 
-    logger.info(log_prefix + not_found_msg(role_field, name))
+    logger.info('_configure_autoscaler_role: '
+                f'{not_found_msg(role_field, name)}')
     kubernetes.auth_api().create_namespaced_role(namespace, role)
-    logger.info(log_prefix + created_msg(role_field, name))
+    logger.info(f'_configure_autoscaler_role: {created_msg(role_field, name)}')
 
 
 def _configure_autoscaler_role_binding(namespace: str,
                                        provider_config: Dict[str, Any]) -> None:
     binding_field = 'autoscaler_role_binding'
     if binding_field not in provider_config:
-        logger.info(log_prefix + not_provided_msg(binding_field))
+        logger.info('_configure_autoscaler_role_binding: '
+                    f'{not_provided_msg(binding_field)}')
         return
 
     binding = provider_config[binding_field]
@@ -263,12 +267,15 @@ def _configure_autoscaler_role_binding(namespace: str,
         namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
-        logger.info(log_prefix + using_existing_msg(binding_field, name))
+        logger.info('_configure_autoscaler_role_binding: '
+                    f'{using_existing_msg(binding_field, name)}')
         return
 
-    logger.info(log_prefix + not_found_msg(binding_field, name))
+    logger.info('_configure_autoscaler_role_binding: '
+                f'{not_found_msg(binding_field, name)}')
     kubernetes.auth_api().create_namespaced_role_binding(namespace, binding)
-    logger.info(log_prefix + created_msg(binding_field, name))
+    logger.info('_configure_autoscaler_role_binding: '
+                f'{created_msg(binding_field, name)}')
 
 
 def _configure_ssh_jump(namespace, config: common.ProvisionConfig):
@@ -310,7 +317,7 @@ def _configure_services(namespace: str, provider_config: Dict[str,
                                                               Any]) -> None:
     service_field = 'services'
     if service_field not in provider_config:
-        logger.info(log_prefix + not_provided_msg(service_field))
+        logger.info(f'_configure_services: {not_provided_msg(service_field)}')
         return
 
     services = provider_config[service_field]
@@ -328,14 +335,12 @@ def _configure_services(namespace: str, provider_config: Dict[str,
             assert len(services) == 1
             existing_service = services[0]
             if service == existing_service:
-                logger.info(
-                    f'_configure_services: {using_existing_msg("service", name)}'
-                )
+                logger.info('_configure_services: '
+                            f'{using_existing_msg("service", name)}')
                 return
             else:
-                logger.info(
-                    f'_configure_services: {updating_existing_msg("service", name)}'
-                )
+                logger.info('_configure_services: '
+                            f'{updating_existing_msg("service", name)}')
                 kubernetes.core_api().patch_namespaced_service(
                     name, namespace, service)
         else:
