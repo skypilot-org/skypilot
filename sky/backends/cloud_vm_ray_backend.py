@@ -2493,7 +2493,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 6:
             state['cluster_name_on_cloud'] = state['cluster_name']
-        
+
         if version < 7:
             self.ssh_user = None
 
