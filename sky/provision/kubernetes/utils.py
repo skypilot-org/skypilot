@@ -1130,7 +1130,7 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
     kubernetes_config = skypilot_config.get_nested(
-        ('kubernetes', 'pod_config_override'), {})
+        ('kubernetes', 'pod_config'), {})
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     _merge_dicts(
