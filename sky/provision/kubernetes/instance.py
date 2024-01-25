@@ -16,7 +16,7 @@ from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 
-POLL_INTERVAL = 5
+POLL_INTERVAL = 2
 
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
@@ -398,14 +398,24 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     node_uuid = str(uuid.uuid4())
     tags = {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-        TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
     }
     pod_spec['metadata']['namespace'] = namespace
     if 'labels' in pod_spec['metadata']:
         pod_spec['metadata']['labels'].update(tags)
     else:
         pod_spec['metadata']['labels'] = tags
-    pod_spec['metadata']['labels'][TAG_SVC_POD_UUID] = node_uuid
+    pod_spec['metadata']['labels'].update({
+        TAG_SVC_POD_UUID: node_uuid,
+        TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
+    })
+
+    terminating_pods = _filter_pods(namespace, tags, ['Terminating'])
+    while len(terminating_pods) > 0:
+        logger.debug(f'run_instances: Found {len(terminating_pods)} '
+                     'terminating pods. Waiting them to finish: '
+                     f'{list(terminating_pods.keys())}')
+        time.sleep(POLL_INTERVAL)
+        terminating_pods = _filter_pods(namespace, tags, ['Terminating'])
 
     running_pods = _filter_pods(namespace, tags, ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
