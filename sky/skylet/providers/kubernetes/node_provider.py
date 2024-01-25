@@ -11,7 +11,7 @@ from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from ray.autoscaler.tags import TAG_RAY_NODE_KIND
 
 from sky.adaptors import kubernetes
-from sky.provision.kubernetes import utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet.providers.kubernetes import config
 from sky.utils import common_utils
 
@@ -81,7 +81,8 @@ class KubernetesNodeProvider(NodeProvider):
 
         # Kubernetes namespace to user
         self.namespace = provider_config.get(
-            'namespace', utils.get_current_kube_config_context_namespace())
+            'namespace',
+            kubernetes_utils.get_current_kube_config_context_namespace())
 
         # Timeout for resource provisioning. If it takes longer than this
         # timeout, the resource provisioning will be considered failed.
@@ -128,7 +129,7 @@ class KubernetesNodeProvider(NodeProvider):
         return pod.metadata.labels
 
     def external_ip(self, node_id):
-        return utils.get_external_ip()
+        return kubernetes_utils.get_external_ip()
 
     def external_port(self, node_id):
         # Extract the NodePort of the head node's SSH service
@@ -137,7 +138,7 @@ class KubernetesNodeProvider(NodeProvider):
         # TODO(romilb): Implement caching here for performance.
         # TODO(romilb): Multi-node would need more handling here.
         cluster_name = node_id.split('-head')[0]
-        return utils.get_head_ssh_port(cluster_name, self.namespace)
+        return kubernetes_utils.get_head_ssh_port(cluster_name, self.namespace)
 
     def internal_ip(self, node_id):
         pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
@@ -242,7 +243,7 @@ class KubernetesNodeProvider(NodeProvider):
                             lack_resource_msg.format(resource='memory'))
                     gpu_lf_keys = [
                         lf.get_label_key()
-                        for lf in utils.LABEL_FORMATTER_REGISTRY
+                        for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     ]
                     if pod.spec.node_selector:
                         for label_key in pod.spec.node_selector.keys():
@@ -437,7 +438,7 @@ class KubernetesNodeProvider(NodeProvider):
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
         try:
-            utils.clean_zombie_ssh_jump_pod(self.namespace, node_id)
+            kubernetes_utils.clean_zombie_ssh_jump_pod(self.namespace, node_id)
         except Exception as e:
             logger.warning(config.log_prefix +
                            f'Error occurred when analyzing SSH Jump pod: {e}')

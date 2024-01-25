@@ -10,7 +10,7 @@ from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
-from sky.provision.kubernetes import utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 
@@ -74,8 +74,8 @@ class Kubernetes(clouds.Cloud):
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
-        curr_context = utils.get_current_kube_config_context_name()
-        if curr_context == utils.KIND_CONTEXT_NAME:
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
+        if curr_context == kubernetes_utils.KIND_CONTEXT_NAME:
             # If we are using KIND, the loadbalancer service will never be
             # assigned an external IP. Users may use ingress, but that requires
             # blocking HTTP port 80.
@@ -127,8 +127,8 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_port(cls, svc_name) -> int:
-        ns = utils.get_current_kube_config_context_namespace()
-        return utils.get_port(svc_name, ns)
+        ns = kubernetes_utils.get_current_kube_config_context_namespace()
+        return kubernetes_utils.get_port(svc_name, ns)
 
     @classmethod
     def get_default_instance_type(
@@ -145,7 +145,7 @@ class Kubernetes(clouds.Cloud):
             cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
         instance_mem = float(memory.strip('+')) if memory is not None else \
             instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
-        virtual_instance_type = utils.KubernetesInstanceType(
+        virtual_instance_type = kubernetes_utils.KubernetesInstanceType(
             instance_cpus, instance_mem).name
         return virtual_instance_type
 
@@ -154,7 +154,8 @@ class Kubernetes(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        inst = utils.KubernetesInstanceType.from_instance_type(instance_type)
+        inst = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+            instance_type)
         return {
             inst.accelerator_type: inst.accelerator_count
         } if (inst.accelerator_count is not None and
@@ -164,7 +165,8 @@ class Kubernetes(clouds.Cloud):
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         """Returns the #vCPUs and memory that the instance type offers."""
-        k = utils.KubernetesInstanceType.from_instance_type(instance_type)
+        k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+            instance_type)
         return k.cpus, k.memory
 
     @classmethod
@@ -202,7 +204,7 @@ class Kubernetes(clouds.Cloud):
 
         # resources.memory and cpus are None if they are not explicitly set.
         # We fetch the default values for the instance type in that case.
-        k = utils.KubernetesInstanceType.from_instance_type(
+        k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
             resources.instance_type)
         cpus = k.cpus
         mem = k.memory
@@ -230,7 +232,7 @@ class Kubernetes(clouds.Cloud):
         # If GPUs are requested, set node label to match the GPU type.
         if acc_count > 0 and acc_type is not None:
             k8s_acc_label_key, k8s_acc_label_value = \
-                utils.get_gpu_label_key_value(acc_type)
+                kubernetes_utils.get_gpu_label_key_value(acc_type)
 
         port_mode = network_utils.get_port_mode(None)
 
@@ -242,7 +244,8 @@ class Kubernetes(clouds.Cloud):
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             'timeout': str(self.TIMEOUT),
-            'k8s_namespace': utils.get_current_kube_config_context_namespace(),
+            'k8s_namespace':
+                kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
@@ -292,7 +295,7 @@ class Kubernetes(clouds.Cloud):
             acc_type, acc_count = list(accelerators.items())[0]
 
             # Parse into KubernetesInstanceType
-            k8s_instance_type = (utils.KubernetesInstanceType.
+            k8s_instance_type = (kubernetes_utils.KubernetesInstanceType.
                                  from_instance_type(default_instance_type))
 
             gpu_task_cpus = k8s_instance_type.cpus
@@ -300,12 +303,14 @@ class Kubernetes(clouds.Cloud):
             gpu_task_memory = (float(resources.memory.strip('+')) if
                                resources.memory is not None else gpu_task_cpus *
                                self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
-            chosen_instance_type = (utils.KubernetesInstanceType.from_resources(
-                gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
+            chosen_instance_type = (
+                kubernetes_utils.KubernetesInstanceType.from_resources(
+                    gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
 
         # Check if requested instance type will fit in the cluster.
         # TODO(romilb): This will fail early for autoscaling clusters.
-        fits, reason = utils.check_instance_fits(chosen_instance_type)
+        fits, reason = kubernetes_utils.check_instance_fits(
+            chosen_instance_type)
         if not fits:
             logger.debug(f'Instance type {chosen_instance_type} does '
                          'not fit in the Kubernetes cluster. '
@@ -320,7 +325,7 @@ class Kubernetes(clouds.Cloud):
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
             # Test using python API
             try:
-                return utils.check_credentials()
+                return kubernetes_utils.check_credentials()
             except Exception as e:  # pylint: disable=broad-except
                 return (False, 'Credential check failed: '
                         f'{common_utils.format_exception(e)}')
@@ -332,7 +337,7 @@ class Kubernetes(clouds.Cloud):
         return {CREDENTIAL_PATH: CREDENTIAL_PATH}
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return utils.KubernetesInstanceType.is_valid_instance_type(
+        return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
@@ -352,7 +357,7 @@ class Kubernetes(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         try:
             # Check if accelerator is available by checking node labels
-            _, _ = utils.get_gpu_label_key_value(accelerator)
+            _, _ = kubernetes_utils.get_gpu_label_key_value(accelerator)
             return True
         except exceptions.ResourcesUnavailableError:
             return False
@@ -365,7 +370,7 @@ class Kubernetes(clouds.Cloud):
             if 'namespace' in current_context['context']:
                 namespace = current_context['context']['namespace']
             else:
-                namespace = utils.DEFAULT_NAMESPACE
+                namespace = kubernetes_utils.DEFAULT_NAMESPACE
 
             user = current_context['context']['user']
             cluster = current_context['context']['cluster']
