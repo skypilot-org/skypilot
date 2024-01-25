@@ -23,6 +23,7 @@ TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'  # legacy tag for backward compatibility
 TAG_POD_INITIALIZED = 'skypilot-initialized'
+TAG_SVC_POD_UUID = 'svc-node-uuid'
 
 POD_STATUSES = {
     'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
@@ -368,6 +369,24 @@ def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
         _request_timeout=kubernetes.API_TIMEOUT)
 
 
+def _setup_service(namespace: str, service_spec: Optional[Dict[str, Any]],
+                   pods: List) -> None:
+    if service_spec is not None:
+        logger.info('run_instances: calling create_namespaced_service '
+                    f'(count={len(pods)}).')
+
+        for pod in pods:
+            node_uuid = pod.meta.labels.get(TAG_SVC_POD_UUID)
+            metadata = service_spec.get('metadata', {})
+            metadata['name'] = pod.meta.name
+            service_spec['metadata'] = metadata
+            service_spec['spec']['selector'] = {TAG_SVC_POD_UUID: node_uuid}
+            _ = kubernetes.core_api().create_namespaced_service(
+                namespace, service_spec)
+            # TODO(zhwu): Should we wait for the service to be ready?
+            # Currently, it is fine as we don't create the service by default
+
+
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
@@ -380,13 +399,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     tags = {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
-        'svc-node-uuid': node_uuid,
     }
     pod_spec['metadata']['namespace'] = namespace
     if 'labels' in pod_spec['metadata']:
         pod_spec['metadata']['labels'].update(tags)
     else:
         pod_spec['metadata']['labels'] = tags
+    pod_spec['metadata']['labels'][TAG_SVC_POD_UUID] = node_uuid
 
     running_pods = _filter_pods(namespace, tags, ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
@@ -410,7 +429,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             head_selector = head_service_selector(cluster_name_on_cloud)
             pod_spec['metadata']['labels'].update(head_selector)
             pod_spec['metadata']['name'] = f'{cluster_name_on_cloud}-head'
-
         else:
             pod_spec['metadata']['labels'][TAG_RAY_NODE_KIND] = 'worker'
             pod_uuid = str(uuid.uuid4())[:4]
@@ -441,21 +459,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
 
-    if to_start_count > 0:
-        new_svcs = []
-        if service_spec is not None:
-            logger.info('run_instances: calling create_namespaced_service '
-                        '(count={}).'.format(to_start_count))
-
-            for new_node in created_pods:
-                metadata = service_spec.get('metadata', {})
-                metadata['name'] = new_node
-                service_spec['metadata'] = metadata
-                service_spec['spec']['selector'] = {'svc-node-uuid': node_uuid}
-                svc = kubernetes.core_api().create_namespaced_service(
-                    namespace, service_spec)
-                new_svcs.append(svc)
-
     # Adding the jump pod to the new_nodes list as well so it can be
     # checked if it's scheduled and running along with other pods.
     ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
@@ -485,9 +488,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     if len(uninitialized_pods) > 0:
         logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
                      f'pods: {list(uninitialized_pods.keys())}')
-        _check_user_privilege(namespace, list(uninitialized_pods.values()))
-        _setup_ssh_in_pods(namespace, list(uninitialized_pods.values()))
-        _set_env_vars_in_pods(namespace, list(uninitialized_pods.values()))
+        uninitialized_pods_list = list(uninitialized_pods.values())
+        _setup_service(namespace, service_spec, uninitialized_pods_list)
+        _check_user_privilege(namespace, uninitialized_pods_list)
+        _setup_ssh_in_pods(namespace, uninitialized_pods_list)
+        _set_env_vars_in_pods(namespace, uninitialized_pods_list)
         for pod in uninitialized_pods.values():
             _label_pod(namespace,
                        pod.metadata.name,
