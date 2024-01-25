@@ -107,7 +107,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     retries = 60  # times 10 second
     results = {}
     for instance_id in created_instance_ids:
-        for n in range(retries):
+        for _ in range(retries):
             logger.info('Waiting for instance(s) to be ready '
                         f'{instance_id}')
             vm = cudo_wrapper.get_instance(instance_id)
@@ -218,4 +218,4 @@ def cleanup_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    del cluster_name_on_cloud, provider_config
+    del cluster_name_on_cloud, ports, provider_config
