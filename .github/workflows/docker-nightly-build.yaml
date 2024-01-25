@@ -11,15 +11,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v4
       - name: Find the release version
+        id: version
         run: |
           PACKAGE_NAME="skypilot-nightly"
           # Fetch package info from PyPI
           PACKAGE_INFO=$(curl -s https://pypi.org/pypi/$PACKAGE_NAME/json)
           # Parse JSON and get the latest version
           LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Dockerfile
         run: |
@@ -34,7 +34,7 @@ jobs:
               apt install rsync vim -y && \
               rm -rf /var/lib/apt/lists/*
           
-          RUN pip install "skypilot-nightly[all]==$LATEST_VERSION" --no-cache-dir
+          RUN pip install "skypilot-nightly[all]==${{ steps.version.outputs.latest_version }}" --no-cache-dir
           EOF
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -44,13 +44,13 @@ jobs:
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: "${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:latest,${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:$LATEST_VERSION"
+          tags: "${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:latest,${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:${{ steps.version.outputs.latest_version }}"
           cache-from: type=gha
           cache-to: type=gha,mode=max
