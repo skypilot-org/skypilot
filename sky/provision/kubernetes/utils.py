@@ -1058,6 +1058,7 @@ def get_endpoint_debug_message() -> str:
     return ENDPOINTS_DEBUG_MESSAGE.format(endpoint_type=endpoint_type,
                                           debug_cmd=debug_cmd)
 
+
 def combine_pod_config_fields(config_yaml_path: str) -> None:
     """Adds or updates fields in the YAML with fields from the ~/.sky/config's
     kubernetes.pod_spec dict.
@@ -1129,8 +1130,8 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
     with open(config_yaml_path, 'r') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
-    kubernetes_config = skypilot_config.get_nested(
-        ('kubernetes', 'pod_config'), {})
+    kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
+                                                   {})
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     _merge_dicts(
