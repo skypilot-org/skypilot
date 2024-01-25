@@ -234,7 +234,7 @@ extras_require: Dict[str, List[str]] = {
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes'] + local_ray,
     'remote': remote,
-    'cudo': ['cudo-compute'],
+    'cudo': ['cudo-compute>=0.1.8'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

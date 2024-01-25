@@ -104,11 +104,10 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             head_instance_id = instance_id
 
     # Wait for instances to be ready.
-    retries = 12  # times 10 second
+    retries = 60  # times 10 second
     results = {}
-    for instance_id, _ in instances.items():
-        n = 0
-        while n in range(retries):
+    for instance_id in created_instance_ids:
+        for n in range(retries):
             logger.info('Waiting for instance(s) to be ready '
                         f'{instance_id}')
             vm = cudo_wrapper.get_instance(instance_id)

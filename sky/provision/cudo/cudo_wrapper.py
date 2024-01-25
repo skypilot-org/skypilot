@@ -1,6 +1,4 @@
 """Cudo Compute library wrapper for SkyPilot."""
-import random
-import string
 import time
 from typing import Dict
 
