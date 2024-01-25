@@ -13,7 +13,9 @@ SkyServe will launch new replicas described by ``new_service.yaml``. When the nu
 
 SkyServe does not mix traffic from old and new replicas and will not send traffic to new replicas until ``min_replicas`` new replicas are ready to serve user requests. Before that, SkyServe will only send traffic to the old replicas. 
 
-:code:`sky serve status` will highlight the latest service version and each replica's version. 
+.. tip::
+
+  :code:`sky serve status` will highlight the latest service version and each replica's version. 
 
 Example
 ===========
