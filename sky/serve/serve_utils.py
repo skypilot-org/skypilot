@@ -217,13 +217,6 @@ def generate_replica_log_file_name(service_name: str, replica_id: int) -> str:
     return os.path.join(dir_name, f'replica_{replica_id}.log')
 
 
-def generate_replica_down_log_file_name(service_name: str,
-                                        replica_id: int) -> str:
-    dir_name = generate_remote_service_dir_name(service_name)
-    dir_name = os.path.expanduser(dir_name)
-    return os.path.join(dir_name, f'replica_{replica_id}_down.log')
-
-
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
