@@ -1,4 +1,4 @@
-"""RunPod instance provisioning."""
+"""Kubernetes instance provisioning."""
 import copy
 import time
 from typing import Any, Dict, List, Optional
@@ -11,7 +11,7 @@ from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import config as config_lib
-from sky.provision.kubernetes import utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
@@ -41,7 +41,8 @@ def to_label_selector(tags):
 
 def _get_namespace(provider_config: Dict[str, Any]) -> str:
     return provider_config.get(
-        'namespace', utils.get_current_kube_config_context_namespace())
+        'namespace',
+        kubernetes_utils.get_current_kube_config_context_namespace())
 
 
 def _filter_pods(namespace: str, tag_filters: Dict[str, str],
@@ -132,7 +133,8 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
                     raise config_lib.KubernetesError(
                         lack_resource_msg.format(resource='memory'))
                 gpu_lf_keys = [
-                    lf.get_label_key() for lf in utils.LABEL_FORMATTER_REGISTRY
+                    lf.get_label_key()
+                    for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                 ]
                 if pod.spec.node_selector:
                     for label_key in pod.spec.node_selector.keys():
@@ -546,7 +548,7 @@ def _terminate_node(namespace: str, pod_name: str) -> None:
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
     try:
-        utils.clean_zombie_ssh_jump_pod(namespace, pod_name)
+        kubernetes_utils.clean_zombie_ssh_jump_pod(namespace, pod_name)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning('terminate_instances: Error occurred when analyzing '
                        f'SSH Jump pod: {e}')
@@ -615,10 +617,11 @@ def get_cluster_info(
                                                   port_forward_mode.value)
     network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
         network_mode_str)
-    external_ip = utils.get_external_ip(network_mode)
+    external_ip = kubernetes_utils.get_external_ip(network_mode)
     port = 22
     if not provider_config.get('use_internal_ips', False):
-        port = utils.get_head_ssh_port(cluster_name_on_cloud, namespace)
+        port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
+                                                  namespace)
 
     head_pod_name = None
     cpu_request = None
@@ -679,7 +682,7 @@ def query_instances(
         'Terminating': None,
     }
 
-    namespace = utils.get_current_kube_config_context_namespace()
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
     # Get all the pods with the label skypilot-cluster: <cluster_name>
     try:
@@ -689,7 +692,7 @@ def query_instances(
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         with ux_utils.print_exception_no_traceback():
-            ctx = utils.get_current_kube_config_context_name()
+            ctx = kubernetes_utils.get_current_kube_config_context_name()
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query cluster {cluster_name_on_cloud!r} status. '
                 'Network error - check if the Kubernetes cluster in '

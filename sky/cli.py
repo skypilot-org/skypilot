@@ -62,7 +62,7 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
-from sky.provision.kubernetes import utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import core as serve_core
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -2019,8 +2019,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                         if handle.launched_resources.cloud.is_same_cloud(
                                 clouds.Kubernetes()):
                             # Add Kubernetes specific debugging info
-                            error_msg += \
-                                utils.get_endpoint_debug_message()
+                            error_msg += (
+                                kubernetes_utils.get_endpoint_debug_message())
                         with ux_utils.print_exception_no_traceback():
                             raise RuntimeError(error_msg)
                     click.echo(port_details[endpoint][0].url(ip=head_ip))
@@ -2040,7 +2040,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                                 clouds.Kubernetes()):
                             # Add Kubernetes specific debugging info
                             error_msg += \
-                                utils.get_endpoint_debug_message()
+                                kubernetes_utils.get_endpoint_debug_message()
                         with ux_utils.print_exception_no_traceback():
                             raise RuntimeError(error_msg)
 
@@ -3624,7 +3624,7 @@ def show_gpus(
 
             if (len(result) == 0 and cloud_obj is not None and
                     cloud_obj.is_same_cloud(clouds.Kubernetes())):
-                yield utils.NO_GPU_ERROR_MESSAGE
+                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
                 return
 
             # "Common" GPUs
@@ -3692,7 +3692,7 @@ def show_gpus(
 
         if len(result) == 0:
             if cloud == 'kubernetes':
-                yield utils.NO_GPU_ERROR_MESSAGE
+                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
                 return
 
             quantity_str = (f' with requested quantity {quantity}'
@@ -5412,7 +5412,7 @@ def local_up(gpus: bool):
 
     # Check if ~/.kube/config exists:
     if os.path.exists(os.path.expanduser('~/.kube/config')):
-        curr_context = utils.get_current_kube_config_context_name()
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
         skypilot_context = 'kind-skypilot'
         if curr_context is not None and curr_context != skypilot_context:
             click.echo(

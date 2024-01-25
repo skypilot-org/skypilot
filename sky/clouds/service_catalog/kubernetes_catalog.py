@@ -11,7 +11,7 @@ from sky import global_user_state
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
-from sky.provision.kubernetes import utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 
 _PULL_FREQUENCY_HOURS = 7
 
@@ -45,20 +45,20 @@ def list_accelerators(
     del all_regions  # unused
     if not any(
             map(k8s_cloud.is_same_cloud, global_user_state.get_enabled_clouds())
-    ) or not utils.check_credentials()[0]:
+    ) or not kubernetes_utils.check_credentials()[0]:
         return {}
 
-    has_gpu = utils.detect_gpu_resource()
+    has_gpu = kubernetes_utils.detect_gpu_resource()
     if not has_gpu:
         return {}
 
-    label_formatter, _ = utils.detect_gpu_label_formatter()
+    label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter()
     if not label_formatter:
         return {}
 
     accelerators: Set[Tuple[str, int]] = set()
     key = label_formatter.get_label_key()
-    nodes = utils.get_kubernetes_nodes()
+    nodes = kubernetes_utils.get_kubernetes_nodes()
     for node in nodes:
         if key in node.metadata.labels:
             accelerator_name = label_formatter.get_accelerator_from_label_value(
