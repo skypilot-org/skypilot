@@ -35,6 +35,8 @@ jobs:
           
           RUN pip install "skypilot-nightly[aws,gcp,azure,kubernetes]==$LATEST_VERSION" --no-cache-dir
           EOF
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to Docker Hub
@@ -46,6 +48,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: "${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:latest,${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:$LATEST_VERSION"
           cache-from: type=gha
