@@ -433,6 +433,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             'Use "sky down" to terminate the cluster.')
 
     created_pods = {}
+    logger.debug(f'run_instances: calling create_namespaced_pod '
+                 f'(count={to_start_count}).')
     for _ in range(to_start_count):
         if head_pod_name is None:
             pod_spec['metadata']['labels'][TAG_RAY_NODE_KIND] = 'head'
@@ -477,6 +479,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     wait_pods_dict = _filter_pods(namespace, tags, ['Pending'])
     wait_pods = list(wait_pods_dict.values())
     wait_pods.append(jump_pod)
+    logger.debug(f'run_instances: waiting for pods to schedule and run: {list(wait_pods_dict.keys())}')
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
@@ -484,6 +487,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     # Wait until the pods and their containers are up and running, and
     # fail early if there is an error
     _wait_for_pods_to_run(namespace, wait_pods)
+    logger.debug(f'run_instances: all pods are scheduled and running: '
+                 f'{list(wait_pods_dict.keys())}')
 
     running_pods = _filter_pods(namespace, tags, ['Running'])
     initialized_pods = _filter_pods(namespace, {
