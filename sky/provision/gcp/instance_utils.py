@@ -724,7 +724,7 @@ class GCPComputeInstance(GCPInstance):
             # We need to retry the insert operation because it may fail with
             # RESOURCE_OPERATION_RATE_EXCEEDED error, which is normally caused
             # by creating VMs with machine images on different zones.
-            operation = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+            operation = request.execute(num_retries=GCP_MAX_RETRIES)
             operations.append(operation)
 
         logger.debug('"insert" operation requested ...')
