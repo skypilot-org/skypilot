@@ -1395,9 +1395,17 @@ def get_node_ips(
     assert cloud is not None, provider_name
 
     if cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.SKYPILOT:
-        metadata = provision_lib.get_cluster_info(
-            provider_name, ray_config['provider']['region'],
-            ray_config['cluster_name'], ray_config['provider'])
+        try:
+            metadata = provision_lib.get_cluster_info(
+                provider_name, ray_config['provider'].get('region'),
+                ray_config['cluster_name'], ray_config['provider'])
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                'Failed to get cluster info for '
+                f'{ray_config["cluster_name"]} from the new provisioner '
+                f'with {common_utils.format_exception(e)}.')
+            raise exceptions.FetchIPError(
+                exceptions.FetchIPError.Reason.HEAD) from e
         if len(metadata.instances) < expected_num_nodes:
             # Simulate the exception when Ray head node is not up.
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
