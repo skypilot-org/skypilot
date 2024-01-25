@@ -22,6 +22,7 @@ logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'  # legacy tag for backward compatibility
+TAG_POD_INITIALIZED = 'skypilot-initialized'
 
 POD_STATUSES = {
     'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
@@ -357,6 +358,16 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
         run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd)
 
 
+def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
+    """Label a pod."""
+    kubernetes.core_api().patch_namespaced_pod(
+        pod_name,
+        namespace, {'metadata': {
+            'labels': label
+        }},
+        _request_timeout=kubernetes.API_TIMEOUT)
+
+
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
@@ -370,7 +381,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
     }
-    tags[TAG_RAY_CLUSTER_NAME] = cluster_name_on_cloud
     pod_spec['metadata']['namespace'] = namespace
     if 'labels' in pod_spec['metadata']:
         pod_spec['metadata']['labels'].update(tags)
@@ -458,9 +468,30 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         # Wait until the pods and their containers are up and running, and
         # fail early if there is an error
         _wait_for_pods_to_run(namespace, wait_pods)
-        _check_user_privilege(namespace, list(created_pods.values()))
-        _setup_ssh_in_pods(namespace, list(created_pods.values()))
-        _set_env_vars_in_pods(namespace, list(created_pods.values()))
+
+    running_pods = _filter_pods(namespace, tags, ['Running'])
+    initialized_pods = _filter_pods(namespace, {
+        TAG_POD_INITIALIZED: 'true',
+        **tags
+    }, ['Running'])
+    uninitialized_pods = {
+        pod_name: pod
+        for pod_name, pod in running_pods.items()
+        if pod_name not in initialized_pods
+    }
+    if len(uninitialized_pods) > 0:
+        logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
+                     f'pods: {list(uninitialized_pods.keys())}')
+        _check_user_privilege(namespace, list(uninitialized_pods.values()))
+        _setup_ssh_in_pods(namespace, list(uninitialized_pods.values()))
+        _set_env_vars_in_pods(namespace, list(uninitialized_pods.values()))
+        for pod in uninitialized_pods.values():
+            _label_pod(namespace,
+                       pod.metadata.name,
+                       label={
+                           TAG_POD_INITIALIZED: 'true',
+                           **pod.metadata.labels
+                       })
 
     assert head_pod_name is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(
