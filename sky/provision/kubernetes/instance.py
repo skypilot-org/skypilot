@@ -380,6 +380,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     tags = {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+        'svc-node-uuid': node_uuid,
     }
     pod_spec['metadata']['namespace'] = namespace
     if 'labels' in pod_spec['metadata']:
@@ -389,6 +390,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     running_pods = _filter_pods(namespace, tags, ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
+    logger.debug(f'Found {len(running_pods)} existing pods: '
+                 f'{list(running_pods.keys())}')
 
     to_start_count = config.count - len(running_pods)
     if to_start_count < 0:
@@ -448,26 +451,26 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 metadata = service_spec.get('metadata', {})
                 metadata['name'] = new_node
                 service_spec['metadata'] = metadata
-                service_spec['spec']['selector'] = {'ray-node-uuid': node_uuid}
+                service_spec['spec']['selector'] = {'svc-node-uuid': node_uuid}
                 svc = kubernetes.core_api().create_namespaced_service(
                     namespace, service_spec)
                 new_svcs.append(svc)
 
-        # Adding the jump pod to the new_nodes list as well so it can be
-        # checked if it's scheduled and running along with other pods.
-        ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
-        jump_pod = kubernetes.core_api().read_namespaced_pod(
-            ssh_jump_pod_name, namespace)
-        wait_pods = list(created_pods.values())
-        wait_pods.append(jump_pod)
+    # Adding the jump pod to the new_nodes list as well so it can be
+    # checked if it's scheduled and running along with other pods.
+    ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
+    jump_pod = kubernetes.core_api().read_namespaced_pod(
+        ssh_jump_pod_name, namespace)
+    wait_pods_dict = _filter_pods(namespace, tags, ['Pending'])
+    wait_pods = list(wait_pods_dict.values())
+    wait_pods.append(jump_pod)
 
-        # Wait until the pods are scheduled and surface cause for error
-        # if there is one
-        _wait_for_pods_to_schedule(namespace, wait_pods,
-                                   provider_config['timeout'])
-        # Wait until the pods and their containers are up and running, and
-        # fail early if there is an error
-        _wait_for_pods_to_run(namespace, wait_pods)
+    # Wait until the pods are scheduled and surface cause for error
+    # if there is one
+    _wait_for_pods_to_schedule(namespace, wait_pods, provider_config['timeout'])
+    # Wait until the pods and their containers are up and running, and
+    # fail early if there is an error
+    _wait_for_pods_to_run(namespace, wait_pods)
 
     running_pods = _filter_pods(namespace, tags, ['Running'])
     initialized_pods = _filter_pods(namespace, {
