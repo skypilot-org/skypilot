@@ -2130,7 +2130,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 6
+    _VERSION = 7
 
     def __init__(
             self,
@@ -2493,6 +2493,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 6:
             state['cluster_name_on_cloud'] = state['cluster_name']
+        
+        if version < 7:
+            self.ssh_user = None
 
         self.__dict__.update(state)
 
