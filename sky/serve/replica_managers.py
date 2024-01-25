@@ -556,6 +556,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                       'w') as replica_log_file, open(launch_log_file_name,
                                                      'r') as launch_file:
                 replica_log_file.write(launch_file.read())
+            os.remove(launch_log_file_name)
+
             logger.info(f'Syncing down logs for replica {replica_id}...')
             backend = backends.CloudVmRayBackend()
             handle = global_user_state.get_handle_from_cluster_name(
