@@ -40,6 +40,13 @@ def get_current_account_user() -> str:
 
 
 @import_package
+def core_exception():
+    """HttpError exception."""
+    from azure.core import exceptions
+    return exceptions
+
+
+@import_package
 def http_error_exception():
     """HttpError exception."""
     from azure.core import exceptions
@@ -56,6 +63,7 @@ def get_client(name: str, subscription_id: str):
     from azure.identity import AzureCliCredential
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.resource import ResourceManagementClient
+    from azure.mgmt.storage import StorageManagementClient
     with _session_creation_lock:
         credential = AzureCliCredential(process_timeout=30)
         if name == 'compute':
@@ -65,6 +73,8 @@ def get_client(name: str, subscription_id: str):
             return NetworkManagementClient(credential, subscription_id)
         elif name == 'resource':
             return ResourceManagementClient(credential, subscription_id)
+        elif name == 'storage':
+            return StorageManagementClient(credential, subscription_id)
         else:
             raise ValueError(f'Client not supported: "{name}"')
 

@@ -15,6 +15,7 @@ from filelock import FileLock
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import aws
+from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
@@ -44,6 +45,18 @@ def split_gcs_path(gcs_path: str) -> Tuple[str, str]:
       gcs_path: str; GCS Path, e.g. gcs://imagenet/train/
     """
     path_parts = gcs_path.replace('gs://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def split_az_path(az_path: str) -> Tuple[str, str]:
+    """Splits S3 Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      az_path: str; S3 Path, e.g. s3://imagenet/train/
+    """
+    path_parts = az_path.replace('az://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
@@ -122,6 +135,34 @@ def verify_gcs_bucket(name: str) -> bool:
     except gcp.not_found_exception():
         return False
 
+
+def create_az_storage_client() -> Client:
+    """Helper method that connects to Boto3 client for S3 Bucket
+
+    Args:
+      region: str; Region name, e.g. us-west-1, us-east-2
+    """
+    subscription_id = azure.get_subscription_id()
+    return azure.get_client('storage', subscription_id)
+
+def create_az_resource_client() -> Client:
+    """Helper method that connects to Boto3 client for S3 Bucket
+
+    Args:
+      region: str; Region name, e.g. us-west-1, us-east-2
+    """
+    subscription_id = azure.get_subscription_id()
+    return azure.get_client('resource', subscription_id)
+
+def verify_az_bucket(name: str) -> bool:
+    """Helper method that checks if the R2 bucket exists
+
+    Args:
+      name: str; Name of R2 Bucket (without r2:// prefix)
+    """
+    r2 = cloudflare.resource('s3')
+    bucket = r2.Bucket(name)
+    return bucket in r2.buckets.all()
 
 def create_r2_client(region: str = 'auto') -> Client:
     """Helper method that connects to Boto3 client for R2 Bucket
