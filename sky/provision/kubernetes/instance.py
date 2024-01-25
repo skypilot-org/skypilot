@@ -479,7 +479,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     wait_pods_dict = _filter_pods(namespace, tags, ['Pending'])
     wait_pods = list(wait_pods_dict.values())
     wait_pods.append(jump_pod)
-    logger.debug(f'run_instances: waiting for pods to schedule and run: {list(wait_pods_dict.keys())}')
+    logger.debug(
+        f'run_instances: waiting for pods to schedule and run: {list(wait_pods_dict.keys())}'
+    )
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
