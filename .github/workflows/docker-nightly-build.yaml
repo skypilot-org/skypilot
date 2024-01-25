@@ -49,7 +49,9 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          # TODO: add support for linux/arm64 for M series Macs
+          # It currently fails due to the failure to install google-cloud-sdk
+          platforms: linux/amd64
           push: true
           tags: "${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:latest,${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:${{ steps.version.outputs.latest_version }}"
           cache-from: type=gha
