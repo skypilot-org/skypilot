@@ -11,6 +11,22 @@ SkyServe supports update for your services. Use ``sky serve update`` to update a
 
 SkyServe will launch new replicas described by ``new_service.yaml``. When the number of new replicas reaches the minimum number of replicas (``min_replicas``) required for the service, SkyServe will scale down old replicas to save cost. SkyServe allows users to update ``replica_policy`` parameters, such as ``target_qps_per_replica``. SkyServe also allows users to update ``resources`` parameters, such as ``cpu`` and ``memory``, so that new replicas can be launched on VMs of different types.  
 
+For example, suppose we have a running service hosting Llama 2 model with the following resource configuration: 
+
+.. code-block:: console
+
+    resources:
+        memory: 32+
+        accelerators: T4
+
+SkyServe supports updating an existing service to a new resource configuration, such as:
+
+.. code-block:: console
+
+    resources:
+        memory: 128+
+        accelerators: A100
+
 SkyServe does not mix traffic from old and new replicas and will not send traffic to new replicas until ``min_replicas`` new replicas are ready to serve user requests. Before that, SkyServe will only send traffic to the old replicas. 
 
 .. tip::
