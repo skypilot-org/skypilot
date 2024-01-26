@@ -494,6 +494,8 @@ class Storage(object):
                         self.add_store(StoreType.S3)
                     elif self.source.startswith('gs://'):
                         self.add_store(StoreType.GCS)
+                    elif self.source.startswith('az://'):
+                        self.add_store(StoreType.AZURE)
                     elif self.source.startswith('r2://'):
                         self.add_store(StoreType.R2)
                     elif self.source.startswith('cos://'):
@@ -784,6 +786,8 @@ class Storage(object):
             store_cls = S3Store
         elif store_type == StoreType.GCS:
             store_cls = GcsStore
+        elif store_type == StoreType.AZURE:
+            store_cls = AzureBlobStore
         elif store_type == StoreType.R2:
             store_cls = R2Store
         elif store_type == StoreType.IBM:
