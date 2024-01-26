@@ -1,9 +1,9 @@
-.. _update:
+.. _serve-update:
 
 Update
 ===========
 
-SkyServe supports rolling update for your services. Use ``sky serve update`` to update an existing service:
+SkyServe supports update for your services. Use ``sky serve update`` to update an existing service:
 
 .. code-block:: console
 
