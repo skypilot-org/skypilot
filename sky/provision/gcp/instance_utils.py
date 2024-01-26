@@ -778,7 +778,7 @@ class GCPComputeInstance(GCPInstance):
         #    "diskSizeGb": "256",    "diskType"...\'. Boot disk must have a
         #    source specified'
         # https://cloud.google.com/compute/docs/reference/rest/v1/instances/bulkInsert # pylint: disable=line-too-long
-        if config.get('sourceMachineImage'):
+        if config.get('sourceMachineImage') is not None:
             return False
         return True
 
