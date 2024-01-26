@@ -593,7 +593,6 @@ class RayCodeGen:
             textwrap.dedent(f"""\
             returncodes = ray.get(futures)
             if sum(returncodes) != 0:
-                print('set failed in job', file=sys.stderr, flush=True)
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # This waits for all streaming logs to finish.
                 job_lib.scheduler.schedule_step()
