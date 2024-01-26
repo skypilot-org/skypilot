@@ -687,9 +687,11 @@ def open_ports(
 
 def cleanup_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    del ports  # Unused.
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
@@ -769,9 +771,12 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
     waiter.wait(WaiterConfig={'Delay': 5, 'MaxAttempts': 120}, Filters=filters)
 
 
-def get_cluster_info(region: str,
-                     cluster_name_on_cloud: str) -> common.ClusterInfo:
+def get_cluster_info(
+        region: str,
+        cluster_name_on_cloud: str,
+        provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
+    del provider_config  # unused
     ec2 = _default_ec2_resource(region)
     filters = [
         {
@@ -791,14 +796,26 @@ def get_cluster_info(region: str,
         tags = [(t['Key'], t['Value']) for t in inst.tags]
         # sort tags by key to support deterministic unit test stubbing
         tags.sort(key=lambda x: x[0])
-        instances[inst.id] = common.InstanceInfo(
-            instance_id=inst.id,
-            internal_ip=inst.private_ip_address,
-            external_ip=inst.public_ip_address,
-            tags=dict(tags),
-        )
+        instances[inst.id] = [
+            common.InstanceInfo(
+                instance_id=inst.id,
+                internal_ip=inst.private_ip_address,
+                external_ip=inst.public_ip_address,
+                tags=dict(tags),
+            )
+        ]
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
     )
+
+
+def query_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[common.Endpoint]]:
+    """See sky/provision/__init__.py"""
+    return common.query_ports_passthrough(cluster_name_on_cloud, ports,
+                                          provider_config)

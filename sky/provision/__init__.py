@@ -16,6 +16,9 @@ from sky.provision import aws
 from sky.provision import azure
 from sky.provision import common
 from sky.provision import gcp
+from sky.provision import kubernetes
+from sky.provision import runpod
+from sky.provision import vsphere
 
 logger = sky_logging.init_logger(__name__)
 
@@ -123,9 +126,25 @@ def open_ports(
 def cleanup_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
+    # TODO: make ports optional and allow cleaning up only specified ports.
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def query_ports(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[common.Endpoint]]:
+    """Query details about ports on a cluster.
+
+    Returns a dict with port as the key and a list of common.Endpoint.
+    """
     raise NotImplementedError
 
 
@@ -137,7 +156,10 @@ def wait_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
 
 
 @_route_to_cloud_impl
-def get_cluster_info(provider_name: str, region: str,
-                     cluster_name_on_cloud: str) -> common.ClusterInfo:
+def get_cluster_info(
+        provider_name: str,
+        region: str,
+        cluster_name_on_cloud: str,
+        provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """Get the metadata of instances in a cluster."""
     raise NotImplementedError

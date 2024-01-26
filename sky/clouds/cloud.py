@@ -18,6 +18,7 @@ from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.skylet import constants
 from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -61,11 +62,48 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     region: Region
 
 
+class ProvisionerVersion(enum.Enum):
+    """The version of the provisioner.
+
+    1: [Deprecated] ray node provider based implementation
+    2: [Deprecated] ray node provider for provisioning and SkyPilot provisioner
+    for stopping and termination
+    3: SkyPilot provisioner for both provisioning and stopping
+    """
+    RAY_AUTOSCALER = 1
+    RAY_PROVISIONER_SKYPILOT_TERMINATOR = 2
+    SKYPILOT = 3
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+
+class StatusVersion(enum.Enum):
+    """The version of the status query.
+
+    1: [Deprecated] cloud-CLI based implementation
+    2: SkyPilot provisioner based implementation
+    """
+    CLOUD_CLI = 1
+    SKYPILOT = 2
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+
 class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
-    _DEFAULT_DISK_TIER = 'medium'
+    _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
+    _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
+    _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
+
+    # The version of provisioner and status query. This is used to determine
+    # the code path to use for each cloud in the backend.
+    # NOTE: new clouds being added should use the latest version, i.e. SKYPILOT.
+    PROVISIONER_VERSION = ProvisionerVersion.RAY_AUTOSCALER
+    STATUS_VERSION = StatusVersion.CLOUD_CLI
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -233,7 +271,8 @@ class Cloud:
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs, memory and
         disk tier.
 
@@ -245,10 +284,10 @@ class Cloud:
         memory.  If 'memory=4+', this method returns the default instance
         type with 4GB or more memory.
 
-        If disk_rier='medium', this method returns the default instance type
-        that support medium disk tier.
+        If disk_tier=DiskTier.MEDIUM, this method returns the default instance
+        type that support medium disk tier.
 
-        When cpus is None, memory is None or disk tier is None, this method will
+        When cpus is None, memory is None or disk_tier is None, this method will
         never return None. This method may return None if the cloud's default
         instance family does not have a VM with the given number of vCPUs
         (e.g., when cpus='7') or does not have a VM with the give disk tier
@@ -526,14 +565,28 @@ class Cloud:
                     f'{valid_regex}')
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+                                disk_tier: resources_utils.DiskTier) -> None:
         """Errors out if the disk tier is not supported by the cloud provider.
 
         Raises:
             exceptions.NotSupportedError: If the disk tier is not supported.
         """
-        raise NotImplementedError
+        del instance_type  # unused
+        if disk_tier not in cls._SUPPORTED_DISK_TIERS:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'{disk_tier} is not supported by {cls._REPR}.')
+
+    @classmethod
+    def _translate_disk_tier(
+        cls, disk_tier: Optional[resources_utils.DiskTier]
+    ) -> resources_utils.DiskTier:
+        if disk_tier is None:
+            return cls._DEFAULT_DISK_TIER
+        if disk_tier == resources_utils.DiskTier.BEST:
+            return cls._BEST_DISK_TIER
+        return disk_tier
 
     @classmethod
     def _check_instance_type_accelerators_combination(
@@ -696,3 +749,9 @@ class Cloud:
 
     def __repr__(self):
         return self._REPR
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('PROVISIONER_VERSION', None)
+        state.pop('STATUS_VERSION', None)
+        return state

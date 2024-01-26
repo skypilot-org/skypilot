@@ -568,8 +568,6 @@ def get_config_schema():
                         'items': {
                             'type': 'string',
                         },
-                        'minItems': 1,
-                        'maxItems': 1,
                     },
                     **_NETWORK_CONFIG_SCHEMA,
                 }
@@ -584,6 +582,13 @@ def get_config_schema():
                         'case_insensitive_enum': [
                             type.value for type in
                             kubernetes_enums.KubernetesNetworkingMode
+                        ]
+                    },
+                    'ports': {
+                        'type': 'string',
+                        'case_insensitive_enum': [
+                            type.value
+                            for type in kubernetes_enums.KubernetesPortMode
                         ]
                     },
                 }

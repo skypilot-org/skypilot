@@ -36,6 +36,8 @@ AUTOSCALER_QPS_WINDOW_SIZE_SECONDS = 60
 # Autoscaler scale decision interval in seconds.
 # We will try to scale up/down every `decision_interval`.
 AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS = 20
+# Autoscaler no replica decision interval in seconds.
+AUTOSCALER_NO_REPLICA_DECISION_INTERVAL_SECONDS = 5
 # Autoscaler default upscale delays in seconds.
 # We will upscale only if the target number of instances
 # is larger than the current launched instances for delay amount of time.
@@ -65,3 +67,6 @@ DEFAULT_MIN_REPLICAS = 1
 CONTROLLER_PORT_START = 20001
 LOAD_BALANCER_PORT_START = 30001
 LOAD_BALANCER_PORT_RANGE = '30001-30100'
+
+# Initial version of service.
+INITIAL_VERSION = 1

@@ -16,6 +16,7 @@ types-PyYAML
 types-requests<2.31
 types-setuptools
 types-cachetools
+types-pyvmomi
 
 # testing
 pytest
@@ -24,3 +25,6 @@ pytest-env>=0.6
 
 # memory profiler
 memory_profiler==0.61.0
+
+# For testing SkyServe
+aiohttp==3.9.1

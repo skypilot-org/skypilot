@@ -1,0 +1,42 @@
+# service.yaml
+# The newly-added `service` section to the `serve-openai-api.yaml` file.
+service:
+  # Specifying the path to the endpoint to check the readiness of the service.
+  readiness_probe: /v1/models
+  # How many replicas to manage.
+  replicas: 2
+
+# Fields below are the same with `serve-openai-api.yaml`.
+envs:
+  MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
+  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
+
+resources:
+  accelerators: {L4:1, A10G:1, A10:1, A100:1, A100-80GB:1}
+  ports:
+    - 8000
+
+setup: |
+  conda activate vllm
+  if [ $? -ne 0 ]; then
+    conda create -n vllm python=3.9 -y
+    conda activate vllm
+  fi
+
+  git clone https://github.com/vllm-project/vllm.git || true
+  # Install fschat and accelerate for chat completion
+  pip install fschat
+  pip install accelerate
+
+  cd vllm
+  pip list | grep vllm || pip install .
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+
+run: |
+  conda activate vllm
+  echo 'Starting vllm openai api server...'
+  python -m vllm.entrypoints.openai.api_server \
+    --model $MODEL_NAME --tokenizer hf-internal-testing/llama-tokenizer \
+    --host 0.0.0.0
+

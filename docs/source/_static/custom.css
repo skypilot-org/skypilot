@@ -20,3 +20,77 @@
 .rst-versions {
     z-index: 10001 !important; /* Set to 10001 to avoid overlap with kapa */
 }
+
+
+html[data-theme="light"] {
+  --pst-color-secondary: var(--pst-color-primary);
+}
+
+html[data-theme="dark"] {
+  --pst-color-secondary: var(--pst-color-primary);
+
+  .bd-sidebar::-webkit-scrollbar {
+    width: 6px;
+    background-color: #2e2e2e;
+  }
+
+  .bd-sidebar::-webkit-scrollbar-thumb {
+    background-color: #565656;
+    border-radius: 6px;
+  }
+
+  .bd-sidebar::-webkit-scrollbar-thumb:hover {
+    background-color: #6f6f6f;
+  }
+
+  /* Common hidden scrollbar when not hovered */
+  .bd-sidebar:not(:hover) {
+    -ms-overflow-style: none;
+  }
+
+  .bd-sidebar:not(:hover)::-webkit-scrollbar {
+    background: var(--pst-color-background);
+  }
+
+  .bd-sidebar:not(:hover)::-webkit-scrollbar-thumb {
+    background: var(--pst-color-background);
+  }
+}
+
+/* Light mode scrollbar styles */
+.bd-sidebar::-webkit-scrollbar {
+  width: 6px;
+  background-color: #f0f0f0;
+}
+
+.bd-sidebar::-webkit-scrollbar-thumb {
+  background-color: #c1c1c1;
+  /* rounded corners */
+  border-radius: 6px;
+}
+
+.bd-sidebar::-webkit-scrollbar-thumb:hover {
+  background-color: #a8a8a8;
+}
+
+/* Common hidden scrollbar when not hovered */
+.bd-sidebar:not(:hover) {
+  -ms-overflow-style: none;
+}
+
+.bd-sidebar:not(:hover)::-webkit-scrollbar {
+  background: var(--pst-color-background);
+}
+
+.bd-sidebar:not(:hover)::-webkit-scrollbar-thumb {
+  background: var(--pst-color-background);
+}
+
+/* Avoid the border of the search box when click on it */
+.form-control:focus,:focus-visible {
+  border: none;
+  box-shadow: none;
+  outline: none;
+  background-color: var(--pst-color-background);
+  color: var(--pst-color-text-muted);
+}
