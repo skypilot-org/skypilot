@@ -2567,11 +2567,11 @@ def test_inline_env_file(generic_cloud: str):
 
 # ---------- Testing custom image ----------
 @pytest.mark.aws
-def test_custom_image():
-    """Test custom image"""
+def test_aws_custom_image():
+    """Test AWS custom image"""
     name = _get_cluster_name()
     test = Test(
-        'test-custom-image',
+        'test-aws-custom-image',
         [
             f'sky launch -c {name} --retry-until-up -y examples/custom_image.yaml',
             f'sky logs {name} 1 --status',
@@ -2581,6 +2581,20 @@ def test_custom_image():
     )
     run_one_test(test)
 
+@pytest.mark.kubernetes
+def test_kubernetes_custom_image():
+    """Test Kubernetes custom image"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-kubernetes-custom-image',
+        [
+            f'sky launch -c {name} --retry-until-up -y examples/custom_image.yaml',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,
+    )
+    run_one_test(test)
 
 @pytest.mark.slow
 def test_azure_start_stop_two_nodes():

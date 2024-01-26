@@ -10,4 +10,7 @@ setup: |
   echo "running setup"
 
 run: |
-  echo "hello sky"
+  for i in {1..100}; do
+    echo "Hello $i"
+    sleep 0.25
+  done
