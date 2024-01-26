@@ -339,7 +339,6 @@ class SSHCommandRunner:
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
-
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,

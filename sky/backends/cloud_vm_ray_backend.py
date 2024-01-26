@@ -593,6 +593,7 @@ class RayCodeGen:
             textwrap.dedent(f"""\
             returncodes = ray.get(futures)
             if sum(returncodes) != 0:
+                print('set failed in job', file=sys.stderr, flush=True)
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # This waits for all streaming logs to finish.
                 job_lib.scheduler.schedule_step()
@@ -2929,7 +2930,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
             job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
-                                                   handle.docker_user)
+                                                   handle.docker_user,
+                                                   handle.ssh_user)
             cmd = job_lib.JobLibCodeGen.update_status(job_owner)
             logger.debug('Update job queue on remote cluster.')
             with rich_utils.safe_status(
@@ -3552,7 +3554,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             assert jobs is None, (
                 'If cancel_all=True, usage is to set jobs=None')
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
-                                               handle.docker_user)
+                                               handle.docker_user,
+                                               handle.ssh_user)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs, cancel_all)
 
         # All error messages should have been redirected to stdout.
@@ -3663,7 +3666,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   spot_job_id: Optional[int] = None,
                   follow: bool = True) -> int:
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
-                                               handle.docker_user)
+                                               handle.docker_user,
+                                               handle.ssh_user)
         code = job_lib.JobLibCodeGen.tail_logs(job_owner,
                                                job_id,
                                                spot_job_id=spot_job_id,
