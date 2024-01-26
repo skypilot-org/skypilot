@@ -745,7 +745,7 @@ class GCPComputeInstance(GCPInstance):
 
         for disk in config.get('disks', []):
             disk_type = disk.get('initializeParams', {}).get('diskType')
-            if disk_type:
+            if disk_type is not None:
                 disk['initializeParams']['diskType'] = selflink_to_name(
                     disk_type)
         config['machineType'] = selflink_to_name(config['machineType'])
