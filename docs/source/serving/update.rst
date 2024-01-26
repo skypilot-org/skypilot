@@ -13,7 +13,7 @@ SkyServe will launch new replicas described by ``new_service.yaml``. When the nu
 
 For example, suppose we have a running service hosting Llama 2 model with the following resource configuration: 
 
-.. code-block:: console
+.. code-block:: yaml
 
     resources:
         memory: 32+
@@ -21,7 +21,7 @@ For example, suppose we have a running service hosting Llama 2 model with the fo
 
 SkyServe supports updating an existing service to a new resource configuration, such as:
 
-.. code-block:: console
+.. code-block:: yaml
 
     resources:
         memory: 128+
@@ -58,6 +58,25 @@ We can use :code:`sky serve status http-server` to check the status of the servi
     http-server   2   1        52.87.241.103   2 mins ago  1x AWS(vCPU=2)  READY   us-east-1 
 
 Service ``http-server`` has an initial version of 1. Suppose we want to update the service to use 4 CPUs instead of 2, we can update the task yaml ``examples/serve/http_server/task.yaml``, by changing the ``cpu`` parameter from 2 to 4. We can then use :code:`sky serve update` to update the service:
+
+That is, we update the cpus field of the YAML file from 2 to 4:
+
+.. code-block:: yaml
+    :emphasize-lines: 8
+
+    # examples/serve/http_server/task.yaml
+    service:
+        readiness_probe: /
+        replicas: 1
+
+    resources:
+        ports: 8081
+        cpus: 4+
+
+    workdir: .
+
+    run: python3 server.py
+
 
 .. code-block:: console
 
