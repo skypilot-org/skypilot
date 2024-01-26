@@ -1786,7 +1786,8 @@ def _update_cluster_status_no_lock(
 
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
-                                                       handle.docker_user)
+                                                       handle.docker_user,
+                                                       handle.ssh_user)
 
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
