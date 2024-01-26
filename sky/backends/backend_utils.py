@@ -1400,6 +1400,8 @@ def get_node_ips(
                 provider_name, ray_config['provider'].get('region'),
                 ray_config['cluster_name'], ray_config['provider'])
         except Exception as e:  # pylint: disable=broad-except
+            # This could happen when the VM is not fully launched, and a user
+            # is trying to terminate it with `sky down`.
             logger.debug(
                 'Failed to get cluster info for '
                 f'{ray_config["cluster_name"]} from the new provisioner '
