@@ -15,6 +15,7 @@ from sky import check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import skypilot_config
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
@@ -110,6 +111,8 @@ class StoreType(enum.Enum):
             return StoreType.S3
         elif isinstance(store, GcsStore):
             return StoreType.GCS
+        elif isinstance(store, AzureBlobStore):
+            return StoreType.AZURE
         elif isinstance(store, R2Store):
             return StoreType.R2
         elif isinstance(store, IBMCosStore):
@@ -580,15 +583,16 @@ class Storage(object):
                             'using a bucket by writing <destination_path>: '
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
-            elif split_path.scheme in ['s3', 'gs', 'r2', 'cos']:
+            elif split_path.scheme in ['s3', 'gs', 'az', 'r2', 'cos']:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
                 # cloud store - ensure path points to only a directory
                 if mode == StorageMode.MOUNT:
-                    if ((not split_path.scheme == 'cos' and
+                    if (split_path.scheme != 'az' and
+                        ((split_path.scheme != 'cos' and
                          split_path.path.strip('/') != '') or
                         (split_path.scheme == 'cos' and
-                         not re.match(r'^/[-\w]+(/\s*)?$', split_path.path))):
+                         not re.match(r'^/[-\w]+(/\s*)?$', split_path.path)))):
                         # regex allows split_path.path to include /bucket
                         # or /bucket/optional_whitespaces while considering
                         # cos URI's regions (cos://region/bucket_name)
@@ -669,6 +673,8 @@ class Storage(object):
                     if source.startswith('cos://'):
                         # cos url requires custom parsing
                         name = data_utils.split_cos_path(source)[0]
+                    elif source.startswith('az://'):
+                        name = data_utils.split_az_path(source)[0]
                     else:
                         name = urllib.parse.urlsplit(source).netloc
                     assert name is not None, source
@@ -1843,14 +1849,14 @@ class AzureBlobStore(AbstractStore):
     def __init__(self,
                  name: str,
                  source: str,
-                 region: Optional[str] = 'us-east-2',
+                 region: Optional[str] = 'eastus',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
         # TODO(Doyoung): Maybe type annotate the following two clients?
         self.storage_client = None
         self.resource_client = None
-        self.resource_group: str
-        self.storage_account: str
+        self.resource_group_name: str
+        self.storage_account_name: str
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
@@ -1972,11 +1978,77 @@ class AzureBlobStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        self.storage_client = data_utils.create_az_client()
+        self.storage_client = data_utils.create_az_storage_client()
         self.resource_client = data_utils.create_az_resource_client()
-        # temporary testing values to keep the names same.
-        self.resource_group_name = self.name
-        self.storage_account_name = self.name
+        # To mount already existing bucket, source value(i.e. az://storage_account/container_name)
+        # can be used to _get_bucket
+        # If creating a new container, it's necessary to obtain resource group name and storage account
+        # from this function either using default value or user provided value from config.yaml.
+        # We can tell if already existing bucket is used or not
+        
+        # 1. prep to run _get_bucket: Need to figure out either or not
+        # this bucket is externally created or being newly created.
+        # 1.1. If it's externally created, the source must be in a form of 'az://{}/{}'
+        #      Extract the storage account and return it
+        # 1.2. If it's newly being created,
+        # 1.2.1 check if the source is non-az cloud url: perhaps this is not necessary now.
+        # 1.2.2 check if the source is from local directory
+        #      Create storage account and resource group if they do not exist. 
+        # input: self.name, self.source, self.mode
+        # output: resource group and storage account name
+        
+        # TODO(Doyoung): Currently, assuming source starting with az:// to be 
+        # externally created az container. Need to confirm and test if the assumption
+        # is enough
+        if self.source.startswith('az://'):
+            bucket_name, _, storage_account_name = data_utils.split_az_path(self.source)
+            # Using externally created storage
+            if self.name == bucket_name:
+                self.storage_account_name = storage_account_name
+                self.resource_group_name = self._get_resource_group(storage_account_name)
+        # TODO(Doyoung): May need to do some handling for what to do for non az
+        # cloud urls passed as a source.
+        elif not data_utils.is_cloud_store_url(self.source):
+            # creating new cloud storage
+            # 1. Check if resource group and storage account is provided from config
+            #    Use those as the name.
+            # 2. If not provided, use default names for resource group and storage accnt
+            # 3. Check if those are already created or not, and if not, create them.
+            
+            # TODO(Doyoung): Currently, assuming both storage_account and resource group names
+            # are both provided when user specifies them. Need to handle the case when only either
+            # of them is specified. Perhaps force the users to specify both when have to specify any?
+            # Need to put in some thoughts.
+            self.storage_account_name = skypilot_config.get_nested(
+                ('azure', 'storage_account'),
+                f'sky{common_utils.get_user_hash()}')
+            self.resource_group_name = skypilot_config.get_nested(
+                ('azure', 'resource_group'),
+                f'sky{common_utils.get_user_hash()}')
+            self.resource_client.resource_groups.create_or_update(
+                self.resource_group_name,
+                {"location": self.region}
+            )
+            self.storage_client.storage_accounts.begin_create(
+                self.resource_group_name,
+                self.storage_account_name,
+                {
+                    "sku": {
+                    "name": "Standard_GRS"
+                    },
+                    "kind": "StorageV2",
+                    "location": "westus",
+                    "encryption": {
+                    "services": {
+                        "blob": {
+                        "key_type": "Account",
+                        "enabled": True
+                        }
+                    },
+                    "key_source": "Microsoft.Storage"
+                    },
+                }
+            ).result()
         self.bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
@@ -2105,6 +2177,14 @@ class AzureBlobStore(AbstractStore):
         elif self.source.startswith('r2://'):
             data_transfer.r2_to_s3(self.name, self.name)
 
+    def _get_resource_group(self, storage_account_name: str):
+        for account in self.storage_client.storage_accounts.list():
+            if account.name == storage_account_name:
+                # Extract the resource group name from the account ID
+                resource_group = account.id.split('/')[4]
+                return resource_group
+        return None
+
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the Azure Blob Storage Container.
 
@@ -2123,8 +2203,9 @@ class AzureBlobStore(AbstractStore):
                 'sky storage delete' or 'sky start'
         """
         
-        # fetch the bucket
         try:
+            # TODO(Doyoung): This may need an additional handling for public
+            # container. Test it, and if it doesn't work, update.
             container = self.storage_client.blob_containers.get(
                 self.resource_group_name,
                 self.storage_account_name,
@@ -2151,8 +2232,8 @@ class AzureBlobStore(AbstractStore):
                 # Store object is being reconstructed for deletion or re-mount with
                 # sky start, and error is raised instead.
                 if self.sync_on_reconstruction:
-                    bucket = self._create_az_bucket(self.name)
-                    return bucket, True
+                    container = self._create_az_bucket(self.name)
+                    return container, True
 
         # Raised when Storage object is reconstructed for sky storage
         # delete or to re-mount Storages with sky start but the storage
@@ -2185,9 +2266,9 @@ class AzureBlobStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def _create_s3_bucket(self,
-                          bucket_name: str,
-                          region='us-east-2') -> StorageHandle:
+    def _create_az_bucket(self,
+                          container_name: str,
+                          region='eastus') -> StorageHandle:
         """Creates S3 bucket with specific name in specific region
 
         Args:
@@ -2196,21 +2277,14 @@ class AzureBlobStore(AbstractStore):
         Raises:
           StorageBucketCreateError: If bucket creation fails.
         """
-        s3_client = self.client
-        try:
-            if region is None:
-                s3_client.create_bucket(Bucket=bucket_name)
-            else:
-                location = {'LocationConstraint': region}
-                s3_client.create_bucket(Bucket=bucket_name,
-                                        CreateBucketConfiguration=location)
-                logger.info(f'Created S3 bucket {bucket_name} in {region}')
-        except aws.botocore_exceptions().ClientError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketCreateError(
-                    f'Attempted to create a bucket '
-                    f'{self.name} but failed.') from e
-        return aws.resource('s3').Bucket(bucket_name)
+        container = self.storage_client.blob_containers.create(
+            self.resource_group_name,
+            self.storage_account_name,
+            container_name,
+            {}
+        )
+        logger.info(f'Created S3 bucket {container_name} in {region}')
+        return container
 
     def _delete_s3_bucket(self, bucket_name: str) -> bool:
         """Deletes S3 bucket, including all objects in bucket

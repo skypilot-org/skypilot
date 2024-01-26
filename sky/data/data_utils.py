@@ -57,9 +57,10 @@ def split_az_path(az_path: str) -> Tuple[str, str]:
       az_path: str; S3 Path, e.g. s3://imagenet/train/
     """
     path_parts = az_path.replace('az://', '').split('/')
+    storage_account = path_parts.pop(0)
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
-    return bucket, key
+    return bucket, key, storage_account
 
 
 def split_r2_path(r2_path: str) -> Tuple[str, str]:
