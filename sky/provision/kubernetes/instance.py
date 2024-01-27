@@ -469,7 +469,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     # Adding the jump pod to the new_nodes list as well so it can be
     # checked if it's scheduled and running along with other pods.
-    ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
+    ssh_jump_pod_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
     jump_pod = kubernetes.core_api().read_namespaced_pod(
         ssh_jump_pod_name, namespace)
     wait_pods_dict = _filter_pods(namespace, tags, ['Pending'])
