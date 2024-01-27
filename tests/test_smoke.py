@@ -2573,13 +2573,14 @@ def test_aws_custom_image():
     test = Test(
         'test-aws-custom-image',
         [
-            f'sky launch -c {name} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --cloud aws --region us-east-2 --image-id ami-062ddd90fb6f8267a', # Nvidia image
+            f'sky launch -c {name} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --cloud aws --region us-east-2 --image-id ami-062ddd90fb6f8267a',  # Nvidia image
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
         timeout=30 * 60,
     )
     run_one_test(test)
+
 
 @pytest.mark.kubernetes
 @pytest.mark.parametrize("image_id", [
@@ -2603,6 +2604,7 @@ def test_kubernetes_custom_image(image_id):
         timeout=30 * 60,
     )
     run_one_test(test)
+
 
 @pytest.mark.slow
 def test_azure_start_stop_two_nodes():
