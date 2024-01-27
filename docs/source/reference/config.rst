@@ -189,9 +189,8 @@ Available fields and semantics:
           my-label: my-value
       spec:
         runtimeClassName: nvidia
-        containers:
-          imagePullSecrets:
-            - name: my-secret
+        imagePullSecrets:
+          - name: my-secret
 
   # Advanced OCI configurations (optional).
   oci:

@@ -1083,9 +1083,8 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
         kubernetes:
             pod_config:
                 spec:
-                    containers:
-                        imagePullSecrets:
-                            - name: my-secret
+                    imagePullSecrets:
+                        - name: my-secret
         ```
     then the resulting YAML will be:
         ```
@@ -1095,8 +1094,8 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
                 containers:
                     - name: ray
                     image: rayproject/ray:nightly
-                    imagePullSecrets:
-                        - name: my-secret
+                imagePullSecrets:
+                    - name: my-secret
         ```
     """
 
