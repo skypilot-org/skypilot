@@ -24,7 +24,6 @@ TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'  # legacy tag for backward compatibility
 TAG_POD_INITIALIZED = 'skypilot-initialized'
-TAG_SVC_POD_UUID = 'svc-node-uuid'
 
 POD_STATUSES = {
     'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
@@ -371,32 +370,12 @@ def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
         }},
         _request_timeout=kubernetes.API_TIMEOUT)
 
-
-def _setup_service(namespace: str, service_spec: Optional[Dict[str, Any]],
-                   pods: List) -> None:
-    if service_spec is not None:
-        logger.info('run_instances: calling create_namespaced_service '
-                    f'(count={len(pods)}).')
-
-        for pod in pods:
-            node_uuid = pod.meta.labels.get(TAG_SVC_POD_UUID)
-            metadata = service_spec.get('metadata', {})
-            metadata['name'] = pod.meta.name
-            service_spec['metadata'] = metadata
-            service_spec['spec']['selector'] = {TAG_SVC_POD_UUID: node_uuid}
-            _ = kubernetes.core_api().create_namespaced_service(
-                namespace, service_spec)
-
-
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
     provider_config = config.provider_config
     namespace = _get_namespace(provider_config)
-    conf = copy.deepcopy(config.node_config)
-    pod_spec = conf.get('pod', conf)
-    service_spec = conf.get('service')
-    node_uuid = str(uuid.uuid4())
+    pod_spec = copy.deepcopy(config.node_config)
     tags = {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
@@ -406,7 +385,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     else:
         pod_spec['metadata']['labels'] = tags
     pod_spec['metadata']['labels'].update({
-        TAG_SVC_POD_UUID: node_uuid,
         TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
     })
 
@@ -523,7 +501,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
                      f'pods: {list(uninitialized_pods.keys())}')
         uninitialized_pods_list = list(uninitialized_pods.values())
-        _setup_service(namespace, service_spec, uninitialized_pods_list)
         _check_user_privilege(namespace, uninitialized_pods_list)
         _setup_ssh_in_pods(namespace, uninitialized_pods_list)
         _set_env_vars_in_pods(namespace, uninitialized_pods_list)
