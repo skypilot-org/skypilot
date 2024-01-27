@@ -138,7 +138,7 @@ To use your own image, add :code:`image_id: docker:<your image tag>` to the :cod
 
 Your image must satisfy the following requirements:
 
-* Image must be debian based and must have the apt package manager installed.
+* Image must be **debian-based** and must have the apt package manager installed.
 * The default user in the image must have root privileges or passwordless sudo access.
 
 .. note::
