@@ -81,7 +81,6 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.GCP: 240,
     clouds.Lambda: 150,
     clouds.IBM: 160,
-    clouds.Local: 90,
     clouds.OCI: 300,
     clouds.Kubernetes: 300,
     clouds.Vsphere: 240,
@@ -146,7 +145,6 @@ def _get_cluster_config_template(cloud):
         clouds.GCP: 'gcp-ray.yml.j2',
         clouds.Lambda: 'lambda-ray.yml.j2',
         clouds.IBM: 'ibm-ray.yml.j2',
-        clouds.Local: 'local-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.RunPod: 'runpod-ray.yml.j2',
@@ -217,18 +215,15 @@ class RayCodeGen:
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
-    def add_prologue(self, job_id: int, is_local: bool = False) -> None:
+    def add_prologue(self, job_id: int) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
-        self.is_local = is_local
         # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
         # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
         # Otherwise, ray will fail to get the placement group because of a bug
         # in ray job.
-        # TODO(mluo): Check why 'auto' not working with on-prem cluster and
-        # whether the placement group issue also occurs in on-prem cluster.
-        ray_address = 'ray://localhost:10001' if is_local else 'auto'
+        ray_address = 'auto'
         self._code = [
             textwrap.dedent(f"""\
             import getpass
@@ -1593,9 +1588,6 @@ class RetryingVmProvisioner(object):
 
                 config_dict['handle'] = handle
                 plural = '' if num_nodes == 1 else 's'
-                if not isinstance(to_provision.cloud, clouds.Local):
-                    logger.info(f'{fore.GREEN}Successfully provisioned or found'
-                                f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
@@ -1740,11 +1732,7 @@ class RetryingVmProvisioner(object):
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
         style = colorama.Style
-        if isinstance(to_provision_cloud, clouds.Local):
-            cluster_name = logging_info['cluster_name']
-            logger.info(f'{style.BRIGHT}Launching on local cluster '
-                        f'{cluster_name!r}.')
-        elif isinstance(to_provision_cloud, clouds.Kubernetes):
+        if isinstance(to_provision_cloud, clouds.Kubernetes):
             logger.info(f'{style.BRIGHT}Launching on {to_provision_cloud} '
                         f'{style.RESET_ALL}')
         else:
@@ -1862,22 +1850,10 @@ class RetryingVmProvisioner(object):
                     head_internal_ip, head_external_ip)
 
         # All code below is handling num_nodes > 1.
-
         provision_str = ('Successfully provisioned or found existing head '
                          'instance.')
-        if isinstance(to_provision_cloud, clouds.Local):
-            provision_str = 'Successfully connected to head node.'
-
         logger.info(f'{style.BRIGHT}{provision_str} '
                     f'Waiting for workers.{style.RESET_ALL}')
-
-        # Special handling is needed for the local case. This is due to a Ray
-        # autoscaler bug, where filemounting and setup does not run on worker
-        # nodes. Hence, this method here replicates what the Ray autoscaler
-        # would do were it for public cloud.
-        if isinstance(to_provision_cloud, clouds.Local):
-            onprem_utils.do_filemounts_and_setup_on_local_workers(
-                cluster_config_file)
 
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
@@ -1887,8 +1863,7 @@ class RetryingVmProvisioner(object):
             num_nodes=cluster_handle.launched_nodes,
             log_path=log_abs_path,
             nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT[
-                type(to_provision_cloud)],
-            is_local_cloud=isinstance(to_provision_cloud, clouds.Local))
+                type(to_provision_cloud)])
         if cluster_ready:
             cluster_status = GangSchedulingStatus.CLUSTER_READY
             # ray up --no-restart again with upscaling_speed=0 after cluster is
@@ -1941,14 +1916,6 @@ class RetryingVmProvisioner(object):
                 require_outputs=True)
         if returncode == 0:
             return
-        launched_resources = handle.launched_resources
-        # Ray cluster should already be running if the system admin has setup
-        # Ray.
-        if isinstance(launched_resources.cloud, clouds.Local):
-            raise RuntimeError(
-                'The command `ray status` errored out on the head node '
-                'of the local cluster. Check if ray[default]==2.4.0 '
-                'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop')
 
         # Runs `ray up <kwargs>` with our monkey-patched launch hash
@@ -2192,47 +2159,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         return common_utils.read_yaml(self.cluster_yaml).get(
             'provider', {}).get('use_internal_ips', False)
 
-    def _maybe_make_local_handle(self):
-        """Adds local handle for the local cloud case.
-
-        For public cloud, the first time sky launch is ran, task resources
-        = cluster resources. For the local cloud case, sky launch is ran,
-        task resources != cluster resources; hence, this method is needed
-        to correct this.
-        """
-        self.local_handle = None
-        local_file = os.path.expanduser(
-            onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(self.cluster_name))
-        # Local cluster case requires several modifications:
-        #   1) Create local_handle to store local cluster IPs and
-        #      custom accelerators for each node.
-        #   2) Replace launched_resources to represent a generic local
-        #      node (without accelerator specifications).
-        #   3) Replace launched_nodes to represent the total nodes in the
-        #      local cluster.
-        if os.path.isfile(local_file):
-            config = onprem_utils.get_local_cluster_config_or_error(
-                self.cluster_name)
-            self.local_handle = {}
-            cluster_config = config['cluster']
-            auth_config = config['auth']
-            ips = cluster_config['ips']
-            local_region = clouds.Local.LOCAL_REGION.name
-            # Convert existing ResourceHandle fields to specify local
-            # cluster resources.
-            self.launched_resources = resources_lib.Resources(
-                cloud=clouds.Local(), region=local_region)
-            self.launched_nodes = len(ips)
-            self.local_handle['ips'] = ips
-            cluster_accs = onprem_utils.get_local_cluster_accelerators(
-                ips, auth_config)
-            self.local_handle['cluster_resources'] = [
-                resources_lib.Resources(
-                    cloud=clouds.Local(),
-                    accelerators=acc_dict if acc_dict else None,
-                    region=local_region) for acc_dict in cluster_accs
-            ]
-
     def _update_cluster_region(self):
         """Update the region in handle.launched_resources.
 
@@ -2250,9 +2176,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         elif cloud.is_same_cloud(clouds.GCP()) or cloud.is_same_cloud(
                 clouds.AWS()):
             region = provider['region']
-        elif cloud.is_same_cloud(clouds.Local()):
-            # There is only 1 region for Local cluster, 'Local'.
-            region = clouds.Local.LOCAL_REGION.name
 
         self.launched_resources = self.launched_resources.copy(region=region)
 
@@ -4461,14 +4384,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if not storage_mounts:
             return
 
-        cloud = handle.launched_resources.cloud
-        # TODO(romil): Support Mounting for Local (remove sudo installation)
-        if isinstance(cloud, clouds.Local):
-            logger.warning(
-                f'{colorama.Fore.YELLOW}Sky On-prem does not support '
-                f'mounting. No action will be taken.{colorama.Style.RESET_ALL}')
-            return
-
         fore = colorama.Fore
         style = colorama.Style
         plural = 's' if len(storage_mounts) > 1 else ''
@@ -4608,8 +4523,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
         codegen = RayCodeGen()
-        is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id, is_local=is_local)
+        codegen.add_prologue(job_id)
         codegen.add_gang_scheduling_placement_group_and_setup(
             1,
             resources_dict,
@@ -4667,8 +4581,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
 
         codegen = RayCodeGen()
-        is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
-        codegen.add_prologue(job_id, is_local=is_local)
+        codegen.add_prologue(job_id)
         codegen.add_gang_scheduling_placement_group_and_setup(
             num_actual_nodes,
             resources_dict,

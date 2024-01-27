@@ -68,12 +68,8 @@ def _bulk_provision(
     else:
         zone_str = ','.join(z.name for z in zones)
 
-    if isinstance(cloud, clouds.Local):
-        logger.info(f'{style.BRIGHT}Launching on local cluster '
-                    f'{cluster_name!r}.')
-    else:
-        logger.info(f'{style.BRIGHT}Launching on {cloud} '
-                    f'{region_name}{style.RESET_ALL} ({zone_str})')
+    logger.info(f'{style.BRIGHT}Launching on {cloud} '
+                f'{region_name}{style.RESET_ALL} ({zone_str})')
 
     start = time.time()
     with rich_utils.safe_status('[bold cyan]Launching[/]') as status:

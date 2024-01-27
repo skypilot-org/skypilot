@@ -79,7 +79,6 @@ Azure = clouds.Azure
 GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
-Local = clouds.Local
 Kubernetes = clouds.Kubernetes
 OCI = clouds.OCI
 RunPod = clouds.RunPod
@@ -94,7 +93,6 @@ __all__ = [
     'IBM',
     'Kubernetes',
     'Lambda',
-    'Local',
     'OCI',
     'RunPod',
     'SCP',

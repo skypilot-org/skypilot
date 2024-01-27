@@ -2282,14 +2282,6 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
         job_table = job_lib.format_job_queue(job_table)
         click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
 
-    local_clusters = onprem_utils.check_and_get_local_clusters()
-    for local_cluster in local_clusters:
-        if local_cluster not in clusters and show_local_clusters:
-            click.secho(
-                f'Local cluster {local_cluster} is uninitialized;'
-                ' skipped.',
-                fg='yellow')
-
     if unsupported_clusters:
         click.secho(
             f'Note: Job queues are not supported on clusters: '
@@ -3086,17 +3078,7 @@ def _down_or_stop_clusters(
             name for name in _get_glob_clusters(names)
             if controller_utils.Controllers.from_name(name) is None
         ]
-        if not down:
-            local_clusters = onprem_utils.check_and_get_local_clusters()
-            # Local clusters are allowed to `sky down`, but not
-            # `sky start/stop`. `sky down` unregisters the local cluster
-            # from sky.
-            names = [
-                c for c in names
-                if _warn_if_local_cluster(c, local_clusters, (
-                    f'Skipping local cluster {c}, as it does not support '
-                    '`sky stop/autostop`.'))
-            ]
+
         # Make sure the controllers are explicitly specified without other
         # normal clusters.
         if controllers:
@@ -3844,84 +3826,6 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
                 show_default=True)
 
     subprocess_utils.run_in_parallel(sky.storage_delete, names)
-
-
-# TODO(skypilot): remove all code related to the deprecated `sky admin` code
-# path.
-@cli.group(cls=_NaturalOrderGroup, hidden=True)
-def admin():
-    """SkyPilot On-prem administrator CLI."""
-    pass
-
-
-@admin.command('deploy', cls=_DocumentedCodeCommand)
-@click.argument('clusterspec_yaml', required=True, type=str, nargs=-1)
-@usage_lib.entrypoint
-def admin_deploy(clusterspec_yaml: str):
-    """Launches Sky on a local cluster.
-
-    Performs preflight checks (environment setup, cluster resources)
-    and launches Ray to serve sky tasks on the cluster. Finally
-    generates a distributable YAML that can be used by multiple
-    users sharing the cluster.
-
-    This command should be run once by the cluster admin, not cluster users.
-
-    Example:
-
-    .. code-block:: bash
-
-        sky admin deploy examples/local/cluster-config.yaml
-    """
-    steps = 1
-    clusterspec_yaml = ' '.join(clusterspec_yaml)
-    assert clusterspec_yaml
-    is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
-    common_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
-                                 'Invalid cluster YAML: ')
-    if not is_yaml:
-        raise ValueError('Must specify cluster config')
-    assert yaml_config is not None, (is_yaml, yaml_config)
-
-    auth_config = yaml_config['auth']
-    ips = yaml_config['cluster']['ips']
-    if not isinstance(ips, list):
-        ips = [ips]
-    local_cluster_name = yaml_config['cluster']['name']
-    usage_lib.record_cluster_name_for_current_operation(local_cluster_name)
-    usage_lib.messages.usage.update_cluster_resources(
-        len(ips), sky.Resources(sky.Local()))
-
-    # Check for Ray
-    click.secho(f'[{steps}/4] Installing on-premise dependencies\n',
-                fg='green',
-                nl=False)
-    onprem_utils.check_and_install_local_env(ips, auth_config)
-    steps += 1
-
-    # Detect what GPUs the cluster has (which can be heterogeneous)
-    click.secho(f'[{steps}/4] Auto-detecting cluster resources\n',
-                fg='green',
-                nl=False)
-    custom_resources = onprem_utils.get_local_cluster_accelerators(
-        ips, auth_config)
-    steps += 1
-
-    # Launching Ray Autoscaler service
-    click.secho(f'[{steps}/4] Launching sky runtime\n', fg='green', nl=False)
-    onprem_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
-    steps += 1
-
-    # Generate sanitized yaml file to be sent to non-admin users
-    click.secho(f'[{steps}/4] Generating sanitized local yaml file\n',
-                fg='green',
-                nl=False)
-    sanitized_yaml_path = onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
-        local_cluster_name)
-    onprem_utils.save_distributable_yaml(yaml_config)
-    click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
-    click.secho(f'Successfully deployed local cluster {local_cluster_name!r}\n',
-                fg='green')
 
 
 @cli.group(cls=_NaturalOrderGroup)
