@@ -19,6 +19,30 @@ resources:
   accelerators: {A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
 ```
 
+The following is the example output of the optimizer:
+
+```
+Considered resources (1 node):
+----------------------------------------------------------------------------------------------------------
+ CLOUD   INSTANCE                    vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+----------------------------------------------------------------------------------------------------------
+ Azure   Standard_NC48ads_A100_v4    48      440       A100-80GB:2    eastus          7.35          ✔     
+ GCP     g2-standard-96              96      384       L4:8           us-east4-a      7.98                
+ GCP     a2-ultragpu-2g              24      340       A100-80GB:2    us-central1-a   10.06               
+ Azure   Standard_NC96ads_A100_v4    96      880       A100-80GB:4    eastus          14.69               
+ GCP     a2-highgpu-4g               48      340       A100:4         us-central1-a   14.69               
+ AWS     g5.48xlarge                 192     768       A10G:8         us-east-1       16.29               
+ GCP     a2-ultragpu-4g              48      680       A100-80GB:4    us-central1-a   20.11               
+ Azure   Standard_ND96asr_v4         96      900       A100:8         eastus          27.20               
+ GCP     a2-highgpu-8g               96      680       A100:8         us-central1-a   29.39               
+ Azure   Standard_ND96amsr_A100_v4   96      1924      A100-80GB:8    eastus          32.77               
+ AWS     p4d.24xlarge                96      1152      A100:8         us-east-1       32.77               
+ GCP     a2-ultragpu-8g              96      1360      A100-80GB:8    us-central1-a   40.22               
+ AWS     p4de.24xlarge               96      1152      A100-80GB:8    us-east-1       40.97               
+----------------------------------------------------------------------------------------------------------
+```
+
+
 ### Accessing the model
 
 We can now access the model through the OpenAI API with the IP and port:

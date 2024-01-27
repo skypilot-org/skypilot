@@ -509,8 +509,9 @@ class Resources:
 
             # Canonicalize the accelerator names.
             accelerators = {
-                accelerator_registry.canonicalize_accelerator_name(acc):
-                acc_count for acc, acc_count in accelerators.items()
+                accelerator_registry.canonicalize_accelerator_name(
+                    acc, self._cloud): acc_count
+                for acc, acc_count in accelerators.items()
             }
 
             acc, _ = list(accelerators.items())[0]
@@ -1311,8 +1312,9 @@ class Resources:
             accelerators = state.pop('_accelerators', None)
             if accelerators is not None:
                 accelerators = {
-                    accelerator_registry.canonicalize_accelerator_name(acc):
-                    acc_count for acc, acc_count in accelerators.items()
+                    accelerator_registry.canonicalize_accelerator_name(
+                        acc, cloud=None): acc_count
+                    for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators
 
