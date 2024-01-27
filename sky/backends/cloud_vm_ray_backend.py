@@ -392,8 +392,6 @@ class RayCodeGen:
                     .remote(
                         setup_cmd,
                         os.path.expanduser({setup_log_path!r}),
-                        getpass.getuser(),
-                        job_id={self.job_id},
                         env_vars={envs!r},
                         stream_logs=True,
                         with_ray=True,
@@ -572,8 +570,6 @@ class RayCodeGen:
                     .remote(
                         script,
                         log_path,
-                        getpass.getuser(),
-                        job_id={self.job_id},
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
                         with_ray=True,
@@ -2238,6 +2234,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             ]
 
     def _update_cluster_region(self):
+        """Update the region in handle.launched_resources.
+
+        This is for backward compatibility to handle the clusters launched
+        long before. We should remove this after 0.6.0.
+        """
         if self.launched_resources.region is not None:
             return
 
@@ -3181,45 +3182,34 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        if isinstance(handle.launched_resources.cloud, clouds.Local):
-            # Ray Multitenancy is unsupported.
-            # (Git Issue) https://github.com/ray-project/ray/issues/6800
-            # Temporary workaround - wrap the run command in a script, and
-            # execute it as the specified user.
-            executable = onprem_utils.get_python_executable(handle.cluster_name)
-            ray_command = (f'{cd} && {executable} -u {script_path} '
-                           f'> {remote_log_path} 2>&1')
-            job_submit_cmd = self._setup_and_create_job_cmd_on_local_head(
-                handle, ray_command, job_id)
-        else:
-            job_submit_cmd = (
-                'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
-                f'{cd} && ray job submit '
-                '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
-                f'--submission-id {job_id}-$(whoami) --no-wait '
-                f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
+        job_submit_cmd = (
+            'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
+            f'{cd} && ray job submit '
+            '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
+            f'--submission-id {job_id}-$(whoami) --no-wait '
+            f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
-            mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
-                          f'touch {remote_log_path}')
-            code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-            job_submit_cmd = mkdir_code + ' && ' + code
+        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
+                      f'touch {remote_log_path}')
+        code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+        job_submit_cmd = mkdir_code + ' && ' + code
 
-            if spot_dag is not None:
-                # Add the spot job to spot queue table.
-                spot_codegen = spot_lib.SpotCodeGen()
-                spot_code = spot_codegen.set_pending(job_id, spot_dag)
-                # Set the spot job to PENDING state to make sure that this spot
-                # job appears in the `sky spot queue`, when there are already 16
-                # controller process jobs running on the controller VM with 8
-                # CPU cores.
-                # The spot job should be set to PENDING state *after* the
-                # controller process job has been queued, as our skylet on spot
-                # controller will set the spot job in FAILED state if the
-                # controller process job does not exist.
-                # We cannot set the spot job to PENDING state in the codegen for
-                # the controller process job, as it will stay in the job pending
-                # table and not be executed until there is an empty slot.
-                job_submit_cmd = job_submit_cmd + ' && ' + spot_code
+        if spot_dag is not None:
+            # Add the spot job to spot queue table.
+            spot_codegen = spot_lib.SpotCodeGen()
+            spot_code = spot_codegen.set_pending(job_id, spot_dag)
+            # Set the spot job to PENDING state to make sure that this spot
+            # job appears in the `sky spot queue`, when there are already 16
+            # controller process jobs running on the controller VM with 8
+            # CPU cores.
+            # The spot job should be set to PENDING state *after* the
+            # controller process job has been queued, as our skylet on spot
+            # controller will set the spot job in FAILED state if the
+            # controller process job does not exist.
+            # We cannot set the spot job to PENDING state in the codegen for
+            # the controller process job, as it will stay in the job pending
+            # table and not be executed until there is an empty slot.
+            job_submit_cmd = job_submit_cmd + ' && ' + spot_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3280,47 +3270,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             '\nTo view the job queue:\t'
                             f'{backend_utils.BOLD}sky queue {name}'
                             f'{backend_utils.RESET_BOLD}')
-
-    def _setup_and_create_job_cmd_on_local_head(
-        self,
-        handle: CloudVmRayResourceHandle,
-        ray_command: str,
-        job_id: int,
-    ):
-        """Generates and prepares job submission code for local clusters."""
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user)
-        ssh_user = ssh_credentials['ssh_user']
-        runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                 port=handle.head_ssh_port,
-                                                 **ssh_credentials)
-        remote_log_dir = self.log_dir
-        with tempfile.NamedTemporaryFile('w', prefix='sky_local_app_') as fp:
-            fp.write(ray_command)
-            fp.flush()
-            run_file = os.path.basename(fp.name)
-            remote_run_file = f'/tmp/sky_local/{run_file}'
-            # Ensures remote_run_file directory is created.
-            runner.run(f'mkdir -p {os.path.dirname(remote_run_file)}',
-                       stream_logs=False)
-            # We choose to sync code + exec, so that Ray job submission API will
-            # work for the multitenant case.
-            runner.rsync(source=fp.name,
-                         target=remote_run_file,
-                         up=True,
-                         stream_logs=False)
-        runner.run(f'mkdir -p {remote_log_dir}; chmod a+rwx {remote_run_file}',
-                   stream_logs=False)
-        switch_user_cmd = job_lib.make_job_command_with_user_switching(
-            ssh_user, remote_run_file)
-        switch_user_cmd = ' '.join(switch_user_cmd)
-        job_submit_cmd = (
-            'ray job submit '
-            '--address='
-            f'http://127.0.0.1:{constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
-            f'--submission-id {job_id}-$(whoami) '
-            f'--no-wait -- {switch_user_cmd}')
-        return job_submit_cmd
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str) -> int:
@@ -3406,8 +3355,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'
                     f'{backend_utils.RESET_BOLD}')
-        if isinstance(handle.launched_resources.cloud, clouds.Local):
-            stop_str = ''
         logger.info(f'\n{fore.CYAN}Cluster name: '
                     f'{style.BRIGHT}{name}{style.RESET_ALL}'
                     '\nTo log into the head VM:\t'
@@ -4342,23 +4289,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             to_provision = handle_before_refresh.launched_resources
             self.check_resources_fit_cluster(handle_before_refresh, task)
 
-        cloud = to_provision.cloud
-        if isinstance(cloud, clouds.Local):
-            # The field ssh_user is specified in the cluster config file.
-            ssh_user = onprem_utils.get_local_cluster_config_or_error(
-                cluster_name)['auth']['ssh_user']
-            logger.info(f'{colorama.Fore.CYAN}Connecting to local cluster: '
-                        f'{cluster_name!r} [Username: {ssh_user}].'
-                        f'{colorama.Style.RESET_ALL}\n'
-                        'Run `sky status` to see existing clusters.')
-        else:
-            logger.info(
-                f'{colorama.Fore.CYAN}Creating a new cluster: {cluster_name!r} '
-                f'[{task.num_nodes}x {to_provision}].'
-                f'{colorama.Style.RESET_ALL}\n'
-                'Tip: to reuse an existing cluster, '
-                'specify --cluster (-c). '
-                'Run `sky status` to see existing clusters.')
+        logger.info(
+            f'{colorama.Fore.CYAN}Creating a new cluster: {cluster_name!r} '
+            f'[{task.num_nodes}x {to_provision}].'
+            f'{colorama.Style.RESET_ALL}\n'
+            'Tip: to reuse an existing cluster, '
+            'specify --cluster (-c). '
+            'Run `sky status` to see existing clusters.')
         return RetryingVmProvisioner.ToProvisionConfig(
             cluster_name,
             to_provision,

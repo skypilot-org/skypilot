@@ -152,7 +152,6 @@ def run_with_log(
         process_stream: Whether to post-process the stdout/stderr of the
             command, such as replacing or skipping lines on the fly. If
             enabled, lines are printed only when '\r' or '\n' is found.
-        ray_job_id: The id for a ray job.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -289,7 +288,6 @@ def add_ray_env_vars(
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              job_id: Optional[int] = None,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False):
@@ -306,11 +304,9 @@ def run_bash_command_with_log(bash_command: str,
         subprocess_cmd: Union[str, List[str]]
         subprocess_cmd = inner_command
 
-        ray_job_id = job_lib.make_ray_job_id(job_id) if job_id else None
         return run_with_log(
             subprocess_cmd,
             log_path,
-            ray_job_id=ray_job_id,
             stream_logs=stream_logs,
             with_ray=with_ray,
             # Disable input to avoid blocking.

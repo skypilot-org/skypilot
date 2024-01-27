@@ -112,7 +112,6 @@ def add_ray_env_vars(
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              job_id: Optional[int] = ...,
                               env_vars: Optional[Dict[str, str]] = ...,
                               stream_logs: bool = ...,
                               with_ray: bool = ...):
