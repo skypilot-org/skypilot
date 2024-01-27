@@ -690,7 +690,10 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
         break
     enabled_clouds: List[clouds.Cloud] = []
     for c in ret:
-        cloud = clouds.CLOUD_REGISTRY.from_str(c)
+        try:
+            cloud = clouds.CLOUD_REGISTRY.from_str(c)
+        except ValueError:
+            continue
         if cloud is not None:
             enabled_clouds.append(cloud)
     return enabled_clouds
