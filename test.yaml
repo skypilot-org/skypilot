@@ -1,0 +1,6 @@
+name: Test Configuration
+details:
+    - item1: value1
+    - item2 value2  # Missing colon
+    - item3: value3
+  incorrect_indentation  # This line is incorrectly indented
