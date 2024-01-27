@@ -397,7 +397,6 @@ class RayCodeGen:
                         env_vars={envs!r},
                         stream_logs=True,
                         with_ray=True,
-                        use_sudo={self.is_local},
                     ) for i in range(total_num_nodes)]
                 setup_returncodes = ray.get(setup_workers)
                 if sum(setup_returncodes) != 0:
@@ -469,8 +468,7 @@ class RayCodeGen:
                      ray_resources_dict: Dict[str, float],
                      log_dir: str,
                      env_vars: Optional[Dict[str, str]] = None,
-                     gang_scheduling_id: int = 0,
-                     use_sudo: bool = False) -> None:
+                     gang_scheduling_id: int = 0) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_gang_scheduling, (
             'Call add_gang_scheduling_placement_group_and_setup() before '
@@ -579,7 +577,6 @@ class RayCodeGen:
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
                         with_ray=True,
-                        use_sudo={use_sudo},
                     ))""")
         ]
 
@@ -2922,9 +2919,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # update_status will query the ray job status for all INIT /
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
-            job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
-                                                   handle.docker_user)
-            cmd = job_lib.JobLibCodeGen.update_status(job_owner)
+            cmd = job_lib.JobLibCodeGen.update_status()
             logger.debug('Update job queue on remote cluster.')
             with rich_utils.safe_status(
                     '[bold cyan]Preparing SkyPilot runtime'):
@@ -3186,10 +3181,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        job_owner = ssh_credentials['ssh_user']
-        if handle.docker_user is not None:
-            job_owner = handle.docker_user
-        ray_job_id = job_lib.make_ray_job_id(job_id, job_owner)
         if isinstance(handle.launched_resources.cloud, clouds.Local):
             # Ray Multitenancy is unsupported.
             # (Git Issue) https://github.com/ray-project/ray/issues/6800
@@ -3199,13 +3190,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ray_command = (f'{cd} && {executable} -u {script_path} '
                            f'> {remote_log_path} 2>&1')
             job_submit_cmd = self._setup_and_create_job_cmd_on_local_head(
-                handle, ray_command, ray_job_id)
+                handle, ray_command, job_id)
         else:
             job_submit_cmd = (
                 'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
                 f'{cd} && ray job submit '
                 '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
-                f'--submission-id {ray_job_id} --no-wait '
+                f'--submission-id {job_id}-$(whoami) --no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
             mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
@@ -3294,7 +3285,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self,
         handle: CloudVmRayResourceHandle,
         ray_command: str,
-        ray_job_id: str,
+        job_id: int,
     ):
         """Generates and prepares job submission code for local clusters."""
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
@@ -3327,7 +3318,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             'ray job submit '
             '--address='
             f'http://127.0.0.1:{constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
-            f'--submission-id {ray_job_id} '
+            f'--submission-id {job_id}-$(whoami) '
             f'--no-wait -- {switch_user_cmd}')
         return job_submit_cmd
 
@@ -3544,9 +3535,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if cancel_all:
             assert jobs is None, (
                 'If cancel_all=True, usage is to set jobs=None')
-        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
-                                               handle.docker_user)
-        code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs, cancel_all)
+        code = job_lib.JobLibCodeGen.cancel_jobs(jobs, cancel_all)
 
         # All error messages should have been redirected to stdout.
         returncode, stdout, stderr = self.run_on_head(handle,
@@ -3655,10 +3644,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   job_id: Optional[int],
                   spot_job_id: Optional[int] = None,
                   follow: bool = True) -> int:
-        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
-                                               handle.docker_user)
-        code = job_lib.JobLibCodeGen.tail_logs(job_owner,
-                                               job_id,
+        code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                spot_job_id=spot_job_id,
                                                follow=follow)
         if job_id is None and spot_job_id is None:
@@ -4710,15 +4696,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            job_id=str(job_id)))
 
         command_for_node = task.run if isinstance(task.run, str) else None
-        use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_ray_task(
             bash_script=command_for_node,
             env_vars=task.envs,
             task_name=task.name,
             job_run_id=job_run_id,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
-            log_dir=log_dir,
-            use_sudo=use_sudo)
+            log_dir=log_dir)
 
         codegen.add_epilogue()
 
@@ -4776,7 +4760,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
-            use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
             codegen.add_ray_task(
                 bash_script=command_for_node,
                 env_vars=task.envs,
@@ -4784,9 +4767,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_run_id=job_run_id,
                 ray_resources_dict=backend_utils.get_task_demands_dict(task),
                 log_dir=log_dir,
-                gang_scheduling_id=i,
-                use_sudo=use_sudo,
-            )
+                gang_scheduling_id=i)
 
         codegen.add_epilogue()
         # TODO(zhanghao): Add help info for downloading logs.
