@@ -17,6 +17,7 @@ from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 2
+_TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
@@ -385,8 +386,6 @@ def _setup_service(namespace: str, service_spec: Optional[Dict[str, Any]],
             service_spec['spec']['selector'] = {TAG_SVC_POD_UUID: node_uuid}
             _ = kubernetes.core_api().create_namespaced_service(
                 namespace, service_spec)
-            # TODO(zhwu): Should we wait for the service to be ready?
-            # Currently, it is fine as we don't create the service by default
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,
@@ -412,12 +411,29 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     })
 
     terminating_pods = _filter_pods(namespace, tags, ['Terminating'])
-    while len(terminating_pods) > 0:
+    start_time = time.time()
+    while (len(terminating_pods) > 0 and
+           time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION):
         logger.debug(f'run_instances: Found {len(terminating_pods)} '
                      'terminating pods. Waiting them to finish: '
                      f'{list(terminating_pods.keys())}')
         time.sleep(POLL_INTERVAL)
         terminating_pods = _filter_pods(namespace, tags, ['Terminating'])
+
+    if len(terminating_pods) > 0:
+        # If there are still terminating pods, we force delete them.
+        logger.debug(f'run_instances: Found {len(terminating_pods)} '
+                     'terminating pods still in terminating state after '
+                     f'timeout {_TIMEOUT_FOR_POD_TERMINATION}s. '
+                     'Force deleting them.')
+        for pod_name in terminating_pods.keys():
+            # grace_period_seconds=0 means force delete the pod.
+            # https://github.com/kubernetes-client/python/issues/508#issuecomment-1695759777
+            kubernetes.core_api().delete_namespaced_pod(
+                pod_name,
+                namespace,
+                _request_timeout=config_lib.DELETION_TIMEOUT,
+                grace_period_seconds=0)
 
     running_pods = _filter_pods(namespace, tags, ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
