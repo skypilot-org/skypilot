@@ -720,6 +720,11 @@ class Storage(object):
                         s_metadata,
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction)
+                elif s_type == StoreType.AZURE:
+                    store = AzureBlobStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
                 elif s_type == StoreType.R2:
                     store = R2Store.from_metadata(
                         s_metadata,
@@ -2000,7 +2005,7 @@ class AzureBlobStore(AbstractStore):
         # TODO(Doyoung): Currently, assuming source starting with az:// to be 
         # externally created az container. Need to confirm and test if the assumption
         # is enough
-        if self.source.startswith('az://'):
+        if isinstance(self.source, str) and self.source.startswith('az://'):
             bucket_name, _, storage_account_name = data_utils.split_az_path(self.source)
             # Using externally created storage
             if self.name == bucket_name:
@@ -2008,7 +2013,7 @@ class AzureBlobStore(AbstractStore):
                 self.resource_group_name = self._get_resource_group(storage_account_name)
         # TODO(Doyoung): May need to do some handling for what to do for non az
         # cloud urls passed as a source.
-        elif not data_utils.is_cloud_store_url(self.source):
+        else:
             # creating new cloud storage
             # 1. Check if resource group and storage account is provided from config
             #    Use those as the name.
@@ -2068,7 +2073,7 @@ class AzureBlobStore(AbstractStore):
         """
         try:
             if isinstance(self.source, list):
-                self.batch_az_rsync(self.source, create_dirs=True)
+                self.batch_az_blob_sync(self.source, create_dirs=True)
             elif self.source is not None:
                 error_message = (
                     'Moving data directly from Azure to {cloud} is currently '
@@ -2085,7 +2090,7 @@ class AzureBlobStore(AbstractStore):
                 elif self.source.startswith('cos://'):
                     raise NotImplementedError(error_message.format('IBM COS'))
                 else:
-                    self.batch_az_rsync([self.source])
+                    self.batch_az_blob_sync([self.source])
         except exceptions.StorageUploadError:
             raise
         except Exception as e:
@@ -2105,7 +2110,7 @@ class AzureBlobStore(AbstractStore):
     def get_handle(self) -> StorageHandle:
         return aws.resource('s3').Bucket(self.name)
 
-    def batch_az_rsync(self,
+    def batch_az_blob_sync(self,
                         source_path_list: List[Path],
                         create_dirs: bool = False) -> None:
         """Invokes aws s3 sync to batch upload a list of local paths to S3
@@ -2127,14 +2132,16 @@ class AzureBlobStore(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join([
-                f'--include {shlex.quote(file_name)}'
-                for file_name in file_names
+            # shlex.quote is not used as az storage blob sync already
+            # deals with file names with empty spaces when used
+            # with --include-pattern. 
+            includes_list = ';'.join([
+                file_name for file_name in file_names
             ])
+            includes = f'--include-pattern "{includes_list}"'
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = (f'az storage sync '
-                            f'--account-name {self.storage_account_name}'
-                            '--exclude="*" '
+            sync_command = (f'az storage blob sync '
+                            f'--account-name {self.storage_account_name} '
                             f'{includes} '
                             f'--source {base_dir_path} '
                             f'--container {self.bucket.name}')
@@ -2144,15 +2151,17 @@ class AzureBlobStore(AbstractStore):
             # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
-            excluded_list.append('.git/*')
-            excludes = ' '.join([
-                f'--exclude {shlex.quote(file_name)}'
-                for file_name in excluded_list
+            excluded_list.append('.git/')
+            excludes_list = ';'.join([
+                file_name for file_name in excluded_list
             ])
+            excludes = f'--exclude-pattern "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
-            sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
-                            f'{src_dir_path} '
-                            f's3://{self.name}/{dest_dir_name}')
+            sync_command = (f'az storage blob sync '
+                            f'--account-name {self.storage_account_name} '
+                            f'{excludes} '
+                            f'--source {src_dir_path} '
+                            f'--container {self.bucket.name}')
             return sync_command
 
         # Generate message for upload
@@ -2280,13 +2289,26 @@ class AzureBlobStore(AbstractStore):
         Raises:
           StorageBucketCreateError: If bucket creation fails.
         """
-        container = self.storage_client.blob_containers.create(
-            self.resource_group_name,
-            self.storage_account_name,
-            container_name,
-            {}
-        )
-        logger.info(f'Created S3 bucket {container_name} in {region}')
+        try:
+            container = self.storage_client.blob_containers.create(
+                self.resource_group_name,
+                self.storage_account_name,
+                container_name,
+                {}
+            )
+            logger.info(f'Created Azure Blob Storage {container_name} in {region}')
+        except azure.core_exception().ResourceExistsError as e:
+            error_msg, error_code = e.error.message, e.error.code
+            if error_code == 'ContainerOperationFailure':
+                if 'container is being deleted' in error_msg:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketCreateError(
+                            f'The bucket {self.name!r} is currently being '
+                            'deleted. Please wait for the deletion to complete'
+                            'before attempting to create a bucket with the '
+                            'same name. This may take a few minutes. '
+                            'Try again soon.'
+                        )
         return container
 
     def _delete_s3_bucket(self, bucket_name: str) -> bool:
