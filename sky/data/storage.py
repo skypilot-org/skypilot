@@ -2068,7 +2068,7 @@ class AzureBlobStore(AbstractStore):
         """
         try:
             if isinstance(self.source, list):
-                self.batch_aws_rsync(self.source, create_dirs=True)
+                self.batch_az_rsync(self.source, create_dirs=True)
             elif self.source is not None:
                 error_message = (
                     'Moving data directly from Azure to {cloud} is currently '
@@ -2085,7 +2085,7 @@ class AzureBlobStore(AbstractStore):
                 elif self.source.startswith('cos://'):
                     raise NotImplementedError(error_message.format('IBM COS'))
                 else:
-                    self.batch_aws_rsync([self.source])
+                    self.batch_az_rsync([self.source])
         except exceptions.StorageUploadError:
             raise
         except Exception as e:
@@ -2132,9 +2132,12 @@ class AzureBlobStore(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
-                            f'{includes} {base_dir_path} '
-                            f's3://{self.name}')
+            sync_command = (f'az storage sync '
+                            f'--account-name {self.storage_account_name}'
+                            '--exclude="*" '
+                            f'{includes} '
+                            f'--source {base_dir_path} '
+                            f'--container {self.bucket.name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
