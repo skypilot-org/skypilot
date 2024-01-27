@@ -1081,7 +1081,7 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
     and the config has the following:
         ```
         kubernetes:
-            pod_override:
+            pod_config:
                 spec:
                     containers:
                         imagePullSecrets:
