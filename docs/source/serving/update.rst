@@ -1,6 +1,6 @@
 .. _serve-update:
 
-Update
+Update Your Service
 ===========
 
 SkyServe supports update for your services. Use ``sky serve update`` to update an existing service:
