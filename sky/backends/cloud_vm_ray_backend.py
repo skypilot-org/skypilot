@@ -36,7 +36,6 @@ from sky import spot as spot_lib
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.backends import onprem_utils
 from sky.backends import wheel_utils
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
@@ -1354,7 +1353,6 @@ class RetryingVmProvisioner(object):
     ) -> Dict[str, Any]:
         """The provision retry loop."""
         style = colorama.Style
-        fore = colorama.Fore
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1587,7 +1585,6 @@ class RetryingVmProvisioner(object):
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 config_dict['handle'] = handle
-                plural = '' if num_nodes == 1 else 's'
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
@@ -2128,7 +2125,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # TODO (zhwu): Remove this after 0.6.0.
         self.tpu_create_script = tpu_create_script
         self.tpu_delete_script = tpu_delete_script
-        self._maybe_make_local_handle()
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2252,7 +2248,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             cluster_feasible_ips = backend_utils.get_node_ips(
                 self.cluster_yaml,
                 self.launched_nodes,
-                handle=self,
                 head_ip_max_attempts=max_attempts,
                 worker_ip_max_attempts=max_attempts,
                 get_internal_ips=use_internal_ips)
@@ -2282,7 +2277,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             cluster_internal_ips = backend_utils.get_node_ips(
                 self.cluster_yaml,
                 self.launched_nodes,
-                handle=self,
                 head_ip_max_attempts=max_attempts,
                 worker_ip_max_attempts=max_attempts,
                 get_internal_ips=True)

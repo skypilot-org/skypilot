@@ -57,7 +57,6 @@ from sky import sky_logging
 from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import backend_utils
-from sky.backends import onprem_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
@@ -74,7 +73,6 @@ from sky.utils import kubernetes_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
-from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -130,12 +128,7 @@ def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0 and not silent:
-            if onprem_utils.check_if_local_cloud(cluster):
-                click.echo(
-                    constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
-                        cluster=cluster))
-            else:
-                click.echo(f'Cluster {cluster} not found.')
+            click.echo(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
 
@@ -149,15 +142,6 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
             click.echo(f'Storage {storage_object} not found.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
-
-
-def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
-                           message: str) -> bool:
-    """Raises warning if the cluster name is a local cluster."""
-    if cluster in local_clusters:
-        click.echo(message)
-        return False
-    return True
 
 
 def _interactive_node_cli_command(cli_func):
@@ -851,12 +835,9 @@ def _launch_with_confirm(
         prompt = None
         if maybe_status is None:
             cluster_str = '' if cluster is None else f' {cluster!r}'
-            if onprem_utils.check_if_local_cloud(cluster):
-                prompt = f'Initializing local cluster{cluster_str}. Proceed?'
-            else:
-                prompt = (
-                    f'Launching a new cluster{cluster_str}{clone_source_str}. '
-                    'Proceed?')
+            prompt = (
+                f'Launching a new cluster{cluster_str}{clone_source_str}. '
+                'Proceed?')
         elif maybe_status == status_lib.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
@@ -934,10 +915,6 @@ def _create_and_ssh_into_node(
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
-    if onprem_utils.check_if_local_cloud(cluster_name):
-        raise click.BadParameter(
-            f'Name {cluster_name!r} taken by a local cluster and cannot '
-            f'be used for a {node_type}.')
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if not isinstance(backend, backends.CloudVmRayBackend):
@@ -1102,7 +1079,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     *,
     entrypoint_name: str = 'Task',
     name: Optional[str] = None,
-    cluster: Optional[str] = None,
     workdir: Optional[str] = None,
     cloud: Optional[str] = None,
     region: Optional[str] = None,
@@ -1129,7 +1105,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         Otherwise, a task.
     """
     entrypoint = ' '.join(entrypoint)
-    is_yaml, yaml_config = _check_yaml(entrypoint)
+    is_yaml, _ = _check_yaml(entrypoint)
     entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
@@ -1146,9 +1122,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                         fg='yellow',
                         nl=False)
             click.secho(entrypoint, bold=True)
-
-    if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
-        cloud = 'local'
 
     override_params = _parse_override_params(cloud=cloud,
                                              region=region,
@@ -1442,7 +1415,6 @@ def launch(
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
-        cluster=cluster,
         workdir=workdir,
         cloud=cloud,
         region=region,
@@ -1600,10 +1572,6 @@ def exec(
         cluster, operation_str='Executing task on it')
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        if onprem_utils.check_if_local_cloud(cluster):
-            raise click.BadParameter(
-                constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
-                    cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1611,7 +1579,6 @@ def exec(
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
-        cluster=cluster,
         workdir=workdir,
         cloud=cloud,
         region=region,
@@ -2063,13 +2030,10 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 controllers.append(cluster_record)
             else:
                 normal_clusters.append(cluster_record)
-        local_clusters = onprem_utils.check_and_get_local_clusters(
-            suppress_error=True)
 
         num_pending_autostop = 0
         num_pending_autostop += status_utils.show_status_table(
             normal_clusters + controllers, all)
-        status_utils.show_local_status_table(local_clusters)
 
         def _try_get_future_result(future) -> Tuple[bool, Any]:
             result = None
@@ -2257,11 +2221,9 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
-    show_local_clusters = False
     if clusters:
         clusters = _get_glob_clusters(clusters)
     else:
-        show_local_clusters = True
         cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
 
@@ -2763,13 +2725,6 @@ def start(
     else:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
-        local_clusters = onprem_utils.check_and_get_local_clusters()
-        clusters = [
-            c for c in clusters
-            if _warn_if_local_cluster(c, local_clusters, (
-                f'Skipping local cluster {c}, as it does not support '
-                '`sky start`.'))
-        ]
 
         for name in clusters:
             cluster_status, _ = backend_utils.refresh_cluster_status_handle(

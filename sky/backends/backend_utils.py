@@ -37,7 +37,6 @@ from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import status_lib
-from sky.backends import onprem_utils
 from sky.clouds import cloud_registry
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
@@ -815,7 +814,6 @@ def write_cluster_config(
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
 
-    ip_list = None
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
     region_name = resources_vars.get('region')
 
@@ -929,9 +927,6 @@ def write_cluster_config(
                 'sky_ray_yaml_local_path': tmp_yaml_path,
                 'sky_version': str(version.parse(sky.__version__)),
                 'sky_wheel_hash': wheel_hash,
-                # Local IP handling (optional).
-                'head_ip': None if ip_list is None else ip_list[0],
-                'worker_ips': None if ip_list is None else ip_list[1:],
                 # Authentication (optional).
                 **auth_config,
             }),
@@ -1355,7 +1350,6 @@ def get_node_ips(
         expected_num_nodes: int,
         # TODO: remove this argument once we remove the legacy on-prem
         # support.
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
         head_ip_max_attempts: int = 1,
         worker_ip_max_attempts: int = 1,
         get_internal_ips: bool = False) -> List[str]:
@@ -1427,19 +1421,6 @@ def get_node_ips(
                              f'{backoff_time} seconds.')
                 time.sleep(backoff_time)
         worker_ips = re.findall(IP_ADDR_REGEX, out)
-        # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
-        # Workaround: List of IPs are shown in Stderr
-        cluster_name = os.path.basename(cluster_yaml).split('.')[0]
-        if ((handle is not None and hasattr(handle, 'local_handle') and
-             handle.local_handle is not None) or
-                onprem_utils.check_if_local_cloud(cluster_name)):
-            out = proc.stderr.decode()
-            worker_ips = re.findall(IP_ADDR_REGEX, out)
-            # Remove head ip from worker ip list.
-            for i, ip in enumerate(worker_ips):
-                if ip == head_ip_list[0]:
-                    del worker_ips[i]
-                    break
         if len(worker_ips) != expected_num_nodes - 1:
             n = expected_num_nodes - 1
             if len(worker_ips) > n:
@@ -2195,12 +2176,6 @@ def check_cluster_available(
                 f'{backends.CloudVmRayBackend.NAME}.'
                 f'{reset}')
     if cluster_status != status_lib.ClusterStatus.UP:
-        if onprem_utils.check_if_local_cloud(cluster_name):
-            raise exceptions.ClusterNotUpError(
-                constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
-                    cluster_name),
-                cluster_status=cluster_status,
-                handle=handle)
         with ux_utils.print_exception_no_traceback():
             hint_for_init = ''
             if cluster_status == status_lib.ClusterStatus.INIT:

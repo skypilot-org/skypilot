@@ -23,8 +23,7 @@ from sky.utils import ux_utils
 # 3. (For SkyPilot dev) What to do if I want to add a new accelerator?
 #
 # Append its case-sensitive canonical name to this list. The name must match
-# `AcceleratorName` in the service catalog, or what we define in
-# `onprem_utils.get_local_cluster_accelerators`.
+# `AcceleratorName` in the service catalog.
 _ACCELERATORS = [
     'A100',
     'A10G',

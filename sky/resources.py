@@ -198,7 +198,6 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
-        self._try_validate_local()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_spot()
