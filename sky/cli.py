@@ -1055,7 +1055,8 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
                     logger.debug(e)
                     detailed_error = f'\nDetailed Error: {e}\n'
                     invalid_reason = (
-                        'contains an invalid configuration. Please check syntax.\n'
+                        'contains an invalid configuration. '
+                        'Please check syntax.\n'
                         f'{detailed_error}')
                 is_yaml = False
 
