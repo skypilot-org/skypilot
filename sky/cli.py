@@ -4458,9 +4458,10 @@ def serve_up(
         dag.add(task)
 
     # task.service.spot_policy will be translated to spot_placer.
-    if task.service and task.service.spot_placer:
+    assert task.service is not None
+    if task.service.spot_placer:
         for resource in list(task.resources):
-            if resource.use_spot is not None and not resource.use_spot:
+            if resource.use_spot_specified and not resource.use_spot:
                 logger.info('use_spot will be override to True, '
                             'because spot placer is enabled.')
                 break

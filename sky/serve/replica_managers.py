@@ -197,10 +197,10 @@ def _get_use_spot_override(task_yaml: str,
             return use_spot_override
     task = sky.Task.from_yaml(task_yaml)
     spot_use_resources = [
-        1 if resources.use_spot else 0 for resources in task.resources
+        resources for resources in task.resources if resources.use_spot
     ]
     # Either resources all use spot or none use spot.
-    assert sum(spot_use_resources) in [0, len(spot_use_resources)]
+    assert len(spot_use_resources) in [0, len(spot_use_resources)]
     return spot_use_resources == len(task.resources)
 
 
@@ -714,18 +714,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                                                     replica_id)
         assert info is not None
 
-        is_launching = False
-        if replica_id in self._launch_process_pool:
-            is_launching = True
-            launch_process = self._launch_process_pool[replica_id]
-            if launch_process.is_alive():
-                logger.info(f'Terminating launch process for replica '
-                            f'{replica_id}...')
-                launch_process.terminate()
-                launch_process.join()
-            del self._launch_process_pool[replica_id]
-
-        if sync_down_logs and not is_launching:
+        if sync_down_logs:
             _download_and_stream_logs(info)
 
         logger.info(f'preempted: {info.status_property.preempted}, '
@@ -847,6 +836,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                                          f'{replica_id}. Skipping adding '
                                          'active or preemption history.')
                         else:
+                            # If a spot fails to launch in a given zone.
                             if p.exitcode != 0:
                                 self.preemption_history.append(info.zone)
                             else:

@@ -13,7 +13,7 @@ from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
-_policy_to_autoscaler_placer = {
+_policy_to_autoscaler_and_spot_placer = {
     'SpotHedge': ('SpotOnDemandRequestRateAutoscaler', 'DynamicFailover'),
     'SpotOnly': ('SpotRequestRateAutoscaler', 'DynamicFailover'),
 }
@@ -84,8 +84,8 @@ class SkyServiceSpec:
                         'Cannot specify `autoscaler` and `spot_placer`'
                         'when `spot_policy` is specified.')
             # TODO(MaoZiming): do not hardcode the name
-            if spot_policy in _policy_to_autoscaler_placer:
-                autoscaler, spot_placer = _policy_to_autoscaler_placer[
+            if spot_policy in _policy_to_autoscaler_and_spot_placer:
+                autoscaler, spot_placer = _policy_to_autoscaler_and_spot_placer[
                     spot_policy]
             else:
                 with ux_utils.print_exception_no_traceback():

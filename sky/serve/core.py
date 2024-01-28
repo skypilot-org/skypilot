@@ -71,7 +71,8 @@ def up(
                 first_resource_dict.pop(key)
             if key in requested_resources_dict:
                 requested_resources_dict.pop(key)
-        if first_resource_dict != requested_resources_dict:
+        if (first_resource_dict != requested_resources_dict and
+                task.service.spot_placer is not None):
             raise ValueError(
                 'Require multiple resources to have the same fields '
                 'except zones/regions/clouds.')

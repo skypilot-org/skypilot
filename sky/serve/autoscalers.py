@@ -119,7 +119,7 @@ class Autoscaler:
 
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
-        assert (spec.autoscaler is not None and spec.autoscaler in cls.REGISTRY)
+        assert spec.autoscaler is not None and spec.autoscaler in cls.REGISTRY
         return cls.REGISTRY[spec.autoscaler](spec)
 
 
@@ -218,8 +218,18 @@ class RequestRateAutoscaler(Autoscaler):
                                         self.target_qps_per_replica)
         target_num_replicas = max(self.min_replicas,
                                   min(self.max_replicas, target_num_replicas))
-        logger.info(f'Requests per second: {num_requests_per_second}, '
-                    f'Current target number of replicas: {target_num_replicas}')
+
+        overprovision_str = (
+            f' ({self.target_num_replicas + self.num_overprovision} '
+            'with over-provision)' if self.num_overprovision > 0 else '')
+        logger.info(
+            f'Requests per second: {num_requests_per_second}, '
+            f'Current target number of replicas: {target_num_replicas}'
+            f'Final target number of replicas: {self.target_num_replicas}'
+            f'{overprovision_str}, Upscale counter: {self.upscale_counter}/'
+            f'{self.scale_up_consecutive_periods}, '
+            f'Downscale counter: {self.downscale_counter}/'
+            f'{self.scale_down_consecutive_periods}')
 
         if self.target_num_replicas == 0:
             return target_num_replicas
@@ -237,16 +247,6 @@ class RequestRateAutoscaler(Autoscaler):
                 return target_num_replicas
         else:
             self.upscale_counter = self.downscale_counter = 0
-
-        overprovision_str = (
-            f' ({self.target_num_replicas + self.num_overprovision} '
-            'with over-provision)' if self.num_overprovision > 0 else '')
-        logger.info(
-            f'Final target number of replicas: {self.target_num_replicas}'
-            f'{overprovision_str}, Upscale counter: {self.upscale_counter}/'
-            f'{self.scale_up_consecutive_periods}, '
-            f'Downscale counter: {self.downscale_counter}/'
-            f'{self.scale_down_consecutive_periods}')
         return self.target_num_replicas
 
     @classmethod
@@ -270,7 +270,7 @@ class RequestRateAutoscaler(Autoscaler):
         else:
             return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
 
-    def handle_old_versions(
+    def handle_mixed_replica_versions(
             self,
             replica_infos: List['replica_managers.ReplicaInfo']) -> List[int]:
 
@@ -321,7 +321,7 @@ class RequestRateAutoscaler(Autoscaler):
         # ready new replicas, we will direct all traffic to them,
         # we can scale down all old replicas.
         all_replica_ids_to_scale_down.extend(
-            self.handle_old_versions(replica_infos))
+            self.handle_mixed_replica_versions(replica_infos))
 
         # Case 2. when provisioning_and_launched_new_replica is less
         # than num_to_provision, we always scale up new replicas.
@@ -439,7 +439,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         # Once there is min_replicas number of
         # ready new replicas, we will direct all traffic to them,
         # we can scale down all old replicas.
-        for replica_id in self.handle_old_versions(replica_infos):
+        for replica_id in self.handle_mixed_replica_versions(replica_infos):
             scaling_options.append(
                 AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
                                    target=replica_id))
@@ -474,7 +474,7 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
                 latest_version, replica_infos))
 
         num_launched_spot, num_ready_spot = 0, 0
-        num_alive_on_demand, num_ready_on_demand = 0, 0
+        num_launched_on_demand, num_ready_on_demand = 0, 0
         for info in provisioning_and_launched_new_replica:
             if info.is_spot:
                 if info.status == serve_state.ReplicaStatus.READY:
@@ -483,11 +483,11 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
             else:
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_on_demand += 1
-                num_alive_on_demand += 1
+                num_launched_on_demand += 1
         logger.info(
             f'Number of alive spot instances: {num_launched_spot}, '
             f'Number of ready spot instances: {num_ready_spot}, '
-            f'Number of alive on-demand instances: {num_alive_on_demand}, '
+            f'Number of alive on-demand instances: {num_launched_on_demand}, '
             f'Number of ready on-demand instances: {num_ready_on_demand}')
 
         # Obtain scaling options for spot_instances (SpotRequestRateAutoscaler)
@@ -503,16 +503,16 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
         num_on_demand_target = max(self.extra_on_demand_replicas,
                                    num_on_demand_target)
 
-        if num_on_demand_target > num_alive_on_demand:
-            for _ in range(num_on_demand_target - num_alive_on_demand):
+        if num_on_demand_target > num_launched_on_demand:
+            for _ in range(num_on_demand_target - num_launched_on_demand):
                 scaling_options.append(
                     AutoscalerDecision(
                         AutoscalerDecisionOperator.SCALE_UP,
                         target=self._get_on_demand_resources_override_dict()))
-        elif num_alive_on_demand > num_on_demand_target:
+        elif num_launched_on_demand > num_on_demand_target:
             for replica_id in (
                     RequestRateAutoscaler.get_replica_ids_to_scale_down(
-                        num_alive_on_demand - num_on_demand_target,
+                        num_launched_on_demand - num_on_demand_target,
                         list(
                             filter(lambda info: not info.is_spot,
                                    provisioning_and_launched_new_replica)))):
