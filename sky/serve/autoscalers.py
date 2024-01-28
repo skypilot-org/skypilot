@@ -417,8 +417,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                 provisioning_and_launched_new_replica, num_spot_to_scale_up)
             assert len(zones) == num_spot_to_scale_up
             for zone in zones:
-                spot_override = self._get_spot_resources_override_dict()
-                spot_override.update({'zone': zone})
+                spot_override = self._get_spot_resources_override_dict(zone)
                 logger.info(f'Chosen zone {zone} with {self.spot_placer}')
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
