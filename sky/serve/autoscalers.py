@@ -481,10 +481,10 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler,
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
         super().update_version(version, spec)
-        self.extra_on_demand_replicas: int = (
+        self.extra_on_demand_replicas = (
             spec.extra_on_demand_replicas if spec.extra_on_demand_replicas
             is not None else constants.AUTOSCALER_DEFAULT_EXTRA_ON_DEMAND)
-        
+
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False, 'spot_recovery': None}
 
