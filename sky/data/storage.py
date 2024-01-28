@@ -2077,12 +2077,12 @@ class AzureBlobStore(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
-        deleted_by_skypilot = self._delete_s3_bucket(self.name)
+        deleted_by_skypilot = self._delete_az_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted Azure blob storage bucket {self.name}.'
         else:
-            msg_str = (f'Azure blob storage bucket {self.name} may have been '
-                       'deleted externally. Removing from local state.')
+            msg_str = (f'Azure blob storage container {self.name} may have '
+                       'been deleted externally. Removing from local state.')
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -2293,8 +2293,8 @@ class AzureBlobStore(AbstractStore):
                         )
         return container
 
-    def _delete_s3_bucket(self, bucket_name: str) -> bool:
-        """Deletes S3 bucket, including all objects in bucket
+    def _delete_az_bucket(self, bucket_name: str) -> bool:
+        """Deletes Azure blob storage bucket, including all objects in bucket
 
         Args:
           bucket_name: str; Name of bucket
@@ -2302,37 +2302,14 @@ class AzureBlobStore(AbstractStore):
         Returns:
          bool; True if bucket was deleted, False if it was deleted externally.
         """
-        # Deleting objects is very slow programatically
-        # (i.e. bucket.objects.all().delete() is slow).
-        # In addition, standard delete operations (i.e. via `aws s3 rm`)
-        # are slow, since AWS puts deletion markers.
-        # https://stackoverflow.com/questions/49239351/why-is-it-so-much-slower-to-delete-objects-in-aws-s3-than-it-is-to-create-them
-        # The fastest way to delete is to run `aws s3 rb --force`,
-        # which removes the bucket by force.
-        remove_command = f'aws s3 rb s3://{bucket_name} --force'
-        try:
-            with rich_utils.safe_status(
-                    f'[bold cyan]Deleting S3 bucket {bucket_name}[/]'):
-                subprocess.check_output(remove_command.split(' '),
-                                        stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            if 'NoSuchBucket' in e.output.decode('utf-8'):
-                logger.debug(
-                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
-                        bucket_name=bucket_name))
-                return False
-            else:
-                logger.error(e.output)
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete S3 bucket {bucket_name}.')
-
-        # Wait until bucket deletion propagates on AWS servers
-        while data_utils.verify_s3_bucket(bucket_name):
-            time.sleep(0.1)
+        with rich_utils.safe_status(
+                f'[bold cyan]Deleting Azure bucket {bucket_name}[/]'):
+            self.storage_client.blob_containers.delete(
+                self.resource_group_name,
+                self.storage_account_name,
+                bucket_name,
+            )
         return True
-
-
 
 
 class R2Store(AbstractStore):
