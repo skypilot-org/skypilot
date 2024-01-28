@@ -92,7 +92,7 @@ class SkyServiceSpec:
                     raise ValueError(f'Unsupported spot policy: {spot_policy}.')
 
         if autoscaler is None:
-            autoscaler = constants.DEFAULT_AUTOSCALER
+            autoscaler = autoscalers.DEFAULT_AUTOSCALER
 
         if autoscaler not in autoscalers.Autoscaler.get_autoscaler_names():
             with ux_utils.print_exception_no_traceback():

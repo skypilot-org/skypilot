@@ -55,8 +55,6 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 AUTOSCALER_DEFAULT_EXTRA_ON_DEMAND = 0
 # Autoscaler default values for num_overprovision
 AUTOSCALER_DEFAULT_NUM_OVERPROVISION = 0
-# Default autoscaler
-DEFAULT_AUTOSCALER = 'RequestRateAutoscaler'
 
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 

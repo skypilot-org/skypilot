@@ -18,6 +18,9 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# Default autoscaler
+DEFAULT_AUTOSCALER = None
+
 
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
@@ -106,10 +109,15 @@ class Autoscaler:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
-    def __init_subclass__(cls) -> None:
+    def __init_subclass__(cls, default: bool = False) -> None:
         if cls.NAME is None:
             # This is an abstract class, don't put it in the registry.
             return
+        if default:
+            global DEFAULT_AUTOSCALER
+            assert DEFAULT_AUTOSCALER is None, (
+                'Only one autoscaler can be default.')
+            DEFAULT_AUTOSCALER = cls.NAME
         assert cls.NAME not in cls.REGISTRY, f'Name {cls.NAME} already exists'
         cls.REGISTRY[cls.NAME] = cls
 
@@ -123,13 +131,13 @@ class Autoscaler:
         return cls.REGISTRY[spec.autoscaler](spec)
 
 
-class RequestRateAutoscaler(Autoscaler):
+class RequestRateAutoscaler(Autoscaler, default=True):
     """RequestRateAutoscaler: Autoscale according to request rate.
 
     Scales when the number of requests in the given interval is above or below
     the threshold.
     """
-    NAME: Optional[str] = 'RequestRateAutoscaler'
+    NAME: Optional[str] = 'REQUEST_RATE_AUTOSCALER'
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the request rate autoscaler.
@@ -354,7 +362,7 @@ class RequestRateAutoscaler(Autoscaler):
         return scaling_options
 
 
-class SpotRequestRateAutoscaler(RequestRateAutoscaler):
+class SpotRequestRateAutoscaler(RequestRateAutoscaler, default=False):
     """SpotRequestRateAutoscaler: Use spot to autoscale based on request rate.
 
     This autoscaler uses spot instances to save cost.
@@ -366,6 +374,15 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         super().__init__(spec)
         self.spot_placer: 'spot_policy.SpotPlacer' = (
             spot_policy.SpotPlacer.from_spec(spec))
+
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
+        super().update_version(version, spec)
+        if self.spot_placer.NAME != spec.spot_placer:
+            logger.warning(
+                f'Changing spot_placer from {self.spot_placer.NAME} to '
+                f'{spec.spot_placer} is not recommended. ')
+            self.spot_placer = spot_policy.SpotPlacer.from_spec(spec)
 
     def handle_active_history(self, history: List[str]) -> None:
         for zone in history:
@@ -447,7 +464,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         return scaling_options
 
 
-class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
+class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler,
+                                        default=False):
     """SpotOnDemandRequestRateAutoscaler: Use spot/on-demand mixture
     to autoscale based on request rate.
     """
@@ -460,6 +478,13 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
             spec.extra_on_demand_replicas if spec.extra_on_demand_replicas
             is not None else constants.AUTOSCALER_DEFAULT_EXTRA_ON_DEMAND)
 
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
+        super().update_version(version, spec)
+        self.extra_on_demand_replicas: int = (
+            spec.extra_on_demand_replicas if spec.extra_on_demand_replicas
+            is not None else constants.AUTOSCALER_DEFAULT_EXTRA_ON_DEMAND)
+        
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False, 'spot_recovery': None}
 
