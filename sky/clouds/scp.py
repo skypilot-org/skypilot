@@ -310,7 +310,8 @@ class SCP(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
             scp_utils.SCPClient().list_instances()
-        except (AssertionError, KeyError, scp_utils.SCPClientError):
+        except (AssertionError, KeyError, scp_utils.SCPClientError,
+                scp_utils.SCPCreationFailError):
             return False, (
                 'Failed to access SCP with credentials. '
                 'To configure credentials, see: '

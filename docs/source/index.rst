@@ -122,6 +122,7 @@ Documentation
    serving/sky-serve
    serving/service-yaml-spec
    serving/autoscaling
+   serving/update
 
 .. toctree::
    :maxdepth: 1
