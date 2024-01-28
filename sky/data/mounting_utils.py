@@ -12,7 +12,7 @@ _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '1.3.0'
-
+_BLOBFUSE_CACHE_DIR = '~/.sky/blobfuse2_cache'
 
 def get_s3_mount_install_cmd() -> str:
     """Returns a command to install S3 mount utility goofys."""
@@ -44,6 +44,7 @@ def get_gcs_mount_install_cmd() -> str:
 
 def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
     """Returns a command to mount a GCS bucket using gcsfuse."""
+    
     mount_cmd = ('gcsfuse -o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
@@ -51,6 +52,24 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                  f'--rename-dir-limit {_RENAME_DIR_LIMIT} '
                  f'{bucket_name} {mount_path}')
+    return mount_cmd
+
+
+def get_az_mount_install_cmd() -> str:
+    """Returns a command to install AZ blob storage mount utility blobfuse2."""
+    install_cmd = ('sudo apt-get update && '
+                   'sudo apt-get install fuse3 blobfuse2')
+    return install_cmd
+
+
+def get_az_mount_cmd(bucket_name: str, storage_account_name: str,
+                     storage_account_access_key: str,mount_path: str) -> str:
+    """Returns a command to mount a AZ blob storage using blobfuse2."""
+    mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
+                 f'AZURE_STORAGE_ACCESS_KEY={storage_account_access_key} '
+                 f'blobfuse2 {mount_path} --allow-other --no-smylink '
+                 f'--tmp-path {_BLOBFUSE_CACHE_DIR} '
+                 f'--container-name {bucket_name}')
     return mount_cmd
 
 

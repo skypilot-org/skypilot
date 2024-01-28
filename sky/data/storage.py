@@ -1901,7 +1901,7 @@ class AzureBlobStore(AbstractStore):
                     f'Source specified as {self.source}, a COS bucket. ',
                     'COS Bucket should exist.')
         # Validate name
-        self.name = self.validate_name(self.name)
+        self.name = self.validate_container_name(self.name)
 
         # Check if the storage is enabled
         if not _is_storage_cloud_enabled(str(clouds.AWS())):
@@ -1914,10 +1914,10 @@ class AzureBlobStore(AbstractStore):
                     )
 
     @classmethod
-    def validate_name(cls, name) -> str:
-        """Validates the name of the S3 store.
+    def validate_container_name(cls, name) -> str:
+        """Validates the name of the Azure Blob Container.
 
-        Source for rules: https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html # pylint: disable=line-too-long
+        Source for rules: https://learn.microsoft.com/en-us/rest/api/storageservices/Naming-and-Referencing-Containers--Blobs--and-Metadata#container-names # pylint: disable=line-too-long
         """
 
         def _raise_no_traceback_name_error(err_str):
@@ -1931,49 +1931,26 @@ class AzureBlobStore(AbstractStore):
                     'and 63 (max) characters long.')
 
             # Check for valid characters and start/end with a letter or number
-            pattern = r'^[a-z0-9][-a-z0-9.]*[a-z0-9]$'
+            pattern = r'^[a-z0-9][-a-z0-9]*[a-z0-9]$'
             if not re.match(pattern, name):
                 _raise_no_traceback_name_error(
                     f'Invalid store name: name {name} can consist only of '
-                    'lowercase letters, numbers, dots (.), and hyphens (-). '
+                    'lowercase letters, numbers, and hyphens (-). '
                     'It must begin and end with a letter or number.')
 
-            # Check for two adjacent periods
-            if '..' in name:
+            # Check for two adjacent hyphens
+            if '--' in name:
                 _raise_no_traceback_name_error(
                     f'Invalid store name: name {name} must not contain '
-                    'two adjacent periods.')
+                    'two adjacent hyphens.')
 
-            # Check for IP address format
-            ip_pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
-            if re.match(ip_pattern, name):
-                _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not be formatted as '
-                    'an IP address (for example, 192.168.5.4).')
-
-            # Check for 'xn--' prefix
-            if name.startswith('xn--'):
-                _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not start with the '
-                    'prefix "xn--".')
-
-            # Check for '-s3alias' suffix
-            if name.endswith('-s3alias'):
-                _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not end with the '
-                    'suffix "-s3alias".')
-
-            # Check for '--ol-s3' suffix
-            if name.endswith('--ol-s3'):
-                _raise_no_traceback_name_error(
-                    f'Invalid store name: name {name} must not end with the '
-                    'suffix "--ol-s3".')
         else:
             _raise_no_traceback_name_error('Store name must be specified.')
         return name
 
+
     def initialize(self):
-        """Initializes the S3 store object on the cloud.
+        """Initializes the Azure blob storage container object on the cloud.
 
         Initialization involves fetching bucket if exists, or creating it if
         it does not.
@@ -2054,6 +2031,8 @@ class AzureBlobStore(AbstractStore):
                     },
                 }
             ).result()
+        # TODO(Doyoung): Add naming convention check from storage account name
+        # and resource group name
         self.bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
@@ -2100,15 +2079,19 @@ class AzureBlobStore(AbstractStore):
     def delete(self) -> None:
         deleted_by_skypilot = self._delete_s3_bucket(self.name)
         if deleted_by_skypilot:
-            msg_str = f'Deleted S3 bucket {self.name}.'
+            msg_str = f'Deleted Azure blob storage bucket {self.name}.'
         else:
-            msg_str = f'S3 bucket {self.name} may have been deleted ' \
-                      f'externally. Removing from local state.'
+            msg_str = (f'Azure blob storage bucket {self.name} may have been '
+                       'deleted externally. Removing from local state.')
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
     def get_handle(self) -> StorageHandle:
-        return aws.resource('s3').Bucket(self.name)
+        return self.storage_client.blob_containers.get(
+            self.resource_group_name,
+            self.storage_account_name,
+            self.name
+            )
 
     def batch_az_blob_sync(self,
                         source_path_list: List[Path],
@@ -2151,11 +2134,14 @@ class AzureBlobStore(AbstractStore):
             # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
-            excluded_list.append('.git/')
+            excluded_list.append('.git')
             excludes_list = ';'.join([
-                file_name for file_name in excluded_list
+                file_name.rstrip('*') for file_name in excluded_list
             ])
-            excludes = f'--exclude-pattern "{excludes_list}"'
+            # TODO(Doyoung): Currently, used --exclude-path instead of pattern
+            # as --exclude-pattern doesn't seem to recognize excluding certain
+            # directories correctly. Need to investigate further.
+            excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
@@ -2172,7 +2158,8 @@ class AzureBlobStore(AbstractStore):
 
         with rich_utils.safe_status(
                 f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]s3://{self.name}/[/]'):
+                f'[green]{source_message}[/] to '
+                f'[green]az://{self.storage_account_name}/{self.name}/[/]'):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -2181,13 +2168,6 @@ class AzureBlobStore(AbstractStore):
                 self._ACCESS_DENIED_MESSAGE,
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
-
-    def _transfer_to_s3(self) -> None:
-        assert isinstance(self.source, str), self.source
-        if self.source.startswith('gs://'):
-            data_transfer.gcs_to_s3(self.name, self.name)
-        elif self.source.startswith('r2://'):
-            data_transfer.r2_to_s3(self.name, self.name)
 
     def _get_resource_group(self, storage_account_name: str):
         for account in self.storage_client.storage_accounts.list():
@@ -2254,26 +2234,28 @@ class AzureBlobStore(AbstractStore):
             'Attempted to fetch a non-existent bucket: '
             f'{self.name}')
 
-    def _download_file(self, remote_path: str, local_path: str) -> None:
-        """Downloads file from remote to local on s3 bucket
-        using the boto3 API
-
-        Args:
-          remote_path: str; Remote path on S3 bucket
-          local_path: str; Local path on user's device
-        """
-        self.bucket.download_file(remote_path, local_path)
 
     def mount_command(self, mount_path: str) -> str:
-        """Returns the command to mount the bucket to the mount_path.
+        """Returns the command to mount the container to the mount_path.
 
-        Uses goofys to mount the bucket.
+        Uses blobfuse2 to mount the container.
 
         Args:
-          mount_path: str; Path to mount the bucket to.
+          mount_path: str; Path to mount the container to.
         """
-        install_cmd = mounting_utils.get_s3_mount_install_cmd()
-        mount_cmd = mounting_utils.get_s3_mount_cmd(self.bucket.name,
+        # retrieve storage account access key
+        resources = self.resource_client.resources.list_by_resource_group(
+            self.resource_group_name)
+        for resource in resources:
+            if(resource.type=='Microsoft.Storage/storageAccounts' and 
+               resource.name == self.storage_account_name):
+                storage_keys = self.storage_client.storage_accounts.list_keys(
+                    self.resource_group_name, self.storage_account_name)
+                storage_keys = [key.value for key in storage_keys.keys]
+        install_cmd = mounting_utils.get_az_mount_install_cmd()
+        mount_cmd = mounting_utils.get_az_mount_cmd(self.bucket.name,
+                                                    self.storage_account_name,
+                                                    storage_keys[0],
                                                     mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)

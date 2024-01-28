@@ -924,6 +924,18 @@ class Task:
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
+                elif store_type is storage_lib.StoreType.AZURE:
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('gs://'):
+                        blob_path = storage.source
+                    else:
+                        assert storage.name is not None, storage
+                        store_object = storage.stores[storage_lib.StoreType.AZURE]
+                        storage_account_name = store_object.storage_account_name
+                        blob_path = f'az://{storage_account_name}/{storage.name}'
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 elif store_type is storage_lib.StoreType.R2:
                     if storage.source is not None and not isinstance(
                             storage.source,
@@ -947,9 +959,6 @@ class Task:
                             storage.name, data_utils.Rclone.RcloneClouds.IBM)
                         blob_path = f'cos://{cos_region}/{storage.name}'
                     self.update_file_mounts({mnt_path: blob_path})
-                elif store_type is storage_lib.StoreType.AZURE:
-                    # TODO when Azure Blob is done: sync ~/.azure
-                    raise NotImplementedError('Azure Blob not mountable yet')
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '
