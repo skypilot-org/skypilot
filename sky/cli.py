@@ -4468,7 +4468,7 @@ def serve_up(
     else:
         use_spot = False
         for resource in list(task.resources):
-            if resource.use_spot is not None and resource.use_spot:
+            if resource.use_spot:
                 use_spot = True
                 break
         if use_spot:
