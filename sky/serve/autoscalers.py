@@ -375,13 +375,14 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         for zone in history:
             self.spot_placer.handle_preemption(zone)
 
-    def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
+    def _get_spot_resources_override_dict(self, zone: str) -> Dict[str, Any]:
         # We have checked before any_of can only be used to
         # specify multiple zones, regions and clouds.
         return {
             'use_spot': True,
             'spot_recovery': None,
             'region': None,
+            'zone': zone,
         }
 
     def evaluate_scaling(
