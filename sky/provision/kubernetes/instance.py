@@ -370,6 +370,7 @@ def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
         }},
         _request_timeout=kubernetes.API_TIMEOUT)
 
+
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
@@ -384,9 +385,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         pod_spec['metadata']['labels'].update(tags)
     else:
         pod_spec['metadata']['labels'] = tags
-    pod_spec['metadata']['labels'].update({
-        TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud
-    })
+    pod_spec['metadata']['labels'].update(
+        {TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
 
     terminating_pods = _filter_pods(namespace, tags, ['Terminating'])
     start_time = time.time()

@@ -195,6 +195,17 @@ def bulk_provision(
                         terminate=terminate,
                         provider_config=original_config['provider'])
                     break
+                except NotImplementedError as e:
+                    verb = 'terminate' if terminate else 'stop'
+                    # If the underlying cloud does not support stopping
+                    # instances, we should stop failover as well.
+                    raise provision_common.StopFailoverError(
+                        'During provisioner\'s failover, '
+                        f'{terminate_str.lower()} {cluster_name!r} failed. '
+                        f'We cannot {verb} the resources launched, as it is '
+                        f'not supported by {cloud}. Please try launching the '
+                        'cluster again, or terminate it with: '
+                        f'sky down {cluster_name.display_name}') from e
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug(f'{terminate_str} {cluster_name!r} failed.')
                     logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
