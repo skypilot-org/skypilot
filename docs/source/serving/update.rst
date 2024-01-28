@@ -102,7 +102,7 @@ We can then use :code:`sky serve update` to update the service:
     $ sky serve update http-server examples/serve/http_server/task.yaml
 
 SkyServe will first launch two new replicas with 4 vCPUs. When the number of new
-replicas reaches the ``min_replicas`` (defaults to ``service.replicas`` when unspecified; i.e., 2) required for the service,
+replicas reaches the ``min_replicas`` (set to ``service.replicas`` when unspecified; i.e., 2) required for the service,
 SkyServe will scale down old replicas to save cost. The service's version is
 updated from 1 to 2. Replicas 3 and 4 are the new replicas with 4
 vCPUs. Replicas 1 and 2 are the old replicas with 2 vCPUs. When the
