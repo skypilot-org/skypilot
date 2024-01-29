@@ -845,7 +845,7 @@ class ServeCodeGen:
                             follow: bool) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow}) ',
+            f'{service_name!r}, {replica_id!r}, follow={follow})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
