@@ -58,7 +58,7 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
 def get_az_mount_install_cmd() -> str:
     """Returns a command to install AZ blob storage mount utility blobfuse2."""
     install_cmd = ('sudo apt-get update && '
-                   'sudo apt-get install fuse3 blobfuse2')
+                   'sudo apt-get install fuse3 blobfuse2 -y')
     return install_cmd
 
 

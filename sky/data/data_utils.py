@@ -137,23 +137,15 @@ def verify_gcs_bucket(name: str) -> bool:
         return False
 
 
-def create_az_storage_client() -> Client:
+def create_az_client(type: str, storage_account_name: str = None, container_name: str = None) -> Client:
     """Helper method that connects to Boto3 client for S3 Bucket
 
     Args:
       region: str; Region name, e.g. us-west-1, us-east-2
     """
     subscription_id = azure.get_subscription_id()
-    return azure.get_client('storage', subscription_id)
+    return azure.get_client(type, subscription_id, storage_account_name, container_name)
 
-def create_az_resource_client() -> Client:
-    """Helper method that connects to Boto3 client for S3 Bucket
-
-    Args:
-      region: str; Region name, e.g. us-west-1, us-east-2
-    """
-    subscription_id = azure.get_subscription_id()
-    return azure.get_client('resource', subscription_id)
 
 def verify_az_bucket(name: str) -> bool:
     """Helper method that checks if the R2 bucket exists

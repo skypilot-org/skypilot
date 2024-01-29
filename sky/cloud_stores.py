@@ -153,6 +153,80 @@ class GcsCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class AzureCloudStorage(CloudStorage):
+    """Azure Blob Storage."""
+
+    # List of commands to install AWS CLI
+    _GET_AZCLI = [
+        'az --version >/dev/null 2>&1 || '
+        'sudo apt-get install azure-cli -y && '
+        'az login',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether S3 'url' is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        # Given the url of the cloud storage, need to determine either or not
+        # the url is a directory.
+        
+        # split the url using split_az_path
+        container_name, path, storage_account_name = data_utils.split_az_path(url)
+        # if there aren't more than just container name and storage account,
+        # that's a directory
+        if len(path) == 0:
+            return True
+        # if there's more, then we'd need to check if it's a directory or
+        # a file
+        container_client = data_utils.create_az_client(
+            type='container',
+            storage_account_name=storage_account_name,
+            container_name=container_name)
+        num_objects = 0
+        for blob in container_client.list_blobs(name_starts_with=path):
+            if blob.name == path:
+                return False
+            num_objects += 1
+            if num_objects > 1:
+                return True
+
+        # A directory with few or no items
+        return True
+                         
+        
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using AWS CLI."""
+        # AWS Sync by default uses 10 threads to upload files to the bucket.
+        # To increase parallelism, modify max_concurrent_requests in your
+        # aws config file (Default path: ~/.aws/config).
+        container_name, path, storage_account_name = data_utils.split_az_path(
+            source)
+        download_command = ('az storage blob download-batch '
+                            f'--account-name {storage_account_name} '
+                            f'--source {container_name} --file {destination} '
+                            f'--container-name {container_name}')
+
+        all_commands = list(self._GET_AZCLI)
+        all_commands.append(download_command)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI."""
+        container_name, path, storage_account_name = data_utils.split_az_path(
+            source)
+        download_command = ('az storage blob download '
+                            f'--account-name {storage_account_name} '
+                            f'--name {path} --file {destination} '
+                            f'--container-name {container_name}')
+
+        all_commands = list(self._GET_AZCLI)
+        all_commands.append(download_command)
+        return ' && '.join(all_commands)
+
+
 class R2CloudStorage(CloudStorage):
     """Cloudflare Cloud Storage."""
 
@@ -300,4 +374,5 @@ _REGISTRY = {
     's3': S3CloudStorage(),
     'r2': R2CloudStorage(),
     'cos': IBMCosCloudStorage(),
+    'az': AzureCloudStorage()
 }

@@ -1960,8 +1960,8 @@ class AzureBlobStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        self.storage_client = data_utils.create_az_storage_client()
-        self.resource_client = data_utils.create_az_resource_client()
+        self.storage_client = data_utils.create_az_client('storage')
+        self.resource_client = data_utils.create_az_client('resource')
         # To mount already existing bucket, source value(i.e. az://storage_account/container_name)
         # can be used to _get_bucket
         # If creating a new container, it's necessary to obtain resource group name and storage account
@@ -2147,7 +2147,7 @@ class AzureBlobStore(AbstractStore):
                             f'--account-name {self.storage_account_name} '
                             f'{excludes} '
                             f'--source {src_dir_path} '
-                            f'--container {self.bucket.name}')
+                            f'--container {self.bucket.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
