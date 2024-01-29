@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Type, Union
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
-from sky.serve import spot_policy
+from sky.serve import spot_policies
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
@@ -372,8 +372,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler, default=False):
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         super().__init__(spec)
-        self.spot_placer: 'spot_policy.SpotPlacer' = (
-            spot_policy.SpotPlacer.from_spec(spec))
+        self.spot_placer: 'spot_policies.SpotPlacer' = (
+            spot_policies.SpotPlacer.from_spec(spec))
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
@@ -382,7 +382,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler, default=False):
             logger.warning(
                 f'Changing spot_placer from {self.spot_placer.NAME} to '
                 f'{spec.spot_placer} is not recommended. ')
-            self.spot_placer = spot_policy.SpotPlacer.from_spec(spec)
+            self.spot_placer = spot_policies.SpotPlacer.from_spec(spec)
 
     def handle_active_history(self, history: List[str]) -> None:
         for zone in history:

@@ -8,7 +8,7 @@ import yaml
 
 from sky.serve import autoscalers
 from sky.serve import constants
-from sky.serve import spot_policy as spot_policies
+from sky.serve import spot_policies
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils

@@ -1057,6 +1057,15 @@ class FailoverCloudErrorHandlerV2:
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
+            elif code in ['RESOURCE_OPERATION_RATE_EXCEEDED']:
+                # This code can happen when the VM is being created with a
+                # machine image, and the VM and the machine image are on
+                # different zones. We already have the retry when calling the
+                # insert API, but if it still fails, we should block the zone
+                # to avoid infinite retry.
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone.name))
             elif code in [3, 8, 9]:
                 # Error code 3 means TPU is preempted during creation.
                 # Example:
