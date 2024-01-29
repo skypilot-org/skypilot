@@ -1148,6 +1148,17 @@ class FailoverCloudErrorHandlerV2:
                     launchable_resources.copy(zone=zone.name))
 
     @staticmethod
+    def _kubernetes_handler(blocked_resources: Set['resources_lib.Resources'],
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region', zones: List['clouds.Zone'],
+                     err: Exception):
+        del zones, region  # Unused.
+
+        logger.warning(f'Error: {err} ')
+        _add_to_blocked_resources(blocked_resources,
+                                  launchable_resources.copy(zone=None))
+
+    @staticmethod
     def _default_handler(blocked_resources: Set['resources_lib.Resources'],
                          launchable_resources: 'resources_lib.Resources',
                          region: 'clouds.Region',
