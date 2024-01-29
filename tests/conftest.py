@@ -22,7 +22,7 @@ import pytest
 # --managed-spot.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes'
+    'kubernetes', 'cudo'
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -38,7 +38,8 @@ cloud_to_pytest_keyword = {
     'ibm': 'ibm',
     'scp': 'scp',
     'oci': 'oci',
-    'kubernetes': 'kubernetes'
+    'kubernetes': 'kubernetes',
+    'cudo': 'cudo'
 }
 
 
@@ -71,8 +72,8 @@ def pytest_addoption(parser):
         default='gcp',
         choices=all_clouds_in_smoke_tests,
         help='Cloud to use for generic tests. If the generic cloud is '
-        'not within the clouds to be run, it will be reset to the first '
-        'cloud in the list of the clouds to be run.')
+             'not within the clouds to be run, it will be reset to the first '
+             'cloud in the list of the clouds to be run.')
 
     parser.addoption('--terminate-on-failure',
                      dest='terminate_on_failure',
