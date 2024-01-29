@@ -2598,6 +2598,7 @@ def check_public_cloud_enabled():
     Exceptions:
         exceptions.NoCloudAccessError: if no public cloud is enabled.
     """
+    sky_check.check(quiet=True)
 
     def _no_public_cloud():
         enabled_clouds = global_user_state.get_enabled_clouds()
@@ -2608,7 +2609,6 @@ def check_public_cloud_enabled():
     if not _no_public_cloud():
         return
 
-    sky_check.check(quiet=True)
     if _no_public_cloud():
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
