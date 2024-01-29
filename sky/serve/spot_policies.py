@@ -1,4 +1,5 @@
 """ Sky Spot Policy for SkyServe."""
+import collections
 import enum
 import typing
 from typing import Dict, List, Optional, Type
@@ -101,18 +102,17 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
             for info in existing_replicas
             if info.is_spot and info.zone is not None
         ]
-        existing_zones_to_count = {
-            zone: existing_zones.count(zone) for zone in existing_zones
-        }
+        existing_zones_to_count = collections.defaultdict(int)
+        for zone in existing_zones:
+            existing_zones_to_count[zone] = existing_zones.count(zone)
 
         selected_zones = []
         while num_replicas > 0:
             # Select the zone with the least number of replicas.
             selected_zone = min(
                 self.active_zones(),
-                key=lambda zone: existing_zones_to_count.get(zone, 0))
+                key=lambda zone: existing_zones_to_count[selected_zone])
             selected_zones.append(selected_zone)
             num_replicas -= 1
-            existing_zones_to_count[selected_zone] = (
-                existing_zones_to_count.get(selected_zone, 0) + 1)
+            existing_zones_to_count[selected_zone] += 1
         return selected_zones
