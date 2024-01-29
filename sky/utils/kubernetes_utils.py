@@ -1024,10 +1024,10 @@ def check_port_forward_mode_dependencies() -> None:
     osused = pltsys()
     dependency_list = [['socat', ['socat', '-V'], 'socat'],
                        ['nc', ['nc', '-h'], 'netcat']]
-    if osused == "Darwin":
-        dependency_list.append(["gshuf", ["gshuf", "--version"], "coreutils"])
-    elif osused == "Linux":
-        dependency_list.append(["shuf", ["shuf", "--version"], "coreutils"])
+    if osused == 'Darwin':
+        dependency_list.append(['gshuf', ['gshuf', '--version'], 'coreutils'])
+    elif osused == 'Linux':
+        dependency_list.append(['shuf', ['shuf', '--version'], 'coreutils'])
     for name, check_cmd, install_cmd in dependency_list:
         try:
             subprocess.run(check_cmd,
