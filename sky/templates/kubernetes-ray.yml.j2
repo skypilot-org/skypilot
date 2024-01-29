@@ -207,7 +207,7 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - sudo DEBIAN_FRONTEND=noninteractive apt install gcc patch pciutils rsync fuse curl python3 python3-pip -y;
+  - sudo DEBIAN_FRONTEND=noninteractive apt install gcc patch pciutils rsync fuse curl -y;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;

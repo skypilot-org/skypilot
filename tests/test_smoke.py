@@ -2598,7 +2598,7 @@ def test_kubernetes_custom_image(image_id):
             # Try exec to run again and check if the logs are printed
             f'sky exec {name} tests/test_yamls/test_custom_image.yaml --cloud kubernetes --image-id {image_id} --region None --gpus T4:1 | grep "Hello 100"',
             # Make sure ssh is working with custom username
-            # f'ssh {name} echo hi | grep hi',
+            f'ssh {name} echo hi | grep hi',
         ],
         f'sky down -y {name}',
         timeout=30 * 60,
