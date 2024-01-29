@@ -1053,7 +1053,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
             except yaml.YAMLError as e:
                 if yaml_file_provided:
                     logger.debug(e)
-                    detailed_error = f'\nDetailed Error: {e}\n'
+                    detailed_error = f'\nYAML Error: {e}\n'
                     invalid_reason = ('contains an invalid configuration. '
                                       'Please check syntax.\n'
                                       f'{detailed_error}')
