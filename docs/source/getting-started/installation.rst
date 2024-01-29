@@ -31,6 +31,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[oci]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
+          pip install "skypilot-nightly[cudo]"
           pip install "skypilot-nightly[all]"
 
     .. tab-item:: Latest Release
@@ -53,6 +54,7 @@ Install SkyPilot using pip:
           pip install "skypilot[oci]"
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
+          pip install "skypilot[cudo]"
           pip install "skypilot[all]"
 
     .. tab-item:: From Source
@@ -78,6 +80,7 @@ Install SkyPilot using pip:
           pip install -e ".[oci]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
+          pip install -e ".[cudo]"
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -131,6 +134,7 @@ This will produce a summary like:
     OCI: enabled
     IBM: enabled
     SCP: enabled
+    Cudo: enabled
     Cloudflare (for R2 object store): enabled
 
   SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
@@ -227,6 +231,29 @@ Lambda Cloud
 
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
+
+Cudo Compute
+~~~~~~~~~~~~~~~~~~
+
+`Cudo Compute <https://www.cudocompute.com/>`__ GPU cloud provides lost cost GPUs powered with green energy.
+
+1. Create an API Key by following `this guide <https://www.cudocompute.com/docs/guide/api-keys/>`__.
+2. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
+3. Run :code:`cudoctl init`:
+
+.. code-block:: shell
+
+  cudoctl init
+    ✔ api key: my-api-key
+    ✔ project: my-project
+    ✔ billing account: my-billing-account
+    ✔ context: default
+    config file saved ~/.config/cudo/cudo.yml
+
+If you want to want to use skypilot with a different Cudo Compute account or project, just run :code:`cudoctl init`: again.
+
+
+
 
 IBM
 ~~~~~~~~~
