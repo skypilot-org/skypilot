@@ -555,58 +555,60 @@ def stream_replica_logs(service_name: str, replica_id: int,
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
-    launch_log_file_name = generate_replica_launch_log_file_name(
-        service_name, replica_id)
+
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
-    if os.path.exists(launch_log_file_name):
-        replica_cluster_name = generate_replica_cluster_name(
-            service_name, replica_id)
-
-        def _get_replica_status() -> serve_state.ReplicaStatus:
-            replica_info = serve_state.get_replica_infos(service_name)
-            for info in replica_info:
-                if info.replica_id == replica_id:
-                    return info.status
-            raise ValueError(
-                _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
-
-        finish_stream = (lambda: _get_replica_status() != serve_state.
-                         ReplicaStatus.PROVISIONING)
-        with open(launch_log_file_name, 'r', newline='') as f:
-            for line in _follow_replica_logs(f,
-                                             replica_cluster_name,
-                                             finish_stream=finish_stream,
-                                             exit_if_stream_end=not follow):
-                print(line, end='', flush=True)
-        if (not follow and _get_replica_status()
-                == serve_state.ReplicaStatus.PROVISIONING):
-            # Early exit if not following the logs.
-            return ''
-
-        backend = backends.CloudVmRayBackend()
-        handle = global_user_state.get_handle_from_cluster_name(
-            replica_cluster_name)
-        if handle is None:
-            return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
-        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
-
-        # Notify user here to make sure user won't think the log is finished.
-        print(f'{colorama.Fore.YELLOW}Start streaming logs for task job '
-              f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
-
-        # Always tail the latest logs, which represent user setup & run.
-        returncode = backend.tail_logs(handle, job_id=None, follow=follow)
-        if returncode != 0:
-            return (f'{colorama.Fore.RED}Failed to stream logs for replica '
-                    f'{replica_id}.{colorama.Style.RESET_ALL}')
-        return ''
-    elif os.path.exists(log_file_name):
+    if os.path.exists(log_file_name):
         with open(log_file_name, 'r') as f:
             print(f.read(), flush=True)
         return ''
-    else:
+
+    launch_log_file_name = generate_replica_launch_log_file_name(
+        service_name, replica_id)
+    if not os.path.exists(launch_log_file_name):
         return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')
+
+    replica_cluster_name = generate_replica_cluster_name(
+        service_name, replica_id)
+
+    def _get_replica_status() -> serve_state.ReplicaStatus:
+        replica_info = serve_state.get_replica_infos(service_name)
+        for info in replica_info:
+            if info.replica_id == replica_id:
+                return info.status
+        raise ValueError(
+            _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
+
+    finish_stream = (
+        lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
+    with open(launch_log_file_name, 'r', newline='') as f:
+        for line in _follow_replica_logs(f,
+                                         replica_cluster_name,
+                                         finish_stream=finish_stream,
+                                         exit_if_stream_end=not follow):
+            print(line, end='', flush=True)
+    if (not follow and
+            _get_replica_status() == serve_state.ReplicaStatus.PROVISIONING):
+        # Early exit if not following the logs.
+        return ''
+
+    backend = backends.CloudVmRayBackend()
+    handle = global_user_state.get_handle_from_cluster_name(
+        replica_cluster_name)
+    if handle is None:
+        return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+
+    # Notify user here to make sure user won't think the log is finished.
+    print(f'{colorama.Fore.YELLOW}Start streaming logs for task job '
+          f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
+
+    # Always tail the latest logs, which represent user setup & run.
+    returncode = backend.tail_logs(handle, job_id=None, follow=follow)
+    if returncode != 0:
+        return (f'{colorama.Fore.RED}Failed to stream logs for replica '
+                f'{replica_id}.{colorama.Style.RESET_ALL}')
+    return ''
 
 
 def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
