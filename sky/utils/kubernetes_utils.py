@@ -1,6 +1,7 @@
 """Kubernetes utilities for SkyPilot."""
 import math
 import os
+from platform import system as pltsys
 import re
 import subprocess
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -8,7 +9,7 @@ from urllib.parse import urlparse
 
 import jinja2
 import yaml
-from platform import system as pltsys
+
 
 import sky
 from sky import exceptions
