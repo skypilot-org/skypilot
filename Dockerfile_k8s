@@ -1,4 +1,4 @@
-FROM continuumio/miniconda3:22.11.1
+FROM continuumio/miniconda3:23.3.1-0
 
 # TODO(romilb): Investigate if this image can be consolidated with the skypilot
 #  client image (`Dockerfile`)
@@ -25,25 +25,20 @@ RUN useradd -m -s /bin/bash sky && \
 # Switch to sky user
 USER sky
 
-# Install SkyPilot pip dependencies
+# Install SkyPilot pip dependencies preemptively to speed up provisioning time
 RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install networkx oauth2client pandas pendulum PrettyTable && \
     pip install ray[default]==2.4.0 rich tabulate filelock && \
     pip install packaging 'protobuf<4.0.0' pulp && \
-    pip install awscli boto3 pycryptodome==3.12.0 && \
-    pip install docker kubernetes
+    pip install pycryptodome==3.12.0 && \
+    pip install docker kubernetes==28.1.0
 
 # Add /home/sky/.local/bin/ to PATH
 RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
-# Install SkyPilot. This is purposely separate from installing SkyPilot
-# dependencies to optimize rebuild time
+# Copy SkyPilot code base. This is required for the ssh jump pod to find the
+# lifecycle management scripts
 COPY --chown=sky . /skypilot/sky/
-
-# TODO(romilb): Installing SkyPilot may not be necessary since ray up will do it
-RUN cd /skypilot/ && \
-    sudo mv -v sky/setup_files/* . && \
-    pip install ".[aws]"
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1
