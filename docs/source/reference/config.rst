@@ -178,26 +178,28 @@ Available fields and semantics:
     # This must be either: 'ingress' or 'loadbalancer'. If not specified,
     # defaults to 'loadbalancer'.
     #
-    # ingress: This requires an ingress controller to be configured on the
-    # Kubernetes cluster. The ingress controller will be used to open ports on
-    # the cluster. Currently, only the NGINX ingress controller is supported.
-    # Refer to https://kubernetes.github.io/ingress-nginx/ for details on
-    # configuring the NGINX ingress controller. This mode creates an ingress and a
-    # ClusterIP service for each port opened. The port can be accessed externally
-    # using the Ingress URL plus a path prefix of the form
-    # /skypilot/{cluster_name_on_cloud}/{port}
-    # Refer to kubernetes-ingress.yml.j2 for the exact template.
-    #
-    # loadbalancer: This mode is supported for all Kubernetes clusters that support
-    # the LoadBalancer service type. This mode creates a single LoadBalancer service for
-    # all ports opened. The port can be accessed externally using the service's external IP
+    # loadbalancer: Creates services of type `LoadBalancer` to expose ports.
+    # See https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer.
+    # This mode is supported for all Kubernetes clusters that support
+    # the LoadBalancer service type (e.g., GKE, EKS and other cloud hosted k8s)
+    # This mode creates a single LoadBalancer service for all ports opened.
+    # The port can be accessed externally using the service's external IP
     # plus the specific port you want to access. The external IP generally takes some time
     # to be assigned so there might be a slight delay before the port can be accessed.
     #
+    # ingress: Creates an ingress and a ClusterIP service for each port opened.
+    # Requires an ingress controller to be configured on the Kubernetes cluster.
+    # Currently, only the NGINX ingress controller is supported.
+    # Refer to https://kubernetes.github.io/ingress-nginx/deploy/ for details on
+    # deploying the NGINX ingress controller. In this mode, the port can be
+    # accessed externally using the Ingress URL plus a path prefix of the form
+    # /skypilot/{cluster_pod_name}/{port}
+    # Refer to kubernetes-ingress.yml.j2 for the exact template.
+    #
     # You can get the endpoint for any port opened using the following command:
-    # sky status {cluster_name} --endpoint {port}
+    # `sky status {cluster_name} --endpoint {port}`
     # or list the endpoints for all ports opened using:
-    # sky status {cluster_name} --endpoints
+    # `sky status {cluster_name} --endpoints`
     ports: loadbalancer
 
   # Advanced OCI configurations (optional).
