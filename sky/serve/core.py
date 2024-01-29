@@ -9,7 +9,6 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
-from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
@@ -43,6 +42,10 @@ def up(
         task: sky.Task to serve up.
         service_name: Name of the service.
     """
+    # This is to avoid circular import.
+    # pylint: disable=import-outside-toplevel
+    from sky import execution
+
     if service_name is None:
         service_name = serve_utils.generate_service_name()
 

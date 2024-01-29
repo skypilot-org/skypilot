@@ -63,7 +63,6 @@ from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.serve import core as serve_core
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -1727,7 +1726,7 @@ def _get_services(service_names: Optional[List[str]],
             if not service_names:
                 # Change empty list to None
                 service_names = None
-            service_records = serve_core.status(service_names)
+            service_records = serve_lib.status(service_names)
             num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -3014,7 +3013,7 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
         with rich_utils.safe_status(
                 '[bold cyan]Checking for running services[/]'):
             try:
-                services = serve_core.status()
+                services = serve_lib.status()
             except exceptions.ClusterNotUpError:
                 cluster_status = backend_utils.refresh_cluster_status_handle(
                     controller_name)
@@ -4464,7 +4463,7 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    serve_core.up(task, service_name)
+    serve_lib.up(task, service_name)
 
 
 # TODO(MaoZiming): Update Doc.
@@ -4511,7 +4510,7 @@ def serve_update(service_name: str, service_yaml: List[str], yes: bool):
                       abort=True,
                       show_default=True)
 
-    serve_core.update(task, service_name)
+    serve_lib.update(task, service_name)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
@@ -4706,7 +4705,7 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
                       abort=True,
                       show_default=True)
 
-    serve_core.down(service_names=service_names, all=all, purge=purge)
+    serve_lib.down(service_names=service_names, all=all, purge=purge)
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
@@ -4770,10 +4769,10 @@ def serve_logs(
         assert replica_id is not None
         target_component = serve_lib.ServiceComponent.REPLICA
     try:
-        serve_core.tail_logs(service_name,
-                             target=target_component,
-                             replica_id=replica_id,
-                             follow=follow)
+        serve_lib.tail_logs(service_name,
+                            target=target_component,
+                            replica_id=replica_id,
+                            follow=follow)
     except exceptions.ClusterNotUpError:
         # Hint messages already printed by the call above.
         sys.exit(1)

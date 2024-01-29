@@ -103,7 +103,7 @@ class Optimizer:
 
     @staticmethod
     def optimize(dag: 'dag_lib.Dag',
-                 minimize=OptimizeTarget.COST,
+                 minimize: OptimizeTarget = OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[
                      resources_lib.Resources]] = None,
                  quiet: bool = False):
