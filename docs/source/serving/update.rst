@@ -6,13 +6,13 @@ Updating a Service
 SkyServe supports *updating* a deployed service, which can be used to change:
 
 * Replica code (e.g., ``run``/``setup``; useful for debugging)
-* Replica resource spec (e.g., accelerator/instance used)
-* Service spec (e.g., number of replicas; autoscaling spec in ``replica_policy``)
+* Replica resource spec in ``resources`` (e.g., accelerator or instance type)
+* Service spec in ``service`` (e.g., number of replicas or autoscaling spec)
 
-During an update, the service endpoint will remain the same and the service will
-remain accessible with no downtime.
+During an update, the service will remain accessible with no downtime and its
+endpoint will remain the same.
 
-Use ``sky serve update`` to update an existing service:
+To update an existing service, use ``sky serve update``:
 
 .. code-block:: console
 
@@ -22,12 +22,11 @@ SkyServe will launch new replicas described by ``new_service.yaml`` with the fol
 
 * An update is initiated, and traffic will still be redirected to existing (old) replicas.
 * New replicas (with new settings) are brought up in the background.
-* Once ``min_replicas`` new replicas are ready, traffic is *switched*: traffic will be sent to the new
-  replicas, and old replicas will stop receiving traffic and will be scaled down.
-* Replicas are versioned (starting from 1). During an update, traffic is
-  entirely serviced by either old-versioned or new-versioned replicas.
+* Once ``min_replicas`` new replicas are ready, new traffic will start to be redirected to the new
+  replicas, while old replicas will stop receiving traffic and will be scaled down.
 
-For example, suppose we have a running service hosting a Llama2 model with the following resource configuration:
+
+For example, suppose we have a running service hosting an AI model with the following resource configuration:
 
 .. code-block:: yaml
 
@@ -35,7 +34,7 @@ For example, suppose we have a running service hosting a Llama2 model with the f
       memory: 32+
       accelerators: T4
 
-You can update it to use a new resource configuration for each replica, such as:
+It is possible to update it to use a new resource configuration for all replicas, such as:
 
 .. code-block:: yaml
 
@@ -43,9 +42,10 @@ You can update it to use a new resource configuration for each replica, such as:
       memory: 128+
       accelerators: A100
 
-.. tip::
-
-  :code:`sky serve status` will show the latest service version and each replica's version.
+To support updates, a service and its replicas are versioned (starting from 1).
+During an update, traffic is entirely serviced by either old-versioned or
+new-versioned replicas.  :code:`sky serve status` shows the latest service
+version and each replica's version.
 
 Example
 ===========
@@ -101,13 +101,13 @@ We can then use :code:`sky serve update` to update the service:
 
     $ sky serve update http-server examples/serve/http_server/task.yaml
 
-SkyServe will first launch two new replicas with 4 vCPUs. When the number of new
-replicas reaches the ``min_replicas`` (set to ``service.replicas`` when unspecified; i.e., 2) required for the service,
-SkyServe will scale down old replicas to save cost. The service's version is
-updated from 1 to 2. Replicas 3 and 4 are the new replicas with 4
-vCPUs. Replicas 1 and 2 are the old replicas with 2 vCPUs. When the
-new replicas are still provisioning, SkyServe will only send traffic to the old
-replicas.
+SkyServe will trigger launching two new replicas with 4 vCPUs. Before
+``min_replicas`` (set to ``service.replicas`` when unspecified; i.e., 2) new
+replicas are ready, SkyServe will only send traffic to the old replicas.  When
+the number of new replicas reaches ``min_replicas``, SkyServe will scale down
+old replicas to save cost. The service's version is updated from 1 to 2.
+Replicas 3 and 4 are the new replicas with 4 vCPUs.  Replicas 1 and 2 are the
+old replicas with 2 vCPUs.
 
 .. code-block:: console
 
