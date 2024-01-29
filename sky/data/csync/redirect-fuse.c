@@ -132,9 +132,9 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
     char* translated_path = full_path(path, 0, 0);
     int res = lstat(translated_path, stbuf);
     free(translated_path);
-	if (res == -1)
+	if (res == -1) {
 		return -errno;
-
+	}
 	return 0;
 }
 
@@ -143,9 +143,9 @@ static int xmp_access(const char *path, int mask)
     char* translated_path = full_path(path, 0, 0);
     int res = access(translated_path, mask);
 	free(translated_path);
-	if (res == -1)
+	if (res == -1) {
 		return -errno;
-
+	}
 	return 0;
 }
 
@@ -169,9 +169,9 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
                 memset(&st, 0, sizeof(st));
                 st.st_ino = de->d_ino;
                 st.st_mode = de->d_type << 12;
-                if (filler(buf, de->d_name, &st, 0, fill_dir_plus))
+                if (filler(buf, de->d_name, &st, 0, fill_dir_plus)) {
                     break;
-
+				}
 				set_add(&set, de->d_name);
             }
         }
@@ -187,9 +187,9 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
                 memset(&st, 0, sizeof(st));
                 st.st_ino = de->d_ino;
                 st.st_mode = de->d_type << 12;
-                if (filler(buf, de->d_name, &st, 0, fill_dir_plus))
+                if (filler(buf, de->d_name, &st, 0, fill_dir_plus)) {
                     break;
-
+				}
 				set_add(&set, de->d_name);
             }
         }
@@ -227,9 +227,9 @@ static int xmp_mkdir(const char *path, mode_t mode)
     char* write_path = full_path(path, 1, 0);
     int res = mkdir_p(write_path, mode);
 	free(write_path);
-	if (res == -1)
+	if (res == -1) {
 		return -errno;
-
+	}
 	return 0;
 }
 
@@ -288,15 +288,15 @@ static int xmp_rename(const char *from, const char *to, unsigned int flags)
 	// mv /path/file_name/in/mountpoint /path/diff_file_name/in/mountpoint
 	char* translated_from = full_path(from, 0, 0);
 	char* translated_to = full_path(to, 1, 0);
-	if (flags)
+	if (flags) {
 		return -EINVAL;
-
+	}
 	int res = rename(translated_from, translated_to);
 	free(translated_from);
 	free(translated_to);
-	if (res == -1)
+	if (res == -1) {
 		return -errno;
-
+	}
 	return 0;
 }
 
@@ -308,8 +308,9 @@ static int xmp_chmod(const char *path, mode_t mode,
     char* translated_path = full_path(path, 0, 0);
 	int res = chmod(translated_path, mode);
 	free(translated_path);
-	if (res == -1)
+	if (res == -1) {
 		return -errno;
+	}
 	return 0;
 }
 
@@ -320,8 +321,9 @@ static int xmp_chown(const char *path, uid_t uid, gid_t gid,
     char* translated_path = full_path(path, 0, 0);
 	int res = lchown(translated_path, uid, gid);
 	free(translated_path);
-	if (res == -1)
+	if (res == -1) {
 		return -errno;
+	}
 	return 0;
 }
 
@@ -329,14 +331,17 @@ static int xmp_truncate(const char *path, off_t size,
 			struct fuse_file_info *fi)
 {
 	int res;
-    char* translated_path = full_path(path, 0, 0);
-	if (fi != NULL)
+	char* translated_path = full_path(path, 0, 0);
+	if (fi != NULL) {
 		res = ftruncate(fi->fh, size);
-	else
+	}
+	else {
 		res = truncate(translated_path, size);
+	}
 	free(translated_path);
-	if (res == -1)
+	if (res == -1) {
 		return -errno;
+	}
 	return 0;
 }
 
@@ -348,8 +353,9 @@ static int xmp_utimens(const char *path, const struct timespec ts[2],
     char* write_path = full_path(path, 1, 0);
 	/* don't use utime/utimes since they follow symlinks */
 	res = utimensat(0, write_path, ts, AT_SYMLINK_NOFOLLOW);
-	if (res == -1)
+	if (res == -1) {
 		return -errno;
+	}
 	free(write_path);
 	return 0;
 }
@@ -381,9 +387,9 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
     char* translated_path = full_path(path, 0, 0);
     int res = open(translated_path, fi->flags);
 	free(translated_path);
-	if (res == -1)
+	if (res == -1) {
 		return -errno;
-
+	}
 	fi->fh = res;
 	fi->parallel_direct_writes = 1;
 	return 0;
@@ -395,20 +401,22 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	int fd;
 	int res;
     char* translated_path = full_path(path, 0, 0);
-	if(fi == NULL)
+	if(fi == NULL) {
 		fd = open(translated_path, O_RDONLY);
-	else
+	}
+	else {
 		fd = fi->fh;
-	
-	if (fd == -1)
+	}
+	if (fd == -1) {
 		return -errno;
-
+	}
 	res = pread(fd, buf, size, offset);
-	if (res == -1)
+	if (res == -1) {
 		res = -errno;
-
-	if(fi == NULL)
+	}
+	if(fi == NULL) {
 		close(fd);
+	}
 	free(translated_path);
 	return res;
 }
@@ -420,20 +428,22 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	int res;
     char* write_path = full_path(path, 1, 0);
 	(void) fi;
-	if(fi == NULL)
+	if(fi == NULL) {
 		fd = open(write_path, O_RDONLY);
-	else
+	}
+	else {
 		fd = fi->fh;
-	
-	if (fd == -1)
+	}
+	if (fd == -1) {
 		return -errno;
-
+	}
 	res = pwrite(fd, buf, size, offset);
-	if (res == -1)
+	if (res == -1) {
 		res = -errno;
-
-	if(fi == NULL)
+	}
+	if(fi == NULL) {
 		close(fd);
+	}
 	free(write_path);
 	return res;
 }
@@ -444,9 +454,9 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 	int res;
 	res = statvfs(translated_path, stbuf);
 	free(translated_path);
-	if (res == -1)
+	if (res == -1) {
 		return -errno;
-
+	}
 	return 0;
 }
 
@@ -471,20 +481,23 @@ static off_t xmp_lseek(const char *path, off_t off, int whence, struct fuse_file
 	int fd;
 	off_t res;
     char* translated_path = full_path(path, 0, 0);
-	if (fi == NULL)
+	if (fi == NULL) {
 		fd = open(translated_path, O_RDONLY);
-	else
+	}
+	else {
 		fd = fi->fh;
+	}
 	free(translated_path);
-	if (fd == -1)
+	if (fd == -1) {
 		return -errno;
-
+	}
 	res = lseek(fd, off, whence);
-	if (res == -1)
+	if (res == -1) {
 		res = -errno;
-
-	if (fi == NULL)
+	}
+	if (fi == NULL) {
 		close(fd);
+	}
 	return res;
 }
 
