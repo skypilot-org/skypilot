@@ -20,7 +20,7 @@ To update an existing service, use ``sky serve update``:
 
 SkyServe will launch new replicas described by ``new_service.yaml`` with the following behavior:
 
-* An update is initiated, and traffic will still be redirected to existing (old) replicas.
+* An update is initiated, and traffic will continue to be redirected to existing (old) replicas.
 * New replicas (with new settings) are brought up in the background.
 * Once ``min_replicas`` new replicas are ready, new traffic will start to be redirected to the new
   replicas, while old replicas will stop receiving traffic and will be scaled down.
