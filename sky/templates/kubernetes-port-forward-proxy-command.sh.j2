@@ -14,23 +14,14 @@ if ! command -v nc > /dev/null; then
 fi
 
 # Checks if shuf is installed(Linux/macos)
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    # Check if gshuf is installed
-    if [[ $(command -v gshuf) == "" ]]; then
-        echo "gshuf is not installed. Please install gshuf first."
-        exit 1
-    else
-        shufcommand=$(command -v gshuf)
-    fi
+if [[ $(command -v gshuf) != "" ]]; then
+  shufcommand=$(command -v gshuf)
+elif [[ $(command -v shuf) != "" ]]; then
+  shufcommand=$(command -v shuf)
 else
-    # Check if shuf is installed
-    if [[ $(command -v shuf) == "" ]]; then
-        echo "shuf is not installed. Please install shuf first."
-        exit 1
-    else
-        shufcommand=$(command -v shuf)
-    fi
+  echo "shuf is not installed. Please install shuf(coreutils) first."
 fi
+
 
 # Establishes connection between local port and the ssh jump pod using kube port-forward
 # Instead of specifying a port, we let kubectl select a random port.

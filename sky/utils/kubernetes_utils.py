@@ -1,7 +1,6 @@
 """Kubernetes utilities for SkyPilot."""
 import math
 import os
-from platform import system as pltsys
 import re
 import subprocess
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -1021,13 +1020,9 @@ def check_port_forward_mode_dependencies() -> None:
     # We store the dependency list as a list of lists. Each inner list
     # contains the name of the dependency, the command to check if it is
     # installed, and the package name to install it.
-    osused = pltsys()
     dependency_list = [['socat', ['socat', '-V'], 'socat'],
-                       ['nc', ['nc', '-h'], 'netcat']]
-    if osused == 'Darwin':
-        dependency_list.append(['gshuf', ['gshuf', '--version'], 'coreutils'])
-    elif osused == 'Linux':
-        dependency_list.append(['shuf', ['shuf', '--version'], 'coreutils'])
+                       ['nc', ['nc', '-h'], 'netcat'],
+                       ['shuf', ['shuf', '--version'], 'coreutils']]
     for name, check_cmd, install_cmd in dependency_list:
         try:
             subprocess.run(check_cmd,
