@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import jinja2
 import yaml
+from platform import system as pltsys
 
 import sky
 from sky import exceptions
@@ -1020,8 +1021,17 @@ def check_port_forward_mode_dependencies() -> None:
     # We store the dependency list as a list of lists. Each inner list
     # contains the name of the dependency, the command to check if it is
     # installed, and the package name to install it.
+    _osused = pltsys()
     dependency_list = [['socat', ['socat', '-V'], 'socat'],
                        ['nc', ['nc', '-h'], 'netcat']]
+    if _osused == "Darwin":
+
+        dependency_list.append(["gshuf", ["gshuf", "--version"], "coreutils"])
+
+    elif _osused == "Linux":
+
+        dependency_list.append(["shuf", ["shuf", "--version"], "coreutils"])
+    
     for name, check_cmd, install_cmd in dependency_list:
         try:
             subprocess.run(check_cmd,
