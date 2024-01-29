@@ -5,6 +5,7 @@ import pytest
 
 from sky import exceptions
 from sky.data import storage as storage_lib
+from sky.data import storage_utils
 
 
 class TestStorageSpecLocalSource:
@@ -68,13 +69,13 @@ class TestStorageSpecValidation:
         # When mode is COPY and the storage object doesn't exist - error out
         with pytest.raises(exceptions.StorageSourceError) as e:
             storage_lib.Storage(name='sky-test-bucket',
-                                mode=storage_lib.StorageMode.COPY)
+                                mode=storage_utils.StorageMode.COPY)
 
         assert 'source must be specified when using COPY mode' in str(e)
 
         # When mode is MOUNT - valid spec (e.g., use for scratch space)
         storage_lib.Storage(name='sky-test-bucket',
-                            mode=storage_lib.StorageMode.MOUNT)
+                            mode=storage_utils.StorageMode.MOUNT)
 
     def test_noname_and_nosource(self):
         """Tests when neither name nor source is specified"""

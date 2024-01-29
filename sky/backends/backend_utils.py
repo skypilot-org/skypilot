@@ -104,6 +104,7 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 # Filelocks for updating cluster's file_mounts.
 CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
     '~/.sky/.{}_file_mounts.lock')
+
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
@@ -2678,3 +2679,50 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
                     f'not interrupted): {colorama.Style.BRIGHT}sky start -f -y '
                     f'{cluster_name}{colorama.Style.RESET_ALL}'
                     f'\n--- Details ---\n{stderr.strip()}\n')
+
+
+def wait_and_terminate_csync(cluster_name: str) -> None:
+    """Terminates all the CSYNC process running in each node.
+
+    Before terminating the CSYNC daemon, it waits until the sync process
+    launched by CSYNC is completed if there are any.
+
+    Args:
+        cluster_name: Cluster name (see `sky status`)
+    """
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    assert record is not None, cluster_name
+    handle = record['handle']
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    try:
+        ip_list = handle.external_ips()
+    # When cluster is in INIT status, attempt to fetch IP fails raising an error
+    except exceptions.FetchIPError as e:
+        logger.error(common_utils.format_exception(e))
+        return
+    port_list = handle.external_ssh_ports()
+    ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
+                                               handle.docker_user)
+    runners = command_runner.SSHCommandRunner.make_runner_list(
+        ip_list, port_list=port_list, **ssh_credentials)
+    csync_terminate_cmd = ('python -m sky.data.sky_csync terminate -a')
+
+    def _run_csync_terminate(runner):
+
+        rc, stdout, stderr = runner.run(csync_terminate_cmd,
+                                        stream_logs=False,
+                                        require_outputs=True)
+        stderr = stdout + stderr
+        if rc:
+            # TODO(Doyoung): following message will interrupt the progress
+            # bar UI until #2504 is resolved. Remove this comment after the
+            # issue is resolved.
+            logger.warning(
+                f'CSYNC: failed to terminate the CSYNC on {runner.ip}. '
+                f'Details: {stderr}')
+
+    # TODO(Doyoung): Set the following to 'info' when #2504 is resolved
+    logger.debug(f'CSYNC termination initiated for {cluster_name}. If a '
+                 'sync process is currently running, CSYNC will terminate '
+                 'after it completes.\n')
+    subprocess_utils.run_in_parallel(_run_csync_terminate, runners)

@@ -41,6 +41,7 @@ from sky.backends import wheel_utils
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.data import storage_utils
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
@@ -54,6 +55,7 @@ from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -3062,7 +3064,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         controller_utils.replace_skypilot_config_path_in_file_mounts(
             handle.launched_resources.cloud, all_file_mounts)
         self._execute_file_mounts(handle, all_file_mounts)
-        self._execute_storage_mounts(handle, storage_mounts)
+        self._execute_storage_mounts(handle, storage_mounts,
+                                     storage_utils.StorageMode.MOUNT)
+        self._execute_storage_mounts(handle, storage_mounts,
+                                     storage_utils.StorageMode.CSYNC)
         self._set_storage_mounts_metadata(handle.cluster_name, storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
@@ -3797,6 +3802,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'Cluster {handle.cluster_name!r} is already terminated. '
                 'Skipped.')
             return
+        # Check if the cluster includes storage with CSYNC mode and terminates
+        # the CSYNC process after the syncing is completed if it was running.
+        if self._has_csync(handle.cluster_name):
+            backend_utils.wait_and_terminate_csync(handle.cluster_name)
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -4526,12 +4535,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_storage_mounts(
             self, handle: CloudVmRayResourceHandle,
-            storage_mounts: Optional[Dict[Path, storage_lib.Storage]]):
+            storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
+            mount_mode: storage_utils.StorageMode):
         """Executes storage mounts: installing mounting tools and mounting."""
         # Handle cases where `storage_mounts` is None. This occurs when users
         # initiate a 'sky start' command from a Skypilot version that predates
         # the introduction of the `storage_mounts_metadata` feature.
-        if not storage_mounts:
+        if storage_mounts is None:
             return
 
         # Process only mount mode objects here. COPY mode objects have been
@@ -4540,7 +4550,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT
+            if storage_mount.mode == mount_mode
         }
 
         # Handle cases when there aren't any Storages with MOUNT mode.
@@ -4555,11 +4565,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'mounting. No action will be taken.{colorama.Style.RESET_ALL}')
             return
 
+        if mount_mode == storage_utils.StorageMode.MOUNT:
+            mode_str = 'mount'
+            action_message = 'Mounting'
+        else:  # CSYNC mdoe
+            mode_str = 'csync'
+            action_message = 'Setting up CSYNC'
+
         fore = colorama.Fore
         style = colorama.Style
         plural = 's' if len(storage_mounts) > 1 else ''
         logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
-                    f'storage mount{plural}.{style.RESET_ALL}')
+                    f'storage {mode_str}{plural}.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
         port_list = handle.external_ssh_ports()
@@ -4568,7 +4585,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.cluster_yaml, handle.docker_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=port_list, **ssh_credentials)
-        log_path = os.path.join(self.log_dir, 'storage_mounts.log')
+        log_path = os.path.join(self.log_dir, f'storage_{mode_str}s.log')
 
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):
@@ -4584,7 +4601,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'successfully without mounting the bucket.')
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
-            mount_cmd = store.mount_command(dst)
+            if mount_mode == storage_utils.StorageMode.MOUNT:
+                mount_cmd = store.mount_command(dst)
+            else:  # CSYNC mode
+                mount_cmd = store.csync_command(dst,
+                                                storage_obj.interval_seconds)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
@@ -4596,30 +4617,56 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     target=dst,
                     cmd=mount_cmd,
                     run_rsync=False,
-                    action_message='Mounting',
+                    action_message=action_message,
                     log_path=log_path,
                 )
             except exceptions.CommandError as e:
+                mount_path = (f'{colorama.Fore.RED}'
+                              f'{colorama.Style.BRIGHT}{dst}'
+                              f'{colorama.Style.RESET_ALL}')
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:
-                    mount_path = (f'{colorama.Fore.RED}'
-                                  f'{colorama.Style.BRIGHT}{dst}'
-                                  f'{colorama.Style.RESET_ALL}')
                     error_msg = (f'Mount path {mount_path} is non-empty.'
                                  f' {mount_path} may be a standard unix '
                                  f'path or may contain files from a previous'
                                  f' task. To fix, change the mount path'
                                  f' to an empty or non-existent path.')
                     raise RuntimeError(error_msg) from None
+                elif e.returncode == exceptions.CSYNC_FUSE_MOUNT_FAILURE_CODE:
+                    error_msg = ('Failed to run CSYNC related FUSE processes '
+                                 f'at {mount_path}. Please check the CSYNC '
+                                 'log file located at ~/.sky for any error '
+                                 'message.')
+                    raise RuntimeError(error_msg) from None
                 else:
-                    # Strip the command (a big heredoc) from the exception
-                    raise exceptions.CommandError(
-                        e.returncode,
-                        command='to mount',
-                        error_msg=e.error_msg,
-                        detailed_reason=e.detailed_reason) from None
+                    # By default, raising an error caused from mounting_utils
+                    # shows a big heredoc as part of it. Here, we want to
+                    # conditionally show the heredoc only if SKYPILOT_DEBUG
+                    # is set
+                    if env_options.Options.SHOW_DEBUG_INFO.get():
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command=f'to {mode_str}',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason)
+                    else:
+                        # Strip the command (a big heredoc) from the exception
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command=f'to {mode_str}',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason) from None
 
         end = time.time()
-        logger.debug(f'Storage mount sync took {end - start} seconds.')
+        logger.debug(f'Setting storage {mode_str} took {end - start} seconds.')
+
+    def _has_csync(self, cluster_name: str) -> bool:
+        """Checks if there are CSYNC mode storages within the cluster."""
+        storage_mounts = self.get_storage_mounts_metadata(cluster_name)
+        if storage_mounts is not None:
+            for _, storage_obj in storage_mounts.items():
+                if storage_obj.mode == storage_utils.StorageMode.CSYNC:
+                    return True
+        return False
 
     def _set_storage_mounts_metadata(
             self, cluster_name: str,

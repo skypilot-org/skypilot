@@ -19,6 +19,7 @@ from sky.backends import backend_utils
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.data import storage_utils
 from sky.provision import docker_utils
 from sky.serve import service_spec
 from sky.skylet import constants
@@ -885,9 +886,9 @@ class Task:
     def sync_storage_mounts(self) -> None:
         """(INTERNAL) Eagerly syncs storage mounts to cloud storage.
 
-        After syncing up, COPY-mode storage mounts are translated into regular
-        file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
-        }``.
+        After syncing up, COPY-mode and CSYNC-mode storage mounts are
+        translated into regular file_mounts of the form
+        ``{ /remote/path: {s3,gs,..}://<bucket path>}``.
         """
         for storage in self.storage_mounts.values():
             if len(storage.stores) == 0:
@@ -901,7 +902,7 @@ class Task:
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for mnt_path, storage in storage_mounts.items():
-            if storage.mode == storage_lib.StorageMode.COPY:
+            if storage.mode == storage_utils.StorageMode.COPY:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
                     # TODO: allow for Storage mounting of different clouds

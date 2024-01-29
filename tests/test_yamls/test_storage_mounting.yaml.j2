@@ -27,6 +27,14 @@ file_mounts:
     source: ~/tmp-workdir
     mode: MOUNT
 
+  # Setting up a private bucket in CSYNC mode
+  /mount_private_csync:
+    name: {{csync_storage_name}}
+    source: ~/tmp-workdir-2
+    mode: CSYNC
+    interval_seconds: 5
+
+    
 run: |
   set -ex
   
@@ -41,10 +49,17 @@ run: |
   ls -ltr /mount_private_copy_lof/tmp\ file2
   ls -ltr /mount_private_mount/foo
   ls -ltr /mount_private_mount/tmp\ file
+  ls -ltr /mount_private_csync/tmp\ file
   
   # Symlinks are not copied to buckets
   ! ls /mount_private_copy/circle-link
   ! ls /mount_private_mount/circle-link
+  ! ls /mount_private_csync/circle-link
   
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
+
+  # Write to private bucket in CSYNC mode should pass
+  echo "bye" > /mount_private_csync/bye.txt
+  # Giving enough time for syncing launched by CSYNC mode
+  sleep 10

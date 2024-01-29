@@ -246,6 +246,8 @@ def get_resources_schema():
 def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
+    from sky.data import storage_utils
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -278,8 +280,11 @@ def get_storage_schema():
             'mode': {
                 'type': 'string',
                 'case_insensitive_enum': [
-                    mode.value for mode in storage.StorageMode
+                    mode.value for mode in storage_utils.StorageMode
                 ]
+            },
+            'interval_seconds': {
+                'type': 'number'
             },
             '_force_delete': {
                 'type': 'boolean',

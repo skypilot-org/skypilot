@@ -54,6 +54,7 @@ from sky.clouds import Azure
 from sky.clouds import GCP
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.data import storage_utils
 from sky.data.data_utils import Rclone
 from sky.skylet import events
 from sky.utils import common_utils
@@ -73,9 +74,9 @@ SCP_TYPE = '--cloud scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
 storage_setup_commands = [
-    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
+    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir', 'mkdir -p ~/tmp-workdir-2',
     'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
-    'touch ~/tmp-workdir/foo',
+    'touch ~/tmp-workdir/foo', 'touch ~/tmp-workdir-2/tmp\ file',
     'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
     'touch ~/.ssh/id_rsa.pub'
 ]
@@ -832,11 +833,14 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 @pytest.mark.aws
 def test_aws_storage_mounts_with_stop():
     name = _get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
+    timestamp = int(time.time())
+    storage_name = f'sky-test-{timestamp}'
+    csync_storage_name = f'sky-test-{timestamp + 1}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    content = template.render(storage_name=storage_name,
+                              csync_storage_name=csync_storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
@@ -846,6 +850,7 @@ def test_aws_storage_mounts_with_stop():
             f'sky launch -y -c {name} --cloud aws {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
+            f'aws s3 ls {csync_storage_name}/bye.txt',
             f'sky stop -y {name}',
             f'sky start -y {name}',
             # Check if hello.txt from mounting bucket exists after restart in
@@ -855,7 +860,7 @@ def test_aws_storage_mounts_with_stop():
         test = Test(
             'aws_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name};  sky storage delete -y {csync_storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -864,11 +869,14 @@ def test_aws_storage_mounts_with_stop():
 @pytest.mark.gcp
 def test_gcp_storage_mounts_with_stop():
     name = _get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
+    random_name = int(time.time())
+    storage_name = f'sky-test-{random_name}'
+    csync_storage_name = f'sky-test-{random_name + 1}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    content = template.render(storage_name=storage_name,
+                              csync_storage_name=csync_storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
@@ -878,6 +886,7 @@ def test_gcp_storage_mounts_with_stop():
             f'sky launch -y -c {name} --cloud gcp {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'gsutil ls gs://{storage_name}/hello.txt',
+            f'gsutil ls gs://{csync_storage_name}/bye.txt',
             f'sky stop -y {name}',
             f'sky start -y {name}',
             # Check if hello.txt from mounting bucket exists after restart in
@@ -887,7 +896,7 @@ def test_gcp_storage_mounts_with_stop():
         test = Test(
             'gcp_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name};  sky storage delete -y {csync_storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -3369,7 +3378,7 @@ class TestStorageWithCredentials:
             stores: Optional[Dict[storage_lib.StoreType,
                                   storage_lib.AbstractStore]] = None,
             persistent: Optional[bool] = True,
-            mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT):
+            mode: storage_utils.StorageMode = storage_utils.StorageMode.MOUNT):
         # Creates a temporary storage object. Stores must be added in the test.
         storage_obj = storage_lib.Storage(name=name,
                                           source=source,
@@ -3473,8 +3482,8 @@ class TestStorageWithCredentials:
 
         # Try to initialize another storage with the storage object created
         # above, but now in COPY mode. This should succeed.
-        yield from self.yield_storage_object(name=storage_name,
-                                             mode=storage_lib.StorageMode.COPY)
+        yield from self.yield_storage_object(
+            name=storage_name, mode=storage_utils.StorageMode.COPY)
 
     @pytest.fixture
     def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
@@ -3505,7 +3514,7 @@ class TestStorageWithCredentials:
             yield from self.yield_storage_object(
                 name=tmp_bucket_name,
                 source=tmpdir,
-                mode=storage_lib.StorageMode.COPY)
+                mode=storage_utils.StorageMode.COPY)
 
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
