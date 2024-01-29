@@ -4093,8 +4093,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Handles the case when ~/.kube/config was removed externally.
             except ValueError as e:
                 error_msg = str(e)
-                if ('Invalid kube-config file. '
-                        'No configuration found.') in error_msg:
+                if ('Invalid kube-config file. No configuration found.'
+                   ) in error_msg:
                     pass
 
         # The cluster file must exist because the cluster_yaml will only
