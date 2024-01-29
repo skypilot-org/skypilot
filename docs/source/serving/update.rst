@@ -6,8 +6,8 @@ Updating a Service
 SkyServe supports *updating* a deployed service, which can be used to change:
 
 * Replica code (e.g., ``run``/``setup``; useful for debugging)
-* Replica resource spec (e.g., number of replicas; accelerator/instance used)
-* Service spec (e.g., autoscaling spec in ``replica_policy``)
+* Replica resource spec (e.g., accelerator/instance used)
+* Service spec (e.g., number of replicas; autoscaling spec in ``replica_policy``)
 
 During an update, the service endpoint will remain the same and the service will
 remain accessible with no downtime.
