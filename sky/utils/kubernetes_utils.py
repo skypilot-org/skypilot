@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 import jinja2
 import yaml
 
-
 import sky
 from sky import exceptions
 from sky import sky_logging
