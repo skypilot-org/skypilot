@@ -626,6 +626,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                 with open(log_file_name, 'a') as replica_log_file, open(
                         job_log_file_name, 'r') as job_file:
                     replica_log_file.write(job_file.read())
+            else:
+                logger.error(f'Failed to sync down logs from replica'
+                             f' {replica_id}.')
 
         logger.info(f'Terminating replica {replica_id}...')
         info = serve_state.get_replica_info_from_id(self._service_name,
