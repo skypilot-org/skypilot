@@ -14,8 +14,10 @@ setup: |
   # We have to manually install Torch otherwise apex & xformers won't build
   pip list | grep torch || pip install "torch>=2.0.0"
 
-  pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git"
   pip install "fschat[model_worker,webui]==0.2.24"
+  # Use older version of vllm as fschat does not support the latest vllm with
+  # TokenizerGroup
+  pip list | grep vllm | grep 0.2.6 || pip install vllm==0.2.6
   pip install git+https://github.com/huggingface/transformers accelerate protobuf
 
 run: |
