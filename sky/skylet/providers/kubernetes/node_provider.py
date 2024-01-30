@@ -158,8 +158,7 @@ class KubernetesNodeProvider(NodeProvider):
         # TODO(romilb): Implement caching here for performance.
         # TODO(romilb): Multi-node would need more handling here.
         cluster_name = node_id.split('-head')[0]
-        return kubernetes_utils.get_head_ssh_port(
-            cluster_name, self.namespace)
+        return kubernetes_utils.get_head_ssh_port(cluster_name, self.namespace)
 
     def internal_ip(self, node_id):
         pod = kubernetes.core_api().read_namespaced_pod(
@@ -226,11 +225,9 @@ class KubernetesNodeProvider(NodeProvider):
         return cluster_yaml_path
 
     def _set_node_tags(self, node_id, tags):
-        pod = kubernetes.core_api().read_namespaced_pod(
-            node_id, self.namespace)
+        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
         pod.metadata.labels.update(tags)
-        kubernetes.core_api().patch_namespaced_pod(
-            node_id, self.namespace, pod)
+        kubernetes.core_api().patch_namespaced_pod(node_id, self.namespace, pod)
 
     def _raise_pod_scheduling_errors(self, new_nodes):
         """Raise pod scheduling failure reason.
