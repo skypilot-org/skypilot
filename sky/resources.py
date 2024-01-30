@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import colorama
 
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
@@ -799,15 +800,17 @@ class Resources:
                     'Cloud must be specified when image_id is provided.')
 
         # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-        if not self._cloud.is_same_cloud(
-                clouds.AWS()) and not self._cloud.is_same_cloud(
-                    clouds.GCP()) and not self._cloud.is_same_cloud(
-                        clouds.IBM()) and not self._cloud.is_same_cloud(
-                            clouds.OCI()):
+        try:
+            self._cloud.check_features_are_supported(
+                self,
+                requested_features={
+                    clouds.CloudImplementationFeatures.IMAGE_ID
+                })
+        except exceptions.NotSupportedError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'image_id is only supported for AWS/GCP/IBM/OCI, please '
-                    'explicitly specify the cloud.')
+                    'explicitly specify the cloud.') from e
 
         if self._region is not None:
             if self._region not in self._image_id:

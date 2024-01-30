@@ -75,6 +75,9 @@ class Azure(clouds.Cloud):
         features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.IMAGE_ID:
+                ('Specifying image ID is currently not supported on '
+                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
