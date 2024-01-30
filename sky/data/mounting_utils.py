@@ -58,11 +58,16 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
 
 def get_az_mount_install_cmd() -> str:
     """Returns a command to install AZ blob storage mount utility blobfuse2."""
-    install_cmd = ('wget -nc https://github.com/Azure/azure-storage-fuse'
+    install_cmd = ('sudo apt-get update && '
+                   'sudo apt-get install -y '
+                   '-o Dpkg::Options::="--force-confdef" '
+                   'fuse3 libfuse3-dev && '
+                   'wget -nc https://github.com/Azure/azure-storage-fuse'
                    f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
                    f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
                    '-O /tmp/blobfuse2.deb && '
-                   'sudo dpkg --install /tmp/blobfuse2.deb')
+                   'sudo dpkg --install /tmp/blobfuse2.deb && '
+                   f'mkdir -p {_BLOBFUSE_CACHE_DIR};')
 
     return install_cmd
 
@@ -72,7 +77,7 @@ def get_az_mount_cmd(bucket_name: str, storage_account_name: str,
     """Returns a command to mount a AZ blob storage using blobfuse2."""
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'AZURE_STORAGE_ACCESS_KEY={storage_account_access_key} '
-                 f'blobfuse2 {mount_path} --allow-other --no-smylink '
+                 f'blobfuse2 {mount_path} --allow-other --no-symlinks '
                  f'--tmp-path {_BLOBFUSE_CACHE_DIR} '
                  f'--container-name {bucket_name}')
     return mount_cmd
@@ -121,6 +126,18 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
     return mount_cmd
 
 
+def _get_mount_binary(mount_cmd: str) -> str:
+    """Returns mounting binary in string given the mount command"""
+    if 'goofys' in mount_cmd:
+        return 'goofys'
+    elif 'gcsfuse' in mount_cmd:
+        return 'gcsfuse'
+    elif 'blobfuse2' in mount_cmd:
+        return 'blobfuse2'
+    else: # 'rclone' in mount_cmd
+        return 'rclone'
+
+
 def get_mounting_script(
     mount_path: str,
     mount_cmd: str,
@@ -144,8 +161,7 @@ def get_mounting_script(
     Returns:
         str: Mounting script as a str.
     """
-
-    mount_binary = mount_cmd.split()[0]
+    mount_binary = _get_mount_binary(mount_cmd)
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if version_check_cmd is not None:
         installed_check += f' && {version_check_cmd}'
