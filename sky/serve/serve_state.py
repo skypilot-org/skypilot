@@ -15,6 +15,7 @@ from sky.utils import db_utils
 if typing.TYPE_CHECKING:
     import sky
     from sky.serve import replica_managers
+    from sky.serve import service_spec
 
 _DB_PATH = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'
 _DB_PATH = _DB_PATH.expanduser().absolute()
@@ -43,14 +44,22 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         replica_id INTEGER,
         replica_info BLOB,
         PRIMARY KEY (service_name, replica_id))""")
-
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS version_specs (
+        version INTEGER, 
+        service_name TEXT,
+        spec BLOB,
+        PRIMARY KEY (service_name, version))""")
     conn.commit()
 
 
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+# Backward compatibility.
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              'requested_resources_str', 'TEXT')
-
+db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
+                             'current_version',
+                             f'INTEGER DEFAULT {constants.INITIAL_VERSION}')
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 
@@ -196,7 +205,7 @@ _SERVICE_STATUS_TO_COLOR = {
 }
 
 
-def add_service(name: str, controller_job_id: int, policy: str,
+def add_service(name: str, controller_job_id: int, policy: str, version: int,
                 requested_resources_str: str, status: ServiceStatus) -> bool:
     """Add a service in the database.
 
@@ -209,9 +218,10 @@ def add_service(name: str, controller_job_id: int, policy: str,
             """\
             INSERT INTO services
             (name, controller_job_id, status, policy,
-            requested_resources_str)
-            VALUES (?, ?, ?, ?, ?)""", (name, controller_job_id, status.value,
-                                        policy, requested_resources_str))
+            requested_resources_str, current_version)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (name, controller_job_id, status.value, policy,
+             requested_resources_str, version))
         _DB.conn.commit()
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -268,7 +278,8 @@ def set_service_load_balancer_port(service_name: str,
 
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
-     uptime, policy, _, requested_resources, requested_resources_str) = row[:10]
+     uptime, policy, _, requested_resources, requested_resources_str,
+     current_version) = row[:11]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -277,6 +288,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'status': ServiceStatus[status],
         'uptime': uptime,
         'policy': policy,
+        'version': current_version,
         # TODO(tian): Backward compatibility.
         # Remove after 2 minor release, 0.6.0.
         'requested_resources': pickle.loads(requested_resources)
@@ -301,6 +313,14 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     for row in rows:
         return _get_service_from_row(row)
     return None
+
+
+def get_service_version(service_name: str) -> Optional[int]:
+    """Get the version of a service."""
+    service = get_service_from_name(service_name)
+    if service is None:
+        return None
+    return service['version']
 
 
 def get_glob_service_names(
@@ -382,3 +402,68 @@ def total_number_provisioning_replicas() -> int:
         if replica_info.status == ReplicaStatus.PROVISIONING:
             provisioning_count += 1
     return provisioning_count
+
+
+# === Version functions ===
+def add_version(service_name: str) -> int:
+    """Adds a version to the database."""
+
+    _DB.cursor.execute(
+        """\
+        INSERT INTO version_specs
+        (version, service_name, spec)
+        VALUES (
+            (SELECT COALESCE(MAX(version), 0) + 1 FROM
+            version_specs WHERE service_name = ?), ?, ?)
+        RETURNING version""", (service_name, service_name, pickle.dumps(None)))
+
+    inserted_version = _DB.cursor.fetchone()[0]
+    _DB.conn.commit()
+
+    return inserted_version
+
+
+def add_or_update_version(service_name: str, version: int,
+                          spec: 'service_spec.SkyServiceSpec') -> None:
+    _DB.cursor.execute(
+        """\
+        INSERT or REPLACE INTO version_specs
+        (service_name, version, spec)
+        VALUES (?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
+    _DB.cursor.execute(
+        """\
+        UPDATE services SET
+        current_version=(?) WHERE name=(?)""", (version, service_name))
+    _DB.conn.commit()
+
+
+def remove_service_versions(service_name: str) -> None:
+    """Removes a replica from the database."""
+    _DB.cursor.execute(
+        """\
+        DELETE FROM version_specs
+        WHERE service_name=(?)""", (service_name,))
+    _DB.conn.commit()
+
+
+def get_spec(service_name: str,
+             version: int) -> Optional['service_spec.SkyServiceSpec']:
+    """Gets spec from the database."""
+    rows = _DB.cursor.execute(
+        """\
+        SELECT spec FROM version_specs
+        WHERE service_name=(?)
+        AND version=(?)""", (service_name, version)).fetchall()
+    for row in rows:
+        return pickle.loads(row[0])
+    return None
+
+
+def delete_version(service_name: str, version: int) -> None:
+    """Deletes a version from the database."""
+    _DB.cursor.execute(
+        """\
+        DELETE FROM version_specs
+        WHERE service_name=(?)
+        AND version=(?)""", (service_name, version))
+    _DB.conn.commit()

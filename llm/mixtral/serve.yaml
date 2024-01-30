@@ -18,7 +18,7 @@ service:
 resources: 
   accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
   ports: 8000
-  disk_tier: high
+  disk_tier: best
 
 setup: |
   conda activate mixtral

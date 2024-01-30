@@ -3,7 +3,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import exceptions
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -36,6 +36,8 @@ class Local(clouds.Cloud):
             ('Docker image is not supported in Local. '
              'You can try running docker command inside the '
              '`run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            ('Custom disk tier is not supported for Local.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is not supported for Local.'),
     }
@@ -106,10 +108,11 @@ class Local(clouds.Cloud):
         return isinstance(other, Local)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[str] = None) -> str:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[resources_utils.DiskTier] = None) -> str:
         # There is only "1" instance type for local cloud: on-prem
         del cpus, memory, disk_tier  # Unused.
         return Local._DEFAULT_INSTANCE_TYPE
@@ -196,9 +199,3 @@ class Local(clouds.Cloud):
             raise ValueError(f'Region {region!r} does not match the Local'
                              f' cloud region {Local.LOCAL_REGION.name!r}.')
         return region, zone
-
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
-        raise exceptions.NotSupportedError(
-            'Local cloud does not support disk tiers.')

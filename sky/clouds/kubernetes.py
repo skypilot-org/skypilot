@@ -7,13 +7,12 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
-from sky.utils import kubernetes_utils
-from sky.utils import ux_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -62,13 +61,13 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker image is not '
-                                                         'supported in '
-                                                         'Kubernetes.',
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
     IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
+
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -132,10 +131,11 @@ class Kubernetes(clouds.Cloud):
         return kubernetes_utils.get_port(svc_name, ns)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[str] = None) -> str:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[resources_utils.DiskTier] = None) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
         del disk_tier  # Unused.
@@ -187,6 +187,13 @@ class Kubernetes(clouds.Cloud):
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> int:
+        del image_id, region  # Unused.
+        # We don't limit the image by its size compared to the disk size, as
+        # we don't have a notion of disk size in Kubernetes.
+        return 0
+
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
             cluster_name_on_cloud: str, region: Optional['clouds.Region'],
@@ -212,15 +219,16 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else None
 
-        # Select image based on whether we are using GPUs or not.
-        image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
-        # Get the container image ID from the service catalog.
-        # TODO(romilb): Note that currently we do not support custom images,
-        #  so the image_id should start with 'skypilot:'.
-        #  In the future we may want to get image_id from the resources object.
-        assert image_id.startswith('skypilot:')
-        image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                         clouds='kubernetes')
+        if resources.image_id is not None:
+            # Use custom image specified in resources
+            image_id_with_region = resources.image_id['kubernetes']
+            image_id = image_id_with_region.lstrip('docker:')
+        else:
+            # Select image based on whether we are using GPUs or not.
+            image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+            # Get the container image ID from the service catalog.
+            image_id = service_catalog.get_image_id_from_tag(
+                image_id, clouds='kubernetes')
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')
@@ -360,42 +368,6 @@ class Kubernetes(clouds.Cloud):
             return True
         except exceptions.ResourcesUnavailableError:
             return False
-
-    @classmethod
-    def query_status(cls, name: str, tag_filters: Dict[str, str],
-                     region: Optional[str], zone: Optional[str],
-                     **kwargs) -> List['status_lib.ClusterStatus']:
-        del tag_filters, region, zone, kwargs  # Unused.
-        namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-
-        # Get all the pods with the label skypilot-cluster: <cluster_name>
-        try:
-            pods = kubernetes.core_api().list_namespaced_pod(
-                namespace,
-                label_selector=f'skypilot-cluster={name}',
-                _request_timeout=kubernetes.API_TIMEOUT).items
-        except kubernetes.max_retry_error():
-            with ux_utils.print_exception_no_traceback():
-                ctx = kubernetes_utils.get_current_kube_config_context_name()
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query cluster {name!r} status. '
-                    'Network error - check if the Kubernetes cluster in '
-                    f'context {ctx} is up and accessible.') from None
-        except Exception as e:  # pylint: disable=broad-except
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query Kubernetes cluster {name!r} status: '
-                    f'{common_utils.format_exception(e)}')
-
-        # Check if the pods are running or pending
-        cluster_status = []
-        for pod in pods:
-            if pod.status.phase == 'Running':
-                cluster_status.append(status_lib.ClusterStatus.UP)
-            elif pod.status.phase == 'Pending':
-                cluster_status.append(status_lib.ClusterStatus.INIT)
-        # If pods are not found, we don't add them to the return list
-        return cluster_status
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

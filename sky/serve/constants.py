@@ -53,10 +53,6 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # do some log rotation.
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 
-# A default controller with 4 vCPU and 16 GB memory can run up to 16 services.
-SERVICES_MEMORY_USAGE_GB = 1.0
-SERVICES_TASK_CPU_DEMAND = 0.25
-
 # A period of time to initialize your service. Any readiness probe failures
 # during this period will be ignored.
 DEFAULT_INITIAL_DELAY_SECONDS = 1200
@@ -67,3 +63,6 @@ DEFAULT_MIN_REPLICAS = 1
 CONTROLLER_PORT_START = 20001
 LOAD_BALANCER_PORT_START = 30001
 LOAD_BALANCER_PORT_RANGE = '30001-30100'
+
+# Initial version of service.
+INITIAL_VERSION = 1

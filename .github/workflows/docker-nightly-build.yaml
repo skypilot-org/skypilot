@@ -1,0 +1,58 @@
+name: docker-nightly-build
+
+on:
+  schedule:
+    # Set the time to be 20 mins after the pypi nightly build
+    - cron: '55 10 * * *' # 10:55am UTC, 2:55am PST, 5:55am EST
+  workflow_dispatch:
+  
+jobs:
+  
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find the release version
+        id: version
+        run: |
+          PACKAGE_NAME="skypilot-nightly"
+          # Fetch package info from PyPI
+          PACKAGE_INFO=$(curl -s https://pypi.org/pypi/$PACKAGE_NAME/json)
+          # Parse JSON and get the latest version
+          LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Setup Dockerfile
+        run: |
+          touch Dockerfile
+          cat <<EOF > Dockerfile
+          # Use the latest version with Python 3.10
+          FROM continuumio/miniconda3:23.3.1-0
+
+          # Install dependencies
+          RUN conda install -c conda-forge google-cloud-sdk && \
+              apt update -y && \
+              apt install rsync vim -y && \
+              rm -rf /var/lib/apt/lists/*
+          
+          RUN pip install "skypilot-nightly[all]==${{ steps.version.outputs.latest_version }}" --no-cache-dir
+          EOF
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          # TODO: add support for linux/arm64 for M series Macs
+          # It currently fails due to the failure to install google-cloud-sdk
+          platforms: linux/amd64
+          push: true
+          tags: "${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:latest,${{ secrets.DOCKER_USERNAME }}/skypilot-nightly:${{ steps.version.outputs.latest_version }}"
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -12,9 +12,9 @@ Why SkyServe?
 
 * **Bring any serving framework** (vLLM, TGI, FastAPI, ...) and scale it across regions/clouds
 * **Reduce costs and increase availability** of service replicas by leveraging multiple/cheaper locations and hardware (spot instances)
-* **Out-of-the-box load-balancing and autoscaling** of service replicas
+* Out-of-the-box **load-balancing** and **autoscaling** of service replicas
+* **Privacy and Control**: Everything is launched inside your cloud accounts and VPCs
 * Manage multi-cloud, multi-region deployments with a single control plane
-* **Privacy**: Everything is launched inside your cloud accounts and VPCs
 
 .. * Allocate scarce resources (e.g., A100) **across regions and clouds**
 .. * Autoscale your endpoint deployment with load balancing
@@ -291,7 +291,7 @@ Let's bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vi
       ports: 8080
       accelerators: A100:1
       disk_size: 1024
-      disk_tier: high
+      disk_tier: best
 
     setup: |
       conda activate chatbot
@@ -443,6 +443,12 @@ Terminate services:
 
     $ sky serve down http-server # terminate the http-server service
     $ sky serve down --all # terminate all services
+
+Autoscaling
+-----------
+
+See :ref:`Autoscaling <serve-autoscaling>` for more information.
+
 
 SkyServe Architecture
 ---------------------

@@ -12,8 +12,8 @@ import yaml
 import sky
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import kubernetes
-from sky.backends import backend_utils
 from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -438,7 +438,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
 
 
 def get_head_ssh_port(cluster_name: str, namespace: str) -> int:
-    svc_name = f'{cluster_name}-ray-head-ssh'
+    svc_name = f'{cluster_name}-head-ssh'
     return get_port(svc_name, namespace)
 
 
@@ -786,9 +786,9 @@ def get_ssh_proxy_command(
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
         }
-        backend_utils.fill_template(port_fwd_proxy_cmd_template,
-                                    vars_to_fill,
-                                    output_path=port_fwd_proxy_cmd_path)
+        common_utils.fill_template(port_fwd_proxy_cmd_template,
+                                   vars_to_fill,
+                                   output_path=port_fwd_proxy_cmd_path)
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path,
             ssh_jump_ip,
@@ -981,13 +981,13 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
                                                         namespace)
             kubernetes.core_api().delete_namespaced_service(
                 ssh_jump_name, namespace)
-    # only warn and proceed as usual
     except kubernetes.api_exception() as e:
-        logger.warning(
-            f'Tried to check ssh jump pod {ssh_jump_name},'
-            f' but got error {e}\n. Consider running `kubectl '
-            f'delete pod {ssh_jump_name} -n {namespace}` to manually '
-            'remove the pod if it has crashed.')
+        # We keep the warning in debug to avoid polluting the `sky launch`
+        # output.
+        logger.debug(f'Tried to check ssh jump pod {ssh_jump_name},'
+                     f' but got error {e}\n. Consider running `kubectl '
+                     f'delete pod {ssh_jump_name} -n {namespace}` to manually '
+                     'remove the pod if it has crashed.')
         # We encountered an issue while checking ssh jump pod. To be on
         # the safe side, lets remove its service so the port is freed
         try:
@@ -1057,3 +1057,85 @@ def get_endpoint_debug_message() -> str:
         debug_cmd = 'kubectl describe service'
     return ENDPOINTS_DEBUG_MESSAGE.format(endpoint_type=endpoint_type,
                                           debug_cmd=debug_cmd)
+
+
+def combine_pod_config_fields(config_yaml_path: str) -> None:
+    """Adds or updates fields in the YAML with fields from the ~/.sky/config's
+    kubernetes.pod_spec dict.
+    This can be used to add fields to the YAML that are not supported by
+    SkyPilot yet, or require simple configuration (e.g., adding an
+    imagePullSecrets field).
+    Note that new fields are added and existing ones are updated. Nested fields
+    are not completely replaced, instead their objects are merged. Similarly,
+    if a list is encountered in the config, it will be appended to the
+    destination list.
+    For example, if the YAML has the following:
+        ```
+        ...
+        node_config:
+            spec:
+                containers:
+                    - name: ray
+                    image: rayproject/ray:nightly
+        ```
+    and the config has the following:
+        ```
+        kubernetes:
+            pod_config:
+                spec:
+                    imagePullSecrets:
+                        - name: my-secret
+        ```
+    then the resulting YAML will be:
+        ```
+        ...
+        node_config:
+            spec:
+                containers:
+                    - name: ray
+                    image: rayproject/ray:nightly
+                imagePullSecrets:
+                    - name: my-secret
+        ```
+    """
+
+    def _merge_dicts(source, destination):
+        """Merge two dictionaries.
+
+        Updates nested dictionaries instead of replacing them.
+        If a list is encountered, it will be appended to the destination list.
+
+        An exception is when the key is 'containers', in which case the
+        first container in the list will be fetched and _merge_dict will be
+        called on it with the first container in the destination list.
+        """
+        for key, value in source.items():
+            if isinstance(value, dict) and key in destination:
+                _merge_dicts(value, destination[key])
+            elif isinstance(value, list) and key in destination:
+                assert isinstance(destination[key], list), \
+                    f'Expected {key} to be a list, found {destination[key]}'
+                if key == 'containers':
+                    # If the key is 'containers', we take the first and only
+                    # container in the list and merge it.
+                    assert len(value) == 1, \
+                        f'Expected only one container, found {value}'
+                    _merge_dicts(value[0], destination[key][0])
+                else:
+                    destination[key].extend(value)
+            else:
+                destination[key] = value
+
+    with open(config_yaml_path, 'r') as f:
+        yaml_content = f.read()
+    yaml_obj = yaml.safe_load(yaml_content)
+    kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
+                                                   {})
+
+    # Merge the kubernetes config into the YAML for both head and worker nodes.
+    _merge_dicts(
+        kubernetes_config,
+        yaml_obj['available_node_types']['ray_head_default']['node_config'])
+
+    # Write the updated YAML back to the file
+    common_utils.dump_yaml(config_yaml_path, yaml_obj)

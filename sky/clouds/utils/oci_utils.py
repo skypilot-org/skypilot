@@ -7,6 +7,7 @@ import logging
 import os
 
 from sky import skypilot_config
+from sky.utils import resources_utils
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +70,9 @@ class OCIConfig:
     # disk_tier to OCI VPU mapping
     BOOT_VOLUME_VPU = {
         None: DISK_TIER_MEDIUM,  # Default to medium
-        'low': DISK_TIER_LOW,
-        'medium': DISK_TIER_MEDIUM,
-        'high': DISK_TIER_HIGH,
+        resources_utils.DiskTier.LOW: DISK_TIER_LOW,
+        resources_utils.DiskTier.MEDIUM: DISK_TIER_MEDIUM,
+        resources_utils.DiskTier.HIGH: DISK_TIER_HIGH,
     }
 
     @classmethod

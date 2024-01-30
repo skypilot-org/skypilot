@@ -202,6 +202,25 @@ Available fields and semantics:
     # `sky status {cluster_name} --endpoints`
     ports: loadbalancer
 
+    # Additional fields to override the pod fields used by SkyPilot (optional)
+    #
+    # Any key:value pairs added here would get added to the pod spec used to
+    # create SkyPilot pods. The schema follows the same schema for a Pod object
+    # in the Kubernetes API:
+    # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core
+    #
+    # Example use cases: adding custom labels to SkyPilot pods, specifying
+    # imagePullSecrets for pulling images from private registries, overriding
+    # the default runtimeClassName etc.
+    pod_config:
+      metadata:
+        labels:
+          my-label: my-value
+      spec:
+        runtimeClassName: nvidia
+        imagePullSecrets:
+          - name: my-secret
+
   # Advanced OCI configurations (optional).
   oci:
     # A dict mapping region names to region-specific configurations, or
@@ -222,3 +241,4 @@ Available fields and semantics:
 
     us-ashburn-1:
       vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+

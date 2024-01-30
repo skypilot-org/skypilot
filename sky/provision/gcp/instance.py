@@ -119,17 +119,12 @@ def _wait_for_operations(
     If zone is None, then the operation is global.
     """
     op_type = 'global' if zone is None else 'zone'
-    total_polls = 0
     for handler, operations in handlers_to_operations.items():
         for operation in operations:
             logger.debug(
                 f'wait_for_compute_{op_type}_operation: '
                 f'Waiting for operation {operation["name"]} to finish...')
-            while total_polls < constants.MAX_POLLS:
-                if handler.wait_for_operation(operation, project_id, zone):
-                    break
-                time.sleep(constants.POLL_INTERVAL)
-                total_polls += 1
+            handler.wait_for_operation(operation, project_id, zone)
 
 
 def _get_head_instance_id(instances: List) -> Optional[str]:
@@ -290,7 +285,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             config.node_config, labels, to_start_count,
             head_instance_id is None)
         if errors:
-            error = common.ProvisionError('Failed to launch instances.')
+            error = common.ProvisionerError('Failed to launch instances.')
             error.errors = errors
             raise error
         if head_instance_id is None:
@@ -370,7 +365,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             })
         else:
             raise
-        error = common.ProvisionError('Failed to launch instances.')
+        error = common.ProvisionerError('Failed to launch instances.')
         error.errors = errors
         raise error from e
 
