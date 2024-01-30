@@ -143,10 +143,10 @@ def get_job_owner(cluster_yaml: str,
                   docker_user: Optional[str] = None,
                   ssh_user: Optional[str] = None) -> str:
     """Get the owner of the job."""
-    if docker_user is not None:
-        return docker_user
     if ssh_user is not None:
         return ssh_user
+    if docker_user is not None:
+        return docker_user
     cluster_config = common_utils.read_yaml(os.path.expanduser(cluster_yaml))
     # User name is guaranteed to exist (on all jinja files)
     return cluster_config['auth']['ssh_user']
