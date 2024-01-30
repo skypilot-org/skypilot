@@ -981,9 +981,10 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
                                                         namespace)
             kubernetes.core_api().delete_namespaced_service(
                 ssh_jump_name, namespace)
-    # only warn and proceed as usual
     except kubernetes.api_exception() as e:
-        logger.warning(
+        # We keep the warning in debug to avoid polluting the `sky launch`
+        # output.
+        logger.debug(
             f'Tried to check ssh jump pod {ssh_jump_name},'
             f' but got error {e}\n. Consider running `kubectl '
             f'delete pod {ssh_jump_name} -n {namespace}` to manually '

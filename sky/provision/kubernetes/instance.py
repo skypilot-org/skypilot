@@ -371,9 +371,9 @@ def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
         _request_timeout=kubernetes.API_TIMEOUT)
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
-    """Runs instances for the given cluster."""
+def _create_pods(region: str, cluster_name_on_cloud: str,
+                 config: common.ProvisionConfig) -> common.ProvisionRecord:
+    """Create pods based on the config."""
     provider_config = config.provider_config
     namespace = _get_namespace(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
@@ -522,6 +522,16 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         resumed_instance_ids=[],
         created_instance_ids=list(created_pods.keys()),
     )
+
+
+def run_instances(region: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+    """Runs instances for the given cluster."""
+    try:
+        return _create_pods(region, cluster_name_on_cloud, config)
+    except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
+        logger.warning(f'run_instances: Error occurred when creating pods: {e}')
+        raise
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
