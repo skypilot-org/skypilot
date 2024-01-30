@@ -1991,16 +1991,13 @@ class AzureBlobStore(AbstractStore):
         # TODO(Doyoung): May need to do some handling for what to do for non az
         # cloud urls passed as a source.
         else:
-            # creating new cloud storage
-            # 1. Check if resource group and storage account is provided from config
-            #    Use those as the name.
-            # 2. If not provided, use default names for resource group and storage accnt
-            # 3. Check if those are already created or not, and if not, create them.
-            
+            # creating new container
             # TODO(Doyoung): Currently, assuming both storage_account and resource group names
             # are both provided when user specifies them. Need to handle the case when only either
-            # of them is specified. Perhaps force the users to specify both when have to specify any?
+            # of them is specified.
             # Need to put in some thoughts.
+            # If resource group and storage account names are not provided from
+            # config, then use default names.
             self.storage_account_name = skypilot_config.get_nested(
                 ('azure', 'storage_account'),
                 f'sky{common_utils.get_user_hash()}')
