@@ -15,6 +15,7 @@ logger = sky_logging.init_logger(__name__)
 # Default spot policy.
 DEFAULT_SPOT_POLICY = None
 
+
 class SpotZoneType(enum.Enum):
     """Spot Zone Type."""
     ACTIVE = 'ACTIVE'
