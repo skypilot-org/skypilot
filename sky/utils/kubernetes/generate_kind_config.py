@@ -9,7 +9,8 @@ import textwrap
 def generate_kind_config(path: str,
                          port_start: int = 30000,
                          port_end: int = 32768,
-                         num_nodes=1) -> None:
+                         num_nodes: int = 1,
+                         gpus: bool = False) -> None:
     """Generate a kind cluster config with ports mapped from host to container
 
     Args:
@@ -17,6 +18,7 @@ def generate_kind_config(path: str,
         port_start: Port range start
         port_end: Port range end
         num_nodes: Number of nodes in the cluster
+        gpus: If true, initialize kind cluster with GPU support
     """
 
     preamble = textwrap.dedent(f"""
@@ -29,8 +31,16 @@ def generate_kind_config(path: str,
         extraArgs:
           "service-node-port-range": {port_start}-{port_end}
     nodes:
-    - role: control-plane
-      extraPortMappings:""")
+    - role: control-plane""")
+    if gpus:
+        preamble += textwrap.indent(
+            textwrap.dedent("""
+        extraMounts:
+        - hostPath: /dev/null
+          containerPath: /var/run/nvidia-container-devices/all"""), ' ' * 2)
+    preamble += textwrap.indent(
+        textwrap.dedent("""
+      extraPortMappings:"""), ' ' * 2)
     suffix = ''
     if num_nodes > 1:
         for _ in range(1, num_nodes):
@@ -68,6 +78,10 @@ if __name__ == '__main__':
                         type=int,
                         default=1,
                         help='Number of nodes in the cluster')
+    # Add GPU support
+    parser.add_argument('--gpus',
+                        action='store_true',
+                        help='Initialize kind cluster with GPU support')
     args = parser.parse_args()
     generate_kind_config(args.path, args.port_start, args.port_end,
-                         args.num_nodes)
+                         args.num_nodes, args.gpus)

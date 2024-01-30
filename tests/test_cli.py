@@ -7,7 +7,9 @@ import sky
 from sky import exceptions
 import sky.cli as cli
 
-CLOUDS_TO_TEST = ['aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci']
+CLOUDS_TO_TEST = [
+    'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere'
+]
 
 
 def test_infer_gpunode_type():

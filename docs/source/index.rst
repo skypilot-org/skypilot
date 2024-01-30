@@ -1,11 +1,17 @@
 Welcome to SkyPilot!
 =========================
 
-.. figure:: ./images/skypilot-wide-light-1k.png
+.. image:: ./_static/SkyPilot_wide_light.svg
   :width: 60%
   :align: center
   :alt: SkyPilot
-  :class: no-scaled-link
+  :class: no-scaled-link, only-light
+
+.. image:: ./_static/SkyPilot_wide_dark.svg
+  :width: 60%
+  :align: center
+  :alt: SkyPilot
+  :class: no-scaled-link, only-dark
 
 .. raw:: html
 
@@ -41,17 +47,16 @@ SkyPilot **cuts your cloud costs**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported providers (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI, Cloudflare, any Kubernetes cluster):
+Current supported providers (AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, IBM, Samsung, Cloudflare, any Kubernetes cluster):
 
 .. raw:: html
 
    <p align="center">
    <picture>
-      <a href="https://skypilot.readthedocs.io/en/latest/getting-started/installation.html">
-      <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%></a>
+      <img class="only-light" alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%>
+      <img class="only-dark" alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png" width=80%>
    </picture>
    </p>
-
 
 More Information
 --------------------------
@@ -62,7 +67,7 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
-  * `Mistral 7B <https://docs.mistral.ai/cloud-deployment/skypilot/>`_ (from official Mistral team)
+  * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)
   * `vLLM: Serving LLM 24x Faster On the Cloud <https://github.com/skypilot-org/skypilot/tree/master/llm/vllm>`_ (from official vLLM team)
   * `Vicuna chatbots: Training & Serving <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_ (from official Vicuna team)
   * `Train your own Vicuna on Llama-2 <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna-llama-2>`_
@@ -112,6 +117,15 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
+   :caption: SkyServe: Model Serving
+
+   serving/sky-serve
+   serving/service-yaml-spec
+   serving/autoscaling
+   serving/update
+
+.. toctree::
+   :maxdepth: 1
    :caption: Cutting Cloud Costs
 
    examples/spot-jobs
@@ -137,6 +151,13 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
+   :caption: Developer Guides
+
+   developers/CONTRIBUTING
+   Guide: Adding a New Cloud <https://docs.google.com/document/d/1oWox3qb3Kz3wXXSGg9ZJWwijoa99a3PIQUHBR8UgEGs/edit?usp=sharing>
+
+.. toctree::
+   :maxdepth: 1
    :caption: Cloud Admin and Usage
 
    cloud-setup/cloud-permissions/index
@@ -151,3 +172,4 @@ Documentation
    reference/cli
    reference/api
    reference/config
+

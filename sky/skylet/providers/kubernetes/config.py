@@ -4,7 +4,7 @@ import math
 from typing import Any, Dict, Union
 
 from sky.adaptors import kubernetes
-from sky.utils import kubernetes_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +128,17 @@ def get_resource(container_resources: Dict[str, Any],
     # float('inf') means there's no limit set
     res_count = request if limit == float('inf') else limit
     # Convert to int since Ray autoscaler expects int.
-    # Cap the minimum resource to 1 because if resource count is set to 0,
-    # (e.g., when request=0.5), ray will not be able to schedule any tasks.
     # We also round up the resource count to the nearest integer to provide the
     # user at least the amount of resource they requested.
-    return max(1, math.ceil(res_count))
+    rounded_count = math.ceil(res_count)
+    if resource_name == 'cpu':
+        # For CPU, we set minimum count to 1 because if CPU count is set to 0,
+        # (e.g. when the user sets --cpu 0.5), ray will not be able to schedule
+        # any tasks.
+        return max(1, rounded_count)
+    else:
+        # For GPU and memory, return the rounded count.
+        return rounded_count
 
 
 def _get_resource(container_resources: Dict[str, Any], resource_name: str,
@@ -144,7 +150,7 @@ def _get_resource(container_resources: Dict[str, Any], resource_name: str,
 
     Args:
         container_resources: Container's resource field.
-        resource_name: One of 'cpu', 'gpu' or memory.
+        resource_name: One of 'cpu', 'gpu' or 'memory'.
         field_name: One of 'requests' or 'limits'.
 
     Returns:

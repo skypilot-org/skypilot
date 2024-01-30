@@ -20,6 +20,7 @@ from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
 from sky.clouds.service_catalog.data_fetchers import fetch_aws
 from sky.utils import common_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -156,7 +157,7 @@ def _get_df() -> pd.DataFrame:
         if _user_df is None:
             try:
                 _user_df = _fetch_and_apply_az_mapping(_default_df)
-            except RuntimeError as e:
+            except (RuntimeError, ImportError) as e:
                 if config.get_use_default_catalog_if_failed():
                     logger.warning('Failed to fetch availability zone mapping. '
                                    f'{common_utils.format_exception(e)}')
@@ -219,9 +220,10 @@ def get_vcpus_mem_from_instance_type(
                                                         instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
@@ -291,12 +293,13 @@ def list_accelerators(
         name_filter: Optional[str],
         region_filter: Optional[str],
         quantity_filter: Optional[int],
-        case_sensitive: bool = True
-) -> Dict[str, List[common.InstanceTypeInfo]]:
+        case_sensitive: bool = True,
+        all_regions: bool = False) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in AWS offering accelerators."""
     return common.list_accelerators_impl('AWS', _get_df(), gpus_only,
                                          name_filter, region_filter,
-                                         quantity_filter, case_sensitive)
+                                         quantity_filter, case_sensitive,
+                                         all_regions)
 
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:

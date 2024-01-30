@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath('../../'))
 # -- Project information
 
 project = 'SkyPilot'
-copyright = '2023, SkyPilot Team'
+copyright = '2024, SkyPilot Team'
 author = 'the SkyPilot authors'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -24,6 +24,7 @@ release = version
 # -- General configuration
 
 extensions = [
+    'sphinxemoji.sphinxemoji',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.duration',
@@ -35,6 +36,7 @@ extensions = [
     'sphinx_click',
     'sphinx_copybutton',
     'sphinx_design',
+    'myst_parser',
 ]
 
 intersphinx_mapping = {
@@ -48,7 +50,6 @@ templates_path = ['_templates']
 # The main toctree document.
 main_doc = 'index'
 
-pygments_style = None
 autosummary_generate = True
 napolean_use_rtype = False
 
@@ -62,12 +63,18 @@ autodoc_member_order = 'bysource'
 html_theme = 'sphinx_book_theme'
 html_theme_options = {
     # 'show_toc_level': 2,
-    'logo_only': True,
+    'logo': {
+        'image_dark': '_static/SkyPilot_wide_dark.svg',
+    },
     'repository_url': 'https://github.com/skypilot-org/skypilot',
     'use_repository_button': True,
     'use_issues_button': True,
     'use_edit_page_button': True,
+    'repository_branch': 'master',
     'path_to_docs': 'docs/source',
+    'pygment_light_style': 'tango',
+    'pygment_dark_style': 'monokai',
+    'primary_sidebar_end': [],
 }
 
 # The name for this set of Sphinx documents.  If None, it defaults to
@@ -85,7 +92,7 @@ html_show_sourcelink = False
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-html_logo = 'images/skypilot-wide-light-1k.png'
+html_logo = '_static/SkyPilot_wide_light.svg'
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs. This file should be a Windows icon file (.ico), 16x16 or 32x32 pixels.
@@ -95,5 +102,5 @@ html_favicon = '_static/favicon.ico'
 # relative to this directory. They are copied after the builtin static files,
 # so a file named 'default.css' will overwrite the builtin 'default.css'.
 html_static_path = ['_static']
-html_js_files = ["custom.js"]
-html_css_files = ["custom.css"]
+html_js_files = ['custom.js']
+html_css_files = ['custom.css']

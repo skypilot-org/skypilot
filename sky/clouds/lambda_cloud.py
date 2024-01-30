@@ -6,10 +6,10 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import requests
 
 from sky import clouds
-from sky import exceptions
 from sky import status_lib
 from sky.clouds import service_catalog
 from sky.clouds.utils import lambda_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -36,20 +36,21 @@ class Lambda(clouds.Cloud):
     # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is currently not supported on {_REPR}.',
         clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
-            f'Docker image is not supported in {_REPR}. '
+            f'Docker image is currently not supported on {_REPR}. '
             'You can try running docker command inside the `run` section in task.yaml.'
         ),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is currently not supported on {_REPR}.',
     }
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del resources  # unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -127,7 +128,8 @@ class Lambda(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -273,12 +275,6 @@ class Lambda(clouds.Cloud):
     @classmethod
     def regions(cls) -> List['clouds.Region']:
         return service_catalog.regions(clouds='lambda')
-
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
-        raise exceptions.NotSupportedError(
-            'Lambda does not support disk tiers.')
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

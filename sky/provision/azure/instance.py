@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import azure
+from sky.provision import common
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -65,7 +66,13 @@ def open_ports(
                     destination_address_prefix='*',
                     destination_port_ranges=ports,
                 ))
-            update_network_security_groups(resource_group, nsg.name, nsg)
+            poller = update_network_security_groups(resource_group, nsg.name,
+                                                    nsg)
+            poller.wait()
+            if poller.status() != 'Succeeded':
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Failed to open ports {ports} in NSG '
+                                     f'{nsg.name}: {poller.status()}')
         except azure.http_error_exception() as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -74,9 +81,20 @@ def open_ports(
 
 def cleanup_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
     # Azure will automatically cleanup network security groups when cleanup
     # resource group. So we don't need to do anything here.
-    del cluster_name_on_cloud, provider_config  # Unused.
+    del cluster_name_on_cloud, ports, provider_config  # Unused.
+
+
+def query_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[common.Endpoint]]:
+    """See sky/provision/__init__.py"""
+    return common.query_ports_passthrough(cluster_name_on_cloud, ports,
+                                          provider_config)
