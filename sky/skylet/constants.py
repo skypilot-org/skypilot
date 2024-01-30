@@ -2,7 +2,6 @@
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
-SKY_USER_FILE_PATH = '~/.sky/generated'
 
 # Default Ray port is 6379. Default Ray dashboard port is 8265.
 # Default Ray tempdir is /tmp/ray.

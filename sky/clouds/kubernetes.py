@@ -60,7 +60,7 @@ class Kubernetes(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Custom disk '
                                                              'tiers are not '
                                                              'supported in '
-                                                             'Kubernetes.'
+                                                             'Kubernetes.',
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
