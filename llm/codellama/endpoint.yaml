@@ -10,7 +10,7 @@ service:
       model: codellama/CodeLlama-70b-Python-hf
       prompt: "def hello_world():"
       max_tokens: 1
-    initial_delay_seconds: 1200
+    initial_delay_seconds: 1500
   replica_policy:
     min_replicas: 2
 
@@ -37,6 +37,7 @@ setup: |
 run: |
   conda activate codellama
   export PATH=$PATH:/sbin
+  # Reduce --max-num-seqs to avoid OOM during loading model on L4:8
   python -u -m vllm.entrypoints.openai.api_server \
                 --host 0.0.0.0 \
                 --model codellama/CodeLlama-70b-Python-hf \

@@ -1,0 +1,44 @@
+resources:
+  accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+  disk_size: 1024
+  disk_tier: best
+  memory: 32+
+
+setup: |
+  conda activate codellama
+  if [ $? -ne 0 ]; then
+    conda create -n codellama python=3.10 -y
+    conda activate codellama
+  fi
+
+  # We have to manually install Torch otherwise apex & xformers won't build
+  pip list | grep torch || pip install "torch>=2.0.0"
+
+  pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git"
+  pip install "fschat[model_worker,webui]==0.2.24"
+  pip install git+https://github.com/huggingface/transformers accelerate protobuf
+
+run: |
+  conda activate codellama
+  export PATH=$PATH:/sbin
+  WORKER_IP=$(hostname -I | cut -d' ' -f1)
+  CONTROLLER_PORT=21001
+  WORKER_PORT=21002
+
+  python3 -m fastchat.serve.controller --host 0.0.0.0 --port ${CONTROLLER_PORT} > ~/controller.log 2>&1 &
+
+  # Reduce --max-num-seqs to avoid OOM during loading model on L4:8
+  python3 -m fastchat.serve.vllm_worker \
+    --model-path codellama/CodeLlama-70b-Instruct-hf \
+    --controller-address http://${WORKER_IP}:${CONTROLLER_PORT} \
+    --worker-address http://${WORKER_IP}:${WORKER_PORT} \
+    --host 0.0.0.0 \
+    --port ${WORKER_PORT} \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-num-seqs 64 2>&1 | tee ~/worker.log &
+
+  echo 'Waiting for model worker to start...'
+  while ! `cat ~/worker.log | grep -q 'Uvicorn running on'`; do sleep 1; done
+
+  echo 'Starting gradio server...'
+  python -u -m fastchat.serve.gradio_web_server --share | tee ~/gradio.log
