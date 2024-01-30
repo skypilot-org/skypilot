@@ -11,7 +11,7 @@ from sky import global_user_state
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
-from sky.utils import kubernetes_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 
 _PULL_FREQUENCY_HOURS = 7
 

@@ -1,29 +1,45 @@
+"""Kubernetes-specific configuration for the provisioner."""
 import copy
 import logging
 import math
 from typing import Any, Dict, Union
 
 from sky.adaptors import kubernetes
+from sky.provision import common
 from sky.provision.kubernetes import utils as kubernetes_utils
 
 logger = logging.getLogger(__name__)
-
-log_prefix = 'KubernetesNodeProvider: '
 
 # Timeout for deleting a Kubernetes resource (in seconds).
 DELETION_TIMEOUT = 90
 
 
+def bootstrap_instances(
+        region: str, cluster_name: str,
+        config: common.ProvisionConfig) -> common.ProvisionConfig:
+    del region, cluster_name  # unused
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+
+    _configure_services(namespace, config.provider_config)
+
+    config = _configure_ssh_jump(namespace, config)
+
+    if not config.provider_config.get('_operator'):
+        # These steps are unecessary when using the Operator.
+        _configure_autoscaler_service_account(namespace, config.provider_config)
+        _configure_autoscaler_role(namespace, config.provider_config)
+        _configure_autoscaler_role_binding(namespace, config.provider_config)
+
+    return config
+
+
 class InvalidNamespaceError(ValueError):
 
     def __init__(self, field_name: str, namespace: str):
-        self.message = (
+        super().__init__(
             f'Namespace of {field_name} config does not match provided '
-            f'namespace "{namespace}". Either set it to {namespace} or remove the '
-            'field')
-
-    def __str__(self) -> str:
-        return self.message
+            f'namespace "{namespace}". Either set it to {namespace} or remove '
+            'the field')
 
 
 def using_existing_msg(resource_type: str, name: str) -> str:
@@ -50,22 +66,6 @@ def not_provided_msg(resource_type: str) -> str:
     return f'no {resource_type} config provided, must already exist'
 
 
-def bootstrap_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
-    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-
-    _configure_services(namespace, config['provider'])
-
-    config = _configure_ssh_jump(namespace, config)
-
-    if not config['provider'].get('_operator'):
-        # These steps are unecessary when using the Operator.
-        _configure_autoscaler_service_account(namespace, config['provider'])
-        _configure_autoscaler_role(namespace, config['provider'])
-        _configure_autoscaler_role_binding(namespace, config['provider'])
-
-    return config
-
-
 def fillout_resources_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
     """Fills CPU and GPU resources in the ray cluster config.
 
@@ -80,7 +80,7 @@ def fillout_resources_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
 
         node_config = node_types[node_type]['node_config']
         # The next line is for compatibility with configs which define pod specs
-        # cf. KubernetesNodeProvider.create_node().
+        # cf.create_node().
         pod = node_config.get('pod', node_config)
         container_data = pod['spec']['containers'][0]
 
@@ -181,7 +181,8 @@ def _configure_autoscaler_service_account(
         namespace: str, provider_config: Dict[str, Any]) -> None:
     account_field = 'autoscaler_service_account'
     if account_field not in provider_config:
-        logger.info(log_prefix + not_provided_msg(account_field))
+        logger.info('_configure_autoscaler_service_account: '
+                    f'{not_provided_msg(account_field)}')
         return
 
     account = provider_config[account_field]
@@ -196,19 +197,23 @@ def _configure_autoscaler_service_account(
         namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
-        logger.info(log_prefix + using_existing_msg(account_field, name))
+        logger.info('_configure_autoscaler_service_account: '
+                    f'{using_existing_msg(account_field, name)}')
         return
 
-    logger.info(log_prefix + not_found_msg(account_field, name))
+    logger.info('_configure_autoscaler_service_account: '
+                f'{not_found_msg(account_field, name)}')
     kubernetes.core_api().create_namespaced_service_account(namespace, account)
-    logger.info(log_prefix + created_msg(account_field, name))
+    logger.info('_configure_autoscaler_service_account: '
+                f'{created_msg(account_field, name)}')
 
 
 def _configure_autoscaler_role(namespace: str,
                                provider_config: Dict[str, Any]) -> None:
     role_field = 'autoscaler_role'
     if role_field not in provider_config:
-        logger.info(log_prefix + not_provided_msg(role_field))
+        logger.info('_configure_autoscaler_role: '
+                    f'{not_provided_msg(role_field)}')
         return
 
     role = provider_config[role_field]
@@ -223,19 +228,22 @@ def _configure_autoscaler_role(namespace: str,
         namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
-        logger.info(log_prefix + using_existing_msg(role_field, name))
+        logger.info('_configure_autoscaler_role: '
+                    f'{using_existing_msg(role_field, name)}')
         return
 
-    logger.info(log_prefix + not_found_msg(role_field, name))
+    logger.info('_configure_autoscaler_role: '
+                f'{not_found_msg(role_field, name)}')
     kubernetes.auth_api().create_namespaced_role(namespace, role)
-    logger.info(log_prefix + created_msg(role_field, name))
+    logger.info(f'_configure_autoscaler_role: {created_msg(role_field, name)}')
 
 
 def _configure_autoscaler_role_binding(namespace: str,
                                        provider_config: Dict[str, Any]) -> None:
     binding_field = 'autoscaler_role_binding'
     if binding_field not in provider_config:
-        logger.info(log_prefix + not_provided_msg(binding_field))
+        logger.info('_configure_autoscaler_role_binding: '
+                    f'{not_provided_msg(binding_field)}')
         return
 
     binding = provider_config[binding_field]
@@ -257,24 +265,28 @@ def _configure_autoscaler_role_binding(namespace: str,
         namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
-        logger.info(log_prefix + using_existing_msg(binding_field, name))
+        logger.info('_configure_autoscaler_role_binding: '
+                    f'{using_existing_msg(binding_field, name)}')
         return
 
-    logger.info(log_prefix + not_found_msg(binding_field, name))
+    logger.info('_configure_autoscaler_role_binding: '
+                f'{not_found_msg(binding_field, name)}')
     kubernetes.auth_api().create_namespaced_role_binding(namespace, binding)
-    logger.info(log_prefix + created_msg(binding_field, name))
+    logger.info('_configure_autoscaler_role_binding: '
+                f'{created_msg(binding_field, name)}')
 
 
-def _configure_ssh_jump(namespace, config):
+def _configure_ssh_jump(namespace, config: common.ProvisionConfig):
     """Creates a SSH jump pod to connect to the cluster.
 
     Also updates config['auth']['ssh_proxy_command'] to use the newly created
     jump pod.
     """
-    pod_cfg = config['available_node_types']['ray_head_default']['node_config']
+    provider_config = config.provider_config
+    pod_cfg = config.node_config
 
     ssh_jump_name = pod_cfg['metadata']['labels']['skypilot-ssh-jump']
-    ssh_jump_image = config['provider']['ssh_jump_image']
+    ssh_jump_image = provider_config['ssh_jump_image']
 
     volumes = pod_cfg['spec']['volumes']
     # find 'secret-volume' and get the secret name
@@ -303,7 +315,7 @@ def _configure_services(namespace: str, provider_config: Dict[str,
                                                               Any]) -> None:
     service_field = 'services'
     if service_field not in provider_config:
-        logger.info(log_prefix + not_provided_msg(service_field))
+        logger.info(f'_configure_services: {not_provided_msg(service_field)}')
         return
 
     services = provider_config[service_field]
@@ -321,16 +333,19 @@ def _configure_services(namespace: str, provider_config: Dict[str,
             assert len(services) == 1
             existing_service = services[0]
             if service == existing_service:
-                logger.info(log_prefix + using_existing_msg('service', name))
+                logger.info('_configure_services: '
+                            f'{using_existing_msg("service", name)}')
                 return
             else:
-                logger.info(log_prefix + updating_existing_msg('service', name))
+                logger.info('_configure_services: '
+                            f'{updating_existing_msg("service", name)}')
                 kubernetes.core_api().patch_namespaced_service(
                     name, namespace, service)
         else:
-            logger.info(log_prefix + not_found_msg('service', name))
+            logger.info(
+                f'_configure_services: {not_found_msg("service", name)}')
             kubernetes.core_api().create_namespaced_service(namespace, service)
-            logger.info(log_prefix + created_msg('service', name))
+            logger.info(f'_configure_services: {created_msg("service", name)}')
 
 
 class KubernetesError(Exception):
