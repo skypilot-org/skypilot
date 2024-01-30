@@ -161,8 +161,7 @@ class KubernetesNodeProvider(NodeProvider):
         return kubernetes_utils.get_head_ssh_port(cluster_name, self.namespace)
 
     def internal_ip(self, node_id):
-        pod = kubernetes.core_api().read_namespaced_pod(
-            node_id, self.namespace)
+        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
         return pod.status.pod_ip
 
     def get_node_id(self, ip_address, use_internal_ip=True) -> str:
