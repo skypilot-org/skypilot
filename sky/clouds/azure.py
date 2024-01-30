@@ -663,6 +663,10 @@ class Azure(clouds.Cloud):
         assert stdout.strip(), f'No status returned for {name!r}'
 
         original_statuses_list = json.loads(stdout.strip())
+        if not original_statuses_list:
+            # No nodes found. The original_statuses_list will be empty string.
+            # Return empty list.
+            return []
         if not isinstance(original_statuses_list, list):
             original_statuses_list = [original_statuses_list]
         statuses = []

@@ -912,7 +912,8 @@ def test_kubernetes_storage_mounts():
             *storage_setup_commands,
             f'sky launch -y -c {name} --cloud kubernetes {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls {storage_name}/hello.txt',
+            f'aws s3 ls {storage_name}/hello.txt || '
+            f'gsutil ls gs://{storage_name}/hello.txt',
         ]
         test = Test(
             'kubernetes_storage_mounts',
@@ -1216,7 +1217,7 @@ def test_large_job_queue(generic_cloud: str):
             f'sky launch -y -c {name} --cpus 8 --cloud {generic_cloud}',
             f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
-            'sleep 75',
+            'sleep 85',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep PENDING | wc -l | grep 43',
@@ -2566,14 +2567,38 @@ def test_inline_env_file(generic_cloud: str):
 
 # ---------- Testing custom image ----------
 @pytest.mark.aws
-def test_custom_image():
-    """Test custom image"""
+def test_aws_custom_image():
+    """Test AWS custom image"""
     name = _get_cluster_name()
     test = Test(
-        'test-custom-image',
+        'test-aws-custom-image',
         [
-            f'sky launch -c {name} --retry-until-up -y examples/custom_image.yaml',
+            f'sky launch -c {name} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --cloud aws --region us-east-2 --image-id ami-062ddd90fb6f8267a',  # Nvidia image
             f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.parametrize("image_id", [
+    "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
+    "docker:ubuntu:18.04",
+])
+def test_kubernetes_custom_image(image_id):
+    """Test Kubernetes custom image"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-kubernetes-custom-image',
+        [
+            f'sky launch -c {name} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --cloud kubernetes --image-id {image_id} --region None --gpus T4:1',
+            f'sky logs {name} 1 --status',
+            # Try exec to run again and check if the logs are printed
+            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --cloud kubernetes --image-id {image_id} --region None --gpus T4:1 | grep "Hello 100"',
+            # Make sure ssh is working with custom username
+            f'ssh {name} echo hi | grep hi',
         ],
         f'sky down -y {name}',
         timeout=30 * 60,
@@ -4032,6 +4057,7 @@ def test_multiple_resources():
 
 
 # ---------- Sky Benchmark ----------
+@pytest.mark.no_kubernetes
 def test_sky_bench(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(

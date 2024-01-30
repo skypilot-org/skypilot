@@ -98,7 +98,7 @@ When a container is used as the runtime environment, everything happens inside t
 - :code:`setup` and :code:`run` commands are executed in the container;
 - Any files created by the task will be stored inside the container.
 
-To use a Docker image as your runtime environment, set the :code:`image_id` field in the :code:`resources` section of your task YAML file to :code:`docker:<image_id>`.
+To use a Docker image as your runtime environment, set the :code:`image_id` field in the :code:`resources` section of your task YAML file to :code:`docker:<image_id>`. Only **Debian-based** images (e.g., Ubuntu) are supported for now.
 
 For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
 

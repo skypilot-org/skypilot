@@ -752,9 +752,14 @@ class GCP(clouds.Cloud):
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
+        # We only add the existing credential files. It should be safe to ignore
+        # the missing files, as we successfully created the VM at this point,
+        # meaning the authentication is successful.
         credentials = {
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
+            if os.path.exists(os.path.expanduser(
+                f'~/.config/gcloud/{filename}'))
         }
         # Upload the application key path to the default path, so that
         # autostop and GCS can be accessed on the remote cluster.

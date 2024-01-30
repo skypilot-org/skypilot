@@ -509,8 +509,9 @@ class Resources:
 
             # Canonicalize the accelerator names.
             accelerators = {
-                accelerator_registry.canonicalize_accelerator_name(acc):
-                acc_count for acc, acc_count in accelerators.items()
+                accelerator_registry.canonicalize_accelerator_name(
+                    acc, self._cloud): acc_count
+                for acc, acc_count in accelerators.items()
             }
 
             acc, _ = list(accelerators.items())[0]
@@ -802,11 +803,12 @@ class Resources:
                 clouds.AWS()) and not self._cloud.is_same_cloud(
                     clouds.GCP()) and not self._cloud.is_same_cloud(
                         clouds.IBM()) and not self._cloud.is_same_cloud(
-                            clouds.OCI()):
+                            clouds.OCI()) and not self._cloud.is_same_cloud(
+                                clouds.Kubernetes()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS/GCP/IBM/OCI, please '
-                    'explicitly specify the cloud.')
+                    'image_id is only supported for AWS/GCP/IBM/OCI/Kubernetes,'
+                    ' please explicitly specify the cloud.')
 
         if self._region is not None:
             if self._region not in self._image_id:
@@ -1311,8 +1313,9 @@ class Resources:
             accelerators = state.pop('_accelerators', None)
             if accelerators is not None:
                 accelerators = {
-                    accelerator_registry.canonicalize_accelerator_name(acc):
-                    acc_count for acc, acc_count in accelerators.items()
+                    accelerator_registry.canonicalize_accelerator_name(
+                        acc, cloud=None): acc_count
+                    for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators
 
