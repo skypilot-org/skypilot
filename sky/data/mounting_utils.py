@@ -12,6 +12,7 @@ _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '1.3.0'
+BLOBFUSE2_VERSION = '2.2.0'
 _BLOBFUSE_CACHE_DIR = '~/.sky/blobfuse2_cache'
 
 def get_s3_mount_install_cmd() -> str:
@@ -57,8 +58,12 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
 
 def get_az_mount_install_cmd() -> str:
     """Returns a command to install AZ blob storage mount utility blobfuse2."""
-    install_cmd = ('sudo apt-get update && '
-                   'sudo apt-get install fuse3 blobfuse2 -y')
+    install_cmd = ('wget -nc https://github.com/Azure/azure-storage-fuse'
+                   f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
+                   f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
+                   '-O /tmp/blobfuse2.deb && '
+                   'sudo dpkg --install /tmp/blobfuse2.deb')
+
     return install_cmd
 
 
