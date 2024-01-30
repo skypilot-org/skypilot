@@ -159,8 +159,8 @@ class AzureCloudStorage(CloudStorage):
     # List of commands to install AWS CLI
     _GET_AZCLI = [
         'az --version >/dev/null 2>&1 || '
-        'sudo apt-get install azure-cli -y && '
-        'az login',
+        '(sudo apt-get update --allow-releaseinfo-change && '
+        'sudo apt-get install azure-cli -y)'
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -194,20 +194,20 @@ class AzureCloudStorage(CloudStorage):
 
         # A directory with few or no items
         return True
-                         
-        
+
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads using AWS CLI."""
-        # AWS Sync by default uses 10 threads to upload files to the bucket.
-        # To increase parallelism, modify max_concurrent_requests in your
-        # aws config file (Default path: ~/.aws/config).
+        # TODO(Doyoung): May need to update the argument passed into --source
+        # depending on either the directory being downloaded is the container
+        # itself or the subdirectory of the container. Confirm if we support
+        # syncing from subdirectory of the bucket first.
         container_name, path, storage_account_name = data_utils.split_az_path(
             source)
         download_command = ('az storage blob download-batch '
                             f'--account-name {storage_account_name} '
-                            f'--source {container_name} --file {destination} '
-                            f'--container-name {container_name}')
+                            f'--source {container_name} '
+                            f'--destination {destination}')
 
         all_commands = list(self._GET_AZCLI)
         all_commands.append(download_command)
