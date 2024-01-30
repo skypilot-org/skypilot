@@ -1,4 +1,4 @@
-# Serving Code Llama
+# Serving Code Llama with vLLM
 
 [Code Llama](https://github.com/facebookresearch/codellama) is a code-specialized version of Llama 2 that was created by further training Llama 2 on its code-specific datasets, sampling more data from that same dataset for longer. On Jan 29th, 2024, Meta releases the Code Llama 70B, the largest and best-performing model in the Code Llama family.
 
@@ -19,9 +19,9 @@
 
 ## Running your own Code Llama with SkyPilot
 
-You can now host your own Code Llama with SkyPilot using 1-click.
+After [installing SkyPilot](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html), run your own Code Llama on vLLM with SkyPilot in 1-click:
 
-1. Start serving the Code Llam on a single instance with any available GPU specified in the [endpoint.yaml](endpoint.yaml) with an OpenAI-compatible endpoint exposed:
+1. Start servingCode Llama on a single instance with any available GPU in the list specified in [endpoint.yaml](endpoint.yaml) with a vLLM powered OpenAI-compatible endpoint:
 ```console
 sky launch -c code-llama -s endpoint.yaml
 
@@ -81,11 +81,11 @@ This returns the following completion:
 
 ## Scale up the service with SkyServe
 
-1. To scale up the Code Llama service is as simple as running the following command:
+1. With [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html), scaling up the Code Llama service is as simple as running:
 ```bash
 sky serve up -n code-llama ./endpoint.yaml
 ```
-This will start the service with multiple replicas on cheapest available locations and accelerators, and SkyServe will automatically manage the replicas, monitor the healthiness of the replicas, and restart the replicas when needed.
+This will start the service with multiple replicas on the cheapest available locations and accelerators. SkyServe will automatically manage the replicas, monitor their health, and restart them when needed.
 
 A single endpoint will be returned and any request sent to the endpoint will be routed to the healthy replicas.
 
@@ -121,7 +121,7 @@ curl -L http://$ENDPOINT/v1/completions \
   }' | jq -r '.choices[0].text'
 ```
 
-## **Optional:** Chat with Code Llama
+## **Optional:** Accessing Code Llama with Chat API
 
 We can also chat with Code Llama using the same endpoint by using the `codellama/CodeLlama-70b-Instruct-hf` model.
 To test it, we first replace the model in the [endpoint.yaml](endpoint.yaml) with the instruction-tuned model:
@@ -147,7 +147,7 @@ curl -L http://$ENDPOINT/v1/chat/completions \
       "messages": [
         {
           "role": "system",
-          "content": "You are ahelpful and honest code assistant expert in Python."
+          "content": "You are a helpful and honest code assistant expert in Python."
         },
         {
           "role": "user",
