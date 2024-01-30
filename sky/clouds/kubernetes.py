@@ -187,6 +187,13 @@ class Kubernetes(clouds.Cloud):
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> int:
+        del image_id, region  # Unused.
+        # We don't limit the image by its size compared to the disk size, as
+        # we don't have a notion of disk size in Kubernetes.
+        return 0
+
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
             cluster_name_on_cloud: str, region: Optional['clouds.Region'],
