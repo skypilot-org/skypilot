@@ -984,11 +984,10 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
     except kubernetes.api_exception() as e:
         # We keep the warning in debug to avoid polluting the `sky launch`
         # output.
-        logger.debug(
-            f'Tried to check ssh jump pod {ssh_jump_name},'
-            f' but got error {e}\n. Consider running `kubectl '
-            f'delete pod {ssh_jump_name} -n {namespace}` to manually '
-            'remove the pod if it has crashed.')
+        logger.debug(f'Tried to check ssh jump pod {ssh_jump_name},'
+                     f' but got error {e}\n. Consider running `kubectl '
+                     f'delete pod {ssh_jump_name} -n {namespace}` to manually '
+                     'remove the pod if it has crashed.')
         # We encountered an issue while checking ssh jump pod. To be on
         # the safe side, lets remove its service so the port is freed
         try:
