@@ -803,11 +803,12 @@ class Resources:
                 clouds.AWS()) and not self._cloud.is_same_cloud(
                     clouds.GCP()) and not self._cloud.is_same_cloud(
                         clouds.IBM()) and not self._cloud.is_same_cloud(
-                            clouds.OCI()):
+                            clouds.OCI()) and not self._cloud.is_same_cloud(
+                                clouds.Kubernetes()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS/GCP/IBM/OCI, please '
-                    'explicitly specify the cloud.')
+                    'image_id is only supported for AWS/GCP/IBM/OCI/Kubernetes,'
+                    ' please explicitly specify the cloud.')
 
         if self._region is not None:
             if self._region not in self._image_id:

@@ -221,6 +221,10 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
+    if cluster_info.custom_ray_options:
+        for key, value in cluster_info.custom_ray_options.items():
+            ray_options += f' --{key}={value}'
+
     # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY to avoid using credentials
     # from environment variables set by user. SkyPilot's ray cluster should use
     # the `~/.aws/` credentials, as that is the one used to create the cluster,
@@ -280,6 +284,10 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         f'--object-manager-port=8076')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
+
+    if cluster_info.custom_ray_options:
+        for key, value in cluster_info.custom_ray_options.items():
+            ray_options += f' --{key}={value}'
 
     # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY, see the comment in
     # `start_ray_on_head_node`.

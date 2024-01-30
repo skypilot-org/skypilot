@@ -6,7 +6,6 @@ import colorama
 
 from sky import backends
 from sky import status_lib
-from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -211,6 +210,12 @@ def show_local_status_table(local_clusters: List[str]):
     `sky launch`. Sky understands what types of resources are on the nodes and
     has ran at least one job on the cluster.
     """
+    # Import the backend_utils module here to avoid circular imports.
+    # TODO(zhwu): Local clusters are deprecated and replaced by our k8s support.
+    # We should remove the clouds.Local related implementation.
+    # pylint: disable=import-outside-toplevel
+    from sky.backends import backend_utils
+
     clusters_status = backend_utils.get_clusters(
         include_controller=False,
         refresh=False,
