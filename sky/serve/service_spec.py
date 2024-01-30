@@ -14,8 +14,8 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 
 _policy_to_autoscaler_and_spot_placer = {
-    'SpotHedge': ('SpotOnDemandRequestRateAutoscaler', 'DynamicFailover'),
-    'SpotOnly': ('SpotRequestRateAutoscaler', 'DynamicFailover'),
+    'SpotHedge': ('SPOT_ON_DEMAND_REQUEST_RATE_AUTOSCALER', 'DYNAMIC_FAILOVER'),
+    'SpotOnly': ('SPOT_REQUEST_RATE_AUTOSCALER', 'DYNAMIC_FAILOVER'),
 }
 
 
@@ -97,6 +97,9 @@ class SkyServiceSpec:
         if autoscaler not in autoscalers.Autoscaler.get_autoscaler_names():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unsupported autoscaler: {autoscaler}.')
+
+        if spot_placer is None:
+            spot_placer = spot_policies.DEFAULT_SPOT_POLICY
 
         if (spot_placer is not None and
                 spot_placer not in spot_policies.SpotPlacer.get_policy_names()):

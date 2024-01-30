@@ -12,6 +12,8 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# Default spot policy.
+DEFAULT_SPOT_POLICY = None
 
 class SpotZoneType(enum.Enum):
     """Spot Zone Type."""
@@ -31,12 +33,14 @@ class SpotPlacer:
             zone: SpotZoneType.ACTIVE for zone in self.zones
         }
 
-    def __init_subclass__(cls) -> None:
-        if cls.NAME is None:
-            # This is an abstract class, don't put it in the registry.
-            return
-        assert cls.NAME not in cls.REGISTRY, f'Name {cls.NAME} already exists'
-        cls.REGISTRY[cls.NAME] = cls
+    def __init_subclass__(cls, name: str, default: bool = False) -> None:
+        if default:
+            global DEFAULT_SPOT_POLICY
+            assert DEFAULT_SPOT_POLICY is None, (
+                'Only one autoscaler can be default.')
+            DEFAULT_SPOT_POLICY = name
+        assert name not in cls.REGISTRY, f'Name {name} already exists'
+        cls.REGISTRY[name] = cls
 
     @classmethod
     def get_policy_names(cls) -> List[str]:
@@ -87,9 +91,10 @@ class SpotPlacer:
         return cls.REGISTRY[spec.spot_placer](spec)
 
 
-class DynamicFailoverSpotPlacer(SpotPlacer):
+class DynamicFailoverSpotPlacer(SpotPlacer,
+                                name='DYNAMIC_FAILOVER',
+                                default=True):
     """Dynamic failover to an active zone when preempted."""
-    NAME: Optional[str] = 'DynamicFailover'
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
                num_replicas: int) -> List[str]:
@@ -109,9 +114,8 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
         selected_zones = []
         while num_replicas > 0:
             # Select the zone with the least number of replicas.
-            selected_zone = min(
-                self.active_zones(),
-                key=lambda zone: existing_zones_to_count[selected_zone])
+            selected_zone = min(self.active_zones(),
+                                key=lambda zone: existing_zones_to_count[zone])
             selected_zones.append(selected_zone)
             num_replicas -= 1
             existing_zones_to_count[selected_zone] += 1

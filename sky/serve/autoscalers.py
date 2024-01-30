@@ -109,17 +109,14 @@ class Autoscaler:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
-    def __init_subclass__(cls, default: bool = False) -> None:
-        if cls.NAME is None:
-            # This is an abstract class, don't put it in the registry.
-            return
+    def __init_subclass__(cls, name: str, default: bool = False) -> None:
         if default:
             global DEFAULT_AUTOSCALER
             assert DEFAULT_AUTOSCALER is None, (
                 'Only one autoscaler can be default.')
-            DEFAULT_AUTOSCALER = cls.NAME
-        assert cls.NAME not in cls.REGISTRY, f'Name {cls.NAME} already exists'
-        cls.REGISTRY[cls.NAME] = cls
+            DEFAULT_AUTOSCALER = name
+        assert name not in cls.REGISTRY, f'Name {name} already exists'
+        cls.REGISTRY[name] = cls
 
     @classmethod
     def get_autoscaler_names(cls) -> List[str]:
@@ -131,13 +128,14 @@ class Autoscaler:
         return cls.REGISTRY[spec.autoscaler](spec)
 
 
-class RequestRateAutoscaler(Autoscaler, default=True):
+class RequestRateAutoscaler(Autoscaler,
+                            name='REQUEST_RATE_AUTOSCALER',
+                            default=True):
     """RequestRateAutoscaler: Autoscale according to request rate.
 
     Scales when the number of requests in the given interval is above or below
     the threshold.
     """
-    NAME: Optional[str] = 'REQUEST_RATE_AUTOSCALER'
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the request rate autoscaler.
@@ -362,13 +360,13 @@ class RequestRateAutoscaler(Autoscaler, default=True):
         return scaling_options
 
 
-class SpotRequestRateAutoscaler(RequestRateAutoscaler, default=False):
+class SpotRequestRateAutoscaler(RequestRateAutoscaler,
+                                name='SPOT_REQUEST_RATE_AUTOSCALER',
+                                default=False):
     """SpotRequestRateAutoscaler: Use spot to autoscale based on request rate.
 
     This autoscaler uses spot instances to save cost.
     """
-
-    NAME: Optional[str] = 'SpotRequestRateAutoscaler'
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         super().__init__(spec)
@@ -464,13 +462,13 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler, default=False):
         return scaling_options
 
 
-class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler,
-                                        default=False):
+class SpotOnDemandRequestRateAutoscaler(
+        SpotRequestRateAutoscaler,
+        name='SPOT_ON_DEMAND_REQUEST_RATE_AUTOSCALER',
+        default=False):
     """SpotOnDemandRequestRateAutoscaler: Use spot/on-demand mixture
     to autoscale based on request rate.
     """
-
-    NAME: Optional[str] = 'SpotOnDemandRequestRateAutoscaler'
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         super().__init__(spec)
