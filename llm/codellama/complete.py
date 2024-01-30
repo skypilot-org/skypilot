@@ -2,12 +2,10 @@ import openai
 import sky
 from sky import serve
 
-# service_records = sky.serve.status('code-llama')
-# endpoint = serve.get_endpoint(service_records[0])
+service_records = sky.serve.status('code-llama')
+endpoint = serve.get_endpoint(service_records[0])
 
-ip = sky.status('test-endpoint')[0]['handle'].external_ips()[0]
-endpoint = f'{ip}:8000'
-
+print('Using endpoint:', endpoint)
 
 client = openai.OpenAI(
     base_url = f'http://{endpoint}/v1',

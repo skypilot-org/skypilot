@@ -392,7 +392,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
         except exceptions.CommandError as e:
             raise RuntimeError(e.error_msg) from e
 
-    print(f'{colorama.Fore.GREEN}Service {service_name!r} update succeeded.'
+    print(f'{colorama.Fore.GREEN}Service {service_name!r} update scheduled.'
           f'{colorama.Style.RESET_ALL}\n'
           f'Please use {backend_utils.BOLD}sky serve status {service_name} '
           f'{backend_utils.RESET_BOLD}to check the latest status.')
