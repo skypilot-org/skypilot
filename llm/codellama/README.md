@@ -120,3 +120,66 @@ curl -L http://$ENDPOINT/v1/completions \
       "max_tokens": 256
   }' | jq -r '.choices[0].text'
 ```
+
+## **Optional:** Chat with Code Llama
+
+We can also chat with Code Llama using the same endpoint by using the `codellama/CodeLlama-70b-Instruct-hf` model.
+To test it, we first replace the model in the [endpoint.yaml](endpoint.yaml) with the instruction-tuned model:
+```bash
+sed -i 's/codellama\/CodeLlama-70b-Python-hf/codellama\/CodeLlama-70b-Instruct-hf/g' endpoint.yaml
+```
+Then, we launch the service with the new endpoint:
+```bash
+sky serve up -n code-llama ./endpoint.yaml
+```
+Or, we can update the existing service:
+```bash
+sky serve update code-llama ./endpoint.yaml
+```
+
+```bash
+ENDPOINT=$(sky serve status --endpoint code-llama-instruct)
+
+curl -L http://$ENDPOINT/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{
+      "model": "codellama/CodeLlama-70b-Instruct-hf",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are ahelpful and honest code assistant expert in Python."
+        },
+        {
+          "role": "user",
+          "content": "Show me the code for quick sort a list of integers."
+        }
+      ],
+      "max_tokens": 256,
+  }' | jq -r '.choices[0].message.content'
+```
+
+You can see something similar as below:
+````````
+```python
+def quicksort(arr):
+    if len(arr) <= 1:
+        return arr
+    pivot = arr[len(arr) // 2]
+    left = [x for x in arr if x < pivot]
+    middle = [x for x in arr if x == pivot]
+    right = [x for x in arr if x > pivot]
+    return quicksort(left) + middle + quicksort(right)
+
+# Example usage:
+numbers = [10, 2, 44, 15, 30, 11, 50]
+sorted_numbers = quicksort(numbers)
+print(sorted_numbers)
+```
+
+This code defines a function `quicksort` that takes a list of integers as input. It divides the list into three parts based on the pivot element, which is the middle element of the list. It then recursively sorts the left and right partitions and combines them with the middle partition.
+````````
+
+Alternatively, you could access the model through python with OpenAI's API (see [complete.py](complete.py)):
+```bash
+python complete.py
+```
