@@ -111,3 +111,6 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
 CSYNC_DIR = '~/.sky/csync'
 CSYNC_TERMINATION_CMD = 'python -m sky.data.sky_csync terminate -a'
+CSYNC_MOUNT_CMD = ('python -m sky.data.sky_csync csync {csync_path} '
+                   '{store_type_str} {destination} --interval-seconds '
+                   '{interval_seconds} --no-follow-symlinks')

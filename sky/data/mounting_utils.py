@@ -142,12 +142,14 @@ def get_mounting_script(
     path and finally mounts the bucket.
 
     Args:
+        mount_mode: Specifies which Storagemode is being used.
         mount_path: Path to mount the bucket at.
+        mount_cmd: Command to mount the bucket. Should be single line.
         install_cmd: Command to install the mounting utility. Should be
           single line.
-        mount_cmd: Command to mount the bucket. Should be single line.
         version_check_cmd: Command to check the version of already installed
           mounting util.
+        csync_log_path: log path for CSYNC mode.
 
     Returns:
         str: Mounting script as a str.
@@ -229,12 +231,12 @@ def get_mounting_script(
 
 
 def get_mounting_command(
-    mount_mode: storage_utils.StorageMode,
     mount_path: str,
     mount_cmd: str,
     install_cmd: Optional[str] = None,
     version_check_cmd: Optional[str] = None,
     csync_log_path: Optional[str] = None,
+    **kwargs,
 ) -> str:
     """Generates the mounting command for a given bucket.
 
@@ -248,22 +250,26 @@ def get_mounting_command(
     For CSYNC, generated script first creates the CSYNC_PATH if it does not
     exist, and finally runs CSYNC daemon on CSYNC_PATH to the bucket.
 
+    The generated mounting script is written to a temporary file, which is then
+    executed and subsequently deleted, ensuring that these operations are
+    encapsulated within a single, executable command sequence.
+
     Args:
-        mount_mode: Defines which mounting mode is used between traditional
-          MOUNT and CSYNC
         mount_path: Path to mount the bucket at.
         mount_cmd: Command to mount the bucket. Should be single line.
         install_cmd: Command to install the mounting utility for MOUNT mode.
           Should be single line.
+        version_check_cmd: Command to check the version of already installed
+          mounting util.
+        csync_log_path: log path for CSYNC mode.
+        mount_mode: Defines which mounting mode is used between traditional
+          MOUNT and CSYNC
 
     Returns:
         str: Mounting command with the mounting script as a heredoc.
     """
-    if mount_mode == storage_utils.StorageMode.MOUNT:
-        script_path = f'~/.sky/mount_{random.randint(0, 1000000)}.sh'
-    else:  # script path for CSYNC mode
-        script_path = f'~/.sky/csync_{random.randint(0, 1000000)}.sh'
-
+    mount_mode = kwargs['mount_mode']
+    script_path = f'~/.sky/{mount_mode.value}_{random.randint(0, 1000000)}.sh'
     script = get_mounting_script(mount_mode, mount_path, mount_cmd, install_cmd,
                                  version_check_cmd, csync_log_path)
 
