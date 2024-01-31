@@ -10,7 +10,7 @@ service:
       model: codellama/CodeLlama-70b-Instruct-hf
       prompt: "def hello_world():"
       max_tokens: 1
-    initial_delay_seconds: 1500
+    initial_delay_seconds: 1800
   replicas: 2
 
 resources:
