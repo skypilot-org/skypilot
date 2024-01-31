@@ -195,7 +195,7 @@ sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endp
 Note that you may get better results to use a higher temperature and top_p value.
 
 
-## **Optional:** Using Code Llama as Coding Assistant in VScode with Tabby
+## **Optional:** Using Code Llama as Coding Assistant in VScode
 
 [Tabby](https://tabby.tabbyml.com/) is an open-source, self-hosted AI coding assistant. It allows you to connect
 to your own AI models and use them as a coding assistant in VScode. Please check the [demo](#use-code-llama-70b-as-a-coding-assistant-in-vscode-using-tabby) at the top.
