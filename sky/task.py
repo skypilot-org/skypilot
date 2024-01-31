@@ -653,7 +653,7 @@ class Task:
                                 for zone in region.zones:
                                     launchable_zones.add(zone.name)
 
-            logger.info(f'launchable_zones: {launchable_zones}')
+            logger.debug(f'launchable_zones: {launchable_zones}')
             service.set_spot_zones(list(launchable_zones))
 
         self._service = service

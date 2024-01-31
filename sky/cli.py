@@ -4452,14 +4452,9 @@ def serve_up(
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
-    click.secho('Each replica will use the following resources (estimated):',
-                fg='cyan')
-    with sky.Dag() as dag:
-        dag.add(task)
-
     # task.service.spot_policy will be translated to spot_placer.
     assert task.service is not None
-    if task.service.spot_placer:
+    if task.service.spot_placer is not None:
         for resource in list(task.resources):
             if resource.use_spot_specified and not resource.use_spot:
                 logger.info('use_spot will be override to True, '
@@ -4469,7 +4464,7 @@ def serve_up(
     else:
         use_spot = False
         for resource in list(task.resources):
-            if resource.use_spot:
+            if resource.use_spot_specified and resource.use_spot:
                 use_spot = True
                 break
         if use_spot:
@@ -4481,6 +4476,10 @@ def serve_up(
                         'automate spot replica management for better '
                         'service quality and smaller downtime.')
 
+    click.secho('Each replica will use the following resources (estimated):',
+                fg='cyan')
+    with sky.Dag() as dag:
+        dag.add(task)
     sky.optimize(dag)
 
     if not yes:

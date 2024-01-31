@@ -113,11 +113,10 @@ class DynamicFailoverSpotPlacer(SpotPlacer,
             existing_zones_to_count[zone] = existing_zones.count(zone)
 
         selected_zones = []
-        while num_replicas > 0:
+        for _ in range(num_replicas):
             # Select the zone with the least number of replicas.
             selected_zone = min(self.active_zones(),
                                 key=lambda zone: existing_zones_to_count[zone])
             selected_zones.append(selected_zone)
-            num_replicas -= 1
             existing_zones_to_count[selected_zone] += 1
         return selected_zones

@@ -98,9 +98,6 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unsupported autoscaler: {autoscaler}.')
 
-        if spot_placer is None:
-            spot_placer = spot_policies.DEFAULT_SPOT_POLICY
-
         if (spot_placer is not None and
                 spot_placer not in spot_policies.SpotPlacer.get_policy_names()):
             with ux_utils.print_exception_no_traceback():
