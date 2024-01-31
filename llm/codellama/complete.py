@@ -17,7 +17,7 @@ chat_completion = client.chat.completions.create(
     model='codellama/CodeLlama-70b-Instruct-hf',
     messages=[{
         'role': 'system',
-        'content': 'You are ahelpful and honest code assistant expert in Python.'
+        'content': 'You are a helpful and honest code assistant expert in Python.'
     }, {
         'role': 'user',
         'content': 'Show me the code for quick sort a list of integers.'
