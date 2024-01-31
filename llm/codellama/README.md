@@ -223,6 +223,8 @@ docker run -it -p 8080:8080 -v $HOME/.tabby:/data \
 ```
 
 > Note that Code Llama 70B does not have the full infiling functionality [[1](https://huggingface.co/codellama/CodeLlama-70b-Instruct-hf)], so the performance of Tabby with Code Llama may be limited.
+> 
 > To get infiling functionality, you can use the smaller Code Llama models, e.g., Code Llama [7B](https://huggingface.co/codellama/CodeLlama-13B-Instruct-hf) and [13B](https://huggingface.co/codellama/CodeLlama-13B-Instruct-hf), and replace `prompt_template` with `"<｜fim▁begin｜>{prefix}<｜fim▁hole｜>{suffix}<｜fim▁end｜>"` in the [yaml](./tabby.yaml) or the command above.
+> 
 > For better performance, we recommend using Tabby with the recommended models in the [Tabby documentation](https://tabby.tabbyml.com/docs/models/) and our [Tabby example](../tabby).
 
