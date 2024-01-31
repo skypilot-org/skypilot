@@ -211,7 +211,7 @@ IP=$(sky status --ip tabby)
 echo Endpoint: http://$IP:8080
 ```
 
-Then, you can connect to the Tabby server from VScode by installing the [Tabby extension](https://marketplace.visualstudio.com/items?itemName=tabby-ai.tabby-vscode). Please check the code completion demo at the top of this page.
+Then, you can connect to the Tabby server from VScode by installing the [Tabby extension](https://marketplace.visualstudio.com/items?itemName=tabby-ai.tabby-vscode).
 
 Alternatively, if you don't want to start a cluster as the Tabby server, you can also run the Tabby server locally with docker:
 ```bash
