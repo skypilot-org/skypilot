@@ -1,4 +1,4 @@
-# A example yaml for serving Code Llama model from Meta with an OpenAI API.
+# An example yaml for serving Code Llama model from Meta with an OpenAI API.
 # Usage:
 #  1. Launch on a single instance: `sky launch -c code-llama ./endpoint.yaml`
 #  2. Scale up to multiple replicas with a single endpoint:
