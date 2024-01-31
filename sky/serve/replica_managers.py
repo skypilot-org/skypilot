@@ -189,7 +189,7 @@ def _get_use_spot_override(task_yaml: str,
         resources for resources in task.resources if resources.use_spot
     ]
     # Either resources all use spot or none use spot.
-    assert len(spot_use_resources) in [0, len(spot_use_resources)]
+    assert len(spot_use_resources) in [0, len(task.resources)]
     return spot_use_resources == len(task.resources)
 
 
