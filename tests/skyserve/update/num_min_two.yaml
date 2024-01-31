@@ -1,0 +1,16 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replica_policy:
+    min_replicas: 2
+
+resources:
+  ports: 8080
+  cloud: gcp
+  cpus: 2+
+
+workdir: examples/serve/http_server
+
+run: python3 server.py --port 8080
+
