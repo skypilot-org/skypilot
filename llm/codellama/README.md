@@ -4,10 +4,10 @@
 
 The followings are the demos of Code Llama 70B hosted by SkyServe (see more details about the setup in later sections):
 
-##### Use Code Llama 70B as a coding assistant in VScode using Tabby
+##### Connect to hosted Code Llama with Tabby as a coding assistant in VScode
 <img src="https://imgur.com/fguAmP0.gif" width="60%" />
 
-##### Chat with Code Llama 70B using FastChat
+##### Connect to hosted Code Llama with FastChat for chatting
 <img src="https://imgur.com/Dor1MoE.gif" width="60%" /> 
 
 ## References
@@ -180,7 +180,7 @@ python complete.py
 
 ## **Optional:** Accessing Code Llama with Chat GUI
 
-It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat). Please check the [demo](#chat-with-code-llama-70b-using-fastchat).
+It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat). Please check the [demo](#connect-to-hosted-code-llama-with-fastchat-for-chatting).
 
 1. Start the chat web UI:
 ```bash
@@ -198,7 +198,7 @@ Note that you may get better results to use a higher temperature and top_p value
 ## **Optional:** Using Code Llama as Coding Assistant in VScode
 
 [Tabby](https://tabby.tabbyml.com/) is an open-source, self-hosted AI coding assistant. It allows you to connect
-to your own AI models and use them as a coding assistant in VScode. Please check the [demo](#use-code-llama-70b-as-a-coding-assistant-in-vscode-using-tabby) at the top.
+to your own AI models and use them as a coding assistant in VScode. Please check the [demo](#connect-to-hosted-code-llama-with-tabby-as-a-coding-assistant-in-vscode) at the top.
 
 To start a Tabby server that connects to the Code Llama service, run:
 ```bash
