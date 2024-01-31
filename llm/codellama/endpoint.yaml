@@ -11,7 +11,7 @@ service:
       prompt: "def hello_world():"
       max_tokens: 1
     initial_delay_seconds: 1500
-  replicas: 1
+  replicas: 2
 
 resources:
   accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
