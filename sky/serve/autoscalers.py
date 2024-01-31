@@ -210,12 +210,14 @@ class RequestRateAutoscaler(Autoscaler,
                                    current_time - self.qps_window_size)
         self.request_timestamps = self.request_timestamps[index:]
 
-    def _get_desired_num_replicas(self) -> int:
-        # Always return self.target_num_replicas when autoscaling
+    def _set_desired_num_replicas(self) -> None:
+        """Set self.target_num_replicas based on request rate.
+        """
+        # Maintain self.target_num_replicas when autoscaling
         # is not enabled, i.e. self.target_qps_per_replica is None.
         # In this case, self.target_num_replicas will be min_replicas.
         if self.target_qps_per_replica is None:
-            return self.target_num_replicas
+            return
 
         # Convert to requests per second.
         num_requests_per_second = len(
@@ -224,36 +226,36 @@ class RequestRateAutoscaler(Autoscaler,
                                         self.target_qps_per_replica)
         target_num_replicas = max(self.min_replicas,
                                   min(self.max_replicas, target_num_replicas))
+        old_target_num_replicas = self.target_num_replicas
+
+        if self.target_num_replicas == 0:
+            self.target_num_replicas = target_num_replicas
+        elif target_num_replicas > self.target_num_replicas:
+            self.upscale_counter += 1
+            self.downscale_counter = 0
+            if self.upscale_counter >= self.scale_up_consecutive_periods:
+                self.upscale_counter = 0
+                self.target_num_replicas = target_num_replicas
+        elif target_num_replicas < self.target_num_replicas:
+            self.downscale_counter += 1
+            self.upscale_counter = 0
+            if self.downscale_counter >= self.scale_down_consecutive_periods:
+                self.downscale_counter = 0
+                self.target_num_replicas = target_num_replicas
+        else:
+            self.upscale_counter = self.downscale_counter = 0
 
         overprovision_str = (
             f' ({self.target_num_replicas + self.num_overprovision} '
             'with over-provision)' if self.num_overprovision > 0 else '')
         logger.info(
             f'Requests per second: {num_requests_per_second}, '
-            f'Current target number of replicas: {target_num_replicas}'
+            f'Current target number of replicas: {old_target_num_replicas}'
             f'Final target number of replicas: {self.target_num_replicas}'
             f'{overprovision_str}, Upscale counter: {self.upscale_counter}/'
             f'{self.scale_up_consecutive_periods}, '
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_consecutive_periods}')
-
-        if self.target_num_replicas == 0:
-            return target_num_replicas
-        elif target_num_replicas > self.target_num_replicas:
-            self.upscale_counter += 1
-            self.downscale_counter = 0
-            if self.upscale_counter >= self.scale_up_consecutive_periods:
-                self.upscale_counter = 0
-                return target_num_replicas
-        elif target_num_replicas < self.target_num_replicas:
-            self.downscale_counter += 1
-            self.upscale_counter = 0
-            if self.downscale_counter >= self.scale_down_consecutive_periods:
-                self.downscale_counter = 0
-                return target_num_replicas
-        else:
-            self.upscale_counter = self.downscale_counter = 0
-        return self.target_num_replicas
 
     @classmethod
     def get_replica_ids_to_scale_down(
@@ -317,7 +319,7 @@ class RequestRateAutoscaler(Autoscaler,
                 if info.is_launched:
                     provisioning_and_launched_new_replica.append(info)
 
-        self.target_num_replicas = self._get_desired_num_replicas()
+        self._set_desired_num_replicas()
         num_to_provision = self.target_num_replicas + self.num_overprovision
 
         scaling_options: List[AutoscalerDecision] = []
@@ -410,7 +412,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
                 lambda info: info.is_launched and info.version == self.
                 latest_version, replica_infos))
 
-        self.target_num_replicas = self._get_desired_num_replicas()
+        self._set_desired_num_replicas()
         num_launched_spot, num_ready_spot = 0, 0
         for info in provisioning_and_launched_new_replica:
             if info.is_spot:
