@@ -32,6 +32,7 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import provision as provision_lib
+from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import status_lib
@@ -2525,7 +2526,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     # For sky serve controller task, we set the CPU resource to a smaller
     # value to support a larger number of services.
     resources_dict = {
-        'CPU': (constants.SERVICES_TASK_CPU_DEMAND
+        'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND
                 if task.service_name is not None else DEFAULT_TASK_CPU_DEMAND)
     }
     if task.best_resources is not None:
@@ -2546,7 +2547,7 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
     The resources string is only used as a display purpose, so we only show
     the accelerator demands (if any). Otherwise, the CPU demand is shown.
     """
-    task_cpu_demand = (constants.SERVICES_TASK_CPU_DEMAND if task.service_name
+    task_cpu_demand = (serve_lib.SERVICES_TASK_CPU_DEMAND if task.service_name
                        is not None else DEFAULT_TASK_CPU_DEMAND)
     if task.best_resources is not None:
         accelerator_dict = task.best_resources.accelerators
