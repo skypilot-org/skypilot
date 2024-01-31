@@ -3,8 +3,8 @@
 [Code Llama](https://github.com/facebookresearch/codellama) is a code-specialized version of Llama 2 that was created by further training Llama 2 on its code-specific datasets, sampling more data from that same dataset for longer. On Jan 29th, 2024, Meta released the Code Llama 70B, the largest and best-performing model in the Code Llama family.
 
 <p float="center">
-  <img src="https://imgur.com/fguAmP0.gif" width="80%" />
-  <img src="https://imgur.com/Dor1MoE.gif" width="80%" /> 
+  <img src="https://imgur.com/fguAmP0.gif" width="60%" />
+  <img src="https://imgur.com/Dor1MoE.gif" width="60%" /> 
 </p>
 
 ## References
