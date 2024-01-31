@@ -186,3 +186,5 @@ sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endp
 ```
 
 Please check the GIF at the top of this page for a demo of the web GUI.
+
+Note that you may get better results to use a higher temperature and top_p value.

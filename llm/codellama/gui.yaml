@@ -22,7 +22,7 @@ setup: |
     conda activate codellama
   fi
 
-  pip install "fschat[webui]"
+  pip install "fschat[model_worker,webui]"
   pip install "openai<1"
 
 run: |
