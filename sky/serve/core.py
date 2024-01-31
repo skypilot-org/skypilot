@@ -597,9 +597,17 @@ def sync_down(service_name: str) -> None:
         port=handle.head_ssh_port,
         **ssh_credentials,
     )
-    runner.rsync(source=serve_utils.generate_remote_controller_log_file_name(
-        service_name),
-                 target=os.path.expanduser(constants.SKY_LOGS_DIRECTORY),
+    controller_log_file_name = (
+        serve_utils.generate_remote_controller_log_file_name(service_name))
+    target_directory = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
+    runner.rsync(source=controller_log_file_name,
+                 target=target_directory,
+                 up=False,
+                 stream_logs=False)
+    load_balancer_log_file_name = (
+        serve_utils.generate_remote_load_balancer_log_file_name(service_name))
+    runner.rsync(source=load_balancer_log_file_name,
+                 target=target_directory,
                  up=False,
                  stream_logs=False)
 
