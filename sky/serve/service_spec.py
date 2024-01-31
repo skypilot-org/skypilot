@@ -4,12 +4,11 @@ import os
 import textwrap
 from typing import Any, Dict, Optional
 
-import yaml
-
 from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 
 class SkyServiceSpec:
@@ -143,7 +142,7 @@ class SkyServiceSpec:
     @staticmethod
     def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
         with open(os.path.expanduser(yaml_path), 'r') as f:
-            config = yaml.safe_load(f)
+            config = yaml_utils.yaml_safe_load_with_env(f)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():

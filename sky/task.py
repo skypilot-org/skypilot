@@ -8,7 +8,6 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
 import colorama
-import yaml
 
 import sky
 from sky import clouds
@@ -25,6 +24,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -464,7 +464,7 @@ class Task:
             # TODO(zongheng): use
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
             # to raise errors on duplicate keys.
-            config = yaml.safe_load(f)
+            config = yaml_utils.yaml_safe_load_with_env(f)
 
         if isinstance(config, str):
             with ux_utils.print_exception_no_traceback():

@@ -78,6 +78,7 @@ from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import yaml_utils
 from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
@@ -1040,7 +1041,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     try:
         with open(entrypoint, 'r') as f:
             try:
-                config = list(yaml.safe_load_all(f))
+                config = list(yaml_utils.yaml_safe_load_all_with_env(f))
                 if config:
                     # FIXME(zongheng): in a chain DAG YAML it only returns the
                     # first section. OK for downstream but is weird.

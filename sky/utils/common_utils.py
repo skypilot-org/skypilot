@@ -25,6 +25,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import ux_utils
 from sky.utils import validator
+from sky.utils import yaml_utils
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -252,13 +253,13 @@ def user_and_hostname_hash() -> str:
 
 def read_yaml(path) -> Dict[str, Any]:
     with open(path, 'r') as f:
-        config = yaml.safe_load(f)
+        config = yaml_utils.yaml_safe_load_with_env(f)
     return config
 
 
 def read_yaml_all(path: str) -> List[Dict[str, Any]]:
     with open(path, 'r') as f:
-        config = yaml.safe_load_all(f)
+        config = yaml_utils.yaml_safe_load_all_with_env(f)
         configs = list(config)
         if not configs:
             # Empty YAML file.
