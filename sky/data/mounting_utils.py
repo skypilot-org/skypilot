@@ -101,11 +101,10 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
 def get_redirect_mount_install_cmd() -> str:
     """Returns a command to install redirectin FUSE utility."""
     install_cmd = ('sudo apt-get install -y libfuse3-dev; '
-                   'command -v redirect-fuse >/dev/null 2>&1 || '
-                   '{ sudo wget -nc https://github.com/landscapepainter/'
-                   'libfuse/releases/download/test/redirect-fuse '
+                   'sudo wget -nc https://github.com/landscapepainter/'
+                   'libfuse/releases/download/v0.1.0/redirect-fuse '
                    '-O /usr/local/bin/redirect-fuse && '
-                   'sudo chmod +x /usr/local/bin/redirect-fuse; };')
+                   'sudo chmod +x /usr/local/bin/redirect-fuse;')
     return install_cmd
 
 
@@ -116,6 +115,17 @@ def get_redirect_mount_cmd(mountpoint_path: str, csync_read_path: str,
                  f'{csync_read_path} {csync_write_path}')
     return mount_cmd
 
+def _get_mount_binary(mount_cmd: str) -> str:
+    """Returns mounting binary in string given the mount command"""
+    if 'goofys' in mount_cmd:
+      return 'goofys'
+    elif 'gcsfuse' in mount_cmd:
+      return 'gcsfuse'
+    elif 'sky_csync csync' in mount_cmd:
+      return 'redirect-fuse'
+    else:
+      assert 'rclone' in mount_cmd
+      return 'rclone'
 
 def get_mounting_script(
     mount_mode: storage_utils.StorageMode,
@@ -142,13 +152,16 @@ def get_mounting_script(
     Returns:
         str: Mounting script as a str.
     """
-    mount_binary = mount_cmd.split()[0]
+    mount_binary = _get_mount_binary(mount_cmd)
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if mount_mode == storage_utils.StorageMode.MOUNT:
         assert csync_log_path is None, ('CSYNC log path should '
                                         'not be defined for MOUNT mode.')
         if version_check_cmd is not None:
             installed_check += f' && {version_check_cmd}'
+    else:
+        assert mount_mode == storage_utils.StorageMode.CSYNC
+        assert version_check_cmd is None, ('some logging info')
 
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
@@ -166,14 +179,14 @@ def get_mounting_script(
               fusermount -uz "$MOUNT_PATH"
               echo "Successfully unmounted $MOUNT_PATH."
             fi
+        fi
 
-            # Install MOUNT_BINARY if not already installed
-            if {installed_check}; then
-              echo "$MOUNT_BINARY already installed. Proceeding..."
-            else
-              echo "Installing $MOUNT_BINARY..."
-              {install_cmd}
-            fi
+        # Install MOUNT_BINARY if not already installed
+        if {installed_check}; then
+          echo "$MOUNT_BINARY already installed. Proceeding..."
+        else
+          echo "Installing $MOUNT_BINARY..."
+          {install_cmd}
         fi
 
         # Check if mount path exists
@@ -196,7 +209,6 @@ def get_mounting_script(
         else
           # running CSYNC cmd
           echo "Setting up CSYNC on $MOUNT_PATH to source bucket..."
-          {install_cmd}
           setsid {mount_cmd} >> {csync_log_path} 2>&1 &
           # Wait for mount_cmd to complete and check the log file
           while true; do
