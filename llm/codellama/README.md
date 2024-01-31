@@ -12,9 +12,9 @@
 
 * Get the best GPU availability by utilizing multiple resources pools across multiple regions and clouds.
 * Pay absolute minimum — SkyPilot picks the cheapest resources across regions and clouds. No managed solution markups.
-* Enable scaling up to multiple replicas across different locations and accelerators with a single endpoint exposed.
+* Scale up to multiple replicas across different locations and accelerators, all served with a single endpoint 
 * Everything stays in your cloud account (your VMs & buckets)
-* No one else sees your chat history
+* Completely private - no one else sees your chat history
 
 
 ![Code Llama GUI](https://imgur.com/Dor1MoE.gif "Chatting with Code Llama")
@@ -88,9 +88,9 @@ This returns the following completion:
 ```bash
 sky serve up -n code-llama ./endpoint.yaml
 ```
-This will start the service with multiple replicas on the cheapest available locations and accelerators. SkyServe will automatically manage the replicas, monitor their health, and restart them when needed.
+This will start the service with multiple replicas on the cheapest available locations and accelerators. SkyServe will automatically manage the replicas, monitor their health, autoscale based on load, and restart them when needed.
 
-A single endpoint will be returned and any request sent to the endpoint will be routed to the healthy replicas.
+A single endpoint will be returned and any request sent to the endpoint will be routed to the ready replicas.
 
 2. To check the status of the service, run:
 ```bash
@@ -108,7 +108,7 @@ code-llama    1   1        -   2 mins ago  1x Azure({'A100-80GB': 2}) READY  eas
 code-llama    2   1        -   2 mins ago  1x GCP({'L4': 8})          READY  us-east4-a 
 ```
 As shown, the service is now backed by 2 replicas, one on Azure and one on GCP, and the accelerator
-type is chosen to be **the cheapest and available one** on the clouds. That said, it maximizes the
+type is chosen to be **the cheapest available one** on the clouds. That said, it maximizes the
 availability of the service while minimizing the cost.
 
 3. To access the model, we use the same curl command to send the request to the endpoint:
@@ -177,7 +177,7 @@ python complete.py
 ## **Optional:** Accessing Code Llama with Chat GUI
 
 It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat). To do so, 
-1. We can start the chat web UI:
+1. Start the chat web UI:
 ```bash
 sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint code-llama)
 ```
