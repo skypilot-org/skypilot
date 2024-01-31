@@ -1016,12 +1016,13 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
 
 
 def check_port_forward_mode_dependencies() -> None:
-    """Checks if 'socat' is installed"""
+    """Checks if 'socat', 'netcat', 'coreutils' is installed"""
     # We store the dependency list as a list of lists. Each inner list
     # contains the name of the dependency, the command to check if it is
     # installed, and the package name to install it.
     dependency_list = [['socat', ['socat', '-V'], 'socat'],
-                       ['nc', ['nc', '-h'], 'netcat']]
+                       ['nc', ['nc', '-h'], 'netcat'],
+                       ['shuf', ['shuf', '--version'], 'coreutils']]
     for name, check_cmd, install_cmd in dependency_list:
         try:
             subprocess.run(check_cmd,
