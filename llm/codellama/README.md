@@ -12,7 +12,7 @@
 
 * Get the best GPU availability by utilizing multiple resources pools across multiple regions and clouds.
 * Pay absolute minimum — SkyPilot picks the cheapest resources across regions and clouds. No managed solution markups.
-* Enable scaling up to multiple replicas across different locations and accelerators with a single endpoint exposed.
+* Scale up to multiple replicas across different locations and accelerators, all served with a single endpoint 
 * Everything stays in your cloud account (your VMs & buckets)
 * No one else sees your chat history
 
