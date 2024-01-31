@@ -17,7 +17,7 @@ setup: |
   pip install "fschat[model_worker,webui]==0.2.24"
   # Use older version of vllm as fschat does not support the latest vllm with
   # TokenizerGroup
-  pip list | grep vllm | grep 0.2.6 || pip install vllm==0.2.6
+  pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git@9c1352eb5736d9e71d37959db44b6a641e898772"
   pip install git+https://github.com/huggingface/transformers accelerate protobuf
 
 run: |
