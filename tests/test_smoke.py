@@ -3091,7 +3091,7 @@ def test_skyserve_update():
 @pytest.mark.gcp
 @pytest.mark.sky_serve
 def test_skyserve_update_autoscale():
-    """Test skyserve with update"""
+    """Test skyserve update with autoscale"""
     name = _get_service_name()
     test = Test(
         f'test-skyserve-update-autoscale',
