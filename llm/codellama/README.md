@@ -2,11 +2,12 @@
 
 [Code Llama](https://github.com/facebookresearch/codellama) is a code-specialized version of Llama 2 that was created by further training Llama 2 on its code-specific datasets, sampling more data from that same dataset for longer. On Jan 29th, 2024, Meta released the Code Llama 70B, the largest and best-performing model in the Code Llama family.
 
+![Code Llama GUI](https://imgur.com/Dor1MoE.gif "Chatting with Code Llama")
+
 ## References
 * [Llama-2 Example](../../llm/llama-2/)
 * [Code Llama release](https://ai.meta.com/blog/code-llama-large-language-model-coding/)
 * [Code Llama paper](https://arxiv.org/abs/2308.12950)
-
 
 ## Why use SkyPilot/SkyServe to deploy over commercial hosted solutions?
 
@@ -15,9 +16,6 @@
 * Scale up to multiple replicas across different locations and accelerators, all served with a single endpoint 
 * Everything stays in your cloud account (your VMs & buckets)
 * Completely private - no one else sees your chat history
-
-
-![Code Llama GUI](https://imgur.com/Dor1MoE.gif "Chatting with Code Llama")
 
 
 ## Running your own Code Llama with SkyPilot
@@ -57,7 +55,7 @@ curl -L http://$IP:8000/v1/completions \
     -d '{
       "model": "codellama/CodeLlama-70b-Instruct-hf",
       "prompt": "def quick_sort(a: List[int]):",
-      "max_tokens": 256
+      "max_tokens": 512
   }' | jq -r '.choices[0].text'
 ```
 
@@ -120,7 +118,7 @@ curl -L http://$ENDPOINT/v1/completions \
     -d '{
       "model": "codellama/CodeLlama-70b-Instruct-hf",
       "prompt": "def quick_sort(a: List[int]):",
-      "max_tokens": 256
+      "max_tokens": 512
   }' | jq -r '.choices[0].text'
 ```
 
@@ -128,7 +126,7 @@ curl -L http://$ENDPOINT/v1/completions \
 
 We can also access the Code Llama service with the openAI Chat API.
 ```bash
-ENDPOINT=$(sky serve status --endpoint code-llama-instruct)
+ENDPOINT=$(sky serve status --endpoint code-llama)
 
 curl -L http://$ENDPOINT/v1/chat/completions \
     -H "Content-Type: application/json" \
@@ -144,7 +142,7 @@ curl -L http://$ENDPOINT/v1/chat/completions \
           "content": "Show me the python code for quick sorting a list of integers."
         }
       ],
-      "max_tokens": 256,
+      "max_tokens": 512
   }' | jq -r '.choices[0].message.content'
 ```
 
