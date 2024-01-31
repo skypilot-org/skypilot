@@ -15,6 +15,7 @@
 * Everything stays in your cloud account (your VMs & buckets)
 * No one else sees your chat history
 * Pay absolute minimum — no managed solution markups
+![Code Llama GUI](https://imgur.com/Dor1MoE.gif)
 
 
 ## Running your own Code Llama with SkyPilot
@@ -197,4 +198,4 @@ sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endp
 | INFO | stdout | Running on public URL: https://6141e84201ce0bb4ed.gradio.live
 ```
 
-![Code Llama GUI](https://imgur.com/Dor1MoE.gif)
+Please check the GIF at the top of this page for a demo of the web GUI.
