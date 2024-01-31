@@ -1118,6 +1118,8 @@ class Resources:
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         if self.extract_docker_image() is not None:
             features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
+        elif self.image_id is not None:
+            features.add(clouds.CloudImplementationFeatures.IMAGE_ID)
         if self.ports is not None:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
         return features
