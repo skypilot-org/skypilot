@@ -177,7 +177,7 @@ python complete.py
 ## **Optional:** Accessing Code Llama with Chat GUI
 
 It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat). To do so, 
-1. We can start the chat web UI:
+1. Start the chat web UI:
 ```bash
 sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint code-llama)
 ```
