@@ -3793,7 +3793,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         # Check if the cluster includes storage with CSYNC mode and terminates
         # the CSYNC process after the syncing is completed if it was running.
-        if self._has_csync(handle.cluster_name):
+        if self._cluster_has_csync_storage(handle.cluster_name):
             backend_utils.wait_and_terminate_csync(handle.cluster_name)
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
@@ -4648,7 +4648,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'Setting storage {mode_str} took {end - start} seconds.')
 
-    def _has_csync(self, cluster_name: str) -> bool:
+    def _cluster_has_csync_storage(self, cluster_name: str) -> bool:
         """Checks if there are CSYNC mode storages within the cluster."""
         storage_mounts = self.get_storage_mounts_metadata(cluster_name)
         if storage_mounts is not None:

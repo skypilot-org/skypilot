@@ -110,3 +110,4 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
 CSYNC_DIR = '~/.sky/csync'
+CSYNC_TERMINATION_CMD = 'python -m sky.data.sky_csync terminate -a'
