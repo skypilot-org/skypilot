@@ -1,6 +1,6 @@
 # Serving Code Llama with vLLM
 
-[Code Llama](https://github.com/facebookresearch/codellama) is a code-specialized version of Llama 2 that was created by further training Llama 2 on its code-specific datasets, sampling more data from that same dataset for longer. On Jan 29th, 2024, Meta releases the Code Llama 70B, the largest and best-performing model in the Code Llama family.
+[Code Llama](https://github.com/facebookresearch/codellama) is a code-specialized version of Llama 2 that was created by further training Llama 2 on its code-specific datasets, sampling more data from that same dataset for longer. On Jan 29th, 2024, Meta released the Code Llama 70B, the largest and best-performing model in the Code Llama family.
 
 ## References
 * [Llama-2 Example](../../llm/llama-2/)
