@@ -66,6 +66,12 @@ def up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
+    if task.service.spot_placer is not None:
+        if isinstance(task.resources, list):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Does not support both spot_policy '
+                                 'and ordered resources.')
+
     first_resource_dict = list(task.resources)[0].to_yaml_config()
     for requested_resources in task.resources:
         requested_resources_dict = requested_resources.to_yaml_config()
@@ -335,6 +341,12 @@ def update(task: 'sky.Task', service_name: str) -> None:
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the task. ')
+
+    if task.service.spot_placer is not None:
+        if isinstance(task.resources, list):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Does not support both spot_policy '
+                                 'and ordered resources.')
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
