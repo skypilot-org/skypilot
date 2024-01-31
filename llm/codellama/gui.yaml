@@ -35,10 +35,10 @@ run: |
   cat <<EOF > ~/model_info.json
   {
     "codellama/CodeLlama-70b-Instruct-hf": {
-        "model_name": "codellama/CodeLlama-70b-Instruct-hf",
-        "api_base": "http://${ENDPOINT}/v1",
-        "api_key": "empty",
-        "model_path": "codellama/CodeLlama-70b-Instruct-hf"
+      "model_name": "codellama/CodeLlama-70b-Instruct-hf",
+      "api_base": "http://${ENDPOINT}/v1",
+      "api_key": "empty",
+      "model_path": "codellama/CodeLlama-70b-Instruct-hf"
     }
   }
   EOF

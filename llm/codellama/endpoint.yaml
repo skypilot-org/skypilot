@@ -11,7 +11,7 @@ service:
       prompt: "def hello_world():"
       max_tokens: 1
     initial_delay_seconds: 1500
-  replicas: 2
+  replicas: 1
 
 resources:
   accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
@@ -38,8 +38,8 @@ run: |
   export PATH=$PATH:/sbin
   # Reduce --max-num-seqs to avoid OOM during loading model on L4:8
   python -u -m vllm.entrypoints.openai.api_server \
-                --host 0.0.0.0 \
-                --model codellama/CodeLlama-70b-Instruct-hf \
-                --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
-                --max-num-seqs 64 | tee ~/openai_api_server.log
+    --host 0.0.0.0 \
+    --model codellama/CodeLlama-70b-Instruct-hf \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-num-seqs 64 | tee ~/openai_api_server.log
 
