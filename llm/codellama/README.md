@@ -15,6 +15,8 @@
 * Everything stays in your cloud account (your VMs & buckets)
 * No one else sees your chat history
 * Pay absolute minimum — no managed solution markups
+
+
 ![Code Llama GUI](https://imgur.com/Dor1MoE.gif)
 
 
