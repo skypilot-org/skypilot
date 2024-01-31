@@ -2,7 +2,7 @@
 
 [Code Llama](https://github.com/facebookresearch/codellama) is a code-specialized version of Llama 2 that was created by further training Llama 2 on its code-specific datasets, sampling more data from that same dataset for longer. On Jan 29th, 2024, Meta released the Code Llama 70B, the largest and best-performing model in the Code Llama family.
 
-The followings are the demos of Code Llama 70B hosted by SkyServe (see more details about the setup in later sections):
+The followings are the demos of Code Llama 70B hosted by SkyPilot Serve (aka SkyServe) (see more details about the setup in later sections):
 
 ##### Connect to hosted Code Llama with Tabby as a coding assistant in VScode
 <img src="https://imgur.com/fguAmP0.gif" width="60%" />
@@ -15,7 +15,7 @@ The followings are the demos of Code Llama 70B hosted by SkyServe (see more deta
 * [Code Llama release](https://ai.meta.com/blog/code-llama-large-language-model-coding/)
 * [Code Llama paper](https://arxiv.org/abs/2308.12950)
 
-## Why use SkyPilot/SkyServe to deploy over commercial hosted solutions?
+## Why use SkyPilot to deploy over commercial hosted solutions?
 
 * Get the best GPU availability by utilizing multiple resources pools across multiple regions and clouds.
 * Pay absolute minimum — SkyPilot picks the cheapest resources across regions and clouds. No managed solution markups.
