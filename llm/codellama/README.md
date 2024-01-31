@@ -213,15 +213,6 @@ echo Endpoint: http://$IP:8080
 
 Then, you can connect to the Tabby server from VScode by installing the [Tabby extension](https://marketplace.visualstudio.com/items?itemName=tabby-ai.tabby-vscode).
 
-Alternatively, if you don't want to start a cluster as the Tabby server, you can also run the Tabby server locally with docker:
-```bash
-ENDPOINT=$(sky serve status --endpoint code-llama)
-
-docker run -it -p 8080:8080 -v $HOME/.tabby:/data \
-    tabbyml/tabby:0.8.0-rc.1 serve --device experimental-http \
-    --model '{"kind": "fastchat", "model_name": "codellama/CodeLlama-70b-Instruct-hf", "api_endpoint": "http://$ENDPOINT/v1/completions", "prompt_template": "{prefix}"}'
-```
-
 > Note that Code Llama 70B does not have the full infiling functionality [[1](https://huggingface.co/codellama/CodeLlama-70b-Instruct-hf)], so the performance of Tabby with Code Llama may be limited.
 > 
 > To get infiling functionality, you can use the smaller Code Llama models, e.g., Code Llama [7B](https://huggingface.co/codellama/CodeLlama-13B-Instruct-hf) and [13B](https://huggingface.co/codellama/CodeLlama-13B-Instruct-hf), and replace `prompt_template` with `"<｜fim▁begin｜>{prefix}<｜fim▁hole｜>{suffix}<｜fim▁end｜>"` in the [yaml](./tabby.yaml) or the command above.
