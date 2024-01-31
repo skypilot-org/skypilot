@@ -12,9 +12,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Default spot policy.
-DEFAULT_SPOT_POLICY = None
-
 
 class SpotZoneType(enum.Enum):
     """Spot Zone Type."""
@@ -34,12 +31,7 @@ class SpotPlacer:
             zone: SpotZoneType.ACTIVE for zone in self.zones
         }
 
-    def __init_subclass__(cls, name: str, default: bool = False) -> None:
-        if default:
-            global DEFAULT_SPOT_POLICY
-            assert DEFAULT_SPOT_POLICY is None, (
-                'Only one autoscaler can be default.')
-            DEFAULT_SPOT_POLICY = name
+    def __init_subclass__(cls, name: str) -> None:
         assert name not in cls.REGISTRY, f'Name {name} already exists'
         cls.REGISTRY[name] = cls
 
@@ -92,9 +84,7 @@ class SpotPlacer:
         return cls.REGISTRY[spec.spot_placer](spec)
 
 
-class DynamicFailoverSpotPlacer(SpotPlacer,
-                                name='DYNAMIC_FAILOVER',
-                                default=True):
+class DynamicFailoverSpotPlacer(SpotPlacer, name='DYNAMIC_FAILOVER'):
     """Dynamic failover to an active zone when preempted."""
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
