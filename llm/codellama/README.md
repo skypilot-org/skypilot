@@ -4,10 +4,10 @@
 
 The followings are the demos of Code Llama 70B hosted by SkyServe (see more details about the setup in later sections):
 
-#### Use Code Llama 70B as a coding assistant in VScode using Tabby
+##### Use Code Llama 70B as a coding assistant in VScode using Tabby
 <img src="https://imgur.com/fguAmP0.gif" width="60%" />
 
-#### Chat with Code Llama 70B using FastChat
+##### Chat with Code Llama 70B using FastChat
 <img src="https://imgur.com/Dor1MoE.gif" width="60%" /> 
 
 ## References
