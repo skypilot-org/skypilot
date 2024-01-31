@@ -55,7 +55,7 @@ IP=$(sky status --ip code-llama)
 curl -L http://$IP:8000/v1/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "codellama/CodeLlama-70b-Python-hf",
+      "model": "codellama/CodeLlama-70b-Instruct-hf",
       "prompt": "def quick_sort(a: List[int]):",
       "max_tokens": 256
   }' | jq -r '.choices[0].text'
@@ -104,8 +104,8 @@ code-llama  1        -       READY         2/2       3.85.107.228:30002
 
 Service Replicas
 SERVICE_NAME  ID  VERSION  IP  LAUNCHED    RESOURCES                   STATUS REGION  
-code-llama    1   1        -   2 mins ago  1x Azure({'A100-80GB': 2})) READY  eastus  
-code-llama    2   1        -   2 mins ago  1x GCP({'L4': 8}))          READY  us-east4-a 
+code-llama    1   1        -   2 mins ago  1x Azure({'A100-80GB': 2}) READY  eastus  
+code-llama    2   1        -   2 mins ago  1x GCP({'L4': 8})          READY  us-east4-a 
 ```
 As shown, the service is now backed by 2 replicas, one on Azure and one on GCP, and the accelerator
 type is chosen to be **the cheapest and available one** on the clouds. That said, it maximizes the
@@ -118,7 +118,7 @@ ENDPOINT=$(sky serve status --endpoint code-llama)
 curl -L http://$ENDPOINT/v1/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "codellama/CodeLlama-70b-Python-hf",
+      "model": "codellama/CodeLlama-70b-Instruct-hf",
       "prompt": "def quick_sort(a: List[int]):",
       "max_tokens": 256
   }' | jq -r '.choices[0].text'
@@ -126,20 +126,7 @@ curl -L http://$ENDPOINT/v1/completions \
 
 ## **Optional:** Accessing Code Llama with Chat API
 
-We can also chat with Code Llama using the same endpoint by using the `codellama/CodeLlama-70b-Instruct-hf` model.
-To test it, we first replace the model in the [endpoint.yaml](endpoint.yaml) with the instruction-tuned model:
-```bash
-sed -i 's/codellama\/CodeLlama-70b-Python-hf/codellama\/CodeLlama-70b-Instruct-hf/g' endpoint.yaml
-```
-Then, we launch the service with the new endpoint:
-```bash
-sky serve up -n code-llama ./endpoint.yaml
-```
-Or, we can update the existing service:
-```bash
-sky serve update code-llama ./endpoint.yaml
-```
-
+We can also access the Code Llama service with the openAI Chat API.
 ```bash
 ENDPOINT=$(sky serve status --endpoint code-llama-instruct)
 
@@ -182,7 +169,7 @@ print(sorted_numbers)
 This code defines a function `quicksort` that takes a list of integers as input. It divides the list into three parts based on the pivot element, which is the middle element of the list. It then recursively sorts the left and right partitions and combines them with the middle partition.
 ````````
 
-Alternatively, you could access the model through python with OpenAI's API (see [complete.py](complete.py)):
+Alternatively, we could access the model through python with OpenAI's API (see [complete.py](complete.py)):
 ```bash
 python complete.py
 ```

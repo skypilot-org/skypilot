@@ -7,7 +7,7 @@ service:
   readiness_probe:
     path: /v1/completions
     post_data:
-      model: codellama/CodeLlama-70b-Python-hf
+      model: codellama/CodeLlama-70b-Instruct-hf
       prompt: "def hello_world():"
       max_tokens: 1
     initial_delay_seconds: 1500
@@ -40,7 +40,7 @@ run: |
   # Reduce --max-num-seqs to avoid OOM during loading model on L4:8
   python -u -m vllm.entrypoints.openai.api_server \
                 --host 0.0.0.0 \
-                --model codellama/CodeLlama-70b-Python-hf \
+                --model codellama/CodeLlama-70b-Instruct-hf \
                 --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
                 --max-num-seqs 64 | tee ~/openai_api_server.log
 
