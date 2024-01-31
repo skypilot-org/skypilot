@@ -11,6 +11,7 @@ from sky.clouds.cloud_registry import CLOUD_REGISTRY
 # isort: split
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
+from sky.clouds.fluidstack import Fluidstack
 from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
@@ -22,22 +23,8 @@ from sky.clouds.scp import SCP
 from sky.clouds.vsphere import Vsphere
 
 __all__ = [
-    'IBM',
-    'AWS',
-    'Azure',
-    'Cloud',
-    'GCP',
-    'Lambda',
-    'Local',
-    'SCP',
-    'RunPod',
-    'OCI',
-    'Vsphere',
-    'Kubernetes',
-    'CloudImplementationFeatures',
-    'Region',
-    'Zone',
-    'CLOUD_REGISTRY',
-    'ProvisionerVersion',
-    'StatusVersion',
+    'IBM', 'AWS', 'Azure', 'Cloud', 'GCP', 'Lambda', 'Local', 'SCP', 'RunPod',
+    'OCI', 'Vsphere', 'Kubernetes', 'CloudImplementationFeatures', 'Region',
+    'Zone', 'CLOUD_REGISTRY', 'ProvisionerVersion', 'StatusVersion',
+    'Fluidstack'
 ]

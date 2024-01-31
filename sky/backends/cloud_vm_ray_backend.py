@@ -152,6 +152,7 @@ def _get_cluster_config_template(cloud):
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
+        clouds.Fluidstack: 'fluidstack-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 
@@ -928,6 +929,38 @@ class FailoverCloudErrorHandlerV1:
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
+
+    @staticmethod
+    def _fluidstack_handler(blocked_resources: Set['resources_lib.Resources'],
+                            launchable_resources: 'resources_lib.Resources',
+                            region: 'clouds.Region',
+                            zones: Optional[List['clouds.Zone']], stdout: str,
+                            stderr: str) -> None:
+        del zones  # Unused.
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'FluidstackAPIError:' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
+
+        logger.warning(f'Got error(s) in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+        _add_to_blocked_resources(blocked_resources,
+                                  launchable_resources.copy(zone=None))
 
     @staticmethod
     def update_blocklist_on_error(

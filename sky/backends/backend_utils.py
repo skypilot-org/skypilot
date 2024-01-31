@@ -801,6 +801,10 @@ def write_cluster_config(
     if isinstance(cloud, clouds.GCP):
         gcp_project_id = cloud.get_project_id(dryrun=dryrun)
 
+    fluidstack_username = 'ubuntu'
+    if isinstance(cloud, clouds.Fluidstack):
+        fluidstack_username = cloud.default_username(to_provision.region)
+
     specific_reservations = set(
         skypilot_config.get_nested(('gcp', 'specific_reservations'), set()))
 
@@ -909,6 +913,9 @@ def write_cluster_config(
                 'specific_reservations': filtered_specific_reservations,
                 'tpu_node_name': tpu_node_name,
 
+                # Fluidstack only:
+                'fluidstack_username': fluidstack_username,
+
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
@@ -1008,6 +1015,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_ibm_authentication(config)
     elif isinstance(cloud, clouds.RunPod):
         config = auth.setup_runpod_authentication(config)
+    elif isinstance(cloud, clouds.Fluidstack):
+        config = auth.setup_fluidstack_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
