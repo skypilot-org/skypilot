@@ -90,7 +90,7 @@ sky serve up -n code-llama ./endpoint.yaml
 ```
 This will start the service with multiple replicas on the cheapest available locations and accelerators. SkyServe will automatically manage the replicas, monitor their health, autoscale based on load, and restart them when needed.
 
-A single endpoint will be returned and any request sent to the endpoint will be routed to the healthy replicas.
+A single endpoint will be returned and any request sent to the endpoint will be routed to the ready replicas.
 
 2. To check the status of the service, run:
 ```bash
