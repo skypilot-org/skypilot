@@ -71,6 +71,10 @@ def _bulk_provision(
     if isinstance(cloud, clouds.Local):
         logger.info(f'{style.BRIGHT}Launching on local cluster '
                     f'{cluster_name!r}.')
+    elif isinstance(cloud, clouds.Kubernetes):
+        # Omit the region name for Kubernetes.
+        logger.info(f'{style.BRIGHT}Launching on {cloud}{style.RESET_ALL} '
+                    f'{cluster_name!r}.')
     else:
         logger.info(f'{style.BRIGHT}Launching on {cloud} '
                     f'{region_name}{style.RESET_ALL} ({zone_str})')
@@ -191,6 +195,17 @@ def bulk_provision(
                         terminate=terminate,
                         provider_config=original_config['provider'])
                     break
+                except NotImplementedError as e:
+                    verb = 'terminate' if terminate else 'stop'
+                    # If the underlying cloud does not support stopping
+                    # instances, we should stop failover as well.
+                    raise provision_common.StopFailoverError(
+                        'During provisioner\'s failover, '
+                        f'{terminate_str.lower()} {cluster_name!r} failed. '
+                        f'We cannot {verb} the resources launched, as it is '
+                        f'not supported by {cloud}. Please try launching the '
+                        'cluster again, or terminate it with: '
+                        f'sky down {cluster_name.display_name}') from e
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug(f'{terminate_str} {cluster_name!r} failed.')
                     logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
@@ -273,13 +288,14 @@ def _shlex_join(command: List[str]) -> str:
     return ' '.join(shlex.quote(arg) for arg in command)
 
 
-def _wait_ssh_connection_direct(
-        ip: str,
-        ssh_port: int,
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = None,
-        ssh_proxy_command: Optional[str] = None) -> bool:
+def _wait_ssh_connection_direct(ip: str,
+                                ssh_port: int,
+                                ssh_user: str,
+                                ssh_private_key: str,
+                                ssh_control_name: Optional[str] = None,
+                                ssh_proxy_command: Optional[str] = None,
+                                **kwargs) -> bool:
+    del kwargs  # unused
     assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
         with socket.create_connection((ip, ssh_port), timeout=1) as s:
@@ -303,16 +319,17 @@ def _wait_ssh_connection_direct(
     return False
 
 
-def _wait_ssh_connection_indirect(
-        ip: str,
-        ssh_port: int,
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = None,
-        ssh_proxy_command: Optional[str] = None) -> bool:
-    del ssh_control_name
+def _wait_ssh_connection_indirect(ip: str,
+                                  ssh_port: int,
+                                  ssh_user: str,
+                                  ssh_private_key: str,
+                                  ssh_control_name: Optional[str] = None,
+                                  ssh_proxy_command: Optional[str] = None,
+                                  **kwargs) -> bool:
+    del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
+    logger.debug(f'Waiting for SSH using command: {_shlex_join(command)}')
     proc = subprocess.run(command,
                           shell=False,
                           check=False,
@@ -397,7 +414,9 @@ def _post_provision_setup(
     # TODO(suquark): Move wheel build here in future PRs.
     ip_list = cluster_info.get_feasible_ips()
     port_list = cluster_info.get_ssh_ports()
-    ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
+    # We don't set docker_user here, as we are configuring the VM itself.
+    ssh_credentials = backend_utils.ssh_credential_from_yaml(
+        cluster_yaml, ssh_user=cluster_info.ssh_user)
 
     with rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for SSH access[/]') as status:

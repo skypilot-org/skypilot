@@ -80,9 +80,9 @@ class Autoscaler:
                          f'latest version: {self.latest_version}')
             return
         self.latest_version = version
-        self.min_nodes = spec.min_replicas
-        self.max_nodes = (spec.max_replicas if spec.max_replicas is not None
-                          else spec.min_replicas)
+        self.min_replicas = spec.min_replicas
+        self.max_replicas = (spec.max_replicas if spec.max_replicas is not None
+                             else spec.min_replicas)
         # Reclip self.target_num_replicas with new min and max replicas.
         self.target_num_replicas = max(
             self.min_replicas, min(self.max_replicas, self.target_num_replicas))

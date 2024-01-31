@@ -799,7 +799,6 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified when image_id is provided.')
 
-        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
         try:
             self._cloud.check_features_are_supported(
                 self,
@@ -809,8 +808,8 @@ class Resources:
         except exceptions.NotSupportedError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS/GCP/IBM/OCI, please '
-                    'explicitly specify the cloud.') from e
+                    'image_id is only supported for AWS/GCP/IBM/OCI/Kubernetes,'
+                    ' please explicitly specify the cloud.') from e
 
         if self._region is not None:
             if self._region not in self._image_id:

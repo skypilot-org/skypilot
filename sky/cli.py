@@ -62,6 +62,7 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -70,7 +71,6 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
-from sky.utils import kubernetes_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -1053,9 +1053,12 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
             except yaml.YAMLError as e:
                 if yaml_file_provided:
                     logger.debug(e)
+                    detailed_error = f'\nYAML Error: {e}\n'
                     invalid_reason = ('contains an invalid configuration. '
-                                      ' Please check syntax.')
+                                      'Please check syntax.\n'
+                                      f'{detailed_error}')
                 is_yaml = False
+
     except OSError:
         if yaml_file_provided:
             entry_point_path = os.path.expanduser(entrypoint)
@@ -2018,8 +2021,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                         if handle.launched_resources.cloud.is_same_cloud(
                                 clouds.Kubernetes()):
                             # Add Kubernetes specific debugging info
-                            error_msg += \
-                                kubernetes_utils.get_endpoint_debug_message()
+                            error_msg += (
+                                kubernetes_utils.get_endpoint_debug_message())
                         with ux_utils.print_exception_no_traceback():
                             raise RuntimeError(error_msg)
                     click.echo(port_details[endpoint][0].url(ip=head_ip))

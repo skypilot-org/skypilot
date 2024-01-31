@@ -22,6 +22,7 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
@@ -680,9 +681,9 @@ def spot_launch(
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{dag_uuid}.yaml')
-        backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
-                                    vars_to_fill,
-                                    output_path=yaml_path)
+        common_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
+                                   vars_to_fill,
+                                   output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         assert len(controller_task.resources) == 1, controller_task
         # Backward compatibility: if the user changed the
