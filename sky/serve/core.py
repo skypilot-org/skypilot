@@ -1,4 +1,5 @@
 """SkyServe core APIs."""
+import os
 import re
 import tempfile
 import typing
@@ -19,6 +20,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import rich_utils
@@ -573,6 +575,33 @@ def status(
         raise RuntimeError(e.error_msg) from e
 
     return serve_utils.load_service_status(serve_status_payload)
+
+
+@usage_lib.entrypoint
+def sync_down(service_name: str) -> None:
+    sky_logging.print(f'Syncing down logs for {service_name}')
+    controller_status, handle = backend_utils.is_controller_up(
+        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        stopped_message='No service is found.')
+    if handle is None or handle.head_ip is None:
+        msg = 'No service is found.'
+        if controller_status == status_lib.ClusterStatus.INIT:
+            msg = ''
+        raise exceptions.ClusterNotUpError(msg,
+                                           cluster_status=controller_status)
+
+    ssh_credentials = backend_utils.ssh_credential_from_yaml(
+        handle.cluster_yaml, handle.docker_user)
+    runner = command_runner.SSHCommandRunner(
+        handle.head_ip,
+        port=handle.head_ssh_port,
+        **ssh_credentials,
+    )
+    runner.rsync(source=serve_utils.generate_remote_controller_log_file_name(
+        service_name),
+                 target=os.path.expanduser(constants.SKY_LOGS_DIRECTORY),
+                 up=False,
+                 stream_logs=False)
 
 
 @usage_lib.entrypoint
