@@ -11,10 +11,10 @@
 ## Why use SkyPilot/SkyServe to deploy over commercial hosted solutions?
 
 * Get the best GPU availability by utilizing multiple resources pools across multiple regions and clouds.
+* Pay absolute minimum — SkyPilot picks the cheapest resources across regions and clouds. No managed solution markups.
 * Enable scaling up to multiple replicas across different locations and accelerators with a single endpoint exposed.
 * Everything stays in your cloud account (your VMs & buckets)
 * No one else sees your chat history
-* Pay absolute minimum — no managed solution markups
 
 
 ![Code Llama GUI](https://imgur.com/Dor1MoE.gif "Chatting with Code Llama")
