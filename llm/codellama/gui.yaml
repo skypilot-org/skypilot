@@ -1,5 +1,5 @@
 envs:
-  ENDPOINT: http://x.x.x.x/3031
+  ENDPOINT: x.x.x.x:3031 # Address of the API server running codellama. 
 
 resources:
   cpus: 2
