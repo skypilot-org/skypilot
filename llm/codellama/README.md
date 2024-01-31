@@ -2,10 +2,13 @@
 
 [Code Llama](https://github.com/facebookresearch/codellama) is a code-specialized version of Llama 2 that was created by further training Llama 2 on its code-specific datasets, sampling more data from that same dataset for longer. On Jan 29th, 2024, Meta released the Code Llama 70B, the largest and best-performing model in the Code Llama family.
 
-<p float="center">
-  <img src="https://imgur.com/fguAmP0.gif" width="60%" />
-  <img src="https://imgur.com/Dor1MoE.gif" width="60%" /> 
-</p>
+The followings are the demos of Code Llama 70B hosted by SkyServe (see more details about the setup in later sections):
+
+#### Use Code Llama 70B as a coding assistant in VScode using Tabby
+<img src="https://imgur.com/fguAmP0.gif" width="60%" />
+
+#### Chat with Code Llama 70B using FastChat
+<img src="https://imgur.com/Dor1MoE.gif" width="60%" /> 
 
 ## References
 * [Llama-2 Example](../../llm/llama-2/)
@@ -177,7 +180,8 @@ python complete.py
 
 ## **Optional:** Accessing Code Llama with Chat GUI
 
-It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat). To do so, 
+It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat). Please check the [demo](#chat-with-code-llama-70b-using-fastchat).
+
 1. Start the chat web UI:
 ```bash
 sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint code-llama)
@@ -188,15 +192,14 @@ sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endp
 | INFO | stdout | Running on public URL: https://6141e84201ce0bb4ed.gradio.live
 ```
 
-Please check the GIF at the top of this page for a demo of the web GUI.
-
 Note that you may get better results to use a higher temperature and top_p value.
 
 
 ## **Optional:** Using the Code Llama as Coding Assistant in VScode with Tabby
 
 [Tabby](https://tabby.tabbyml.com/) is an open-source, self-hosted AI coding assistant. It allows you to connect
-to your own AI models and use them as a coding assistant in VScode.
+to your own AI models and use them as a coding assistant in VScode. Please check the [demo](#use-code-llama-70b-as-a-coding-assistant-in-vscode-using-tabby) at the top.
+
 To start a Tabby server that connects to the Code Llama service, run:
 ```bash
 sky launch -c tabby ./tabby.yaml --env ENDPOINT=$(sky serve status --endpoint code-llama)
@@ -205,7 +208,7 @@ sky launch -c tabby ./tabby.yaml --env ENDPOINT=$(sky serve status --endpoint co
 To get the endpoint for Tabby server, run:
 ```bash
 IP=$(sky status --ip tabby)
-echo http://$IP:8080
+echo Endpoint: http://$IP:8080
 ```
 
 Then, you can connect to the Tabby server from VScode by installing the [Tabby extension](https://marketplace.visualstudio.com/items?itemName=tabby-ai.tabby-vscode). Please check the code completion demo at the top of this page.
