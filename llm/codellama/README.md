@@ -14,7 +14,7 @@
 * Pay absolute minimum — SkyPilot picks the cheapest resources across regions and clouds. No managed solution markups.
 * Scale up to multiple replicas across different locations and accelerators, all served with a single endpoint 
 * Everything stays in your cloud account (your VMs & buckets)
-* No one else sees your chat history
+* Completely private - no one else sees your chat history
 
 
 ![Code Llama GUI](https://imgur.com/Dor1MoE.gif "Chatting with Code Llama")
