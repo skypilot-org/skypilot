@@ -2,6 +2,7 @@
 
 [Code Llama](https://github.com/facebookresearch/codellama) is a code-specialized version of Llama 2 that was created by further training Llama 2 on its code-specific datasets, sampling more data from that same dataset for longer. On Jan 29th, 2024, Meta released the Code Llama 70B, the largest and best-performing model in the Code Llama family.
 
+![Code Llama Tabby](https://imgur.com/fguAmP0.gif "Code Assistant with Code Llama")
 ![Code Llama GUI](https://imgur.com/Dor1MoE.gif "Chatting with Code Llama")
 
 ## References
@@ -188,3 +189,35 @@ sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endp
 Please check the GIF at the top of this page for a demo of the web GUI.
 
 Note that you may get better results to use a higher temperature and top_p value.
+
+
+## **Optional:** Using the Code Llama as Coding Assistant in VScode with Tabby
+
+[Tabby](https://tabby.tabbyml.com/) is an open-source, self-hosted AI coding assistant. It allows you to connect
+to your own AI models and use them as a coding assistant in VScode.
+To start a Tabby server that connects to the Code Llama service, run:
+```bash
+sky launch -c tabby ./tabby.yaml --env ENDPOINT=$(sky serve status --endpoint code-llama)
+```
+
+To get the endpoint for Tabby server, run:
+```bash
+IP=$(sky status --ip tabby)
+echo http://$IP:8080
+```
+
+Then, you can connect to the Tabby server from VScode by installing the [Tabby extension](https://marketplace.visualstudio.com/items?itemName=tabby-ai.tabby-vscode). Please check the code completion demo at the top of this page.
+
+Alternatively, if you don't want to start a cluster as the Tabby server, you can also run the Tabby server locally with docker:
+```bash
+ENDPOINT=$(sky serve status --endpoint code-llama)
+
+docker run -it -p 8080:8080 -v $HOME/.tabby:/data \
+    tabbyml/tabby:0.8.0-rc.1 serve --device experimental-http \
+    --model '{"kind": "fastchat", "model_name": "codellama/CodeLlama-70b-Instruct-hf", "api_endpoint": "http://$ENDPOINT/v1/completions", "prompt_template": "{prefix}"}'
+```
+
+> Note that Code Llama 70B does not have the full infiling functionality [[1](https://huggingface.co/codellama/CodeLlama-70b-Instruct-hf)], so the performance of Tabby with Code Llama may be limited.
+> To get infiling functionality, you can use the smaller Code Llama models, e.g., Code Llama [7B](https://huggingface.co/codellama/CodeLlama-13B-Instruct-hf) and [13B](https://huggingface.co/codellama/CodeLlama-13B-Instruct-hf), and replace `prompt_template` with `"<｜fim▁begin｜>{prefix}<｜fim▁hole｜>{suffix}<｜fim▁end｜>"` in the [yaml](./tabby.yaml) or the command above.
+> For better performance, we recommend using Tabby with the recommended models in the [Tabby documentation](https://tabby.tabbyml.com/docs/models/) and our [Tabby example](../tabby).
+
