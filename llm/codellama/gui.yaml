@@ -1,8 +1,8 @@
+envs:
+  ENDPOINT: http://x.x.x.x/3031
+
 resources:
-  accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
-  disk_size: 1024
-  disk_tier: best
-  memory: 32+
+  cpus: 2
 
 setup: |
   conda activate codellama
@@ -11,14 +11,8 @@ setup: |
     conda activate codellama
   fi
 
-  # We have to manually install Torch otherwise apex & xformers won't build
-  pip list | grep torch || pip install "torch>=2.0.0"
-
-  pip install "fschat[model_worker,webui]==0.2.24"
-  # Use older version of vllm as fschat does not support the latest vllm with
-  # TokenizerGroup
-  pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git@9c1352eb5736d9e71d37959db44b6a641e898772"
-  pip install git+https://github.com/huggingface/transformers accelerate protobuf
+  pip install "fschat[webui]"
+  pip install "openai<1"
 
 run: |
   conda activate codellama
@@ -27,20 +21,19 @@ run: |
   CONTROLLER_PORT=21001
   WORKER_PORT=21002
 
+  cat <<EOF > ~/model_info.json
+  {
+    "codellama/CodeLlama-70b-Instruct-hf": {
+        "model_name": "codellama/CodeLlama-70b-Instruct-hf",
+        "api_base": "http://${ENDPOINT}/v1",
+        "api_key": "empty",
+        "model_path": "codellama/CodeLlama-70b-Instruct-hf"
+    }
+  }
+  EOF
+
   python3 -m fastchat.serve.controller --host 0.0.0.0 --port ${CONTROLLER_PORT} > ~/controller.log 2>&1 &
 
-  # Reduce --max-num-seqs to avoid OOM during loading model on L4:8
-  python3 -m fastchat.serve.vllm_worker \
-    --model-path codellama/CodeLlama-70b-Instruct-hf \
-    --controller-address http://${WORKER_IP}:${CONTROLLER_PORT} \
-    --worker-address http://${WORKER_IP}:${WORKER_PORT} \
-    --host 0.0.0.0 \
-    --port ${WORKER_PORT} \
-    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
-    --max-num-seqs 64 2>&1 | tee ~/worker.log &
-
-  echo 'Waiting for model worker to start...'
-  while ! `cat ~/worker.log | grep -q 'Uvicorn running on'`; do sleep 1; done
-
   echo 'Starting gradio server...'
-  python -u -m fastchat.serve.gradio_web_server --share | tee ~/gradio.log
+  python -u -m fastchat.serve.gradio_web_server --share \
+    --register-openai-compatible-models ~/model_info.json | tee ~/gradio.log

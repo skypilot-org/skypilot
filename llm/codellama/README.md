@@ -151,7 +151,7 @@ curl -L http://$ENDPOINT/v1/chat/completions \
         },
         {
           "role": "user",
-          "content": "Show me the code for quick sort a list of integers."
+          "content": "Show me the python code for quick sorting a list of integers."
         }
       ],
       "max_tokens": 256,
@@ -183,3 +183,18 @@ Alternatively, you could access the model through python with OpenAI's API (see 
 ```bash
 python complete.py
 ```
+
+## **Optional:** Accessing Code Llama with Chat GUI
+
+It is also possible to access the Code Llama service with a GUI. To do so, 
+1. We can start the chat web UI:
+```bash
+sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint code-llama)
+```
+
+2. Then, we can access the GUI at the returned gradio link:
+```
+| INFO | stdout | Running on public URL: https://6141e84201ce0bb4ed.gradio.live
+```
+
+![Code Llama GUI](https://imgur.com/Dor1MoE.gif)
