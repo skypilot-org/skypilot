@@ -108,7 +108,7 @@ code-llama    1   1        -   2 mins ago  1x Azure({'A100-80GB': 2}) READY  eas
 code-llama    2   1        -   2 mins ago  1x GCP({'L4': 8})          READY  us-east4-a 
 ```
 As shown, the service is now backed by 2 replicas, one on Azure and one on GCP, and the accelerator
-type is chosen to be **the cheapest and available one** on the clouds. That said, it maximizes the
+type is chosen to be **the cheapest available one** on the clouds. That said, it maximizes the
 availability of the service while minimizing the cost.
 
 3. To access the model, we use the same curl command to send the request to the endpoint:
