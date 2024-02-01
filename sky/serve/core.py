@@ -42,10 +42,6 @@ def up(
         task: sky.Task to serve up.
         service_name: Name of the service.
     """
-    # This is to avoid circular import.
-    # pylint: disable=import-outside-toplevel
-    from sky import execution
-
     if service_name is None:
         service_name = serve_utils.generate_service_name()
 
@@ -163,14 +159,15 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
-        controller_job_id, controller_handle = execution.execute(
-            entrypoint=controller_task,
+        controller_job_id, controller_handle = sky.launch(
+            task=controller_task,
             stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
             idle_minutes_to_autostop=constants.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
+            _disable_controller_check=True,
         )
 
         style = colorama.Style
