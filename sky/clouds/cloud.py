@@ -18,6 +18,7 @@ from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.skylet import constants
 from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -37,6 +38,7 @@ class CloudImplementationFeatures(enum.Enum):
     STOP = 'stop'  # Includes both stop and autostop.
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
+    IMAGE_ID = 'image_id'
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
@@ -94,7 +96,9 @@ class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
-    _DEFAULT_DISK_TIER = 'medium'
+    _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
+    _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
+    _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
 
     # The version of provisioner and status query. This is used to determine
     # the code path to use for each cloud in the backend.
@@ -268,7 +272,8 @@ class Cloud:
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs, memory and
         disk tier.
 
@@ -280,10 +285,10 @@ class Cloud:
         memory.  If 'memory=4+', this method returns the default instance
         type with 4GB or more memory.
 
-        If disk_rier='medium', this method returns the default instance type
-        that support medium disk tier.
+        If disk_tier=DiskTier.MEDIUM, this method returns the default instance
+        type that support medium disk tier.
 
-        When cpus is None, memory is None or disk tier is None, this method will
+        When cpus is None, memory is None or disk_tier is None, this method will
         never return None. This method may return None if the cloud's default
         instance family does not have a VM with the given number of vCPUs
         (e.g., when cpus='7') or does not have a VM with the give disk tier
@@ -561,14 +566,28 @@ class Cloud:
                     f'{valid_regex}')
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+                                disk_tier: resources_utils.DiskTier) -> None:
         """Errors out if the disk tier is not supported by the cloud provider.
 
         Raises:
             exceptions.NotSupportedError: If the disk tier is not supported.
         """
-        raise NotImplementedError
+        del instance_type  # unused
+        if disk_tier not in cls._SUPPORTED_DISK_TIERS:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'{disk_tier} is not supported by {cls._REPR}.')
+
+    @classmethod
+    def _translate_disk_tier(
+        cls, disk_tier: Optional[resources_utils.DiskTier]
+    ) -> resources_utils.DiskTier:
+        if disk_tier is None:
+            return cls._DEFAULT_DISK_TIER
+        if disk_tier == resources_utils.DiskTier.BEST:
+            return cls._BEST_DISK_TIER
+        return disk_tier
 
     @classmethod
     def _check_instance_type_accelerators_combination(

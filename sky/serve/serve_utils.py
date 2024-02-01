@@ -25,6 +25,7 @@ from sky import global_user_state
 from sky import status_lib
 from sky.serve import constants
 from sky.serve import serve_state
+from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -37,7 +38,8 @@ if typing.TYPE_CHECKING:
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
-NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
+NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
+                         skylet_constants.SERVICES_MEMORY_USAGE_GB)
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
@@ -216,18 +218,10 @@ def generate_replica_launch_log_file_name(service_name: str,
     return os.path.join(dir_name, f'replica_{replica_id}_launch.log')
 
 
-def generate_replica_down_log_file_name(service_name: str,
-                                        replica_id: int) -> str:
+def generate_replica_log_file_name(service_name: str, replica_id: int) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(dir_name)
-    return os.path.join(dir_name, f'replica_{replica_id}_down.log')
-
-
-def generate_replica_local_log_file_name(service_name: str,
-                                         replica_id: int) -> str:
-    dir_name = generate_remote_service_dir_name(service_name)
-    dir_name = os.path.expanduser(dir_name)
-    return os.path.join(dir_name, f'replica_{replica_id}_local.log')
+    return os.path.join(dir_name, f'replica_{replica_id}.log')
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
@@ -556,35 +550,28 @@ def _follow_replica_logs(
             time.sleep(1)
 
 
-def stream_replica_logs(service_name: str,
-                        replica_id: int,
-                        follow: bool,
-                        skip_local_log_file_check: bool = False) -> str:
+def stream_replica_logs(service_name: str, replica_id: int,
+                        follow: bool) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
-    local_log_file_name = generate_replica_local_log_file_name(
-        service_name, replica_id)
 
-    if not skip_local_log_file_check and os.path.exists(local_log_file_name):
-        # When sync down, we set skip_local_log_file_check to False so it won't
-        # detect the just created local log file. Otherwise, it indicates the
-        # replica is already been terminated. All logs should be in the local
-        # log file and we don't need to stream logs for it.
-        with open(local_log_file_name, 'r') as f:
+    log_file_name = generate_replica_log_file_name(service_name, replica_id)
+    if os.path.exists(log_file_name):
+        with open(log_file_name, 'r') as f:
             print(f.read(), flush=True)
         return ''
-
-    replica_cluster_name = generate_replica_cluster_name(
-        service_name, replica_id)
 
     launch_log_file_name = generate_replica_launch_log_file_name(
         service_name, replica_id)
     if not os.path.exists(launch_log_file_name):
         return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')
+
+    replica_cluster_name = generate_replica_cluster_name(
+        service_name, replica_id)
 
     def _get_replica_status() -> serve_state.ReplicaStatus:
         replica_info = serve_state.get_replica_infos(service_name)
@@ -856,15 +843,11 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def stream_replica_logs(cls,
-                            service_name: str,
-                            replica_id: int,
-                            follow: bool,
-                            skip_local_log_file_check: bool = False) -> str:
+    def stream_replica_logs(cls, service_name: str, replica_id: int,
+                            follow: bool) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow}, '
-            f'skip_local_log_file_check={skip_local_log_file_check})',
+            f'{service_name!r}, {replica_id!r}, follow={follow})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)

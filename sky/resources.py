@@ -4,9 +4,9 @@ import textwrap
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
-from typing_extensions import Literal
 
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
@@ -43,7 +43,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 14
+    _VERSION = 15
 
     def __init__(
         self,
@@ -59,7 +59,7 @@ class Resources:
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
-        disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
+        disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         # Internal use only.
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -169,6 +169,15 @@ class Resources:
                 }
         self._is_image_managed = _is_image_managed
 
+        if isinstance(disk_tier, str):
+            disk_tier_str = str(disk_tier).lower()
+            supported_tiers = [tier.value for tier in resources_utils.DiskTier]
+            if disk_tier_str not in supported_tiers:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid disk_tier {disk_tier_str!r}. '
+                                     f'Disk tier must be one of '
+                                     f'{", ".join(supported_tiers)}.')
+            disk_tier = resources_utils.DiskTier(disk_tier_str)
         self._disk_tier = disk_tier
 
         if ports is not None:
@@ -259,7 +268,7 @@ class Resources:
 
         disk_tier = ''
         if self.disk_tier is not None:
-            disk_tier = f', disk_tier={self.disk_tier}'
+            disk_tier = f', disk_tier={self.disk_tier.value}'
 
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
@@ -391,7 +400,7 @@ class Resources:
         return self._image_id
 
     @property
-    def disk_tier(self) -> str:
+    def disk_tier(self) -> resources_utils.DiskTier:
         return self._disk_tier
 
     @property
@@ -501,8 +510,9 @@ class Resources:
 
             # Canonicalize the accelerator names.
             accelerators = {
-                accelerator_registry.canonicalize_accelerator_name(acc):
-                acc_count for acc, acc_count in accelerators.items()
+                accelerator_registry.canonicalize_accelerator_name(
+                    acc, self._cloud): acc_count
+                for acc, acc_count in accelerators.items()
             }
 
             acc, _ = list(accelerators.items())[0]
@@ -789,16 +799,17 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified when image_id is provided.')
 
-        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-        if not self._cloud.is_same_cloud(
-                clouds.AWS()) and not self._cloud.is_same_cloud(
-                    clouds.GCP()) and not self._cloud.is_same_cloud(
-                        clouds.IBM()) and not self._cloud.is_same_cloud(
-                            clouds.OCI()):
+        try:
+            self._cloud.check_features_are_supported(
+                self,
+                requested_features={
+                    clouds.CloudImplementationFeatures.IMAGE_ID
+                })
+        except exceptions.NotSupportedError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS/GCP/IBM/OCI, please '
-                    'explicitly specify the cloud.')
+                    'image_id is only supported for AWS/GCP/IBM/OCI/Kubernetes,'
+                    ' please explicitly specify the cloud.') from e
 
         if self._region is not None:
             if self._region not in self._image_id:
@@ -841,13 +852,6 @@ class Resources:
 
     def _try_validate_disk_tier(self) -> None:
         if self.disk_tier is None:
-            return
-        if self.disk_tier not in ['high', 'medium', 'low']:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Invalid disk_tier {self.disk_tier}. '
-                    'Please use one of "high", "medium", or "low".')
-        if self.instance_type is None:
             return
         if self.cloud is not None:
             self.cloud.check_disk_tier_enabled(self.instance_type,
@@ -1005,10 +1009,14 @@ class Resources:
         if self.disk_tier is not None:
             if other.disk_tier is None:
                 return False
-            if self.disk_tier != other.disk_tier:
-                types = ['low', 'medium', 'high']
-                return types.index(self.disk_tier) < types.index(
-                    other.disk_tier)
+            # Here, BEST tier means the best we can get; for a launched
+            # cluster, the best (and only) tier we can get is the launched
+            # cluster's tier. Therefore, we don't need to check the tier
+            # if it is BEST.
+            if self.disk_tier != resources_utils.DiskTier.BEST:
+                # Add parenthesis for better readability.
+                if not (self.disk_tier <= other.disk_tier):  # pylint: disable=superfluous-parens
+                    return False
 
         if check_ports:
             if self.ports is not None:
@@ -1105,10 +1113,13 @@ class Resources:
         features = set()
         if self.use_spot:
             features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
-        if self.disk_tier is not None:
+        if (self.disk_tier is not None and
+                self.disk_tier != resources_utils.DiskTier.BEST):
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         if self.extract_docker_image() is not None:
             features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
+        elif self.image_id is not None:
+            features.add(clouds.CloudImplementationFeatures.IMAGE_ID)
         if self.ports is not None:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
         return features
@@ -1255,9 +1266,9 @@ class Resources:
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
-        add_if_not_none('disk_tier', self.disk_tier)
+        if self.disk_tier is not None:
+            config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
-        add_if_not_none('_docker_login_config', self._docker_login_config)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         return config
@@ -1304,8 +1315,9 @@ class Resources:
             accelerators = state.pop('_accelerators', None)
             if accelerators is not None:
                 accelerators = {
-                    accelerator_registry.canonicalize_accelerator_name(acc):
-                    acc_count for acc, acc_count in accelerators.items()
+                    accelerator_registry.canonicalize_accelerator_name(
+                        acc, cloud=None): acc_count
+                    for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators
 
@@ -1349,5 +1361,11 @@ class Resources:
                         accelerator_args['tpu_vm'] = accelerator_args.get(
                             'tpu_vm', False)
                         state['_accelerator_args'] = accelerator_args
+
+        if version < 15:
+            original_disk_tier = state.get('_disk_tier', None)
+            if original_disk_tier is not None:
+                state['_disk_tier'] = resources_utils.DiskTier(
+                    original_disk_tier)
 
         self.__dict__.update(state)
