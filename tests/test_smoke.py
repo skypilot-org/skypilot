@@ -1217,7 +1217,7 @@ def test_large_job_queue(generic_cloud: str):
             f'sky launch -y -c {name} --cpus 8 --cloud {generic_cloud}',
             f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
-            'sleep 85',
+            'sleep 90',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep PENDING | wc -l | grep 43',
@@ -3081,6 +3081,30 @@ def test_skyserve_update():
             'sleep 20',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, new SkyPilot here!"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_update_autoscale():
+    """Test skyserve update with autoscale"""
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-update-autoscale',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/update/num_min_two.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} -y tests/skyserve/update/num_min_one.yaml',
+            # sleep before update is registered.
+            'sleep 20',
+            # Timeout will be triggered when update fails.
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here!"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,

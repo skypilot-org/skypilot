@@ -31,6 +31,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
+          pip install "skypilot-nightly[vsphere]"
           pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[all]"
 
@@ -54,6 +55,7 @@ Install SkyPilot using pip:
           pip install "skypilot[runpod]"
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
+          pip install "skypilot[vsphere]"
           pip install "skypilot[kubernetes]"
           pip install "skypilot[all]"
 
@@ -80,6 +82,7 @@ Install SkyPilot using pip:
           pip install -e ".[runpod]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
+          pip install -e ".[vsphere]"
           pip install -e ".[kubernetes]"
           pip install -e ".[all]"
 
@@ -134,6 +137,7 @@ This will produce a summary like:
     RunPod: enabled
     IBM: enabled
     SCP: enabled
+    vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
 
@@ -154,7 +158,7 @@ Cloud account setup
 -------------------
 
 SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod,
-IBM, SCP, and Cloudflare (for R2 object store).
+IBM, SCP, VMware vSphere and Cloudflare (for R2 object store).
 
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
 
@@ -324,6 +328,42 @@ To configure SCP access, you need access keys and the ID of the project your tas
 
   Multi-node clusters are currently not supported on SCP.
 
+
+
+VMware vSphere
+~~~~~~~~~~~~~~
+
+To configure VMware vSphere access, store the vSphere credentials in :code:`~/.vsphere/credential.yaml`:
+
+.. code-block:: shell
+
+    mkdir -p ~/.vsphere
+    touch ~/.vsphere/credential.yaml
+
+Here is an example of configuration within the credential file:
+
+.. code-block:: yaml
+
+    vcenters:
+      - name: <your_vsphere_server_ip_01>
+        username: <your_vsphere_user_name>
+        password: <your_vsphere_user_passwd>
+        skip_verification: true # If your vcenter have valid certificate then change to 'false' here
+        # Clusters that can be used by SkyPilot:
+        #   [] means all the clusters in the vSphere can be used by Skypilot
+        # Instead, you can specify the clusters in a list:
+        # clusters:
+        #   - name: <your_vsphere_cluster_name1>
+        #   - name: <your_vsphere_cluster_name2>
+        clusters: []
+      # If you are configuring only one vSphere instance, omit the following line.
+      - name: <your_vsphere_server_ip_02>
+        username: <your_vsphere_user_name>
+        password: <your_vsphere_user_passwd>
+        skip_verification: true
+        clusters: []
+
+After configuring the vSphere credentials, ensure that the necessary preparations for vSphere are completed. Please refer to this guide for more information: :ref:`Cloud Preparation for vSphere <cloud-prepare-vsphere>`
 
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~

@@ -25,7 +25,6 @@ from sky import global_user_state
 from sky import status_lib
 from sky.serve import constants
 from sky.serve import serve_state
-from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -38,8 +37,7 @@ if typing.TYPE_CHECKING:
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
-NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
-                         skylet_constants.SERVICES_MEMORY_USAGE_GB)
+NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'

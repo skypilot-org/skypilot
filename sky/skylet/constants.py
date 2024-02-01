@@ -54,12 +54,6 @@ SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 # Port on the remote spot controller that the dashboard is running on.
 SPOT_DASHBOARD_REMOTE_PORT = 5000
 
-# A default controller with 4 vCPU and 16 GB memory can run up to 16 services.
-# TODO(tian): This is to fix circular imports. Move this back to
-# sky.serve.constants.
-SERVICES_MEMORY_USAGE_GB = 1.0
-SERVICES_TASK_CPU_DEMAND = 0.25
-
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
 DEFAULT_DOCKER_PORT = 10022
