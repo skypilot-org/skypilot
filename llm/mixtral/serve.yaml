@@ -1,6 +1,6 @@
 # A example yaml for serving Mixtral model from Mistral.ai with an OpenAI API.
 # Usage:
-#  1. Launch on a single instance: `sky launch mixtral ./serve.yaml`
+#  1. Launch on a single instance: `sky launch -c mixtral ./serve.yaml`
 #  2. Scale up to multiple instances with a single endpoint:
 #     `sky serve up -n mixtral ./serve.yaml`
 service:
