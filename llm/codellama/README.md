@@ -211,7 +211,7 @@ IP=$(sky status --ip tabby)
 echo Endpoint: http://$IP:8080
 ```
 
-Then, you can connect to the Tabby server from VScode by installing the [Tabby extension](https://marketplace.visualstudio.com/items?itemName=tabby-ai.tabby-vscode).
+Then, you can connect to the Tabby server from VScode by installing the [Tabby extension](https://marketplace.visualstudio.com/items?itemName=TabbyML.vscode-tabby) and configuring the API Endpoint under Tabby settings.
 
 > Note that Code Llama 70B does not have the full infiling functionality [[1](https://huggingface.co/codellama/CodeLlama-70b-Instruct-hf)], so the performance of Tabby with Code Llama may be limited.
 > 
