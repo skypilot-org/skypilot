@@ -1,0 +1,8 @@
+# no spot policy: should launch ondemand
+
+service:
+  readiness_probe: /health
+  replicas: 1
+
+resources:
+  ports: 8080

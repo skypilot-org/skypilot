@@ -1,0 +1,10 @@
+# all enabled zones
+
+service:
+  readiness_probe: /health
+  replica_policy:
+    spot_policy: SpotHedge
+    min_replicas: 2
+
+resources:
+  ports: 8080

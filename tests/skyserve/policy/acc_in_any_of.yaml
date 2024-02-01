@@ -1,0 +1,14 @@
+# spot_policy disables multiple accelerators in any_of field. 
+# ValueError: Require multiple resources to have the same fields except zones/regions/clouds.
+
+service:
+  readiness_probe: /health
+  replica_policy:
+    spot_policy: SpotHedge
+    min_replicas: 2
+
+resources:
+  any_of:
+    - accelerators: A100:1
+    - accelerators: T4:1
+  ports: 8080

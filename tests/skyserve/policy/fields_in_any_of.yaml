@@ -1,0 +1,17 @@
+# Should not support other fields in any_of
+# Expected output: ValueError: Require multiple resources to have the same fields except zones/regions/clouds.
+
+service:
+  readiness_probe: /health
+  replica_policy:
+    spot_policy: SpotHedge
+    min_replicas: 2
+
+resources:
+  ports: 8080
+  any_of:
+    - instance_type: Standard_D8s_v5
+    - image_id: docker:ubuntu:latest
+    - cpus: 256+
+    - disk_size: 1024
+    - memory: 512+

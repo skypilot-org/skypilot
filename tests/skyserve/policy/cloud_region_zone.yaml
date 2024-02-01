@@ -1,0 +1,15 @@
+# cloud + region + zone; check launchable_zones
+
+service:
+  readiness_probe: /health
+  replica_policy:
+    spot_policy: SpotHedge
+    min_replicas: 2
+
+resources:
+  ports: 8080
+  any_of:
+    - cloud: gcp
+    - cloud: aws
+      region: us-east-1
+    - zone: us-west-1a
