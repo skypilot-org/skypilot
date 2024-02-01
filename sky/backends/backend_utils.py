@@ -495,20 +495,23 @@ class SSHConfigHelper(object):
 
         # Handle Include on top of Config file
         include_str = f'Include {cls.ssh_cluster_path.format("*")}'
+        found = False
         for i, line in enumerate(config):
             config_str = line.strip()
             if config_str == include_str:
+                found = True
                 break
-            # Did not find Include string. Insert `Include` lines.
             if 'Host' in config_str:
-                with open(config_path, 'w') as f:
-                    config.insert(
-                        0,
-                        f'# Added by SkyPilot for ssh config of all clusters\n{include_str}\n'
-                    )
-                    f.write(''.join(config).strip())
-                    f.write('\n' * 2)
                 break
+        if not found:
+            # Did not find Include string. Insert `Include` lines.
+            with open(config_path, 'w') as f:
+                config.insert(
+                    0,
+                    f'# Added by SkyPilot for ssh config of all clusters\n{include_str}\n'
+                )
+                f.write(''.join(config).strip())
+                f.write('\n' * 2)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
 
