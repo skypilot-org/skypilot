@@ -95,7 +95,9 @@ class Autoscaler:
                              else spec.min_replicas)
         # Reclip self.target_num_replicas with new min and max replicas.
         self.target_num_replicas = max(
-            self.min_replicas, min(self.max_replicas, self.target_num_replicas))
+            self.min_replicas,
+            min(self.max_replicas, (spec.init_replicas if spec.init_replicas
+                                    is not None else spec.min_replicas)))
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -192,6 +194,19 @@ class RequestRateAutoscaler(Autoscaler,
         self.scale_down_consecutive_periods = int(
             downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+
+        # Recalculate target_num_replicas based on QPS.
+        new_qps_target_num_replicas = math.ceil(
+            len(self.request_timestamps) / self.qps_window_size /
+            self.target_qps_per_replica
+        ) if self.target_qps_per_replica is not None else spec.min_replicas
+
+        # Reclip self.target_num_replicas with new min and max replicas.
+        self.target_num_replicas = max(
+            self.min_replicas,
+            min(self.max_replicas,
+                (spec.init_replicas if spec.init_replicas is not None else
+                 new_qps_target_num_replicas)))
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
