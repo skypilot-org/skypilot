@@ -114,3 +114,5 @@ CSYNC_TERMINATION_CMD = 'python -m sky.data.sky_csync terminate -a'
 CSYNC_MOUNT_CMD = ('python -m sky.data.sky_csync csync {csync_path} '
                    '{store_type_str} {destination} --interval-seconds '
                    '{interval_seconds} --no-follow-symlinks')
+S3_SYNC_THREAD_CONFIGURE_CMD = (
+    'aws configure set default.s3.max_concurrent_requests {num_threads}')

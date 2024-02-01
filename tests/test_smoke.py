@@ -72,6 +72,7 @@ LAMBDA_TYPE = '--cloud lambda --gpus A10'
 SCP_TYPE = '--cloud scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
+# Commands to create files/directories for testing file_mounts.
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir', 'mkdir -p ~/tmp-workdir-2',
     'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',

@@ -158,17 +158,16 @@ def _get_mountpoint_path_from_csync_pid(csync_pid: int) -> Optional[str]:
     return None
 
 
-def _get_storage_and_redirect_mount_pid(
-        csync_pid: int) -> Tuple[Optional[int], Optional[int]]:
-    """Given the pid of CSYNC, returns pid of storage and redirect mount."""
+def _get_redirect_mount_pid(csync_pid: int) -> Optional[int]:
+    """Given the pid of CSYNC, returns pid of redirect mount."""
     assert _CURSOR is not None
     _CURSOR.execute(
-        'SELECT storage_mount_pid, redirect_mount_pid FROM running_csync '
+        'SELECT redirect_mount_pid FROM running_csync '
         'WHERE csync_pid=(?) AND boot_time=(?)', (csync_pid, _BOOT_TIME))
     row = _CURSOR.fetchone()
     if row:
-        return row[0], row[1]  # storage_mount_pid, redirect_mount_pid
-    return None, None
+        return row[0]  # redirect_mount_pid
+    return None
 
 
 @click.group()
@@ -184,10 +183,7 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
     if storetype == 's3':
         # aws s3 sync does not support options to set number of threads
         # so we need a separate command for configuration
-        thread_configure_cmd = (
-            'aws configure set default.s3.max_concurrent_requests '
-            '{num_threads}')
-        user_configured_thread_cmd = thread_configure_cmd.format(
+        thread_configure_cmd = constants.S3_SYNC_THREAD_CONFIGURE_CMD.format(
             num_threads=num_threads)
 
         # Construct the main sync command
@@ -208,7 +204,7 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
             num_threads=_DEFAULT_S3_NUM_THREAD)
 
         full_cmd = '; '.join(
-            [user_configured_thread_cmd, main_sync_cmd, reset_thread_cmd])
+            [thread_configure_cmd, main_sync_cmd, reset_thread_cmd])
 
     elif storetype == 'gcs':
         base_sync_cmd = [
@@ -317,7 +313,10 @@ def _handle_fuse_process(fuse_cmd: str) -> Tuple[int, int, str]:
 
 @main.command()
 @click.argument('source', required=True, type=str)
-@click.argument('storetype', required=True, type=str)
+@click.argument('storetype',
+                required=True,
+                type=click.Choice(['s3', 'gcs'],
+                                  case_sensitive=False))
 @click.argument('destination', required=True, type=str)
 @click.option('--num-threads', required=False, default=10, type=int, help='')
 @click.option('--interval-seconds',
@@ -387,6 +386,8 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         storage_fuse_mount_pid, rc, _ = _handle_fuse_process(
             storage_fuse_mount_cmd)
     if rc != 0:
+        shutil.rmtree(csync_write_path)
+        shutil.rmtree(csync_read_path)
         sys.exit(exceptions.CSYNC_TERMINATE_FAILURE_CODE)
 
     # redirect read/write of mountpoint_path by mounting redirection FUSE
@@ -459,15 +460,10 @@ def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=
             if csync_pid is not None:
                 csync_pid_set.add(csync_pid)
 
-    pid_set = set()
-    for csync_pid in csync_pid_set:
-        storage_mount_pid, redirect_mount_pid = (
-            _get_storage_and_redirect_mount_pid(csync_pid))
-        pid_set.add((csync_pid, storage_mount_pid, redirect_mount_pid))
-
     failed_to_terminate_list: List[Tuple[int, str, str]] = []
     unmount_cmd = 'sudo fusermount -uz {unmount_path}'
-    for csync_pid, storage_mount_pid, redirect_mount_pid in pid_set:
+    for csync_pid in csync_pid_set:
+        redirect_mount_pid = _get_redirect_mount_pid(csync_pid)
         # 1. unmount cloud storage from read path
         csync_read_path = os.path.abspath(
             os.path.expanduser(_CSYNC_READ_PATH.format(pid=csync_pid)))
