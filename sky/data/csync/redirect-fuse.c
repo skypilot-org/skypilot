@@ -29,6 +29,8 @@
 #define _GNU_SOURCE
 
 #ifdef linux
+/* For pread()/pwrite()/utimensat() */
+#define _XOPEN_SOURCE 700
 #endif
 
 #include <fuse.h>
@@ -42,6 +44,8 @@
 #include <errno.h>
 #include <stdlib.h>
 #ifdef __FreeBSD__
+#include <sys/socket.h>
+#include <sys/un.h>
 #endif
 #include <sys/time.h>
 
@@ -163,9 +167,16 @@ static int xmp_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_
 	if (dp != NULL) {
 		while ((de = readdir(dp)) != NULL) {
 			if (set_contains(&set, de->d_name) == SET_FALSE) {
+				// stat structure is used to store information about a file or
+				// directory, such as inode number, file type, permissions, and
+				// etc.
 				struct stat st;
 				memset(&st, 0, sizeof(st));
 				st.st_ino = de->d_ino;
+				// sets the file type and mode field of stat structure
+				// Also, shifts the directory entry type left by 12 bits to fit
+				// into the mode field format. This field is used to determine
+				// the type of the file and its permissions.
 				st.st_mode = de->d_type << 12;
 				if (filler(buf, de->d_name, &st, 0, use_detailed_listing)) {
 					break;
@@ -521,6 +532,11 @@ static const struct fuse_operations xmp_oper = {
 };
 
 int main(int argc, char* argv[]) {
+
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s <mountpoint_path> <csync_read_path> <csync_write_path>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
 	mountpoint_path = realpath(argv[1], NULL);
 	csync_read_path = realpath(argv[2], NULL);
 	csync_write_path = realpath(argv[3], NULL);
