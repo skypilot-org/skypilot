@@ -297,6 +297,9 @@ class Azure(clouds.Cloud):
             """).encode('utf-8')).decode('utf-8')
 
         def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
+            if (r.disk_tier is not None and
+                    r.disk_tier != resources_utils.DiskTier.BEST):
+                return r.disk_tier
             # Failover disk tier.
             all_tiers = list(reversed(resources_utils.DiskTier))
             start_index = all_tiers.index(
