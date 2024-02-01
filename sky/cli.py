@@ -4395,6 +4395,43 @@ def _generate_task_with_service(service_yaml_args: List[str],
     return task
 
 
+def _serve_up_check_service(task: sky.Task):
+
+    # task.service.spot_policy will be translated to spot_placer.
+    assert task.service is not None
+    if task.service.spot_placer is not None:
+
+        spot_use_resources: List[sky.Resources] = [
+            resource for resource in task.resources
+            if resource.use_spot_specified and resource.use_spot
+        ]
+        if len(spot_use_resources) not in [0, len(task.resources)]:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'All resources must use spot or none use spot.')
+
+        for resource in list(task.resources):
+            if resource.use_spot_specified and not resource.use_spot:
+                logger.info('use_spot will be override to True, '
+                            'because spot placer is enabled.')
+                break
+
+    else:
+        use_spot = False
+        for resource in list(task.resources):
+            if resource.use_spot_specified and resource.use_spot:
+                use_spot = True
+                break
+        if use_spot:
+            yellow = colorama.Fore.YELLOW
+            reset = colorama.Style.RESET_ALL
+            logger.info(f'{yellow}SkyServe uses spot instances as replica '
+                        f'but spot_policy is not specified.{reset} '
+                        f'Consider adding `spot_policy: SpotHedge` to '
+                        'automate spot replica management for better '
+                        'service quality and smaller downtime.')
+
+
 @serve.command('up', cls=_DocumentedCodeCommand)
 @click.argument('service_yaml',
                 required=True,
@@ -4455,30 +4492,7 @@ def serve_up(
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
-    # task.service.spot_policy will be translated to spot_placer.
-    assert task.service is not None
-    if task.service.spot_placer is not None:
-        for resource in list(task.resources):
-            if resource.use_spot_specified and not resource.use_spot:
-                logger.info('use_spot will be override to True, '
-                            'because spot placer is enabled.')
-                break
-
-    else:
-        use_spot = False
-        for resource in list(task.resources):
-            if resource.use_spot_specified and resource.use_spot:
-                use_spot = True
-                break
-        if use_spot:
-            yellow = colorama.Fore.YELLOW
-            reset = colorama.Style.RESET_ALL
-            logger.info(f'{yellow}SkyServe uses spot instances as replica '
-                        f'but spot_policy is not specified.{reset} '
-                        f'Consider adding `spot_policy: SpotHedge` to '
-                        'automate spot replica management for better '
-                        'service quality and smaller downtime.')
-
+    _serve_up_check_service(task)
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
     with sky.Dag() as dag:
@@ -4525,6 +4539,7 @@ def serve_update(service_name: str, service_yaml: List[str], yes: bool):
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
+    _serve_up_check_service(task)
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')
     with sky.Dag() as dag:

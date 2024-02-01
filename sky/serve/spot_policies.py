@@ -105,6 +105,7 @@ class DynamicFailoverSpotPlacer(SpotPlacer, name='DYNAMIC_FAILOVER'):
         selected_zones = []
         for _ in range(num_replicas):
             # Select the zone with the least number of replicas.
+            # TODO(MaoZiming): use cost to tie break.
             selected_zone = min(self.active_zones(),
                                 key=lambda zone: existing_zones_to_count[zone])
             selected_zones.append(selected_zone)
