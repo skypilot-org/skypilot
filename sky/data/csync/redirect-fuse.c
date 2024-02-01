@@ -77,28 +77,27 @@ int file_exists(const char* path) {
     return (stat(path, &buffer) == 0); 
 }
 
-char* full_path(const char* partial_path, int write, int read) {
+char* csync_full_path(const char* partial_path, int write, int read) {
 	// Check and remove leading '/' from partial_path if present
 	if (partial_path[0] == '/') {
-		partial_path++;  // Move the pointer to skip the leading '/'
+		// Move the pointer to skip the leading '/'
+		partial_path++;
 	}
 
-	char* full_write_path = join_path(csync_write_path, partial_path);
-	char* full_read_path = join_path(csync_read_path, partial_path);
 	char* result = NULL;
 
 	if (write) {
-		result = full_write_path;
-		free(full_read_path);
+		result = join_path(csync_write_path, partial_path);
 	} else if (read) {
-		result = full_read_path;
-		free(full_write_path);
-	} else if (file_exists(full_write_path)) {
-		result = full_write_path;
-		free(full_read_path);
+		result = join_path(csync_read_path, partial_path);
 	} else {
-		result = full_read_path;
-		free(full_write_path);
+		char* full_write_path = join_path(csync_write_path, partial_path);
+		if (file_exists(full_write_path)) {
+			result = full_write_path;
+		} else {
+			free(full_write_path);
+			result = join_path(csync_read_path, partial_path);
+		}
 	}
 
 	return result;
@@ -128,7 +127,7 @@ static int xmp_getattr(const char* path, struct stat* stbuf,
 		       struct fuse_file_info* fi)
 {
 	(void) fi;
-	char* translated_path = full_path(path, 0, 0);
+	char* translated_path = csync_full_path(path, 0, 0);
 	int res = lstat(translated_path, stbuf);
 	free(translated_path);
 	if (res == -1) {
@@ -139,7 +138,7 @@ static int xmp_getattr(const char* path, struct stat* stbuf,
 
 static int xmp_access(const char* path, int mask)
 {
-	char* translated_path = full_path(path, 0, 0);
+	char* translated_path = csync_full_path(path, 0, 0);
 	int res = access(translated_path, mask);
 	free(translated_path);
 	if (res == -1) {
@@ -153,8 +152,8 @@ static int xmp_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_
 	DIR* dp;
 	struct dirent* de;
 
-	char* read_path = full_path(path, 0, 1);
-	char* write_path = full_path(path, 1, 0);
+	char* read_path = csync_full_path(path, 0, 1);
+	char* write_path = csync_full_path(path, 1, 0);
 
 	// Clear hash table
 	SimpleSet set;
@@ -223,7 +222,7 @@ static int mkdir_p(const char* path, mode_t mode) {
 
 static int xmp_mkdir(const char* path, mode_t mode)
 {
-	char* write_path = full_path(path, 1, 0);
+	char* write_path = csync_full_path(path, 1, 0);
 	int res = mkdir_p(write_path, mode);
 	free(write_path);
 	if (res == -1) {
@@ -234,8 +233,8 @@ static int xmp_mkdir(const char* path, mode_t mode)
 
 static int xmp_unlink(const char* path)
 {
-	char* write_path = full_path(path, 1, 0);
-	char* read_path = full_path(path, 0, 1);
+	char* write_path = csync_full_path(path, 1, 0);
+	char* read_path = csync_full_path(path, 0, 1);
 	int res;
 	if (file_exists(read_path)) {
 		res = unlink(read_path);
@@ -258,8 +257,8 @@ static int xmp_unlink(const char* path)
 
 static int xmp_rmdir(const char* path)
 {
-	char* write_path = full_path(path, 1, 0);
-	char* read_path = full_path(path, 0, 1);
+	char* write_path = csync_full_path(path, 1, 0);
+	char* read_path = csync_full_path(path, 0, 1);
 	int res;
 	if (file_exists(read_path)) {
 		res = rmdir(read_path);
@@ -284,8 +283,8 @@ static int xmp_rename(const char* from, const char* to, unsigned int flags)
 {
 	// this operation is called when running:
 	// mv /path/file_name/in/mountpoint /path/diff_file_name/in/mountpoint
-	char* translated_from = full_path(from, 0, 0);
-	char* translated_to = full_path(to, 1, 0);
+	char* translated_from = csync_full_path(from, 0, 0);
+	char* translated_to = csync_full_path(to, 1, 0);
 	if (flags) {
 		return -EINVAL;
 	}
@@ -303,7 +302,7 @@ static int xmp_chmod(const char* path, mode_t mode,
 		     struct fuse_file_info* fi)
 {
 	(void) fi;
-	char* translated_path = full_path(path, 0, 0);
+	char* translated_path = csync_full_path(path, 0, 0);
 	int res = chmod(translated_path, mode);
 	free(translated_path);
 	if (res == -1) {
@@ -316,7 +315,7 @@ static int xmp_chown(const char* path, uid_t uid, gid_t gid,
 		     struct fuse_file_info* fi)
 {
 	(void) fi;
-	char* translated_path = full_path(path, 0, 0);
+	char* translated_path = csync_full_path(path, 0, 0);
 	int res = lchown(translated_path, uid, gid);
 	free(translated_path);
 	if (res == -1) {
@@ -329,7 +328,7 @@ static int xmp_truncate(const char* path, off_t size,
 			struct fuse_file_info* fi)
 {
 	int res;
-	char* translated_path = full_path(path, 0, 0);
+	char* translated_path = csync_full_path(path, 0, 0);
 	if (fi != NULL) {
 		res = ftruncate(fi->fh, size);
 	}
@@ -348,7 +347,7 @@ static int xmp_utimens(const char* path, const struct timespec ts[2],
 {
 	(void) fi;
 	int res;
-	char* write_path = full_path(path, 1, 0);
+	char* write_path = csync_full_path(path, 1, 0);
 	/* don't use utime/utimes since they follow symlinks */
 	res = utimensat(0, write_path, ts, AT_SYMLINK_NOFOLLOW);
 	if (res == -1) {
@@ -361,7 +360,7 @@ static int xmp_utimens(const char* path, const struct timespec ts[2],
 static int xmp_create(const char* path, mode_t mode,
 		      struct fuse_file_info* fi)
 {
-	char* write_path = full_path(path, 1, 0);
+	char* write_path = csync_full_path(path, 1, 0);
 	mode_t mkdir_mode = 0755;  // Octal notation
 	char* tmp = strdup(write_path);
 	char* parent = dirname(tmp);
@@ -381,7 +380,7 @@ static int xmp_create(const char* path, mode_t mode,
 
 static int xmp_open(const char* path, struct fuse_file_info* fi)
 {
-	char* translated_path = full_path(path, 0, 0);
+	char* translated_path = csync_full_path(path, 0, 0);
 	int res = open(translated_path, fi->flags);
 	free(translated_path);
 	if (res == -1) {
@@ -397,7 +396,7 @@ static int xmp_read(const char* path, char* buf, size_t size, off_t offset,
 {
 	int fd;
 	int res;
-	char* translated_path = full_path(path, 0, 0);
+	char* translated_path = csync_full_path(path, 0, 0);
 	if(fi == NULL) {
 		fd = open(translated_path, O_RDONLY);
 	}
@@ -423,7 +422,7 @@ static int xmp_write(const char* path, const char* buf, size_t size,
 {
 	int fd;
 	int res;
-	char* write_path = full_path(path, 1, 0);
+	char* write_path = csync_full_path(path, 1, 0);
 	(void) fi;
 	if(fi == NULL) {
 		fd = open(write_path, O_RDONLY);
@@ -447,7 +446,7 @@ static int xmp_write(const char* path, const char* buf, size_t size,
 
 static int xmp_statfs(const char* path, struct statvfs* stbuf)
 {
-	char* translated_path = full_path(path, 0, 0);
+	char* translated_path = csync_full_path(path, 0, 0);
 	int res;
 	res = statvfs(translated_path, stbuf);
 	free(translated_path);
@@ -477,7 +476,7 @@ static off_t xmp_lseek(const char* path, off_t off, int whence, struct fuse_file
 {
 	int fd;
 	off_t res;
-	char* translated_path = full_path(path, 0, 0);
+	char* translated_path = csync_full_path(path, 0, 0);
 	if (fi == NULL) {
 		fd = open(translated_path, O_RDONLY);
 	}
