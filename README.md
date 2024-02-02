@@ -107,7 +107,7 @@ workdir: ~/torch_examples
 # Commands to be run before executing the job.
 # Typical use: pip install -r requirements.txt, git clone, etc.
 setup: |
-  pip install torch<2.2 torchvision --index-url https://download.pytorch.org/whl/cu121
+  pip install "torch<2.2" torchvision --index-url https://download.pytorch.org/whl/cu121
 
 # Commands to run as a job.
 # Typical use: launch the main program.
