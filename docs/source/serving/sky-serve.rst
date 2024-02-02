@@ -541,7 +541,7 @@ You can use a machine image that has the weights preloaded. This can be done by 
 
     resources:
       ports: 8080
-      accelerators: A100:1
+      accelerators: {L4:8, A10g:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
       cloud: gcp
       image_id: projects/my-project/global/machineImages/image-with-model-weights
 
@@ -568,7 +568,7 @@ Notice that the :code:`cloud` field must be specified when :code:`image_id` is u
 
     resources:
       ports: 8080
-      accelerators: A100:1
+      accelerators: {L4:8, A10g:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
       any_of:
         - cloud: gcp
           image_id: projects/my-project/global/machineImages/image-with-model-weights
@@ -595,7 +595,7 @@ You can also :ref:`use docker containers as runtime environment <docker-containe
 
     resources:
       ports: 8080
-      accelerators: A100:1
+      accelerators: {L4:8, A10g:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
       image_id: docker:docker-image-with-model-weights
 
     # Here goes the setup and run commands...
