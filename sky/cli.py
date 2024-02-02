@@ -4397,19 +4397,18 @@ def _generate_task_with_service(service_yaml_args: List[str],
 
 def _serve_up_check_service(task: sky.Task):
 
-    # task.service.spot_policy will be translated to spot_placer.
+    spot_use_resources: List[sky.Resources] = [
+        resource for resource in task.resources
+        if resource.use_spot_specified and resource.use_spot
+    ]
+    if len(spot_use_resources) not in [0, len(task.resources)]:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('All resources must use spot or none use spot. '
+                             'To use on-demand and spot instances together, '
+                             'Use `spot_policy: SpotHedge` in the service.')
+
     assert task.service is not None
     if task.service.spot_placer is not None:
-
-        spot_use_resources: List[sky.Resources] = [
-            resource for resource in task.resources
-            if resource.use_spot_specified and resource.use_spot
-        ]
-        if len(spot_use_resources) not in [0, len(task.resources)]:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'All resources must use spot or none use spot.')
-
         for resource in list(task.resources):
             if resource.use_spot_specified and not resource.use_spot:
                 logger.info('use_spot will be override to True, '
