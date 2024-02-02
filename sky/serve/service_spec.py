@@ -2,15 +2,20 @@
 import json
 import os
 import textwrap
+import typing
 from typing import Any, Dict, List, Optional
 
 import yaml
 
 from sky.serve import autoscalers
 from sky.serve import constants
+from sky.serve import spot_policies
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
 
 _policy_to_autoscaler_and_spot_placer = {
     'SpotHedge': ('SPOT_ON_DEMAND_REQUEST_RATE_AUTOSCALER', 'DYNAMIC_FAILOVER'),
@@ -78,10 +83,6 @@ class SkyServiceSpec:
         # Only let spot_policy to set spot_placer.
         spot_placer = None
         if spot_policy is not None:
-            if autoscaler is not None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Cannot specify `autoscaler`'
-                                     'when `spot_policy` is specified.')
             # TODO(MaoZiming): do not hardcode the name
             if spot_policy in _policy_to_autoscaler_and_spot_placer:
                 autoscaler, spot_placer = _policy_to_autoscaler_and_spot_placer[
@@ -104,12 +105,13 @@ class SkyServiceSpec:
         self._target_qps_per_replica: Optional[float] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
         self._spot_placer: Optional[str] = spot_placer
+        self._spot_policy: Optional[str] = spot_policy
         self._autoscaler: str = autoscaler
         self._num_overprovision: Optional[int] = num_overprovision
         self._init_replicas: Optional[int] = init_replicas
         self._extra_on_demand_replicas: Optional[int] = extra_on_demand_replicas
-        # _spot_zones will be set by set_spot_zones from resource config.
-        self._spot_zones: Optional[List[str]] = None
+        # _spot_locations will be set by set_spot_locations.
+        self._spot_locations: Optional[List[spot_policies.Location]] = None
         self._upscale_delay_seconds: int = (
             upscale_delay_seconds if upscale_delay_seconds is not None else
             constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
@@ -237,7 +239,7 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
-        add_if_not_none('replica_policy', 'spot_placer', self._spot_placer)
+        add_if_not_none('replica_policy', 'spot_policy', self._spot_policy)
         add_if_not_none('replica_policy', 'autoscaler', self._autoscaler)
         add_if_not_none('replica_policy', 'num_overprovision',
                         self._num_overprovision)
@@ -285,8 +287,10 @@ class SkyServiceSpec:
             Spot Policy:                      {self.spot_policy_str()}\
         """)
 
-    def set_spot_zones(self, zones: List[str]) -> None:
-        self._spot_zones = zones
+    # TODO(MaoZiming): Add this function to spot_placer might be better.
+    def set_spot_locations(self,
+                           locations: List[spot_policies.Location]) -> None:
+        self._spot_locations = locations
 
     @property
     def readiness_path(self) -> str:
@@ -322,8 +326,8 @@ class SkyServiceSpec:
         return self._autoscaler
 
     @property
-    def spot_zones(self) -> Optional[List[str]]:
-        return self._spot_zones
+    def spot_locations(self) -> Optional[List[spot_policies.Location]]:
+        return self._spot_locations
 
     @property
     def num_overprovision(self) -> Optional[int]:

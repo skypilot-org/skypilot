@@ -21,6 +21,7 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
 from sky.serve import service_spec
+from sky.serve import spot_policies
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -630,7 +631,7 @@ class Task:
         if service is not None and service.spot_placer is not None:
 
             enabled_clouds = global_user_state.get_enabled_clouds()
-            launchable_zones = set()
+            feasible_locations: List[spot_policies.Location] = []
 
             for resources in self.resources:
                 clouds_list = ([resources.cloud] if resources.cloud is not None
@@ -644,12 +645,20 @@ class Task:
                         regions = (feasible_resource.
                                    get_valid_regions_for_launchable())
                         for region in regions:
-                            if region.zones is not None:
-                                for zone in region.zones:
-                                    launchable_zones.add(zone.name)
+                            if region is None or region.zones is None:
+                                continue
+                            for zone in region.zones:
+                                if zone is None:
+                                    continue
+                                feasible_locations.append(
+                                    spot_policies.Location(
+                                        str(cloud), region.name, zone.name))
 
-            logger.debug(f'launchable_zones: {launchable_zones}')
-            service.set_spot_zones(list(launchable_zones))
+            location_print_list = [(location.cloud, location.region,
+                                    location.zone)
+                                   for location in feasible_locations]
+            logger.info(f'launchable_locations: {location_print_list}')
+            service.set_spot_locations(feasible_locations)
 
         self._service = service
         return self

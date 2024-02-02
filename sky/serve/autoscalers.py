@@ -399,22 +399,26 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
                 f'{spec.spot_placer} is not recommended. ')
             self.spot_placer = spot_policies.SpotPlacer.from_spec(spec)
 
-    def handle_active_history(self, history: List[str]) -> None:
-        for zone in history:
-            self.spot_placer.handle_active(zone)
+    def handle_active_history(self,
+                              history: List[spot_policies.Location]) -> None:
+        for location in history:
+            self.spot_placer.handle_active(location)
 
-    def handle_preemption_history(self, history: List[str]) -> None:
-        for zone in history:
-            self.spot_placer.handle_preemption(zone)
+    def handle_preemption_history(
+            self, history: List[spot_policies.Location]) -> None:
+        for location in history:
+            self.spot_placer.handle_preemption(location)
 
-    def _get_spot_resources_override_dict(self, zone: str) -> Dict[str, Any]:
+    def _get_spot_resources_override_dict(
+            self, location: spot_policies.Location) -> Dict[str, Any]:
         # We have checked before any_of can only be used to
         # specify multiple zones, regions and clouds.
         return {
             'use_spot': True,
             'spot_recovery': None,
-            'region': None,
-            'zone': zone,
+            'region': location.region,
+            'zone': location.zone,
+            'cloud': location.cloud,
         }
 
     def evaluate_scaling(
@@ -445,12 +449,13 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
             # Not enough spot instances, scale up.
             # Consult spot_placer for the zone to launch spot instance.
             num_spot_to_scale_up = num_to_provision - num_launched_spot
-            zones = self.spot_placer.select(
+            locations = self.spot_placer.select(
                 provisioning_and_launched_new_replica, num_spot_to_scale_up)
-            assert len(zones) == num_spot_to_scale_up
-            for zone in zones:
-                spot_override = self._get_spot_resources_override_dict(zone)
-                logger.info(f'Chosen zone {zone} with {self.spot_placer}')
+            assert len(locations) == num_spot_to_scale_up
+            for location in locations:
+                spot_override = self._get_spot_resources_override_dict(location)
+                logger.info(
+                    f'Chosen location {location} with {self.spot_placer}')
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=spot_override))

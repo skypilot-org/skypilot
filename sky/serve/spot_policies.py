@@ -13,8 +13,16 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
-class SpotZoneType(enum.Enum):
-    """Spot Zone Type."""
+class Location:
+
+    def __init__(self, cloud: str, region: str, zone: str) -> None:
+        self.cloud = cloud
+        self.region = region
+        self.zone = zone
+
+
+class LocationStatus(enum.Enum):
+    """Location Spot Status."""
     ACTIVE = 'ACTIVE'
     PREEMPTED = 'PREEMPTED'
 
@@ -25,10 +33,9 @@ class SpotPlacer:
     REGISTRY: Dict[str, Type['SpotPlacer']] = dict()
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
-        assert spec.spot_zones is not None
-        self.zones = list(spec.spot_zones)
-        self.zone2type: Dict[str, SpotZoneType] = {
-            zone: SpotZoneType.ACTIVE for zone in self.zones
+        assert spec.spot_locations is not None
+        self.location2type: Dict[Location, LocationStatus] = {
+            location: LocationStatus.ACTIVE for location in spec.spot_locations
         }
 
     def __init_subclass__(cls, name: str) -> None:
@@ -40,38 +47,38 @@ class SpotPlacer:
         return list(cls.REGISTRY.keys())
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
-               num_zones: int) -> List[str]:
+               num_replicas: int) -> List[Location]:
         """Select next zone to place spot instance."""
         raise NotImplementedError
 
-    def move_zone_to_active(self, zone: str) -> None:
-        assert zone in self.zone2type
-        self.zone2type[zone] = SpotZoneType.ACTIVE
+    def move_location_to_active(self, location: Location) -> None:
+        assert location in self.location2type
+        self.location2type[location] = LocationStatus.ACTIVE
 
-    def move_zone_to_preempted(self, zone: str) -> None:
-        assert zone in self.zone2type
-        self.zone2type[zone] = SpotZoneType.PREEMPTED
+    def move_location_to_preempted(self, location: Location) -> None:
+        assert location in self.location2type
+        self.location2type[location] = LocationStatus.PREEMPTED
 
-    def handle_active(self, zone: str) -> None:
-        self.move_zone_to_active(zone)
+    def handle_active(self, location: Location) -> None:
+        self.move_location_to_active(location)
 
-    def handle_preemption(self, zone: str) -> None:
-        self.move_zone_to_preempted(zone)
+    def handle_preemption(self, location: Location) -> None:
+        self.move_location_to_preempted(location)
 
-    def clear_preempted_zones(self) -> None:
-        for zone in self.zones:
-            self.move_zone_to_active(zone)
+    def clear_preemptive_locations(self) -> None:
+        for location in self.location2type:
+            self.move_location_to_active(location)
 
-    def active_zones(self) -> List[str]:
+    def active_locations(self) -> List[Location]:
         return [
-            zone for zone, zone_type in self.zone2type.items()
-            if zone_type == SpotZoneType.ACTIVE
+            location for location, location_type in self.location2type.items()
+            if location_type == LocationStatus.ACTIVE
         ]
 
-    def preempted_zones(self) -> List[str]:
+    def preemptive_locations(self) -> List[Location]:
         return [
-            zone for zone, zone_type in self.zone2type.items()
-            if zone_type == SpotZoneType.PREEMPTED
+            location for location, location_type in self.location2type.items()
+            if location_type == LocationStatus.PREEMPTED
         ]
 
     def __repr__(self) -> str:
@@ -88,26 +95,29 @@ class DynamicFailoverSpotPlacer(SpotPlacer, name='DYNAMIC_FAILOVER'):
     """Dynamic failover to an active zone when preempted."""
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
-               num_replicas: int) -> List[str]:
+               num_replicas: int) -> List[Location]:
         # Prevent the case with only one active zones.
-        if len(self.active_zones()) <= 1 and len(self.preempted_zones()) > 0:
-            self.clear_preempted_zones()
+        if len(self.active_locations()) <= 1 and len(
+                self.preemptive_locations()) > 0:
+            self.clear_preemptive_locations()
 
-        existing_zones = [
-            info.zone
+        existing_locations = [
+            info.location
             for info in existing_replicas
-            if info.is_spot and info.zone is not None
+            if info.is_spot and info.location is not None
         ]
-        existing_zones_to_count = collections.defaultdict(int)
-        for zone in existing_zones:
-            existing_zones_to_count[zone] = existing_zones.count(zone)
+        existing_locations_to_count = collections.defaultdict(int)
+        for location in existing_locations:
+            existing_locations_to_count[location] = existing_locations.count(
+                location)
 
-        selected_zones = []
+        selected_locations = []
         for _ in range(num_replicas):
             # Select the zone with the least number of replicas.
             # TODO(MaoZiming): use cost to tie break.
-            selected_zone = min(self.active_zones(),
-                                key=lambda zone: existing_zones_to_count[zone])
-            selected_zones.append(selected_zone)
-            existing_zones_to_count[selected_zone] += 1
-        return selected_zones
+            selected_location = min(
+                self.active_locations(),
+                key=lambda location: existing_locations_to_count[location])
+            selected_locations.append(selected_location)
+            existing_locations_to_count[selected_location] += 1
+        return selected_locations

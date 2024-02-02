@@ -26,6 +26,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
+from sky.serve import spot_policies
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -72,7 +73,8 @@ def launch_cluster(task_yaml_path: str,
             resource_config = config.get('resources', {})
             # SkyServe does not support ordered resources.
             # Remove 'any_of' as it only contains zone/region/cloud
-            resource_config.pop('any_of', None)
+            if resources_override.get('use_spot', True):
+                resource_config.pop('any_of', None)
             resource_config.update(resources_override)
             config['resources'] = resource_config
         logger.info(f'Launching replica cluster {cluster_name} with '
@@ -193,14 +195,17 @@ def _get_use_spot_override(task_yaml: str,
     return spot_use_resources == len(task.resources)
 
 
-def _get_zone_override(
-        resource_override: Optional[Dict[str, Any]]) -> Optional[str]:
+def _get_location(
+    resource_override: Optional[Dict[str, Any]]
+) -> Optional[spot_policies.Location]:
     """Get zone override from resource_override."""
     if resource_override is not None:
-        zone_override = resource_override.get('zone')
-        if zone_override is not None:
-            assert isinstance(zone_override, str)
-            return zone_override
+        cloud = resource_override.get('cloud', None)
+        region = resource_override.get('region', None)
+        zone = resource_override.get('zone', None)
+        if cloud is not None and region is not None and zone is not None:
+            location = spot_policies.Location(cloud, region, zone)
+            return location
     return None
 
 
@@ -381,14 +386,15 @@ class ReplicaInfo:
     _VERSION = 0
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
-                 is_spot: bool, zone: Optional[str], version: int) -> None:
+                 is_spot: bool, location: Optional[spot_policies.Location],
+                 version: int) -> None:
         self._version = self._VERSION
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.version: int = version
         self.replica_port: str = replica_port
         self.is_spot: bool = is_spot
-        self.zone: Optional[str] = zone
+        self.location: Optional[spot_policies.Location] = location
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
@@ -505,7 +511,7 @@ class ReplicaInfo:
 
         if version < 0:
             self.is_spot = False
-            self.zone = None
+            self.location = None
 
         self.__dict__.update(state)
 
@@ -577,8 +583,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self._down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
-        self.active_history: List[str] = []
-        self.preemption_history: List[str] = []
+        self.active_history: List[spot_policies.Location] = []
+        self.preemption_history: List[spot_policies.Location] = []
 
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
@@ -630,10 +636,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _get_use_spot_override(self._task_yaml_path,
                                           resources_override)
-        zone = _get_zone_override(resources_override)
+        location = _get_location(resources_override)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
-                           zone, self.latest_version)
+                           location, self.latest_version)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -765,11 +771,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                               f' (status: {cluster_status.value})')
         logger.info(
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
-        if info.zone is None:
-            logger.error(f'Cannot find zone for replica {info.replica_id}. '
+        if info.location is None:
+            logger.error(f'Cannot find location for replica {info.replica_id}. '
                          'Skipping adding to preemption list.')
         else:
-            self.preemption_history.append(info.zone)
+            self.preemption_history.append(info.location)
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
@@ -824,16 +830,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                             ProcessStatus.FAILED)
                         error_in_sky_launch = True
                     if info.is_spot:
-                        if info.zone is None:
+                        if info.location is None:
                             logger.error(f'Cannot find zone for replica '
                                          f'{replica_id}. Skipping adding '
                                          'active or preemption history.')
                         else:
                             # If a spot fails to launch in a given zone.
                             if p.exitcode != 0:
-                                self.preemption_history.append(info.zone)
+                                self.preemption_history.append(info.location)
                             else:
-                                self.active_history.append(info.zone)
+                                self.active_history.append(info.location)
                     else:
                         logger.info(f'replica {replica_id} is on-demand. '
                                     'Skipping adding active or preemption '
