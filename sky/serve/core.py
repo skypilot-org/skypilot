@@ -8,6 +8,7 @@ import colorama
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -163,11 +164,16 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
+        idle_minutes_to_autostop = None if (
+                controller_cloud and
+                controller_cloud.is_same_cloud(clouds.Kubernetes())
+        ) else constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
         controller_job_id, controller_handle = execution.execute(
             entrypoint=controller_task,
             stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
             retry_until_up=True,
         )
 

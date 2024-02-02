@@ -161,6 +161,16 @@ def _get_cloud_dependencies_installation_commands(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
             'azure-mgmt-network > /dev/null 2>&1')
+    if any(
+            cloud.is_same_cloud(clouds.Kubernetes())
+            for cloud in global_user_state.get_enabled_clouds()):
+        commands.append(
+            # Install k8s + skypilot dependencies
+            'sudo bash -c "apt update && apt install curl socat netcat -y" && '
+            # Install kubectl
+            'curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && '
+            'sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && '
+        )
     return commands
 
 
