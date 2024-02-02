@@ -145,10 +145,11 @@ class SkyServeController:
 
                 if self._autoscaler.NAME != service.autoscaler:
                     self._autoscaler = autoscalers.Autoscaler.from_spec(service)
+                    self._autoscaler.latest_version = version
                     logger.info('Not recommended: '
                                 f'Update autoscaler to {service.autoscaler}')
-                    # Need to update autoscaler version
-                self._autoscaler.update_version(version, service)
+                else:
+                    self._autoscaler.update_version(version, service)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in update_service: '
