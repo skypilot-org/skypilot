@@ -184,6 +184,7 @@ class RequestRateAutoscaler(Autoscaler):
         # is not enabled, i.e. self.target_qps_per_replica is None.
         # In this case, self.target_num_replicas will be min_replicas.
         if self.target_qps_per_replica is None:
+            # self.bootstrap_done will not have effect.
             self.bootstrap_done = True
             return self.target_num_replicas
 
