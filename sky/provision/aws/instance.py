@@ -41,6 +41,9 @@ _DEPENDENCY_VIOLATION_PATTERN = re.compile(
     r'An error occurred \(DependencyViolation\) when calling the '
     r'DeleteSecurityGroup operation(.*): (.*)')
 
+_RESUME_INSTANCE_TIMEOUT = 480 # 8 minutes
+_RESUME_PER_INSTANCE_TIMEOUT = 120 # 2 minutes
+
 # ======================== About AWS subnet/VPC ========================
 # https://stackoverflow.com/questions/37407492/are-there-differences-in-networking-performance-if-ec2-instances-are-in-differen
 # https://docs.aws.amazon.com/vpc/latest/userguide/how-it-works.html
@@ -375,8 +378,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     if config.resume_stopped_nodes and to_start_count > 0 and (
             stopping_instances or stopped_instances):
         time_start = time.time()
-        timeout = 480
-        per_instance_timeout = 120
         if stopping_instances:
             plural = 's' if len(stopping_instances) > 1 else ''
             verb = 'are' if len(stopping_instances) > 1 else 'is'
@@ -386,7 +387,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 'fully STOPPED. Waiting ...')
         while (stopping_instances and
                to_start_count > len(stopped_instances) and
-               time.time() - time_start < timeout):
+               time.time() - time_start < _RESUME_INSTANCE_TIMEOUT):
             inst = stopping_instances.pop(0)
             with pool.ThreadPool(processes=1) as pool_:
                 # wait_until_stopped() is a blocking call, and sometimes it can
@@ -396,7 +397,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 fut = pool_.apply_async(inst.wait_until_stopped)
                 per_instance_time_start = time.time()
                 while (time.time() - per_instance_time_start <
-                       per_instance_timeout):
+                       _RESUME_PER_INSTANCE_TIMEOUT):
                     if fut.ready():
                         fut.get()
                         break
@@ -404,7 +405,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 else:
                     logger.warning(
                         f'Instance {inst.id} is still in stopping state '
-                        f'(Timeout: {per_instance_timeout}). Retrying ...')
+                        f'(Timeout: {_RESUME_PER_INSTANCE_TIMEOUT}). '
+                        'Retrying ...')
                     stopping_instances.append(inst)
                     time.sleep(5)
                     continue
