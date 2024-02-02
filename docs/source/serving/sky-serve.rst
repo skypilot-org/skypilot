@@ -522,15 +522,15 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all services to be terminated.
 
-Speedup Weights Loading in Large Model Serving
-----------------------------------------------
+Speedup Setup in Model Serving
+------------------------------
 
-When serving large models, the weights of the model are loaded from the cloud storage / public internet to the VMs. This process can take a long time, especially for large models. To speed up the weights loading, you can use the following methods:
+When serving AI models, the setup process like dependencies installation takes a lot of time on the cold-start time. According to one experiment we found that, dependencies installation can take 45% of times (271s out of 608s) of the setup process. To speed up this process, you can use the following methods:
 
 Use Machine image
 ~~~~~~~~~~~~~~~~~
 
-You can use a machine image that has the weights preloaded. This can be done by creating a VM, loading the weights, and then creating a machine image from the VM. Then, you can use the machine image to launch the VMs for serving:
+You can use a machine image that has the dependencies preinstalled (also probably model weights preloaded). This can be done by creating a VM, installing the dependencies, and then creating a machine image from the VM. Then, you can use the machine image to launch the VMs for serving:
 
 .. code-block:: yaml
   :emphasize-lines: 7-8
@@ -541,21 +541,11 @@ You can use a machine image that has the weights preloaded. This can be done by 
 
     resources:
       ports: 8080
-      accelerators: {L4:8, A10g:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+      accelerators: A100:1
       cloud: gcp
-      image_id: projects/my-project/global/machineImages/image-with-model-weights
+      image_id: projects/my-project/global/machineImages/image-with-dependency-installed
 
-    setup: |
-      conda create -n vllm python=3.9 -y
-      conda activate vllm
-      pip install vllm
-
-    run: |
-      conda activate vllm
-      python -m vllm.entrypoints.openai.api_server \
-        --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
-        --host 0.0.0.0 --port 8080 \
-        --model mistralai/Mixtral-8x7B-Instruct-v0.1
+    # Here goes the setup and run commands...
 
 Notice that the :code:`cloud` field must be specified when :code:`image_id` is used. You can use :code:`any_of` in :code:`resources` to make it support multiple clouds:
 
@@ -568,10 +558,10 @@ Notice that the :code:`cloud` field must be specified when :code:`image_id` is u
 
     resources:
       ports: 8080
-      accelerators: {L4:8, A10g:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+      accelerators: A100:1
       any_of:
         - cloud: gcp
-          image_id: projects/my-project/global/machineImages/image-with-model-weights
+          image_id: projects/my-project/global/machineImages/image-with-dependency-installed
         - cloud: aws
           image_id:
             us-east-1: ami-0729d913a335efca7
@@ -579,12 +569,12 @@ Notice that the :code:`cloud` field must be specified when :code:`image_id` is u
 
     # Here goes the setup and run commands...
 
-Notice that AWS needs a per-region image since its image is only valid in a single region. This requires to configure a lot of images on the cloud console, but it can significantly speed up the weights loading.
+Notice that AWS needs a per-region image since its image is only valid in a single region. This requires to configure a lot of images on the cloud console, but it can significantly speed up the dependency installation. It also takes the advantage of the in-region fast network, which delivers a quicker download speed of the machine image.
 
 Use Docker Container as Runtime Environment
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can also :ref:`use docker containers as runtime environment <docker-containers-as-runtime-environments>`. This can be done by creating a Docker container that has the weights preloaded, and then using the container to launch the VMs for serving:
+You can also :ref:`use docker containers as runtime environment <docker-containers-as-runtime-environments>`. This can be done by creating a Docker container that has the dependencies preinstalled, and then using the container to launch the VMs for serving:
 
 .. code-block:: yaml
   :emphasize-lines: 7
@@ -595,8 +585,8 @@ You can also :ref:`use docker containers as runtime environment <docker-containe
 
     resources:
       ports: 8080
-      accelerators: {L4:8, A10g:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
-      image_id: docker:docker-image-with-model-weights
+      accelerators: A100:1
+      image_id: docker:docker-image-with-dependency-installed
 
     # Here goes the setup and run commands...
 
