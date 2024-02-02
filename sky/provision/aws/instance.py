@@ -270,7 +270,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
-    # NOTE: We set retry=0 for fast failing when the resource is not
+    # NOTE: We set max_attempts=0 for fast failing when the resource is not
     # available (although the doc says it will only retry for network
     # issues, practically, it retries for capacity errors, etc as well).
     ec2_fail_fast = aws.resource('ec2', region_name=region, max_attempts=0)
