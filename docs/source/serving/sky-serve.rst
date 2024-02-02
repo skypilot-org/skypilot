@@ -488,7 +488,7 @@ You can see the controller with :code:`sky status` and refresh its status by usi
 .. _customizing-sky-serve-controller-resources:
 
 Customizing SkyServe controller resources
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You may want to customize the resources of the SkyServe controller for several reasons:
 
@@ -521,3 +521,64 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   These settings will not take effect if you have an existing controller (either
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all services to be terminated.
+
+Speedup Weights Loading in Large Model Serving
+----------------------------------------------
+
+When serving large models, the weights of the model are loaded from the cloud storage / public internet to the VMs. This process can take a long time, especially for large models. To speed up the weights loading, you can use the following methods:
+
+Use Machine image
+~~~~~~~~~~~~~~~~~
+
+You can use a machine image that has the weights preloaded. This can be done by creating a VM, loading the weights, and then creating a machine image from the VM. Then, you can use the machine image to launch the VMs for serving:
+
+.. code-block:: yaml
+  :emphasize-lines: 7-8
+
+    service:
+      replicas: 2
+      readiness_probe: /v1/models
+
+    resources:
+      accelerators: A100:1
+      cloud: gcp
+      image_id: projects/my-project/global/machineImages/image-with-model-weights
+
+Notice that the :code:`cloud` field must be specified when :code:`image_id` is used. You can use :code:`any_of` in :code:`resources` to make it support multiple clouds:
+
+.. code-block:: yaml
+  :emphasize-lines: 7-13
+
+    service:
+      replicas: 2
+      readiness_probe: /v1/models
+
+    resources:
+      accelerators: A100:1
+      any_of:
+        - cloud: gcp
+          image_id: projects/my-project/global/machineImages/image-with-model-weights
+        - cloud: aws
+          image_id:
+            us-east-1: ami-0729d913a335efca7
+            us-west-2: ami-050814f384259894c
+
+Notice that AWS needs a per-region image since its image is only valid in a single region. This requires to configure a lot of images on the cloud console, but it can significantly speed up the weights loading.
+
+Use Docker Container as Runtime Environment
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can also :ref:`use docker containers as runtime environment <docker-containers-as-runtime-environments>`. This can be done by creating a Docker container that has the weights preloaded, and then using the container to launch the VMs for serving:
+
+.. code-block:: yaml
+  :emphasize-lines: 7
+
+    service:
+      replicas: 2
+      readiness_probe: /v1/models
+
+    resources:
+      accelerators: A100:1
+      image_id: docker:docker-image-with-model-weights
+
+This is easier to configure than machine images, but it may have a longer startup time than machine images since it needs to pull the docker image from the registry.
