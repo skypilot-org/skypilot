@@ -27,9 +27,7 @@ setup: |
     conda activate codellama
   fi
 
-  # We have to manually install Torch otherwise apex & xformers won't build
   pip list | grep torch || pip install "torch>=2.0.0"
-
   pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git"
   pip install git+https://github.com/huggingface/transformers
 
