@@ -334,13 +334,9 @@ def get_service_schema():
                     'target_qps_per_replica': {
                         'type': 'number',
                     },
-                    'spot_placer': {
-                        'type': 'string',
-                    },
                     'autoscaler': {
                         'type': 'string',
                     },
-                    # Shortcut for spot_placer and autoscaler
                     'spot_policy': {
                         'type': 'string',
                     },

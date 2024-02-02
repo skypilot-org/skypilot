@@ -8,7 +8,6 @@ import yaml
 
 from sky.serve import autoscalers
 from sky.serve import constants
-from sky.serve import spot_policies
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -31,7 +30,6 @@ class SkyServiceSpec:
         extra_on_demand_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
-        spot_placer: Optional[str] = None,
         spot_policy: Optional[str] = None,
         autoscaler: Optional[str] = None,
         num_overprovision: Optional[int] = None,
@@ -78,11 +76,10 @@ class SkyServiceSpec:
                     'and auto restart it to keep the service running.')
 
         if spot_policy is not None:
-            if autoscaler is not None or spot_placer is not None:
+            if autoscaler is not None:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify `autoscaler` and `spot_placer`'
-                        'when `spot_policy` is specified.')
+                    raise ValueError('Cannot specify `autoscaler`'
+                                     'when `spot_policy` is specified.')
             # TODO(MaoZiming): do not hardcode the name
             if spot_policy in _policy_to_autoscaler_and_spot_placer:
                 autoscaler, spot_placer = _policy_to_autoscaler_and_spot_placer[
@@ -97,11 +94,6 @@ class SkyServiceSpec:
         if autoscaler not in autoscalers.Autoscaler.get_autoscaler_names():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unsupported autoscaler: {autoscaler}.')
-
-        if (spot_placer is not None and
-                spot_placer not in spot_policies.SpotPlacer.get_policy_names()):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Unsupported spot placer: {spot_placer}.')
 
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
@@ -188,8 +180,6 @@ class SkyServiceSpec:
             service_config['downscale_delay_seconds'] = policy_section.get(
                 'downscale_delay_seconds', None)
 
-            service_config['spot_placer'] = policy_section.get(
-                'spot_placer', None)
             service_config['autoscaler'] = policy_section.get(
                 'autoscaler', None)
             service_config['num_overprovision'] = policy_section.get(
