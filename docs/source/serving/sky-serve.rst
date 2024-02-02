@@ -540,9 +540,22 @@ You can use a machine image that has the weights preloaded. This can be done by 
       readiness_probe: /v1/models
 
     resources:
+      ports: 8080
       accelerators: A100:1
       cloud: gcp
       image_id: projects/my-project/global/machineImages/image-with-model-weights
+
+    setup: |
+      conda create -n vllm python=3.9 -y
+      conda activate vllm
+      pip install vllm
+
+    run: |
+      conda activate vllm
+      python -m vllm.entrypoints.openai.api_server \
+        --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+        --host 0.0.0.0 --port 8080 \
+        --model mistralai/Mixtral-8x7B-Instruct-v0.1
 
 Notice that the :code:`cloud` field must be specified when :code:`image_id` is used. You can use :code:`any_of` in :code:`resources` to make it support multiple clouds:
 
@@ -554,6 +567,7 @@ Notice that the :code:`cloud` field must be specified when :code:`image_id` is u
       readiness_probe: /v1/models
 
     resources:
+      ports: 8080
       accelerators: A100:1
       any_of:
         - cloud: gcp
@@ -562,6 +576,8 @@ Notice that the :code:`cloud` field must be specified when :code:`image_id` is u
           image_id:
             us-east-1: ami-0729d913a335efca7
             us-west-2: ami-050814f384259894c
+
+    # Here goes the setup and run commands...
 
 Notice that AWS needs a per-region image since its image is only valid in a single region. This requires to configure a lot of images on the cloud console, but it can significantly speed up the weights loading.
 
@@ -578,7 +594,10 @@ You can also :ref:`use docker containers as runtime environment <docker-containe
       readiness_probe: /v1/models
 
     resources:
+      ports: 8080
       accelerators: A100:1
       image_id: docker:docker-image-with-model-weights
+
+    # Here goes the setup and run commands...
 
 This is easier to configure than machine images, but it may have a longer startup time than machine images since it needs to pull the docker image from the registry.
