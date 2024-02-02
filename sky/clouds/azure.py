@@ -310,7 +310,7 @@ class Azure(clouds.Cloud):
                 if ok:
                     return disk_tier
                 start_index += 1
-            return None
+            assert False, 'Low disk tier should always be supported on Azure.'
 
         return {
             'instance_type': r.instance_type,
@@ -335,9 +335,7 @@ class Azure(clouds.Cloud):
                 return ([], [])
             # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
             # Resources(Azure, Standard_NC4as_T4_v3).
-            resources = resources.copy(
-                accelerators=None,
-            )
+            resources = resources.copy(accelerators=None,)
             return ([resources], [])
 
         def _make(instance_list):
