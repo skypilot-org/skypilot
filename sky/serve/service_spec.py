@@ -75,6 +75,8 @@ class SkyServiceSpec:
                     'Currently, SkyServe will cleanup failed replicas'
                     'and auto restart it to keep the service running.')
 
+        # Only let spot_policy to set spot_placer.
+        spot_placer = None 
         if spot_policy is not None:
             if autoscaler is not None:
                 with ux_utils.print_exception_no_traceback():
