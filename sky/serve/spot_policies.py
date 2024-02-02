@@ -1,5 +1,6 @@
 """ Sky Spot Policy for SkyServe."""
 import collections
+import dataclasses
 import enum
 import typing
 from typing import Dict, List, Optional, Type
@@ -13,12 +14,11 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
+@dataclasses.dataclass
 class Location:
-
-    def __init__(self, cloud: str, region: str, zone: str) -> None:
-        self.cloud = cloud
-        self.region = region
-        self.zone = zone
+    cloud: str
+    region: str
+    zone: str
 
 
 class LocationStatus(enum.Enum):
