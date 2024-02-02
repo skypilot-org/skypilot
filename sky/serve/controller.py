@@ -144,7 +144,14 @@ class SkyServeController:
                 self._replica_manager.update_version(version, service)
 
                 if self._autoscaler.NAME != service.autoscaler:
+                    old_autoscaler = self._autoscaler
                     self._autoscaler = autoscalers.Autoscaler.from_spec(service)
+                    if isinstance(
+                            self._autoscaler,
+                            autoscalers.RequestRateAutoscaler) and isinstance(
+                                old_autoscaler,
+                                autoscalers.RequestRateAutoscaler):
+                        self._autoscaler.request_timestamps = old_autoscaler.request_timestamps  # pylint: disable=line-too-long
                     self._autoscaler.latest_version = version
                     logger.info('Not recommended: '
                                 f'Update autoscaler to {service.autoscaler}')
