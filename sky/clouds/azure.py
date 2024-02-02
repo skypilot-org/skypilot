@@ -300,7 +300,9 @@ class Azure(clouds.Cloud):
             if (r.disk_tier is not None and
                     r.disk_tier != resources_utils.DiskTier.BEST):
                 return r.disk_tier
-            # Failover disk tier.
+            # Failover disk tier from high to low. Default disk tier
+            # (Premium_LRS, medium) only support s-series instance types,
+            # so we failover to lower tiers for non-s-series.
             all_tiers = list(reversed(resources_utils.DiskTier))
             start_index = all_tiers.index(
                 Azure._translate_disk_tier(r.disk_tier))
