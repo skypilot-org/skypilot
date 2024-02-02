@@ -337,7 +337,6 @@ class Azure(clouds.Cloud):
             # Resources(Azure, Standard_NC4as_T4_v3).
             resources = resources.copy(
                 accelerators=None,
-                disk_tier=resources.disk_tier,
             )
             return ([resources], [])
 
