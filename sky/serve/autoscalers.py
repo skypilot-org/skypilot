@@ -160,6 +160,7 @@ class RequestRateAutoscaler(Autoscaler):
         self.scale_down_consecutive_periods = int(
             downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+        self.bootstrap_done = False
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
