@@ -109,8 +109,7 @@ def _ec2_call_with_retry_on_server_error(ec2_fail_fast_fn: Callable[..., _T],
                                          log_level=logging.DEBUG,
                                          **kwargs) -> _T:
     # Here we have to handle 'RequestLimitExceeded' error, so the provision
-    # would not fail due to request limit
-    # issues.
+    # would not fail due to request limit issues.
     # Here the backoff config (5, 12) is picked at random and does not
     # have any special meaning.
     backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=12)
