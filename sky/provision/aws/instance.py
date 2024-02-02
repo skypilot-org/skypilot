@@ -41,8 +41,8 @@ _DEPENDENCY_VIOLATION_PATTERN = re.compile(
     r'An error occurred \(DependencyViolation\) when calling the '
     r'DeleteSecurityGroup operation(.*): (.*)')
 
-_RESUME_INSTANCE_TIMEOUT = 480 # 8 minutes
-_RESUME_PER_INSTANCE_TIMEOUT = 120 # 2 minutes
+_RESUME_INSTANCE_TIMEOUT = 480  # 8 minutes
+_RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 
 # ======================== About AWS subnet/VPC ========================
 # https://stackoverflow.com/questions/37407492/are-there-differences-in-networking-performance-if-ec2-instances-are-in-differen
