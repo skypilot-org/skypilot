@@ -335,7 +335,7 @@ class Azure(clouds.Cloud):
                 return ([], [])
             # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
             # Resources(Azure, Standard_NC4as_T4_v3).
-            resources = resources.copy(accelerators=None,)
+            resources = resources.copy(accelerators=None)
             return ([resources], [])
 
         def _make(instance_list):
