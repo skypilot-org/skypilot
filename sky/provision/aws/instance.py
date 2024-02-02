@@ -113,7 +113,7 @@ def _ec2_call_with_retry_on_server_error(ec2_fail_fast_fn: Callable[..., _T],
     # issues.
     # Here the backoff config (5, 12) is picked at random and does not
     # have any special meaning.
-    backoff = common_utils.Backoff(5, 12)
+    backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=12)
     ret = None
     for _ in range(utils.BOTO_MAX_RETRIES):
         try:
