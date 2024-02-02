@@ -183,6 +183,7 @@ class RequestRateAutoscaler(Autoscaler):
         # is not enabled, i.e. self.target_qps_per_replica is None.
         # In this case, self.target_num_replicas will be min_replicas.
         if self.target_qps_per_replica is None:
+            self.bootstrap_done = True
             return self.target_num_replicas
 
         # Convert to requests per second.
@@ -192,8 +193,10 @@ class RequestRateAutoscaler(Autoscaler):
                                         self.target_qps_per_replica)
         target_num_replicas = max(self.min_replicas,
                                   min(self.max_replicas, target_num_replicas))
-        logger.info(f'Requests per second: {num_requests_per_second}, '
-                    f'Current target number of replicas: {target_num_replicas}')
+        logger.info(
+            f'Requests per second: {num_requests_per_second}, '
+            f'self.target_num_replicas: {self.target_num_replicas}, '
+            f'proposed target number of replicas: {target_num_replicas}')
 
         if not self.bootstrap_done or self.target_num_replicas == 0:
             self.bootstrap_done = True
