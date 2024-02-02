@@ -142,6 +142,12 @@ class SkyServeController:
                     f'Update to new version version {version}: {service}')
 
                 self._replica_manager.update_version(version, service)
+
+                if self._autoscaler.NAME != service.autoscaler:
+                    self._autoscaler = autoscalers.Autoscaler.from_spec(service)
+                    logger.info('Not recommended: '
+                                f'Update autoscaler to {service.autoscaler}')
+                    # Need to update autoscaler version
                 self._autoscaler.update_version(version, service)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
