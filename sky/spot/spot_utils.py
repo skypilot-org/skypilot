@@ -492,6 +492,25 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
+def _get_job_status_from_tasks(
+        job_tasks: List[Dict[str, Any]]) -> Tuple[spot_state.SpotStatus, int]:
+    """Get the current task status and the current task id for a job."""
+    spot_status = spot_state.SpotStatus.SUCCEEDED
+    current_task_id = 0
+    for task in job_tasks:
+        spot_status = task['status']
+        current_task_id = task['task_id']
+
+        # Use the first non-succeeded status.
+        if spot_status != spot_state.SpotStatus.SUCCEEDED:
+            # TODO(zhwu): we should not blindly use the first non-
+            # succeeded as the status could be changed to SUBMITTED
+            # when going from one task to the next one, which can be
+            # confusing.
+            break
+    return spot_status, current_task_id
+
+
 @typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
@@ -525,6 +544,25 @@ def format_job_table(
     Returns: A formatted string of spot jobs, if not `return_rows`; otherwise a
       list of "rows" (each of which is a list of str).
     """
+
+    jobs = collections.defaultdict(list)
+    for task in tasks:
+        # The tasks within the same job_id are already sorted
+        # by the task_id.
+        jobs[task['job_id']].append(task)
+    jobs = dict(jobs)
+
+    status_counts: Dict[str, int] = collections.defaultdict(int)
+    for job_tasks in jobs.values():
+        spot_job_status = _get_job_status_from_tasks(job_tasks)[0]
+        if not spot_job_status.is_terminal():
+            status_counts[spot_job_status.value] += 1
+
+    if max_jobs is not None:
+        job_ids = sorted(jobs.keys(), reverse=True)
+        job_ids = job_ids[:max_jobs]
+        jobs = {job_id: jobs[job_id] for job_id in job_ids}
+
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
@@ -532,21 +570,6 @@ def format_job_table(
     if show_all:
         columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE']
     job_table = log_utils.create_table(columns)
-
-    status_counts: Dict[str, int] = collections.defaultdict(int)
-    for task in tasks:
-        if not task['status'].is_terminal():
-            status_counts[task['status'].value] += 1
-
-    all_tasks = tasks
-    if max_jobs is not None:
-        all_tasks = tasks[:max_jobs]
-    jobs = collections.defaultdict(list)
-    for task in all_tasks:
-        # The tasks within the same job_id are already sorted
-        # by the task_id.
-        jobs[task['job_id']].append(task)
-
     for job_id, job_tasks in jobs.items():
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
@@ -555,9 +578,7 @@ def format_job_table(
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
-            spot_status = spot_state.SpotStatus.SUCCEEDED
-            failure_reason = None
-            current_task_id = len(job_tasks) - 1
+            spot_status, current_task_id = _get_job_status_from_tasks(job_tasks)
             for task in job_tasks:
                 job_duration += task['job_duration']
                 if task['submitted_at'] is not None:
@@ -570,19 +591,8 @@ def format_job_table(
                 else:
                     end_at = None
                 recovery_cnt += task['recovery_count']
-                if spot_status == spot_state.SpotStatus.SUCCEEDED:
-                    # Use the first non-succeeded status.
-                    # TODO(zhwu): we should not blindly use the first non-
-                    # succeeded as the status could be changed to SUBMITTED
-                    # when going from one task to the next one, which can be
-                    # confusing.
-                    spot_status = task['status']
-                    current_task_id = task['task_id']
 
-                if (failure_reason is None and
-                        task['status'] > spot_state.SpotStatus.SUCCEEDED):
-                    failure_reason = task['failure_reason']
-
+            failure_reason = job_tasks[current_task_id]['failure_reason']
             job_duration = log_utils.readable_time_duration(0,
                                                             job_duration,
                                                             absolute=True)
@@ -592,8 +602,7 @@ def format_job_table(
                                                               absolute=True)
 
             status_str = spot_status.colored_str()
-            if (spot_status < spot_state.SpotStatus.RUNNING and
-                    current_task_id > 0):
+            if not spot_status.is_terminal():
                 status_str += f' (task: {current_task_id})'
 
             job_values = [

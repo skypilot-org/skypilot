@@ -110,7 +110,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 
 # The maximum number of in-progress spot jobs to show in the status
 # command.
-_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
+_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 3
 
 _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify {cause} '
@@ -1675,7 +1675,7 @@ def _get_spot_jobs(
             # Make the call silent
             spot_jobs = core.spot_queue(refresh=refresh,
                                         skip_finished=skip_finished)
-        num_in_progress_jobs = len(spot_jobs)
+        num_in_progress_jobs = len(set(job['job_id'] for job in spot_jobs))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         if controller_status == status_lib.ClusterStatus.INIT:
