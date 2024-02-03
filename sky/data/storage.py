@@ -2126,8 +2126,9 @@ class AzureBlobStore(AbstractStore):
                 self.storage_client, self.resource_client)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
-                            f'--account-key {storage_account_key}'
+                            f'--account-key {storage_account_key} '
                             f'{includes} '
+                            '--delete-destination false '
                             f'--source {base_dir_path} '
                             f'--container {self.bucket.name}')
             return sync_command
@@ -2150,8 +2151,9 @@ class AzureBlobStore(AbstractStore):
                 self.storage_client, self.resource_client)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
-                            f'--account-key {storage_account_key}'
+                            f'--account-key {storage_account_key} '
                             f'{excludes} '
+                            '--delete-destination false '
                             f'--source {src_dir_path} '
                             f'--container {self.bucket.name}/{dest_dir_name}')
             return sync_command
