@@ -2121,8 +2121,12 @@ class AzureBlobStore(AbstractStore):
             ])
             includes = f'--include-pattern "{includes_list}"'
             base_dir_path = shlex.quote(base_dir_path)
+            storage_account_key = data_utils.get_az_storage_account_key(
+                self.storage_account_name, self.resource_group_name,
+                self.storage_account_name, self.resource_group_name)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
+                            f'--account-key {storage_account_key}'
                             f'{includes} '
                             f'--source {base_dir_path} '
                             f'--container {self.bucket.name}')
@@ -2141,8 +2145,12 @@ class AzureBlobStore(AbstractStore):
             # directories correctly. Need to investigate further.
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
+            storage_account_key = data_utils.get_az_storage_account_key(
+                self.storage_account_name, self.resource_group_name,
+                self.storage_account_name, self.resource_group_name)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
+                            f'--account-key {storage_account_key}'
                             f'{excludes} '
                             f'--source {src_dir_path} '
                             f'--container {self.bucket.name}/{dest_dir_name}')

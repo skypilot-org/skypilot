@@ -32,8 +32,6 @@ _CREDENTIAL_FILES = [
     'clouds.config',
     'config',
     'msal_token_cache.json',
-    # Necessary to use azcli
-    'accessTokens.json',
 ]
 
 _MAX_IDENTITY_FETCH_RETRY = 10
