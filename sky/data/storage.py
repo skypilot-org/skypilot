@@ -2123,7 +2123,7 @@ class AzureBlobStore(AbstractStore):
             base_dir_path = shlex.quote(base_dir_path)
             storage_account_key = data_utils.get_az_storage_account_key(
                 self.storage_account_name, self.resource_group_name,
-                self.storage_account_name, self.resource_group_name)
+                self.storage_client, self.resource_client)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {storage_account_key}'
@@ -2147,7 +2147,7 @@ class AzureBlobStore(AbstractStore):
             src_dir_path = shlex.quote(src_dir_path)
             storage_account_key = data_utils.get_az_storage_account_key(
                 self.storage_account_name, self.resource_group_name,
-                self.storage_account_name, self.resource_group_name)
+                self.storage_client, self.resource_client)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {storage_account_key}'
