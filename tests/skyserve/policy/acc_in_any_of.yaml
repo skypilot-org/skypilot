@@ -1,4 +1,4 @@
-# spot_policy disables multiple accelerators in any_of field. 
+# Spot Policy disables multiple accelerators in any_of field. 
 # ValueError: Require multiple resources to have the same fields except zones/regions/clouds.
 
 service:

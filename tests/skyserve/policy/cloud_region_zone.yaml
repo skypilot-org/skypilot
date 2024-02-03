@@ -1,4 +1,5 @@
-# cloud + region + zone; check launchable_zones
+# Test with a combination of cloud, region, and zone.
+# SkyServe should consider zones specify by any_of.
 
 service:
   readiness_probe: /health

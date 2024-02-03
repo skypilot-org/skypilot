@@ -1,4 +1,5 @@
-# no spot policy: should launch ondemand
+# When no spot_policy is specified,
+# SkyServe should launch on-demand instances.
 
 service:
   readiness_probe: /health

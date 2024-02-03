@@ -1,4 +1,4 @@
-# spot_policy does not support ordered resources
+# Spot Policy does not support ordered resources
 # Expected output: ValueError: Does not support both spot_policy and ordered resources.
 
 service:
