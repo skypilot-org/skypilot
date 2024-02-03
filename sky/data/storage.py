@@ -1862,6 +1862,7 @@ class AzureBlobStore(AbstractStore):
         self.resource_client: 'storage.Client'
         self.resource_group_name: str
         self.storage_account_name: str
+        self.storage_account_key: str
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
@@ -2005,6 +2006,8 @@ class AzureBlobStore(AbstractStore):
             self.resource_group_name = skypilot_config.get_nested(
                 ('azure', 'resource_group'),
                 f'sky{common_utils.get_user_hash()}')
+            # If the resource group or storage account with the identical name
+            # already exists, it will smoothly progress without failure
             self.resource_client.resource_groups.create_or_update(
                 self.resource_group_name,
                 {"location": self.region}
@@ -2029,6 +2032,9 @@ class AzureBlobStore(AbstractStore):
                     },
                 }
             ).result()
+        self.storage_account_key = data_utils.get_az_storage_account_key(
+            self.storage_account_name, self.resource_group_name,
+            self.storage_client, self.resource_client)
         # TODO(Doyoung): Add naming convention check from storage account name
         # and resource group name
         self.bucket, is_new_bucket = self._get_bucket()
@@ -2121,12 +2127,9 @@ class AzureBlobStore(AbstractStore):
             ])
             includes = f'--include-pattern "{includes_list}"'
             base_dir_path = shlex.quote(base_dir_path)
-            storage_account_key = data_utils.get_az_storage_account_key(
-                self.storage_account_name, self.resource_group_name,
-                self.storage_client, self.resource_client)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
-                            f'--account-key {storage_account_key} '
+                            f'--account-key {self.storage_account_key} '
                             f'{includes} '
                             '--delete-destination false '
                             f'--source {base_dir_path} '
@@ -2146,12 +2149,9 @@ class AzureBlobStore(AbstractStore):
             # directories correctly. Need to investigate further.
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
-            storage_account_key = data_utils.get_az_storage_account_key(
-                self.storage_account_name, self.resource_group_name,
-                self.storage_client, self.resource_client)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
-                            f'--account-key {storage_account_key} '
+                            f'--account-key {self.storage_account_key} '
                             f'{excludes} '
                             '--delete-destination false '
                             f'--source {src_dir_path} '

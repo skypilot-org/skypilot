@@ -926,12 +926,14 @@ class Task:
                     })
                 elif store_type is storage_lib.StoreType.AZURE:
                     if isinstance(storage.source,
-                                  str) and storage.source.startswith('gs://'):
+                                  str) and storage.source.startswith('az://'):
                         blob_path = storage.source
                     else:
                         assert storage.name is not None, storage
                         store_object = storage.stores[storage_lib.StoreType.AZURE]
                         storage_account_name = store_object.storage_account_name
+                        #TODO(Doyoung): May need to update the blob path to support
+                        # other form of sources
                         blob_path = f'az://{storage_account_name}/{storage.name}'
                     self.update_file_mounts({
                         mnt_path: blob_path,
