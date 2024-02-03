@@ -4403,9 +4403,11 @@ def _serve_up_check_service(task: sky.Task):
     ]
     if len(spot_use_resources) not in [0, len(task.resources)]:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('All resources must use spot or none use spot. '
-                             'To use on-demand and spot instances together, '
-                             'Use `spot_policy: SpotHedge` in the service.')
+            raise ValueError(
+                'Resources must either all use spot or none use spot. '
+                'To use on-demand and spot instances together, '
+                'use `spot_policy: SpotHedge` and only specify '
+                '`use_spot: true`.')
 
     assert task.service is not None
     if task.service.spot_placer is not None:
@@ -4429,6 +4431,45 @@ def _serve_up_check_service(task: sky.Task):
                         f'Consider adding `spot_policy: SpotHedge` to '
                         'automate spot replica management for better '
                         'service quality and smaller downtime.')
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Service section not found.')
+
+    if task.service.spot_placer is not None:
+        if isinstance(task.resources, list):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Does not support both spot_policy '
+                                 'and ordered resources.')
+
+    first_resource_dict = list(task.resources)[0].to_yaml_config()
+    for requested_resources in task.resources:
+        requested_resources_dict = requested_resources.to_yaml_config()
+        for key in ['region', 'zone', 'cloud']:
+            if key in first_resource_dict:
+                first_resource_dict.pop(key)
+            if key in requested_resources_dict:
+                requested_resources_dict.pop(key)
+        if (first_resource_dict != requested_resources_dict and
+                task.service.spot_placer is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Require multiple resources to have the same fields '
+                    'except zones/regions/clouds.')
+        if requested_resources.ports is None or len(
+                requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port_str = requested_resources.ports[0]
+        if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Port {service_port_str!r} is not a valid port '
+                    'number. Please specify a single port instead. '
+                    f'Got: {service_port_str!r}')
 
 
 @serve.command('up', cls=_DocumentedCodeCommand)

@@ -657,7 +657,7 @@ class Task:
             location_print_list = [(location.cloud, location.region,
                                     location.zone)
                                    for location in feasible_locations]
-            logger.info(f'launchable_locations: {location_print_list}')
+            logger.debug(f'launchable_locations: {location_print_list}')
             service.set_spot_locations(feasible_locations)
 
         self._service = service
