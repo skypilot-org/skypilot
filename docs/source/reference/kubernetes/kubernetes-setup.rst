@@ -255,8 +255,8 @@ When using this mode, SkyPilot will create a single LoadBalancer Service for all
 Each port can be accessed using the LoadBalancer's external IP address and the port number. Use :code:`sky status --endpoints <cluster>` to view the external endpoints for all ports.
 
 .. note::
-    In cloud based Kubernetes clusters, this will automatically create an external Load Balancer.     GKE creates a pass-through Load Balancer (see `here <https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer>`__)
-    and AWS creates a Network Load Balancer (see `here <https://docs.aws.amazon.com/eks/latest/userguide/network-load-balancing.html>`__). These load balancers will be automatically terminated when the cluster is deleted.
+    In cloud based Kubernetes clusters, this will automatically create an external Load Balancer.     GKE creates a (`pass-through load balancer <https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer>`__)
+    and AWS creates a `Network Load Balancer <https://docs.aws.amazon.com/eks/latest/userguide/network-load-balancing.html>`__). These load balancers will be automatically terminated when the cluster is deleted.
 
 .. note::
     The default LoadBalancer implementation in EKS selects a random port from the list of opened ports for the
@@ -304,7 +304,7 @@ Use :code:`sky status --endpoints <cluster>` to view the full endpoint URLs for 
 
 .. note::
 
-    Currently, SkyPilot does not support opening ports on a Kubernetes cluster using the `Gateway API <https://kubernetes.io/docs/concepts/services-networking/gateway/>`.
+    Currently, SkyPilot does not support opening ports on a Kubernetes cluster using the `Gateway API <https://kubernetes.io/docs/concepts/services-networking/gateway/>`_.
     If you are interested in this feature, please `reach out <https//slack.skypilot.co>`_.
 
 

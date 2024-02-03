@@ -179,27 +179,14 @@ Available fields and semantics:
     # defaults to 'loadbalancer'.
     #
     # loadbalancer: Creates services of type `LoadBalancer` to expose ports.
-    # See https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer.
-    # This mode is supported for all Kubernetes clusters that support
-    # the LoadBalancer service type (e.g., GKE, EKS and other cloud hosted k8s)
-    # This mode creates a single LoadBalancer service for all ports opened.
-    # The port can be accessed externally using the service's external IP
-    # plus the specific port you want to access. The external IP generally takes some time
-    # to be assigned so there might be a slight delay before the port can be accessed.
+    # See https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#loadbalancer-service.
+    # This mode is supported out of the box on most cloud managed Kubernetes
+    # environments (e.g., GKE, EKS).
     #
     # ingress: Creates an ingress and a ClusterIP service for each port opened.
-    # Requires an ingress controller to be configured on the Kubernetes cluster.
-    # Currently, only the NGINX ingress controller is supported.
-    # Refer to https://kubernetes.github.io/ingress-nginx/deploy/ for details on
-    # deploying the NGINX ingress controller. In this mode, the port can be
-    # accessed externally using the Ingress URL plus a path prefix of the form
-    # /skypilot/{cluster_pod_name}/{port}
-    # Refer to kubernetes-ingress.yml.j2 for the exact template.
-    #
-    # You can get the endpoint for any port opened using the following command:
-    # `sky status {cluster_name} --endpoint {port}`
-    # or list the endpoints for all ports opened using:
-    # `sky status {cluster_name} --endpoints`
+    # Requires an Nginx ingress controller to be configured on the Kubernetes cluster.
+    # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#nginx-ingress
+    # for details on deploying the NGINX ingress controller.
     ports: loadbalancer
 
     # Additional fields to override the pod fields used by SkyPilot (optional)
