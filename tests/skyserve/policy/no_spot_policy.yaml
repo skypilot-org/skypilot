@@ -5,4 +5,8 @@ service:
   replicas: 1
 
 resources:
-  ports: 8080
+  ports: 8081
+
+workdir: examples/serve/http_server
+
+run: python3 server.py

@@ -7,9 +7,13 @@ service:
     min_replicas: 2
 
 resources:
-  ports: 8080
+  ports: 8081
   any_of:
     - cloud: gcp
     - cloud: aws
       region: us-east-1
     - zone: us-west-1a
+
+workdir: examples/serve/http_server
+
+run: python3 server.py

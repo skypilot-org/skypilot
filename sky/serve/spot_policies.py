@@ -16,9 +16,20 @@ logger = sky_logging.init_logger(__name__)
 
 @dataclasses.dataclass
 class Location:
+    """Location class of a spot instance."""
+
     cloud: str
     region: str
     zone: str
+
+    def __eq__(self, other):
+        if isinstance(other, Location):
+            return (self.cloud == other.cloud and
+                    self.region == other.region and self.zone == other.zone)
+        return False
+
+    def __hash__(self):
+        return hash(self.cloud + self.region + self.zone)
 
 
 class LocationStatus(enum.Enum):

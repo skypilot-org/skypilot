@@ -1,4 +1,5 @@
-# all enabled zones
+# All enabled zones.
+# SkyServe should launch spots in all zones supported by user.
 
 service:
   readiness_probe: /health
@@ -7,4 +8,8 @@ service:
     min_replicas: 2
 
 resources:
-  ports: 8080
+  ports: 8081
+
+workdir: examples/serve/http_server
+
+run: python3 server.py
