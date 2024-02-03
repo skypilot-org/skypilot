@@ -149,7 +149,6 @@ class RequestRateAutoscaler(Autoscaler,
             downscale_counter: counter for downscale number of replicas.
             scale_up_consecutive_periods: period for scaling up.
             scale_down_consecutive_periods: period for scaling down.
-            bootstrap_done: whether bootstrap is done.
         """
         super().__init__(spec)
         self.target_qps_per_replica: Optional[
@@ -174,8 +173,6 @@ class RequestRateAutoscaler(Autoscaler,
         self.scale_down_consecutive_periods: int = int(
             downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
-
-        self.bootstrap_done: bool = False
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
