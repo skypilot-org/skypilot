@@ -2247,7 +2247,7 @@ class AzureBlobStore(AbstractStore):
         # retrieve storage account access key
         storage_account_key = data_utils.get_az_storage_account_key(
             self.storage_account_name, self.resource_group_name,
-            self.storage_account_name, self.resource_group_name)
+            self.storage_client, self.resource_client)
         install_cmd = mounting_utils.get_az_mount_install_cmd()
         mount_cmd = mounting_utils.get_az_mount_cmd(self.bucket.name,
                                                     self.storage_account_name,
