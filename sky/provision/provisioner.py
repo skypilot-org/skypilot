@@ -473,8 +473,8 @@ def _post_provision_setup(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_info, ssh_credentials)
 
-        head_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                      port=port_list[0],
+        head_runner = command_runner.SSHCommandRunner(node=(ip_list[0],
+                                                            port_list[0]),
                                                       **ssh_credentials)
 
         status.update(

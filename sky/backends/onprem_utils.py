@@ -180,9 +180,13 @@ def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
     """
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
-    ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
+    ssh_credentials = {
+        'ssh_user': ssh_user,
+        'ssh_private_key': ssh_key,
+        'ssh_control_name': 'sky-admin-deploy'
+    }
     runners = command_runner.SSHCommandRunner.make_runner_list(
-        ips, *ssh_credentials)
+        zip(ips, [22] * len(ips)), **ssh_credentials)
     sky_ray_version = constants.SKY_REMOTE_RAY_VERSION
 
     def _install_and_check_dependencies(
@@ -297,10 +301,11 @@ def get_local_cluster_accelerators(
 
         print(accelerators_dict)
         """)
-
-    ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
     runners = command_runner.SSHCommandRunner.make_runner_list(
-        ips, *ssh_credentials)
+        node_list=zip(ips, [22] * len(ips)),
+        ssh_user=ssh_user,
+        ssh_private_key=ssh_key,
+        ssh_control_name='sky-admin-deploy')
 
     def _gather_cluster_accelerators(
             runner: command_runner.SSHCommandRunner):  # -> Dict[str, int]:
@@ -354,12 +359,18 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
 
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
-    ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
-    head_runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
+    ssh_credentials = {
+        'ssh_user': ssh_user,
+        'ssh_private_key': ssh_key,
+        'ssh_control_name': 'sky-admin-deploy'
+    }
+    head_runner = command_runner.SSHCommandRunner(node=(head_ip, 22),
+                                                  **ssh_credentials)
     worker_runners = []
     if worker_ips:
         worker_runners = command_runner.SSHCommandRunner.make_runner_list(
-            worker_ips, *ssh_credentials)
+            node_list=zip(worker_ips, [22] * len(worker_ips)),
+            **ssh_credentials)
 
     # Stops all running Ray instances on all nodes
     with rich_utils.safe_status('[bold cyan]Stopping ray cluster'):
@@ -472,8 +483,13 @@ def save_distributable_yaml(cluster_config: Dict[str, Any]) -> None:
     head_ip = cluster_config['cluster']['ips'][0]
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
-    ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
-    head_runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
+    ssh_credentials = {
+        'ssh_user': ssh_user,
+        'ssh_private_key': ssh_key,
+        'ssh_control_name': 'sky-admin-deploy'
+    }
+    head_runner = command_runner.SSHCommandRunner(node=(head_ip, 22),
+                                                  **ssh_credentials)
     # Admin authentication must be censored out.
     cluster_config['auth']['ssh_user'] = AUTH_PLACEHOLDER
     cluster_config['auth']['ssh_private_key'] = AUTH_PLACEHOLDER
@@ -551,7 +567,7 @@ def do_filemounts_and_setup_on_local_workers(
     setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
 
     worker_runners = command_runner.SSHCommandRunner.make_runner_list(
-        worker_ips, port_list=None, **ssh_credentials)
+        node_list=zip(worker_ips, [22] * len(worker_ips)), **ssh_credentials)
 
     # Uploads setup script to the worker node
     with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:

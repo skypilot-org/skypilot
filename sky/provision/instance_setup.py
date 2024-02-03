@@ -106,8 +106,7 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
             for i, metadata in enumerate(metadatas):
                 cache_id = f'{instance_id}-{i}'
                 runner = command_runner.SSHCommandRunner(
-                    metadata.get_feasible_ip(),
-                    port=metadata.ssh_port,
+                    node=(metadata.get_feasible_ip(), metadata.ssh_port),
                     **ssh_credentials)
                 wrapper = metadata_utils.cache_func(cluster_name, cache_id,
                                                     stage_name, digest)
@@ -204,8 +203,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     """Start Ray on the head node."""
     ip_list = cluster_info.get_feasible_ips()
     port_list = cluster_info.get_ssh_ports()
-    ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                 port=port_list[0],
+    ssh_runner = command_runner.SSHCommandRunner(node=(ip_list[0],
+                                                       port_list[0]),
                                                  **ssh_credentials)
     assert cluster_info.head_instance_id is not None, (cluster_name,
                                                        cluster_info)
@@ -261,8 +260,8 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     _hint_worker_log_path(cluster_name, cluster_info, 'ray_cluster')
     ip_list = cluster_info.get_feasible_ips()
     ssh_runners = command_runner.SSHCommandRunner.make_runner_list(
-        ip_list[1:],
-        port_list=cluster_info.get_ssh_ports()[1:],
+        node_list=zip(ip_list[1:],
+                      cluster_info.get_ssh_ports()[1:]),
         **ssh_credentials)
     worker_instances = cluster_info.get_worker_instances()
     cache_ids = []
@@ -343,8 +342,8 @@ def start_skylet_on_head_node(cluster_name: str,
     del cluster_name
     ip_list = cluster_info.get_feasible_ips()
     port_list = cluster_info.get_ssh_ports()
-    ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                 port=port_list[0],
+    ssh_runner = command_runner.SSHCommandRunner(node=(ip_list[0],
+                                                       port_list[0]),
                                                  **ssh_credentials)
     assert cluster_info.head_instance_id is not None, cluster_info
     log_path_abs = str(provision_logging.get_log_path())

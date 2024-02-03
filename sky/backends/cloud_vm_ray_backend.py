@@ -2862,7 +2862,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         handle.cluster_yaml, handle.docker_user,
                         handle.ssh_user)
                     runners = command_runner.SSHCommandRunner.make_runner_list(
-                        ip_list, port_list=ssh_port_list, **ssh_credentials)
+                        node_list=zip(ip_list, ssh_port_list),
+                        **ssh_credentials)
 
                     def _get_zone(runner):
                         retry_count = 0
@@ -3035,7 +3036,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, port_list=port_list, **ssh_credentials)
+            node_list=zip(ip_list, port_list), **ssh_credentials)
 
         def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
             runner.rsync(
@@ -3101,7 +3102,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # forwarding.
             ssh_credentials.pop('ssh_control_name')
             runners = command_runner.SSHCommandRunner.make_runner_list(
-                ip_list, port_list=port_list, **ssh_credentials)
+                node_list=zip(ip_list, port_list), **ssh_credentials)
 
             # Need this `-i` option to make sure `source ~/.bashrc` work
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
@@ -3184,8 +3185,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         head_ssh_port = handle.head_ssh_port
-        runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                 port=head_ssh_port,
+        runner = command_runner.SSHCommandRunner(node=(handle.head_ip,
+                                                       head_ssh_port),
                                                  **ssh_credentials)
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
@@ -3318,8 +3319,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         ssh_user = ssh_credentials['ssh_user']
-        runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                 port=handle.head_ssh_port,
+        runner = command_runner.SSHCommandRunner(node=(handle.head_ip,
+                                                       handle.head_ssh_port),
                                                  **ssh_credentials)
         remote_log_dir = self.log_dir
         with tempfile.NamedTemporaryFile('w', prefix='sky_local_app_') as fp:
@@ -3638,7 +3639,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, port_list=ssh_port_list, **ssh_credentials)
+            node_list=zip(ip_list, ssh_port_list), **ssh_credentials)
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
@@ -4246,8 +4247,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
-        runner = command_runner.SSHCommandRunner(head_ip,
-                                                 port=head_ssh_port,
+        runner = command_runner.SSHCommandRunner(node=(head_ip, head_ssh_port),
                                                  **ssh_credentials)
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
@@ -4423,7 +4423,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, port_list=port_list, **ssh_credentials)
+            node_list=zip(ip_list, port_list), **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         # Check the files and warn
@@ -4578,7 +4578,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, port_list=port_list, **ssh_credentials)
+            node_list=zip(ip_list, port_list), **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         for dst, storage_obj in storage_mounts.items():

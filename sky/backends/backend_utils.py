@@ -1071,7 +1071,7 @@ def _count_healthy_nodes_from_ray(output: str,
 def get_docker_user(ip: str, cluster_config_file: str) -> str:
     """Find docker container username."""
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
-    runner = command_runner.SSHCommandRunner(ip, port=22, **ssh_credentials)
+    runner = command_runner.SSHCommandRunner(node=(ip, 22), **ssh_credentials)
     container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
     whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
         f'sudo docker exec {container_name} whoami',
@@ -1120,8 +1120,7 @@ def wait_until_ray_cluster_ready(
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file, docker_user)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip,
-                                             port=22,
+    runner = command_runner.SSHCommandRunner(node=(head_ip, 22),
                                              **ssh_credentials)
     with rich_utils.safe_status(
             '[bold cyan]Waiting for workers...') as worker_status:
@@ -1227,7 +1226,7 @@ def ssh_credential_from_yaml(
 
 
 def parallel_data_transfer_to_nodes(
-    runners: List[command_runner.SSHCommandRunner],
+    runners: List[command_runner.CommandRunner],
     source: Optional[str],
     target: str,
     cmd: Optional[str],
@@ -1254,7 +1253,7 @@ def parallel_data_transfer_to_nodes(
 
     origin_source = source
 
-    def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
+    def _sync_node(runner: 'command_runner.CommandRunner') -> None:
         if cmd is not None:
             rc, stdout, stderr = runner.run(cmd,
                                             log_path=log_path,
@@ -1802,9 +1801,9 @@ def _update_cluster_status_no_lock(
                                                        handle.docker_user,
                                                        handle.ssh_user)
 
-            runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     **ssh_credentials,
-                                                     port=head_ssh_port)
+            runner = command_runner.SSHCommandRunner(node=(external_ips[0],
+                                                           head_ssh_port),
+                                                     **ssh_credentials)
             rc, output, stderr = runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,

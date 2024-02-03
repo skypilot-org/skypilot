@@ -6,7 +6,8 @@ import os
 import pathlib
 import shlex
 import time
-from typing import List, Optional, Tuple, Union
+from typing import (Any, Iterable, List, Optional, ParamSpecKwargs, Tuple, Type,
+                    Union)
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -133,17 +134,129 @@ class SshMode(enum.Enum):
     LOGIN = 2
 
 
-class SSHCommandRunner:
+class CommandRunner:
+    """Runner for commands to be executed on the cluster."""
+
+    def __init__(self, node: Any, **kwargs):
+        pass
+
+    def _get_command_to_run(self, cmd: Union[str, List[str]], log_path: str,
+                            process_stream: bool, separate_stderr: bool,
+                            interactive: bool) -> str:
+        """Returns the command to run."""
+        if isinstance(cmd, list):
+            cmd = ' '.join(cmd)
+
+        log_dir = os.path.expanduser(os.path.dirname(log_path))
+        os.makedirs(log_dir, exist_ok=True)
+        # We need this to correctly run the cmd, and get the output.
+        command = [
+            'bash',
+            '--login',
+            '-c',
+            # Need this `-i` option to make sure `source ~/.bashrc` work.
+            '-i',
+        ]
+
+        command += [
+            shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                        f'PYTHONWARNINGS=ignore && ({cmd})'),
+        ]
+        if not separate_stderr:
+            command.append('2>&1')
+        if not process_stream and not interactive:
+            command += [
+                # A hack to remove the following bash warnings (twice):
+                #  bash: cannot set terminal process group
+                #  bash: no job control in this shell
+                '| stdbuf -o0 tail -n +5',
+                # This is required to make sure the executor of command can get
+                # correct returncode, since linux pipe is used.
+                '; exit ${PIPESTATUS[0]}'
+            ]
+
+        command_str = ' '.join(command)
+        return command_str
+
+    def run(
+            self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: bool = False,
+            # Advanced options.
+            log_path: str = os.devnull,
+            # If False, do not redirect stdout/stderr to optimize performance.
+            process_stream: bool = True,
+            stream_logs: bool = True,
+            ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+            separate_stderr: bool = False,
+            **kwargs) -> Union[int, Tuple[int, str, str]]:
+        """Runs the command on the cluster.
+
+        Args:
+            cmd: The command to run.
+            require_outputs: Whether to return the stdout/stderr of the command.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
+            separate_stderr: Whether to separate stderr from stdout.
+
+        Returns:
+            returncode
+            or
+            A tuple of (returncode, stdout, stderr).
+        """
+        raise NotImplementedError
+
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        # Advanced options.
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+    ) -> None:
+        """Uses 'rsync' to sync 'source' to 'target'.
+
+        Args:
+            source: The source path.
+            target: The target path.
+            up: The direction of the sync, True for local to cluster, False
+              for cluster to local.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+            max_retry: The maximum number of retries for the rsync command.
+              This value should be non-negative.
+
+        Raises:
+            exceptions.CommandError: rsync command failed.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def make_runner_list(
+        cls: Type['CommandRunner'],
+        node_list: Iterable[Any],
+        **kwargs,
+    ) -> List['CommandRunner']:
+        """Helper function for creating runners with the same credentials"""
+        return [cls(node, **kwargs) for node in node_list]
+
+
+class SSHCommandRunner(CommandRunner):
     """Runner for SSH commands."""
 
     def __init__(
         self,
-        ip: str,
+        node: Tuple[str, int],
         ssh_user: str,
         ssh_private_key: str,
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
-        port: int = 22,
         docker_user: Optional[str] = None,
         disable_control_master: Optional[bool] = False,
     ):
@@ -173,6 +286,8 @@ class SSHCommandRunner:
                 command will utilize ControlMaster. We currently disable
                 it for k8s instance.
         """
+        super().__init__(node)
+        ip, port = node
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
@@ -196,27 +311,6 @@ class SSHCommandRunner:
             self.ssh_user = ssh_user
             self.port = port
             self._docker_ssh_proxy_command = None
-
-    @staticmethod
-    def make_runner_list(
-        ip_list: List[str],
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = None,
-        ssh_proxy_command: Optional[str] = None,
-        disable_control_master: Optional[bool] = False,
-        port_list: Optional[List[int]] = None,
-        docker_user: Optional[str] = None,
-    ) -> List['SSHCommandRunner']:
-        """Helper function for creating runners with the same ssh credentials"""
-        if not port_list:
-            port_list = [22] * len(ip_list)
-        return [
-            SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
-                             ssh_proxy_command, port, docker_user,
-                             disable_control_master)
-            for ip, port in zip(ip_list, port_list)
-        ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,
                           port_forward: Optional[List[int]]) -> List[str]:
@@ -293,38 +387,12 @@ class SSHCommandRunner:
             command = base_ssh_command + cmd
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
-        if isinstance(cmd, list):
-            cmd = ' '.join(cmd)
-
-        log_dir = os.path.expanduser(os.path.dirname(log_path))
-        os.makedirs(log_dir, exist_ok=True)
-        # We need this to correctly run the cmd, and get the output.
-        command = [
-            'bash',
-            '--login',
-            '-c',
-            # Need this `-i` option to make sure `source ~/.bashrc` work.
-            '-i',
-        ]
-
-        command += [
-            shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                        f'PYTHONWARNINGS=ignore && ({cmd})'),
-        ]
-        if not separate_stderr:
-            command.append('2>&1')
-        if not process_stream and ssh_mode == SshMode.NON_INTERACTIVE:
-            command += [
-                # A hack to remove the following bash warnings (twice):
-                #  bash: cannot set terminal process group
-                #  bash: no job control in this shell
-                '| stdbuf -o0 tail -n +5',
-                # This is required to make sure the executor of command can get
-                # correct returncode, since linux pipe is used.
-                '; exit ${PIPESTATUS[0]}'
-            ]
-
-        command_str = ' '.join(command)
+        command_str = self._get_command_to_run(
+            cmd,
+            log_path,
+            process_stream,
+            separate_stderr,
+            interactive=(ssh_mode != SshMode.NON_INTERACTIVE))
         command = base_ssh_command + [shlex.quote(command_str)]
 
         executable = None
@@ -425,6 +493,153 @@ class SSHCommandRunner:
         else:
             rsync_command.extend([
                 f'{self.ssh_user}@{self.ip}:{source!r}',
+                f'{os.path.expanduser(target)!r}',
+            ])
+        command = ' '.join(rsync_command)
+
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        while max_retry >= 0:
+            returncode, _, stderr = log_lib.run_with_log(
+                command,
+                log_path=log_path,
+                stream_logs=stream_logs,
+                shell=True,
+                require_outputs=True)
+            if returncode == 0:
+                break
+            max_retry -= 1
+            time.sleep(backoff.current_backoff())
+
+        direction = 'up' if up else 'down'
+        error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
+                     'Ensure that the network is stable, then retry.')
+        subprocess_utils.handle_returncode(returncode,
+                                           command,
+                                           error_msg,
+                                           stderr=stderr,
+                                           stream_logs=stream_logs)
+
+
+class SlurmRunner(CommandRunner):
+    """Runner for Slurm commands."""
+
+    def __init__(self, node: Tuple[int, str], cluster_type: str,
+                 access_command: str):
+        """Initialize SlurmRunner.
+
+        Args:
+            node: job_id, node_name
+            cluster_type: The type of the cluster: 'local' or 'remote'. If 'local',
+                the command will be run on the local machine. If 'remote', the
+                command will be run on the remote machine with access_command.
+            access_command: The command to access the cluster.
+            job_id: The job id of the cluster.
+        """
+        super().__init__(node)
+        job_id, node_name = node
+        if cluster_type not in ['local', 'remote']:
+            raise ValueError('Invalid cluster type for slurm runner: '
+                             f'{cluster_type}. Should be "local" or "remote".')
+        if cluster_type == 'local':
+            self.access_command = ''
+        else:
+            self.access_command = access_command
+
+        self.job_id = job_id
+        self.node_name = node_name
+
+    def run(
+            self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: bool = False,
+            # Advanced options.
+            log_path: str = os.devnull,
+            # If False, do not redirect stdout/stderr to optimize performance.
+            process_stream: bool = True,
+            stream_logs: bool = True,
+            separate_stderr: bool = False,
+            **kwargs) -> Union[int, Tuple[int, str, str]]:
+        """Runs the command on the cluster (slurm job)."""
+
+        command_str = self._get_command_to_run(cmd,
+                                               log_path,
+                                               process_stream,
+                                               separate_stderr,
+                                               interactive=True)
+        command = (f'{self.access_command} srun --jobid {self.job_id} '
+                   f'--nodelist={self.node_name}'
+                   f'--pty {shlex.quote(command_str)}')
+        return log_lib.run_with_log(command,
+                                    log_path,
+                                    require_outputs=require_outputs,
+                                    stream_logs=stream_logs,
+                                    process_stream=process_stream,
+                                    shell=True,
+                                    executable='/bin/bash',
+                                    **kwargs)
+
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        # Advanced options.
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+    ) -> None:
+        """Uses 'rsync' to sync 'source' to 'target'.
+
+        This assumes that the source and target are both on the cluster, and
+        the slurm cluster has shared file system set up.
+        
+        Args:
+            source: The source path.
+            target: The target path.
+            up: The direction of the sync, True for local to cluster, False
+              for cluster to local.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+            max_retry: The maximum number of retries for the rsync command.
+              This value should be non-negative.
+
+        Raises:
+            exceptions.CommandError: rsync command failed.
+        """
+        # Build command.
+        # TODO(zhwu): This will print a per-file progress bar (with -P),
+        # shooting a lot of messages to the output. --info=progress2 is used
+        # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
+        # OS has a default rsync==2.6.9 (16 years old).
+        rsync_command = ['rsync', RSYNC_DISPLAY_OPTION]
+
+        # --filter
+        rsync_command.append(RSYNC_FILTER_OPTION)
+
+        if up:
+            # The source is a local path, so we need to resolve it.
+            # --exclude-from
+            resolved_source = pathlib.Path(source).expanduser().resolve()
+            if (resolved_source / GIT_EXCLUDE).exists():
+                # Ensure file exists; otherwise, rsync will error out.
+                #
+                # We shlex.quote() because the path may contain spaces:
+                #   'my dir/.git/info/exclude'
+                # Without quoting rsync fails.
+                rsync_command.append(
+                    RSYNC_EXCLUDE_OPTION.format(
+                        shlex.quote(str(resolved_source / GIT_EXCLUDE))))
+
+            # To support spaces in the path, we need to quote source and target.
+            # rsync doesn't support '~' in a quoted local path, but it is ok to
+            # have '~' in a quoted remote path.
+            full_source_str = str(resolved_source)
+            if resolved_source.is_dir():
+                full_source_str = os.path.join(full_source_str, '')
+            rsync_command.extend([
+                f'{full_source_str!r}',
                 f'{os.path.expanduser(target)!r}',
             ])
         command = ' '.join(rsync_command)

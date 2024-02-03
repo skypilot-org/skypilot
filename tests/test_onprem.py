@@ -162,7 +162,8 @@ class TestOnprem:
         ssh_key = admin_cluster_config['auth']['ssh_private_key']
 
         ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
-        runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
+        runner = command_runner.SSHCommandRunner(node=(head_ip, 22),
+                                                 *ssh_credentials)
 
         # Removing /tmp/ray and ~/.sky to reset jobs id to index 0.
         rc = runner.run(('sudo rm -rf /tmp/ray; '
