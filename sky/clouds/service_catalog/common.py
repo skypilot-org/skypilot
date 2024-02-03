@@ -501,23 +501,17 @@ def list_accelerators_impl(
     grouped = df.groupby('AcceleratorName')
 
     def make_list_from_df(rows):
+        
+        sort_key = ['Price', 'SpotPrice']
+        subset = ['InstanceType', 'AcceleratorName', 'AcceleratorCount',
+                        'vCPUs', 'MemoryGiB']
         if all_regions:
-            # Keep all regions.
-            rows = rows.sort_values(
-                by=['Price', 'SpotPrice', 'Region']).drop_duplicates(
-                    subset=[
-                        'InstanceType', 'AcceleratorName', 'AcceleratorCount',
-                        'vCPUs', 'MemoryGiB', 'Region'
-                    ],
+            sort_key.append('Region')
+            subset.append('Region')
+
+        rows = rows.sort_values(by=sort_key).drop_duplicates(
+                    subset=subset,
                     keep='first')
-        else:
-            # Only keep the lowest prices across regions.
-            rows = rows.sort_values(by=['Price', 'SpotPrice']).drop_duplicates(
-                subset=[
-                    'InstanceType', 'AcceleratorName', 'AcceleratorCount',
-                    'vCPUs', 'MemoryGiB'
-                ],
-                keep='first')
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
                 cloud,
