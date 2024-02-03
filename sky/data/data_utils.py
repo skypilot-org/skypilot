@@ -162,7 +162,7 @@ def get_az_resource_group(storage_account_name: str,
                           storage_client: Optional[Client] = None
                           ) -> Optional[str]:
     if storage_client is None:
-        storage_client = azure.get_client('storage')
+        storage_client = create_az_client('storage')
     for account in storage_client.storage_accounts.list():
         if account.name == storage_account_name:
             # Extract the resource group name from the account ID
@@ -177,9 +177,9 @@ def get_az_storage_account_key(storage_account_name: str,
                                resource_client: Optional[Client] = None,
                                ) -> Optional[str]:
     if resource_client is None:
-        resource_client = azure.get_client('resource')
+        resource_client = create_az_client('resource')
     if storage_client is None:
-        storage_client = azure.get_client('storage')
+        storage_client = create_az_client('storage')
     resources = resource_client.resources.list_by_resource_group(
         resource_group_name)
     for resource in resources:
