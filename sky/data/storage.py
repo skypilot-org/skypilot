@@ -1858,8 +1858,8 @@ class AzureBlobStore(AbstractStore):
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
         # TODO(Doyoung): Maybe type annotate the following two clients?
-        self.storage_client = None
-        self.resource_client = None
+        self.storage_client: 'storage.Client'
+        self.resource_client: 'storage.Client'
         self.resource_group_name: str
         self.storage_account_name: str
         self.bucket: 'StorageHandle'
@@ -1987,7 +1987,8 @@ class AzureBlobStore(AbstractStore):
             # Using externally created storage
             if self.name == bucket_name:
                 self.storage_account_name = storage_account_name
-                self.resource_group_name = self._get_resource_group(storage_account_name)
+                self.resource_group_name = data_utils.get_az_resource_group(
+                    storage_account_name)
         # TODO(Doyoung): May need to do some handling for what to do for non az
         # cloud urls passed as a source.
         else:
@@ -2166,13 +2167,6 @@ class AzureBlobStore(AbstractStore):
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
-    def _get_resource_group(self, storage_account_name: str):
-        for account in self.storage_client.storage_accounts.list():
-            if account.name == storage_account_name:
-                # Extract the resource group name from the account ID
-                resource_group = account.id.split('/')[4]
-                return resource_group
-        return None
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the Azure Blob Storage Container.
@@ -2241,18 +2235,13 @@ class AzureBlobStore(AbstractStore):
           mount_path: str; Path to mount the container to.
         """
         # retrieve storage account access key
-        resources = self.resource_client.resources.list_by_resource_group(
-            self.resource_group_name)
-        for resource in resources:
-            if(resource.type=='Microsoft.Storage/storageAccounts' and 
-               resource.name == self.storage_account_name):
-                storage_keys = self.storage_client.storage_accounts.list_keys(
-                    self.resource_group_name, self.storage_account_name)
-                storage_keys = [key.value for key in storage_keys.keys]
+        storage_account_key = data_utils.get_az_storage_account_key(
+            self.storage_account_name, self.resource_group_name,
+            self.storage_account_name, self.resource_group_name)
         install_cmd = mounting_utils.get_az_mount_install_cmd()
         mount_cmd = mounting_utils.get_az_mount_cmd(self.bucket.name,
                                                     self.storage_account_name,
-                                                    storage_keys[0],
+                                                    storage_account_key,
                                                     mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)

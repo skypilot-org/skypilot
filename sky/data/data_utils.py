@@ -157,6 +157,40 @@ def verify_az_bucket(name: str) -> bool:
     bucket = r2.Bucket(name)
     return bucket in r2.buckets.all()
 
+
+def get_az_resource_group(storage_account_name: str,
+                          storage_client: Optional[Client] = None
+                          ) -> Optional[str]:
+    if storage_client is None:
+        storage_client = azure.get_client('storage')
+    for account in storage_client.storage_accounts.list():
+        if account.name == storage_account_name:
+            # Extract the resource group name from the account ID
+            resource_group = account.id.split('/')[4]
+            return resource_group
+    return None
+
+
+def get_az_storage_account_key(storage_account_name: str,
+                               resource_group_name: str,
+                               storage_client: Optional[Client] = None,
+                               resource_client: Optional[Client] = None,
+                               ) -> Optional[str]:
+    if resource_client is None:
+        resource_client = azure.get_client('resource')
+    if storage_client is None:
+        storage_client = azure.get_client('storage')
+    resources = resource_client.resources.list_by_resource_group(
+        resource_group_name)
+    for resource in resources:
+        if(resource.type=='Microsoft.Storage/storageAccounts' and 
+            resource.name == storage_account_name):
+            storage_account_keys = storage_client.storage_accounts.list_keys(
+                resource_group_name, storage_account_name)
+            storage_account_keys = [key.value
+                                    for key in storage_account_keys.keys]
+    return storage_account_keys[0]
+
 def create_r2_client(region: str = 'auto') -> Client:
     """Helper method that connects to Boto3 client for R2 Bucket
 

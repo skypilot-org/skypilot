@@ -204,8 +204,13 @@ class AzureCloudStorage(CloudStorage):
         # syncing from subdirectory of the bucket first.
         container_name, path, storage_account_name = data_utils.split_az_path(
             source)
+        resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+        storage_account_key = data_utils.get_az_storage_account_key(
+            storage_account_name, resource_group_name)
+        # ADD account key option using account key function I wrote somewhere.
         download_command = ('az storage blob download-batch '
                             f'--account-name {storage_account_name} '
+                            f'--account-key {storage_account_key} '
                             f'--source {container_name} '
                             f'--destination {destination}')
 
@@ -213,12 +218,17 @@ class AzureCloudStorage(CloudStorage):
         all_commands.append(download_command)
         return ' && '.join(all_commands)
 
+
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
         container_name, path, storage_account_name = data_utils.split_az_path(
             source)
+        resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+        storage_account_key = data_utils.get_az_storage_account_key(
+            storage_account_name, resource_group_name)
         download_command = ('az storage blob download '
                             f'--account-name {storage_account_name} '
+                            f'--account-key {storage_account_key} '
                             f'--name {path} --file {destination} '
                             f'--container-name {container_name}')
 
