@@ -104,7 +104,7 @@ def _serve_check_service(task: 'sky.Task'):
                     'number. Please specify a single port instead. '
                     f'Got: {service_port_str!r}')
 
-        if int(service_port_str) != int(first_resource_dict['port']):
+        if service_port_str != list(task.resources)[0].ports[0]:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Got multiple ports: {service_port_str} and '
