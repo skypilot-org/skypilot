@@ -57,7 +57,11 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
 
 
 def get_az_mount_install_cmd() -> str:
-    """Returns a command to install AZ blob storage mount utility blobfuse2."""
+    """Returns a command to install AZ Container mount utility blobfuse2.
+    
+    Returns:
+        str: installation command of the mounting utility blobdfuse2
+    """
     install_cmd = ('sudo apt-get update && '
                    'sudo apt-get install -y '
                    '-o Dpkg::Options::="--force-confdef" '
@@ -72,14 +76,26 @@ def get_az_mount_install_cmd() -> str:
     return install_cmd
 
 
-def get_az_mount_cmd(bucket_name: str, storage_account_name: str,
+def get_az_mount_cmd(container_name: str, storage_account_name: str,
                      storage_account_access_key: str,mount_path: str) -> str:
-    """Returns a command to mount a AZ blob storage using blobfuse2."""
+    """Returns a command to mount an AZ Container using blobfuse2.
+    
+    Args:
+        container_name: str; name of the mounting container
+        storage_account_name: str; name of the storage account the given
+            container belongs to
+        storage_account_access_key: str; access key for the given storage
+            account
+        mount_path: str; path where the container will be mounting
+    
+    Returns:
+        str: command used to mount AZ container with blobfuse2
+    """
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'AZURE_STORAGE_ACCESS_KEY={storage_account_access_key} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
                  f'--tmp-path {_BLOBFUSE_CACHE_DIR} '
-                 f'--container-name {bucket_name}')
+                 f'--container-name {container_name}')
     return mount_cmd
 
 
@@ -127,7 +143,14 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
 
 
 def _get_mount_binary(mount_cmd: str) -> str:
-    """Returns mounting binary in string given the mount command"""
+    """Returns mounting binary in string given as the mount command.
+    
+    Args:
+        mount_cmd: str; command used to mount a cloud storage.
+    
+    Returns:
+        str: name of the binary used to mount a cloud storage.
+    """
     if 'goofys' in mount_cmd:
         return 'goofys'
     elif 'gcsfuse' in mount_cmd:

@@ -50,17 +50,22 @@ def split_gcs_path(gcs_path: str) -> Tuple[str, str]:
     return bucket, key
 
 
-def split_az_path(az_path: str) -> Tuple[str, str]:
-    """Splits S3 Path into Bucket name and Relative Path to Bucket
+def split_az_path(az_path: str) -> Tuple[str, str, str]:
+    """Splits Azure Container Path into Bucket name and Relative Path to Bucket
 
     Args:
-      az_path: str; S3 Path, e.g. s3://imagenet/train/
+        az_path: str; Container Path, e.g. az://storage_account/container/
+      
+    Returns:
+        str; Name of the container
+        str; paths of the file/directory defined within the container
+        str; Name of the storage account
     """
     path_parts = az_path.replace('az://', '').split('/')
-    storage_account = path_parts.pop(0)
-    bucket = path_parts.pop(0)
+    storage_account_name = path_parts.pop(0)
+    container_name = path_parts.pop(0)
     key = '/'.join(path_parts)
-    return bucket, key, storage_account
+    return container_name, key, storage_account_name
 
 
 def split_r2_path(r2_path: str) -> Tuple[str, str]:
@@ -137,30 +142,58 @@ def verify_gcs_bucket(name: str) -> bool:
         return False
 
 
-def create_az_client(type: str, storage_account_name: str = None, container_name: str = None) -> Client:
-    """Helper method that connects to Boto3 client for S3 Bucket
+def create_az_client(type: str, storage_account_name: str = None,
+                     container_name: str = None) -> Client:
+    """Helper method that connects to AZ client for diverse Resources.
 
     Args:
-      region: str; Region name, e.g. us-west-1, us-east-2
+      type: str; resource name, e.g. storage, resource, container
+      storage_account_name: str; name of the storage account
+      container_name: str; name of the container.
+      
+    Returns:
+      Client object facing AZ Resource of the 'type'.
     """
     subscription_id = azure.get_subscription_id()
-    return azure.get_client(type, subscription_id, storage_account_name, container_name)
+    return azure.get_client(type, subscription_id,
+                            storage_account_name,
+                            container_name)
 
 
 def verify_az_bucket(name: str) -> bool:
-    """Helper method that checks if the R2 bucket exists
+    """Helper method that checks if the AZ Container exists
 
     Args:
-      name: str; Name of R2 Bucket (without r2:// prefix)
+      name: str; Name of AZ Container.
+      
+    Returns:
+      boolean; shows either or not the container exists.
     """
-    r2 = cloudflare.resource('s3')
-    bucket = r2.Bucket(name)
-    return bucket in r2.buckets.all()
+    try:
+        # TODO(Doyoung): This may need an additional handling for public
+        # container. Test it, and if it doesn't work, update.
+        storage_client.blob_containers.get(
+            resource_group_name,
+            storage_account_name,
+            name
+        )
+        return True
+    except azure.core_exception().ResourceNotFoundError as e:
+        return False
 
 
 def get_az_resource_group(storage_account_name: str,
                           storage_client: Optional[Client] = None
                           ) -> Optional[str]:
+    """Returns the resource group name the given storage account belongs to.
+    
+    Args:
+        storage_account_name: str; name of the storage account
+        storage_client: Optional[Client]; client object facing storage
+    
+    Returns:
+        Name of the resource group the given storage account belongs to.
+    """
     if storage_client is None:
         storage_client = create_az_client('storage')
     for account in storage_client.storage_accounts.list():
@@ -176,6 +209,18 @@ def get_az_storage_account_key(storage_account_name: str,
                                storage_client: Optional[Client] = None,
                                resource_client: Optional[Client] = None,
                                ) -> Optional[str]:
+    """Returns access key of the given name of storage account.
+    
+    Args:
+        storage_account_name: str; Name of the storage account
+        resource_group_name: str; Name of the resource group the passed storage
+            account belongs to.
+        storage_clent: Optional[Client]; client object facing Storage
+        resource_client: Optional[Client]; client object facing Resource
+    
+    Returns:
+        One of the few access keys to the given storage account
+    """
     if resource_client is None:
         resource_client = create_az_client('resource')
     if storage_client is None:

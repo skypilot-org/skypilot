@@ -164,22 +164,18 @@ class AzureCloudStorage(CloudStorage):
     ]
 
     def is_directory(self, url: str) -> bool:
-        """Returns whether S3 'url' is a directory.
+        """Returns whether 'url' of the AZ Container is a directory.
 
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        # Given the url of the cloud storage, need to determine either or not
-        # the url is a directory.
-        
         # split the url using split_az_path
         container_name, path, storage_account_name = data_utils.split_az_path(url)
-        # if there aren't more than just container name and storage account,
-        # that's a directory
+        # If there aren't more than just container name and storage account,
+        # that's a directory.
         if len(path) == 0:
             return True
-        # if there's more, then we'd need to check if it's a directory or
-        # a file
+        # If there's more, we'd need to check if it's a directory or a file.
         container_client = data_utils.create_az_client(
             type='container',
             storage_account_name=storage_account_name,
@@ -197,7 +193,7 @@ class AzureCloudStorage(CloudStorage):
 
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Downloads using AWS CLI."""
+        """Downloads a directory using AZs CLI."""
         # TODO(Doyoung): May need to update the argument passed into --source
         # depending on either the directory being downloaded is the container
         # itself or the subdirectory of the container. Confirm if we support
@@ -207,7 +203,6 @@ class AzureCloudStorage(CloudStorage):
         resource_group_name = data_utils.get_az_resource_group(storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
-        # ADD account key option using account key function I wrote somewhere.
         download_command = ('az storage blob download-batch '
                             f'--account-name {storage_account_name} '
                             f'--account-key {storage_account_key} '
@@ -220,7 +215,7 @@ class AzureCloudStorage(CloudStorage):
 
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
-        """Downloads a file using AWS CLI."""
+        """Downloads a file using AZ CLI."""
         container_name, path, storage_account_name = data_utils.split_az_path(
             source)
         resource_group_name = data_utils.get_az_resource_group(storage_account_name)

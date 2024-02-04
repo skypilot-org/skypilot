@@ -152,14 +152,13 @@ def get_store_prefix(storetype: StoreType) -> str:
         return 's3://'
     elif storetype == StoreType.GCS:
         return 'gs://'
+    elif storetype == StoreType.AZURE:
+        return 'az://'
     # R2 storages use 's3://' as a prefix for various aws cli commands
     elif storetype == StoreType.R2:
         return 's3://'
     elif storetype == StoreType.IBM:
         return 'cos://'
-    elif storetype == StoreType.AZURE:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Azure Blob Storage is not supported yet.')
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown store type: {storetype}')
@@ -1845,9 +1844,7 @@ class GcsStore(AbstractStore):
 
 
 class AzureBlobStore(AbstractStore):
-    """S3Store inherits from Storage Object and represents the backend
-    for S3 buckets.
-    """
+    """Represents the backend for Azure Blob Storage Container. """
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
 
@@ -1857,7 +1854,6 @@ class AzureBlobStore(AbstractStore):
                  region: Optional[str] = 'eastus',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
-        # TODO(Doyoung): Maybe type annotate the following two clients?
         self.storage_client: 'storage.Client'
         self.resource_client: 'storage.Client'
         self.resource_group_name: str
@@ -1916,9 +1912,19 @@ class AzureBlobStore(AbstractStore):
 
     @classmethod
     def validate_container_name(cls, name) -> str:
-        """Validates the name of the Azure Blob Container.
+        """Validates the name of the AZ Container.
 
         Source for rules: https://learn.microsoft.com/en-us/rest/api/storageservices/Naming-and-Referencing-Containers--Blobs--and-Metadata#container-names # pylint: disable=line-too-long
+        
+        Args:
+            name: str; name of the container
+        
+        Returns:
+            name: str; name of the container
+        
+        Raises:
+            StorageNameError: if the given container name does not follow the
+                naming convention
         """
 
         def _raise_no_traceback_name_error(err_str):
@@ -1951,15 +1957,17 @@ class AzureBlobStore(AbstractStore):
 
 
     def initialize(self):
-        """Initializes the Azure blob storage container object on the cloud.
+        """Initializes the AZ Container object on the cloud.
 
         Initialization involves fetching bucket if exists, or creating it if
-        it does not.
+        it does not. Also, it checks for the existance of the storage account
+        and resource group if provided by the user. If not provided, those are
+        created with a default naming convention.
 
         Raises:
-          StorageBucketCreateError: If bucket creation fails
-          StorageBucketGetError: If fetching existing bucket fails
-          StorageInitError: If general initialization fails.
+            StorageBucketCreateError: If bucket creation fails
+            StorageBucketGetError: If fetching existing bucket fails
+            StorageInitError: If general initialization fails.
         """
         self.storage_client = data_utils.create_az_client('storage')
         self.resource_client = data_utils.create_az_client('resource')
@@ -1982,7 +1990,15 @@ class AzureBlobStore(AbstractStore):
         
         # TODO(Doyoung): Currently, assuming source starting with az:// to be 
         # externally created az container. Need to confirm and test if the assumption
-        # is enough
+        # is enough.
+        # Need to check if we allow to specifiy source to start with az:// for sky managed storages.
+        # If we allow to do so, 
+        # There are three possible scenarioes.
+        # 1. externally created storage (already created)
+        # 2. sky managed storage (already created)
+        # 3. user trying to create a new storage with the syntax (newly being created)
+        # The following currently only assumes 1. is allowed with the syntax. Check with 2. and 3.
+        # as well if we allow them, and handle accordingly.
         if isinstance(self.source, str) and self.source.startswith('az://'):
             bucket_name, _, storage_account_name = data_utils.split_az_path(self.source)
             # Using externally created storage
@@ -1994,11 +2010,7 @@ class AzureBlobStore(AbstractStore):
         # cloud urls passed as a source.
         else:
             # creating new container
-            # TODO(Doyoung): Currently, assuming both storage_account and resource group names
-            # are both provided when user specifies them. Need to handle the case when only either
-            # of them is specified.
-            # Need to put in some thoughts.
-            # If resource group and storage account names are not provided from
+            # If resource group or storage account names are not provided from
             # config, then use default names.
             self.storage_account_name = skypilot_config.get_nested(
                 ('azure', 'storage_account'),
@@ -2006,12 +2018,17 @@ class AzureBlobStore(AbstractStore):
             self.resource_group_name = skypilot_config.get_nested(
                 ('azure', 'resource_group'),
                 f'sky{common_utils.get_user_hash()}')
-            # If the resource group or storage account with the identical name
-            # already exists, it will smoothly progress without failure
+            # If the resource group or storage account already exist with name
+            # used to create below, both create functions will silently move on
+            # TODO(Doyoung) Need to handle any other errors when the storage account or
+            # resource group creation fails for some reason.
             self.resource_client.resource_groups.create_or_update(
                 self.resource_group_name,
                 {"location": self.region}
             )
+            # TODO(Doyoung): storage account names are globally unique. Check what happens
+            # if the passed storage account name already exists(not under the user's account)
+            # If it throws out an error, handle the error notifying the user to use another account name.
             self.storage_client.storage_accounts.begin_create(
                 self.resource_group_name,
                 self.storage_account_name,
@@ -2059,7 +2076,7 @@ class AzureBlobStore(AbstractStore):
                 self.batch_az_blob_sync(self.source, create_dirs=True)
             elif self.source is not None:
                 error_message = (
-                    'Moving data directly from Azure to {cloud} is currently '
+                    'Moving data directly from {cloud} to Azure is currently '
                     'not supported. Please specify a local source for the '
                     'storage object.')
                 if self.source.startswith('az://'):
@@ -2081,16 +2098,18 @@ class AzureBlobStore(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
+        """Deletes the storage."""
         deleted_by_skypilot = self._delete_az_bucket(self.name)
         if deleted_by_skypilot:
-            msg_str = f'Deleted Azure blob storage bucket {self.name}.'
+            msg_str = f'Deleted AZ Container {self.name}.'
         else:
-            msg_str = (f'Azure blob storage container {self.name} may have '
+            msg_str = (f'AZ Container {self.name} may have '
                        'been deleted externally. Removing from local state.')
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
     def get_handle(self) -> StorageHandle:
+        """Returns the Storage Handle object."""
         return self.storage_client.blob_containers.get(
             self.resource_group_name,
             self.storage_account_name,
@@ -2098,16 +2117,9 @@ class AzureBlobStore(AbstractStore):
             )
 
     def batch_az_blob_sync(self,
-                        source_path_list: List[Path],
-                        create_dirs: bool = False) -> None:
-        """Invokes aws s3 sync to batch upload a list of local paths to S3
-
-        AWS Sync by default uses 10 threads to upload files to the bucket.  To
-        increase parallelism, modify max_concurrent_requests in your aws config
-        file (Default path: ~/.aws/config).
-
-        Since aws s3 sync does not support batch operations, we construct
-        multiple commands to be run in parallel.
+                           source_path_list: List[Path],
+                           create_dirs: bool = False) -> None:
+        """Invokes az storage blob sync to batch upload a list of local paths.
 
         Args:
             source_path_list: List of paths to local files or directories
@@ -2179,26 +2191,32 @@ class AzureBlobStore(AbstractStore):
 
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
-        """Obtains the Azure Blob Storage Container.
+        """Obtains the AZ Container.
 
-        If the bucket exists, this method will return the bucket.
-        If the bucket does not exist, there are three cases:
-          1) Raise an error if the bucket source starts with s3://
-          2) Return None if bucket has been externally deleted and
+        Buckets for Azure Blob Storage are referred as Containers.
+        If the container exists, this method will return the container.
+        If the container does not exist, there are three cases:
+          1) Raise an error if the container source starts with az://
+          2) Return None if container has been externally deleted and
              sync_on_reconstruction is False
-          3) Create and return a new bucket otherwise
+          3) Create and return a new container otherwise
+
+        Returns:
+            StorageHandle: handle to interact with the container
+            bool: represents either or not the bucket is managed by skypilot
 
         Raises:
-            StorageBucketCreateError: If creating the bucket fails
-            StorageBucketGetError: If fetching a bucket fails
-            StorageExternalDeletionError: If externally deleted storage is
-                attempted to be fetched while reconstructing the storage for
+            StorageBucketCreateError: If creating the container fails
+            StorageBucketGetError: If fetching a container fails
+            StorageExternalDeletionError: If externally deleted container is
+                attempted to be fetched while reconstructing the Storage for
                 'sky storage delete' or 'sky start'
         """
         
         try:
             # TODO(Doyoung): This may need an additional handling for public
             # container. Test it, and if it doesn't work, update.
+            # Get a public container url and try out from jupyter.
             container = self.storage_client.blob_containers.get(
                 self.resource_group_name,
                 self.storage_account_name,
@@ -2207,10 +2225,22 @@ class AzureBlobStore(AbstractStore):
             return container, False
         except azure.core_exception().ResourceNotFoundError as e:
             error_code = e.error.code
-            # TODO(Doyoung): need to handle the case when the resource group and the storage account
-            # does not exists. Need to determine where this should be handled using:
-            #if error_code == 'ResourceGroupNotFound':
-            #if error_code == 'ParentResourceNotFound' #when storage account doesn't exist
+            if error_code == 'ResourceGroupNotFound':
+                with ux_utils.print_exception_no_traceback():
+                    # TODO(Doyoung): Update the raised debug message.
+                    raise exceptions.StorageBucketGetError(
+                        'Attempted to use a non-existent resource group to '
+                        f'create a container: {self.resource_group_name}. '
+                        f'Consider using `aws s3 ls {self.source}` to debug.')
+
+            if error_code == 'ParentResourceNotFound':
+                with ux_utils.print_exception_no_traceback():
+                    # TODO(Doyoung): Update the raised debug message.
+                    raise exceptions.StorageBucketGetError(
+                        'Attempted to use a non-existent storage account to '
+                        f'create a container: {self.storage_account_name}. '
+                        f'Consider using `aws s3 ls {self.source}` to debug.')     
+            
             if error_code == 'ContainerNotFound':
                 if isinstance(self.source, str) and self.source.startswith('az://'):
                     with ux_utils.print_exception_no_traceback():
@@ -2242,30 +2272,34 @@ class AzureBlobStore(AbstractStore):
         Uses blobfuse2 to mount the container.
 
         Args:
-          mount_path: str; Path to mount the container to.
+            mount_path: str; Path to mount the container to
+            
+        Returns:
+            str: a heredoc used to setup the AZ Container mount
         """
-        # retrieve storage account access key
-        storage_account_key = data_utils.get_az_storage_account_key(
-            self.storage_account_name, self.resource_group_name,
-            self.storage_client, self.resource_client)
         install_cmd = mounting_utils.get_az_mount_install_cmd()
         mount_cmd = mounting_utils.get_az_mount_cmd(self.bucket.name,
                                                     self.storage_account_name,
-                                                    storage_account_key,
+                                                    self.storage_account_key,
                                                     mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
+
     def _create_az_bucket(self,
                           container_name: str,
                           region='eastus') -> StorageHandle:
-        """Creates S3 bucket with specific name in specific region
+        """Creates AZ Container.
 
         Args:
-          bucket_name: str; Name of bucket
-          region: str; Region name, e.g. us-west-1, us-east-2
+            bucket_name: str; Name of bucket
+            region: str; Region name, e.g. eastus, westus
+
+        Returns:
+            StorageHandle: handle to interact with the container
+
         Raises:
-          StorageBucketCreateError: If bucket creation fails.
+            StorageBucketCreateError: If bucket creation fails.
         """
         try:
             container = self.storage_client.blob_containers.create(
@@ -2274,7 +2308,8 @@ class AzureBlobStore(AbstractStore):
                 container_name,
                 {}
             )
-            logger.info(f'Created Azure Blob Storage {container_name} in {region}')
+            logger.info('Created AZ Container '
+                        f'{container_name} in {region}.')
         except azure.core_exception().ResourceExistsError as e:
             error_msg, error_code = e.error.message, e.error.code
             if error_code == 'ContainerOperationFailure':
@@ -2284,26 +2319,25 @@ class AzureBlobStore(AbstractStore):
                             f'The bucket {self.name!r} is currently being '
                             'deleted. Please wait for the deletion to complete'
                             'before attempting to create a bucket with the '
-                            'same name. This may take a few minutes. '
-                            'Try again soon.'
-                        )
+                            'same name. This may take a few minutes. ')
         return container
 
-    def _delete_az_bucket(self, bucket_name: str) -> bool:
-        """Deletes Azure blob storage bucket, including all objects in bucket
+
+    def _delete_az_bucket(self, container_name: str) -> bool:
+        """Deletes AZ Container, including all objects in Container.
 
         Args:
-          bucket_name: str; Name of bucket
+            container_name: str; Name of container
 
         Returns:
-         bool; True if bucket was deleted, False if it was deleted externally.
+            bool: True if bucket was deleted, False if it was deleted externally.
         """
         with rich_utils.safe_status(
-                f'[bold cyan]Deleting Azure bucket {bucket_name}[/]'):
+                f'[bold cyan]Deleting Azure bucket {container_name}[/]'):
             self.storage_client.blob_containers.delete(
                 self.resource_group_name,
                 self.storage_account_name,
-                bucket_name,
+                container_name,
             )
         return True
 
