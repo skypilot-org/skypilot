@@ -75,6 +75,7 @@ def _serve_check_service(task: 'sky.Task'):
                         'automate spot replica management for better '
                         'service quality and smaller downtime.')
 
+    assert len(task.resources) >= 1
     first_resource_dict = list(task.resources)[0].to_yaml_config()
     for requested_resources in task.resources:
         requested_resources_dict = requested_resources.to_yaml_config()
