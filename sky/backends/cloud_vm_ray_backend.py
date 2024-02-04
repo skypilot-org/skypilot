@@ -400,6 +400,7 @@ class RayCodeGen:
                         use_sudo={self.is_local},
                     ) for i in range(total_num_nodes)]
                 setup_returncodes = ray.get(setup_workers)
+                ray_util.remove_placement_group(setup_pg)
                 if sum(setup_returncodes) != 0:
                     job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
                     # This waits for all streaming logs to finish.
@@ -592,24 +593,35 @@ class RayCodeGen:
         self._code += [
             textwrap.dedent(f"""\
             returncodes = ray.get(futures)
+            # Remove the placement group after all tasks are done, so that the
+            # next job can be scheduled on the released resources immediately.
+            ray_util.remove_placement_group(pg)
+            sys.stdout.flush()
+            sys.stderr.flush()
             if sum(returncodes) != 0:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
-                # This waits for all streaming logs to finish.
+                # Schedule the next pending job immediately to make the job
+                # scheduling more efficient.
                 job_lib.scheduler.schedule_step()
+                # This waits for all streaming logs to finish.
                 time.sleep(0.5)
+                reason = ''
+                if any(r == 139 for r in returncodes):
+                    reason = ' (likely due to Segmentation Fault)'
                 print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
+                      reason,
                       file=sys.stderr,
                       flush=True)
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
             else:
-                sys.stdout.flush()
-                sys.stderr.flush()
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
-                # This waits for all streaming logs to finish.
+                # Schedule the next pending job immediately to make the job
+                # scheduling more efficient.
                 job_lib.scheduler.schedule_step()
+                # This waits for all streaming logs to finish.
                 time.sleep(0.5)
             """)
         ]
