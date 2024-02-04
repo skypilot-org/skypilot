@@ -9,13 +9,12 @@ import yaml
 
 from sky.serve import autoscalers
 from sky.serve import constants
-from sky.serve import spot_policies
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources as resources_lib
+    from sky.serve import spot_policies
 
 _policy_to_autoscaler_and_spot_placer = {
     'SpotHedge': ('SPOT_ON_DEMAND_REQUEST_RATE_AUTOSCALER', 'DYNAMIC_FAILOVER'),
@@ -111,7 +110,7 @@ class SkyServiceSpec:
         self._init_replicas: Optional[int] = init_replicas
         self._extra_on_demand_replicas: Optional[int] = extra_on_demand_replicas
         # _spot_locations will be set by set_spot_locations.
-        self._spot_locations: Optional[List[spot_policies.Location]] = None
+        self._spot_locations: Optional[List['spot_policies.Location']] = None
         self._upscale_delay_seconds: int = (
             upscale_delay_seconds if upscale_delay_seconds is not None else
             constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
@@ -289,7 +288,7 @@ class SkyServiceSpec:
 
     # TODO(MaoZiming): Add this function to spot_placer might be better.
     def set_spot_locations(self,
-                           locations: List[spot_policies.Location]) -> None:
+                           locations: List['spot_policies.Location']) -> None:
         self._spot_locations = locations
 
     @property
@@ -326,7 +325,7 @@ class SkyServiceSpec:
         return self._autoscaler
 
     @property
-    def spot_locations(self) -> Optional[List[spot_policies.Location]]:
+    def spot_locations(self) -> Optional[List['spot_policies.Location']]:
         return self._spot_locations
 
     @property

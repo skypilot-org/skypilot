@@ -31,6 +31,87 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
+def _serve_check_service(task: sky.Task):
+
+    spot_use_resources: List[sky.Resources] = [
+        resource for resource in task.resources
+        if resource.use_spot_specified and resource.use_spot
+    ]
+    if len(spot_use_resources) not in [0, len(task.resources)]:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Resources must either all use spot or none use spot. '
+                'To use on-demand and spot instances together, '
+                'use `spot_policy: SpotHedge` and only specify '
+                '`use_spot: true`.')
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Service section not found.')
+
+    assert task.service is not None
+    use_spot = False
+    for resource in list(task.resources):
+        if resource.use_spot_specified and resource.use_spot:
+            use_spot = True
+            break
+
+    if task.service.spot_placer is not None:
+        if use_spot:
+            logger.info('use_spot will be override to True, '
+                        'because spot placer is enabled.')
+        if isinstance(task.resources, list):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Does not support both spot_policy '
+                                 'and ordered resources.')
+
+    else:
+        if use_spot:
+            yellow = colorama.Fore.YELLOW
+            reset = colorama.Style.RESET_ALL
+            logger.info(f'{yellow}SkyServe uses spot instances as replica '
+                        f'but spot_policy is not specified.{reset} '
+                        f'Consider adding `spot_policy: SpotHedge` to '
+                        'automate spot replica management for better '
+                        'service quality and smaller downtime.')
+
+    first_resource_dict = list(task.resources)[0].to_yaml_config()
+    for requested_resources in task.resources:
+        requested_resources_dict = requested_resources.to_yaml_config()
+        for key in ['region', 'zone', 'cloud']:
+            if key in first_resource_dict:
+                first_resource_dict.pop(key)
+            if key in requested_resources_dict:
+                requested_resources_dict.pop(key)
+        if (first_resource_dict != requested_resources_dict and
+                task.service.spot_placer is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Require multiple resources to have the same fields '
+                    'except zones/regions/clouds.')
+        if requested_resources.ports is None or len(
+                requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port_str = requested_resources.ports[0]
+        if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Port {service_port_str!r} is not a valid port '
+                    'number. Please specify a single port instead. '
+                    f'Got: {service_port_str!r}')
+
+        if int(service_port_str) != int(first_resource_dict['port']):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Got multiple ports: {service_port_str} and '
+                    f'{first_resource_dict["port"]} in different resources. '
+                    'Please specify the same port instead.')
+
+
 @usage_lib.entrypoint
 def up(
     task: 'sky.Task',
@@ -57,6 +138,40 @@ def up(
                              f'ensure it is fully matched by regex (e.g., '
                              'only contains lower letters, numbers and dash): '
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
+
+    _serve_check_service(task)
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Service section not found.')
+
+    requested_cloud: Optional['clouds.Cloud'] = None
+    service_port: Optional[int] = None
+    for requested_resources in task.resources:
+        if requested_resources.ports is None or len(
+                requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port_str = requested_resources.ports[0]
+        if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
+            raise ValueError(f'Port {service_port_str!r} is not a valid port '
+                             'number. Please specify a single port instead. '
+                             f'Got: {service_port_str!r}')
+        resource_port = int(service_port_str)
+        if service_port is None:
+            service_port = resource_port
+        if service_port != resource_port:
+            raise ValueError(
+                f'Got multiple ports: {service_port} and {resource_port} '
+                'in different resources. Please specify single port instead.')
+        if requested_cloud is None:
+            requested_cloud = requested_resources.cloud
+        if requested_cloud != requested_resources.cloud:
+            raise ValueError(f'Got multiple clouds: {requested_cloud} and '
+                             f'{requested_resources.cloud} in different '
+                             'resources. Please specify single cloud instead.')
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
@@ -99,7 +214,6 @@ def up(
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
             is not None)
-        requested_cloud = list(task.resources)[0].cloud
         controller_cloud = (requested_cloud if not controller_exist and
                             controller_resources.cloud is None else
                             controller_resources.cloud)
@@ -236,6 +350,7 @@ def up(
 @usage_lib.entrypoint
 def update(task: 'sky.Task', service_name: str) -> None:
 
+    _serve_check_service(task)
     cluster_status, handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
@@ -298,16 +413,6 @@ def update(task: 'sky.Task', service_name: str) -> None:
     if prompt is not None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
-
-    if task.service is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Service section not found in the task. ')
-
-    if task.service.spot_placer is not None:
-        if isinstance(task.resources, list):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Does not support both spot_policy '
-                                 'and ordered resources.')
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')

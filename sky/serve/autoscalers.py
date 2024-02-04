@@ -93,11 +93,6 @@ class Autoscaler:
         self.min_replicas = spec.min_replicas
         self.max_replicas = (spec.max_replicas if spec.max_replicas is not None
                              else spec.min_replicas)
-        # Reclip self.target_num_replicas with new min and max replicas.
-        self.target_num_replicas = max(
-            self.min_replicas,
-            min(self.max_replicas, (spec.init_replicas if spec.init_replicas
-                                    is not None else spec.min_replicas)))
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -174,6 +169,15 @@ class RequestRateAutoscaler(Autoscaler,
             downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
 
+    def _calculate_target_num_replicas_based_on_qps(self) -> int:
+        # Update self.target_num_replicas:
+        # Recalculate target_num_replicas based on QPS.
+        # Reclip self.target_num_replicas with new min and max replicas.
+        return math.ceil(
+            len(self.request_timestamps) / self.qps_window_size /
+            self.target_qps_per_replica
+        ) if self.target_qps_per_replica is not None else self.min_replicas
+
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
         super().update_version(version, spec)
@@ -192,18 +196,11 @@ class RequestRateAutoscaler(Autoscaler,
             downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
 
-        # Recalculate target_num_replicas based on QPS.
-        new_qps_target_num_replicas = math.ceil(
-            len(self.request_timestamps) / self.qps_window_size /
-            self.target_qps_per_replica
-        ) if self.target_qps_per_replica is not None else spec.min_replicas
-
-        # Reclip self.target_num_replicas with new min and max replicas.
         self.target_num_replicas = max(
             self.min_replicas,
             min(self.max_replicas,
                 (spec.init_replicas if spec.init_replicas is not None else
-                 new_qps_target_num_replicas)))
+                 self._calculate_target_num_replicas_based_on_qps())))
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -232,12 +229,10 @@ class RequestRateAutoscaler(Autoscaler,
             return
 
         # Convert to requests per second.
-        num_requests_per_second = len(
-            self.request_timestamps) / self.qps_window_size
-        target_num_replicas = math.ceil(num_requests_per_second /
-                                        self.target_qps_per_replica)
-        target_num_replicas = max(self.min_replicas,
-                                  min(self.max_replicas, target_num_replicas))
+        target_num_replicas = max(
+            self.min_replicas,
+            min(self.max_replicas,
+                self._calculate_target_num_replicas_based_on_qps()))
         old_target_num_replicas = self.target_num_replicas
 
         if self.target_num_replicas == 0:
@@ -260,6 +255,8 @@ class RequestRateAutoscaler(Autoscaler,
         overprovision_str = (
             f' ({self.target_num_replicas + self.num_overprovision} '
             'with over-provision)' if self.num_overprovision > 0 else '')
+        num_requests_per_second = len(
+            self.request_timestamps) / self.qps_window_size
         logger.info(
             f'Requests per second: {num_requests_per_second}, '
             f'Current target number of replicas: {old_target_num_replicas}'
@@ -294,17 +291,17 @@ class RequestRateAutoscaler(Autoscaler,
             self,
             replica_infos: List['replica_managers.ReplicaInfo']) -> List[int]:
 
-        ready_new_replica: List['replica_managers.ReplicaInfo'] = []
+        ready_new_replicas: List['replica_managers.ReplicaInfo'] = []
         old_replicas: List['replica_managers.ReplicaInfo'] = []
         for info in replica_infos:
             if info.version == self.latest_version:
                 if info.is_ready:
-                    ready_new_replica.append(info)
+                    ready_new_replicas.append(info)
             else:
                 old_replicas.append(info)
 
         all_replica_ids_to_scale_down: List[int] = []
-        if len(ready_new_replica) >= self.min_replicas:
+        if len(ready_new_replicas) >= self.min_replicas:
             for info in old_replicas:
                 all_replica_ids_to_scale_down.append(info.replica_id)
 
@@ -323,13 +320,13 @@ class RequestRateAutoscaler(Autoscaler,
         override dict. Active migration could require returning both SCALE_UP
         and SCALE_DOWN.
         """
-        provisioning_and_launched_new_replica: List[
+        provisioning_and_launched_new_replicas: List[
             'replica_managers.ReplicaInfo'] = []
 
         for info in replica_infos:
             if info.version == self.latest_version:
                 if info.is_launched:
-                    provisioning_and_launched_new_replica.append(info)
+                    provisioning_and_launched_new_replicas.append(info)
 
         self._set_desired_num_replicas()
         num_to_provision = self.target_num_replicas + self.num_overprovision
@@ -343,31 +340,31 @@ class RequestRateAutoscaler(Autoscaler,
         all_replica_ids_to_scale_down.extend(
             self.handle_mixed_replica_versions(replica_infos))
 
-        # Case 2. when provisioning_and_launched_new_replica is less
+        # Case 2. when provisioning_and_launched_new_replicas is less
         # than num_to_provision, we always scale up new replicas.
-        if len(provisioning_and_launched_new_replica) < num_to_provision:
+        if len(provisioning_and_launched_new_replicas) < num_to_provision:
             num_replicas_to_scale_up = (
-                num_to_provision - len(provisioning_and_launched_new_replica))
+                num_to_provision - len(provisioning_and_launched_new_replicas))
 
             for _ in range(num_replicas_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=None))
 
-        # Case 3: when provisioning_and_launched_new_replica is more
+        # Case 3: when provisioning_and_launched_new_replicas is more
         # than num_to_provision, we scale down new replicas.
-        if len(provisioning_and_launched_new_replica) > num_to_provision:
+        if len(provisioning_and_launched_new_replicas) > num_to_provision:
             num_replicas_to_scale_down = (
-                len(provisioning_and_launched_new_replica) - num_to_provision)
+                len(provisioning_and_launched_new_replicas) - num_to_provision)
             all_replica_ids_to_scale_down.extend(
                 RequestRateAutoscaler.get_replica_ids_to_scale_down(
                     num_limit=num_replicas_to_scale_down,
-                    replica_infos=provisioning_and_launched_new_replica))
+                    replica_infos=provisioning_and_launched_new_replicas))
 
-            for replica_id in all_replica_ids_to_scale_down:
-                scaling_options.append(
-                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                       target=replica_id))
+        for replica_id in all_replica_ids_to_scale_down:
+            scaling_options.append(
+                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                   target=replica_id))
 
         if not scaling_options:
             logger.info('No scaling needed.')
@@ -416,6 +413,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
             'region': location.region,
             'zone': location.zone,
             'cloud': location.cloud,
+            'any_of': None
         }
 
     def evaluate_scaling(
@@ -423,14 +421,14 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
-        provisioning_and_launched_new_replica = list(
+        provisioning_and_launched_new_replicas = list(
             filter(
                 lambda info: info.is_launched and info.version == self.
                 latest_version, replica_infos))
 
         self._set_desired_num_replicas()
         num_launched_spot, num_ready_spot = 0, 0
-        for info in provisioning_and_launched_new_replica:
+        for info in provisioning_and_launched_new_replicas:
             if info.is_spot:
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_spot += 1
@@ -447,7 +445,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
             # Consult spot_placer for the zone to launch spot instance.
             num_spot_to_scale_up = num_to_provision - num_launched_spot
             locations = self.spot_placer.select(
-                provisioning_and_launched_new_replica, num_spot_to_scale_up)
+                provisioning_and_launched_new_replicas, num_spot_to_scale_up)
             assert len(locations) == num_spot_to_scale_up
             for location in locations:
                 spot_override = self._get_spot_resources_override_dict(location)
@@ -465,7 +463,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
                         num_spot_to_scale_down,
                         list(
                             filter(lambda info: info.is_spot,
-                                   provisioning_and_launched_new_replica)))):
+                                   provisioning_and_launched_new_replicas)))):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
                                        target=replica_id))
@@ -510,14 +508,14 @@ class SpotOnDemandRequestRateAutoscaler(
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
-        provisioning_and_launched_new_replica = list(
+        provisioning_and_launched_new_replicas = list(
             filter(
                 lambda info: info.is_launched and info.version == self.
                 latest_version, replica_infos))
 
         num_launched_spot, num_ready_spot = 0, 0
         num_launched_on_demand, num_ready_on_demand = 0, 0
-        for info in provisioning_and_launched_new_replica:
+        for info in provisioning_and_launched_new_replicas:
             if info.is_spot:
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_spot += 1
@@ -557,7 +555,7 @@ class SpotOnDemandRequestRateAutoscaler(
                         num_launched_on_demand - num_on_demand_target,
                         list(
                             filter(lambda info: not info.is_spot,
-                                   provisioning_and_launched_new_replica)))):
+                                   provisioning_and_launched_new_replicas)))):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
                                        target=replica_id))

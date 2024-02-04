@@ -73,8 +73,6 @@ def launch_cluster(task_yaml_path: str,
             resource_config = config.get('resources', {})
             # SkyServe does not support ordered resources.
             # Remove 'any_of' as it only contains zone/region/cloud
-            if resources_override.get('use_spot', True):
-                resource_config.pop('any_of', None)
             resource_config.update(resources_override)
             config['resources'] = resource_config
         logger.info(f'Launching replica cluster {cluster_name} with '
@@ -135,12 +133,13 @@ def launch_cluster(task_yaml_path: str,
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::terminate_cluster
-# delay_in_seconds is useful to drain the node before node termination.
+# replica_drain_delay_seconds is useful to
+# drain the node before node termination.
 def terminate_cluster(cluster_name: str,
-                      delay_in_seconds: int = 0,
+                      replica_drain_delay_seconds: int = 0,
                       max_retry: int = 3) -> None:
     """Terminate the sky serve replica cluster."""
-    time.sleep(delay_in_seconds)
+    time.sleep(replica_drain_delay_seconds)
     retry_cnt = 0
     backoff = common_utils.Backoff()
     while True:
@@ -535,6 +534,7 @@ class ReplicaManager:
         self.least_recent_version: int = serve_constants.INITIAL_VERSION
         serve_state.add_or_update_version(self._service_name,
                                           self.latest_version, spec)
+        self._use_spot_policy: bool = spec.spot_placer is not None
 
     def get_ready_replica_urls(self) -> List[str]:
         """Get all ready replica's IP addresses."""
@@ -651,7 +651,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._next_replica_id += 1
 
     def _terminate_replica(self, replica_id: int, sync_down_logs: bool,
-                           delay_in_seconds: int) -> None:
+                           replica_drain_delay_seconds: int) -> None:
 
         if replica_id in self._launch_process_pool:
             launch_process = self._launch_process_pool[replica_id]
@@ -725,7 +725,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(terminate_cluster,
                                                      log_file_name, 'a').run,
-            args=(info.cluster_name, delay_in_seconds),
+            args=(info.cluster_name, replica_drain_delay_seconds),
         )
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
@@ -733,9 +733,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._down_process_pool[replica_id] = p
 
     def scale_down(self, replica_id: int) -> None:
-        self._terminate_replica(replica_id,
-                                sync_down_logs=False,
-                                delay_in_seconds=_DEFAULT_DRAIN_SECONDS)
+        self._terminate_replica(
+            replica_id,
+            sync_down_logs=False,
+            replica_drain_delay_seconds=_DEFAULT_DRAIN_SECONDS)
 
     def _handle_preemption(self, info: ReplicaInfo) -> bool:
         """Handle preemption of the replica if any error happened.
@@ -774,14 +775,15 @@ class SkyPilotReplicaManager(ReplicaManager):
         if info.location is None:
             logger.error(f'Cannot find location for replica {info.replica_id}. '
                          'Skipping adding to preemption list.')
-        else:
+        elif self._use_spot_policy:
             self.preemption_history.append(info.location)
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
-        self._terminate_replica(info.replica_id,
-                                sync_down_logs=False,
-                                delay_in_seconds=_DEFAULT_DRAIN_SECONDS)
+        self._terminate_replica(
+            info.replica_id,
+            sync_down_logs=False,
+            replica_drain_delay_seconds=_DEFAULT_DRAIN_SECONDS)
         return True
 
     #################################
@@ -834,7 +836,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                             logger.error(f'Cannot find zone for replica '
                                          f'{replica_id}. Skipping adding '
                                          'active or preemption history.')
-                        else:
+                        elif self._use_spot_policy:
                             # If a spot fails to launch in a given zone.
                             if p.exitcode != 0:
                                 self.preemption_history.append(info.location)
@@ -851,7 +853,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     # _terminate_replica will update the replica info too.
                     self._terminate_replica(replica_id,
                                             sync_down_logs=False,
-                                            delay_in_seconds=0)
+                                            replica_drain_delay_seconds=0)
         for replica_id, p in list(self._down_process_pool.items()):
             if not p.is_alive():
                 logger.info(
@@ -983,7 +985,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     'Terminating...')
                 self._terminate_replica(info.replica_id,
                                         sync_down_logs=True,
-                                        delay_in_seconds=0)
+                                        replica_drain_delay_seconds=0)
 
     def _job_status_fetcher(self) -> None:
         """Periodically fetch the service job status of all replicas."""
@@ -1099,7 +1101,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if should_teardown:
                     self._terminate_replica(info.replica_id,
                                             sync_down_logs=True,
-                                            delay_in_seconds=0)
+                                            replica_drain_delay_seconds=0)
 
     def _replica_prober(self) -> None:
         """Periodically probe replicas."""
@@ -1139,6 +1141,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_version(self._service_name, version, spec)
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
+        self._use_spot_policy = spec.spot_placer is not None
 
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         spec = serve_state.get_spec(self._service_name, version)

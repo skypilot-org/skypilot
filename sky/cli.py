@@ -4395,83 +4395,6 @@ def _generate_task_with_service(service_yaml_args: List[str],
     return task
 
 
-def _serve_check_service(task: sky.Task):
-
-    spot_use_resources: List[sky.Resources] = [
-        resource for resource in task.resources
-        if resource.use_spot_specified and resource.use_spot
-    ]
-    if len(spot_use_resources) not in [0, len(task.resources)]:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Resources must either all use spot or none use spot. '
-                'To use on-demand and spot instances together, '
-                'use `spot_policy: SpotHedge` and only specify '
-                '`use_spot: true`.')
-
-    assert task.service is not None
-    if task.service.spot_placer is not None:
-        for resource in list(task.resources):
-            if resource.use_spot_specified and not resource.use_spot:
-                logger.info('use_spot will be override to True, '
-                            'because spot placer is enabled.')
-                break
-
-    else:
-        use_spot = False
-        for resource in list(task.resources):
-            if resource.use_spot_specified and resource.use_spot:
-                use_spot = True
-                break
-        if use_spot:
-            yellow = colorama.Fore.YELLOW
-            reset = colorama.Style.RESET_ALL
-            logger.info(f'{yellow}SkyServe uses spot instances as replica '
-                        f'but spot_policy is not specified.{reset} '
-                        f'Consider adding `spot_policy: SpotHedge` to '
-                        'automate spot replica management for better '
-                        'service quality and smaller downtime.')
-
-    if task.service is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Service section not found.')
-
-    if task.service.spot_placer is not None:
-        if isinstance(task.resources, list):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Does not support both spot_policy '
-                                 'and ordered resources.')
-
-    first_resource_dict = list(task.resources)[0].to_yaml_config()
-    for requested_resources in task.resources:
-        requested_resources_dict = requested_resources.to_yaml_config()
-        for key in ['region', 'zone', 'cloud']:
-            if key in first_resource_dict:
-                first_resource_dict.pop(key)
-            if key in requested_resources_dict:
-                requested_resources_dict.pop(key)
-        if (first_resource_dict != requested_resources_dict and
-                task.service.spot_placer is not None):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Require multiple resources to have the same fields '
-                    'except zones/regions/clouds.')
-        if requested_resources.ports is None or len(
-                requested_resources.ports) != 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify one port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
-        service_port_str = requested_resources.ports[0]
-        if not service_port_str.isdigit():
-            # For the case when the user specified a port range like 10000-10010
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Port {service_port_str!r} is not a valid port '
-                    'number. Please specify a single port instead. '
-                    f'Got: {service_port_str!r}')
-
-
 @serve.command('up', cls=_DocumentedCodeCommand)
 @click.argument('service_yaml',
                 required=True,
@@ -4532,7 +4455,6 @@ def serve_up(
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
-    _serve_check_service(task)
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
     with sky.Dag() as dag:
@@ -4579,7 +4501,6 @@ def serve_update(service_name: str, service_yaml: List[str], yes: bool):
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
-    _serve_check_service(task)
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')
     with sky.Dag() as dag:

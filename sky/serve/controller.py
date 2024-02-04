@@ -151,7 +151,8 @@ class SkyServeController:
                             autoscalers.RequestRateAutoscaler) and isinstance(
                                 old_autoscaler,
                                 autoscalers.RequestRateAutoscaler):
-                        self._autoscaler.request_timestamps = old_autoscaler.request_timestamps  # pylint: disable=line-too-long
+                        self._autoscaler.request_timestamps = (
+                            old_autoscaler.request_timestamps)
                     self._autoscaler.latest_version = version
                     logger.info('Not recommended: '
                                 f'Update autoscaler to {service.autoscaler}')
