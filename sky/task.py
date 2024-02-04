@@ -88,8 +88,8 @@ def _fill_in_env_vars(
     - model type; e.g.,
         model: $MODEL_NAME
 
-    We simply dump file_mounts into a json string, and replace env vars using
-    regex. This should be safe as file_mounts has been schema-validated.
+    We simply dump yaml_field into a json string, and replace env vars using
+    regex. This should be safe as yaml config has been schema-validated.
 
     Env vars of the following forms are detected:
         - ${ENV}
@@ -373,6 +373,7 @@ class Task:
             config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
                                                       config.get('envs', {}))
 
+        # Fill in any Task.envs into service (e.g. MODEL_NAME).
         if config.get('service') is not None:
             config['service'] = _fill_in_env_vars(config['service'],
                                                   config.get('envs', {}))
