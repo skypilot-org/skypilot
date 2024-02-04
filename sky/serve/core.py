@@ -31,9 +31,9 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
-def _serve_check_service(task: sky.Task):
+def _serve_check_service(task: 'sky.Task'):
 
-    spot_use_resources: List[sky.Resources] = [
+    spot_use_resources: List['sky.Resources'] = [
         resource for resource in task.resources
         if resource.use_spot_specified and resource.use_spot
     ]
