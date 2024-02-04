@@ -71,6 +71,7 @@ SERIES_TO_DISCRIPTION = {
     'g2': 'G2 Instance',
     'm1': 'Memory-optimized Instance',
     # FIXME(woosuk): Support M2 series.
+    'm2': 'M2 Memory-optimized Instance',
     'm3': 'M3 Memory-optimized Instance',
     'n1': 'N1 Predefined Instance',
     'n2': 'N2 Instance',
