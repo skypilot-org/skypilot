@@ -3697,7 +3697,11 @@ class TestStorageWithCredentials:
         'tmp_public_storage_obj, store_type',
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
          ('s3://digitalcorpora', storage_lib.StoreType.S3),
-         ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS)],
+         ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS),
+         pytest.param(
+             'az://azuremlexampledata/data/imagenet',
+             storage_lib.StoreType.AZURE,
+             marks=pytest.mark.azure)],
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not
@@ -3773,7 +3777,6 @@ class TestStorageWithCredentials:
                 match='Attempted to use a non-existent bucket as a source'):
             storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
                 random_name=nonexist_bucket_name))
-
     @pytest.mark.parametrize('private_bucket', [
         f's3://imagenet', f'gs://imagenet',
         pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
