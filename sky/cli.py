@@ -4395,7 +4395,7 @@ def _generate_task_with_service(service_yaml_args: List[str],
     return task
 
 
-def _serve_up_check_service(task: sky.Task):
+def _serve_check_service(task: sky.Task):
 
     spot_use_resources: List[sky.Resources] = [
         resource for resource in task.resources
@@ -4532,7 +4532,7 @@ def serve_up(
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
-    _serve_up_check_service(task)
+    _serve_check_service(task)
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
     with sky.Dag() as dag:
