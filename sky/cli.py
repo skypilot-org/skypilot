@@ -4579,7 +4579,7 @@ def serve_update(service_name: str, service_yaml: List[str], yes: bool):
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
-    _serve_up_check_service(task)
+    _serve_check_service(task)
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')
     with sky.Dag() as dag:
