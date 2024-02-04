@@ -86,7 +86,14 @@ def _fill_in_env_vars(
 
     Use cases of env vars in service:
     - model type; e.g.,
-        model: $MODEL_NAME
+        service:
+          readiness_probe:
+            path: /v1/chat/completions
+            post_data:
+              model: $MODEL_NAME
+              messages:
+                - role: user
+                  content: How to print hello world?
 
     We simply dump yaml_field into a json string, and replace env vars using
     regex. This should be safe as yaml config has been schema-validated.
