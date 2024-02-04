@@ -392,11 +392,11 @@ class ReplicaInfo:
         self.cluster_name: str = cluster_name
         self.version: int = version
         self.replica_port: str = replica_port
-        self.is_spot: bool = is_spot
-        self.location: Optional[spot_policies.Location] = location
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
+        self.is_spot: bool = is_spot
+        self.location: Optional[spot_policies.Location] = location
 
     def handle(
         self,
