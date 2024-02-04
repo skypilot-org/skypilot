@@ -607,7 +607,7 @@ class RayCodeGen:
                 time.sleep(0.5)
                 reason = ''
                 if any(r == 139 for r in returncodes):
-                    reason = ' (likely due to Segmentation Fault)'
+                    reason = '(likely due to Segmentation Fault)'
                 print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
