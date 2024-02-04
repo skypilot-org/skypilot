@@ -1,5 +1,5 @@
 # Spot Policy does not support a mixture of use_spot values
-# ValueError: All resources must use spot or none use spot.
+# 'Resources must either all use spot or none use spot. To use on-demand and spot instances together, use `spot_policy: SpotHedge` and only specify `use_spot: true`.
 
 service:
   readiness_probe: /health

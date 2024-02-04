@@ -3154,11 +3154,9 @@ def test_skyserve_spot_policy():
 
     with pytest.raises(
             ValueError,
-            match=
-            'Resources must either all use spot or none use spot. '
+            match='Resources must either all use spot or none use spot. '
             'To use on-demand and spot instances together, '
-            'use `spot_policy: SpotHedge` and only specify `use_spot: true`.'
-    ):
+            'use `spot_policy: SpotHedge` and only specify `use_spot: true`.'):
         run_skyserve_command(name,
                              'tests/skyserve/policy/use_spot_mixture.yaml')
 

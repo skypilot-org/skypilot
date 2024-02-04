@@ -23,7 +23,6 @@ from ray.autoscaler.tags import (
 )
 from ray.autoscaler._private.cli_logger import cf, cli_logger
 
-
 # The logic has been abstracted away here to allow for different GCP resources
 # (API endpoints), which can differ widely, making it impossible to use
 # the same logic for everything.
