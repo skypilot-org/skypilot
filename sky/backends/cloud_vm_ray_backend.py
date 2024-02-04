@@ -4093,7 +4093,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Handles the case when ~/.kube/config was removed externally.
             except ValueError as e:
                 error_msg = str(e)
-                if ('Failed to load Kubernetes configuration.' in error_msg) and purge:
+                if ('Failed to load Kubernetes configuration.'
+                        in error_msg) and purge:
                     pass
                 else:
                     raise

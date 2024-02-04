@@ -18,12 +18,12 @@ def check(quiet: bool = False,
     enabled_clouds = []
     cloud_check_list: List[clouds.Cloud]
     if cloud_to_check is None:
-        cloud_check_list = clouds.CLOUD_REGISTRY.values()
+        cloud_check_list = list(clouds.CLOUD_REGISTRY.values())
     elif isinstance(cloud_to_check, clouds.Cloud):
         cloud_check_list = [cloud_to_check]
     else:
-        assert isinstance(
-            cloud_to_check, str) and cloud_to_check.lower() == 'r2'
+        assert isinstance(cloud_to_check,
+                          str) and cloud_to_check.lower() == 'r2'
         cloud_check_list = []
 
     for cloud in cloud_check_list:
@@ -52,17 +52,16 @@ def check(quiet: bool = False,
     # support r2 as only clouds with computing instances
     # are added as 'cloud'. This will be removed when
     # cloudflare/r2 is added as a 'cloud'.
-    if (cloud_to_check is None or 
-        isinstance(cloud_to_check, str) and cloud_to_check.lower() == 'r2'):
-        cloud = 'Cloudflare (for R2 object store)'
-        echo(f'  Checking {cloud}...', nl=False)
+    if (cloud_to_check is None or
+            isinstance(cloud_to_check, str) and cloud_to_check.lower() == 'r2'):
+        cloud_r2 = 'Cloudflare (for R2 object store)'
+        echo(f'  Checking {cloud_r2}...', nl=False)
         r2_is_enabled, reason = cloudflare.check_credentials()
         echo('\r', nl=False)
         status_msg = 'enabled' if r2_is_enabled else 'disabled'
         status_color = 'green' if r2_is_enabled else 'red'
-        echo('  ' +
-            click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-            ' ' * 30)
+        echo('  ' + click.style(
+            f'{cloud_r2}: {status_msg}', fg=status_color, bold=True) + ' ' * 30)
         if not r2_is_enabled:
             echo(f'    Reason: {reason}')
 
@@ -76,12 +75,12 @@ def check(quiet: bool = False,
             raise SystemExit()
         else:
             echo('\nSkyPilot will use only the enabled clouds to run tasks. '
-                'To change this, configure cloud credentials, '
-                'and run ' + click.style('sky check', bold=True) + '.'
-                '\n' + click.style(
-                    'If any problems remain, please file an issue at '
-                    'https://github.com/skypilot-org/skypilot/issues/new',
-                    dim=True))
+                 'To change this, configure cloud credentials, '
+                 'and run ' + click.style('sky check', bold=True) + '.'
+                 '\n' + click.style(
+                     'If any problems remain, please file an issue at '
+                     'https://github.com/skypilot-org/skypilot/issues/new',
+                     dim=True))
 
     global_user_state.set_enabled_clouds(enabled_clouds)
 
