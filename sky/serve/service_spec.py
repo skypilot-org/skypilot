@@ -265,11 +265,9 @@ class SkyServiceSpec:
     def spot_policy_str(self):
         policy = ''
         if self.spot_placer:
-            policy += self.spot_placer
+            policy += self._spot_policy
         else:
             return 'No spot policy'
-        if self.autoscaler:
-            policy += f' with {self.autoscaler}'
         if self.num_overprovision is not None and self.num_overprovision > 0:
             policy += f' with {self.num_overprovision} extra spot instance(s)'
         return policy if policy else 'No spot policy'
