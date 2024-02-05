@@ -46,6 +46,8 @@ class SCP(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE,
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            (f'Specifying image ID is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             (f'Docker image is currently not supported on {_REPR}. '
              'You can try running docker command inside the '
@@ -310,7 +312,8 @@ class SCP(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
             scp_utils.SCPClient().list_instances()
-        except (AssertionError, KeyError, scp_utils.SCPClientError):
+        except (AssertionError, KeyError, scp_utils.SCPClientError,
+                scp_utils.SCPCreationFailError):
             return False, (
                 'Failed to access SCP with credentials. '
                 'To configure credentials, see: '

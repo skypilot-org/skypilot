@@ -16,7 +16,6 @@ import uuid
 
 import colorama
 import filelock
-import jinja2
 from packaging import version
 import requests
 from requests import adapters
@@ -41,6 +40,7 @@ from sky.backends import onprem_utils
 from sky.clouds import cloud_registry
 from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_yaml_utils
@@ -165,25 +165,6 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
         prefix).expanduser().resolve() / f'{cluster_name}.yml'
     os.makedirs(output_path.parents[0], exist_ok=True)
     return str(output_path)
-
-
-def fill_template(template_name: str, variables: Dict,
-                  output_path: str) -> None:
-    """Create a file from a Jinja template and return the filename."""
-    assert template_name.endswith('.j2'), template_name
-    template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
-    with open(template_path) as fin:
-        template = fin.read()
-    output_path = os.path.abspath(os.path.expanduser(output_path))
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    # Write out yaml config.
-    j2_template = jinja2.Template(template)
-    content = j2_template.render(**variables)
-    with open(output_path, 'w') as fout:
-        fout.write(content)
 
 
 def _optimize_file_mounts(yaml_path: str) -> None:
@@ -458,6 +439,7 @@ class SSHConfigHelper(object):
         auth_config: Dict[str, str],
         ports: List[int],
         docker_user: Optional[str] = None,
+        ssh_user: Optional[str] = None,
     ):
         """Add authentication information for cluster to local SSH config file.
 
@@ -476,8 +458,12 @@ class SSHConfigHelper(object):
             auth_config: read_yaml(handle.cluster_yaml)['auth']
             ports: List of port numbers for SSH corresponding to ips
             docker_user: If not None, use this user to ssh into the docker
+            ssh_user: Override the ssh_user in auth_config
         """
-        username = auth_config['ssh_user']
+        if ssh_user is None:
+            username = auth_config['ssh_user']
+        else:
+            username = ssh_user
         if docker_user is not None:
             username = docker_user
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
@@ -509,20 +495,23 @@ class SSHConfigHelper(object):
 
         # Handle Include on top of Config file
         include_str = f'Include {cls.ssh_cluster_path.format("*")}'
+        found = False
         for i, line in enumerate(config):
             config_str = line.strip()
             if config_str == include_str:
+                found = True
                 break
-            # Did not find Include string. Insert `Include` lines.
             if 'Host' in config_str:
-                with open(config_path, 'w') as f:
-                    config.insert(
-                        0,
-                        f'# Added by SkyPilot for ssh config of all clusters\n{include_str}\n'
-                    )
-                    f.write(''.join(config).strip())
-                    f.write('\n' * 2)
                 break
+        if not found:
+            # Did not find Include string. Insert `Include` lines.
+            with open(config_path, 'w') as f:
+                config.insert(
+                    0,
+                    f'# Added by SkyPilot for ssh config of all clusters\n{include_str}\n'
+                )
+                f.write(''.join(config).strip())
+                f.write('\n' * 2)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
 
@@ -879,7 +868,7 @@ def write_cluster_config(
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
-    fill_template(
+    common_utils.fill_template(
         cluster_config_template,
         dict(
             resources_vars,
@@ -955,6 +944,10 @@ def write_cluster_config(
         config_dict['ray'] = tmp_yaml_path
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
+
+    # Add kubernetes config fields from ~/.sky/config
+    if isinstance(cloud, clouds.Kubernetes):
+        kubernetes_utils.combine_pod_config_fields(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
@@ -1207,13 +1200,23 @@ def wait_until_ray_cluster_ready(
     return True, docker_user  # success
 
 
-def ssh_credential_from_yaml(cluster_yaml: str,
-                             docker_user: Optional[str] = None
-                            ) -> Dict[str, Any]:
-    """Returns ssh_user, ssh_private_key and ssh_control name."""
+def ssh_credential_from_yaml(
+    cluster_yaml: str,
+    docker_user: Optional[str] = None,
+    ssh_user: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Returns ssh_user, ssh_private_key and ssh_control name.
+
+    Args:
+        cluster_yaml: path to the cluster yaml.
+        docker_user: when using custom docker image, use this user to ssh into
+            the docker container.
+        ssh_user: override the ssh_user in the cluster yaml.
+    """
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
-    ssh_user = auth_section['ssh_user'].strip()
+    if ssh_user is None:
+        ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
@@ -1404,9 +1407,19 @@ def get_node_ips(
     assert cloud is not None, provider_name
 
     if cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.SKYPILOT:
-        metadata = provision_lib.get_cluster_info(
-            provider_name, ray_config['provider']['region'],
-            ray_config['cluster_name'], ray_config['provider'])
+        try:
+            metadata = provision_lib.get_cluster_info(
+                provider_name, ray_config['provider'].get('region'),
+                ray_config['cluster_name'], ray_config['provider'])
+        except Exception as e:  # pylint: disable=broad-except
+            # This could happen when the VM is not fully launched, and a user
+            # is trying to terminate it with `sky down`.
+            logger.debug(
+                'Failed to get cluster info for '
+                f'{ray_config["cluster_name"]} from the new provisioner '
+                f'with {common_utils.format_exception(e)}.')
+            raise exceptions.FetchIPError(
+                exceptions.FetchIPError.Reason.HEAD) from e
         if len(metadata.instances) < expected_num_nodes:
             # Simulate the exception when Ray head node is not up.
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
@@ -1795,7 +1808,8 @@ def _update_cluster_status_no_lock(
 
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
-                                                       handle.docker_user)
+                                                       handle.docker_user,
+                                                       handle.ssh_user)
 
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,

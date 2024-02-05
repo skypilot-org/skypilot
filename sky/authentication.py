@@ -44,9 +44,9 @@ from sky.adaptors import ibm
 from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
 from sky.skylet.providers.fluidstack import fluidstack_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
-from sky.utils import kubernetes_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

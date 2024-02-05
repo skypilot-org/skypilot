@@ -30,7 +30,7 @@ class Vsphere(clouds.Cloud):
     """Vsphere cloud"""
 
     _INDENT_PREFIX = '    '
-    _REPR = 'Vsphere'
+    _REPR = 'vSphere'
 
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not '
@@ -39,6 +39,8 @@ class Vsphere(clouds.Cloud):
                                                        'yet.',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            (f'Specifying image id is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             (f'Docker image is currently not supported on {_REPR}. '
              'You can try running docker command inside the '
@@ -132,7 +134,7 @@ class Vsphere(clouds.Cloud):
         return 0.0
 
     def __repr__(self):
-        return 'Vsphere'
+        return 'vSphere'
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
@@ -263,6 +265,7 @@ class Vsphere(clouds.Cloud):
                 'Run the following commands:'
                 f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
                 f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
+                'For more details. See https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
         required_keys = ['name', 'username', 'password', 'clusters']

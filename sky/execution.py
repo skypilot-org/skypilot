@@ -22,6 +22,7 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
@@ -142,7 +143,7 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     return task
 
 
-def execute(
+def _execute(
     entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
     down: bool = False,
@@ -401,6 +402,7 @@ def launch(
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    _disable_controller_check: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a cluster or task.
@@ -489,10 +491,11 @@ def launch(
         if dryrun.
     """
     entrypoint = task
-    controller_utils.check_cluster_name_not_controller(
-        cluster_name, operation_str='sky.launch')
+    if not _disable_controller_check:
+        controller_utils.check_cluster_name_not_controller(
+            cluster_name, operation_str='sky.launch')
 
-    return execute(
+    return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
         down=down,
@@ -589,7 +592,7 @@ def exec(  # pylint: disable=redefined-builtin
         operation='executing tasks',
         check_cloud_vm_ray_backend=False,
         dryrun=dryrun)
-    return execute(
+    return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
         down=down,
@@ -680,9 +683,9 @@ def spot_launch(
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{dag_uuid}.yaml')
-        backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
-                                    vars_to_fill,
-                                    output_path=yaml_path)
+        common_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
+                                   vars_to_fill,
+                                   output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         assert len(controller_task.resources) == 1, controller_task
         # Backward compatibility: if the user changed the
@@ -700,7 +703,7 @@ def spot_launch(
               f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
-        execute(
+        _execute(
             entrypoint=controller_task,
             stream_logs=stream_logs,
             cluster_name=controller_name,
