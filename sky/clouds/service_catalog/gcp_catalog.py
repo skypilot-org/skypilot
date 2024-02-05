@@ -466,8 +466,9 @@ def list_accelerators(
                         info.cpu_count if not pd.isna(info.cpu_count) else 0)
 
             for info in acc_infos:
-                if cur_key != _get_key(info):
-                    cur_key = _get_key(info)
+                info_key = _get_key(info)
+                if cur_key != info_key:
+                    cur_key = info_key
                     new_acc_infos.append(info)
             new_infos[acc_name] = new_acc_infos
 
