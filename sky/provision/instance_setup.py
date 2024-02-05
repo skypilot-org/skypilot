@@ -107,7 +107,7 @@ def _parallel_ssh_with_cache(func,
     if max_workers is None:
         # Not using the default value of `max_workers` in ThreadPoolExecutor,
         # as 32 is too large for some machines.
-        max_workers = subprocess_utils.get_cpu_count()
+        max_workers = subprocess_utils.get_parallel_threads()
     with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         results = []
         for instance_id, metadatas in cluster_info.instances.items():
@@ -411,7 +411,7 @@ def _max_workers_for_file_mounts(common_file_mounts: Dict[str, str]) -> int:
 
     max_workers = (fd_limit - fd_reserve) // fd_per_rsync
     # At least 1 worker, and avoid too many workers overloading the system.
-    max_workers = min(max(max_workers, 1), subprocess_utils.get_cpu_count())
+    max_workers = min(max(max_workers, 1), subprocess_utils.get_parallel_threads())
     logger.debug(f'Using {max_workers} workers for file mounts.')
     return max_workers
 
