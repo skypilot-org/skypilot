@@ -17,7 +17,13 @@ if typing.TYPE_CHECKING:
     from sky.serve import spot_policies
 
 _policy_to_autoscaler_and_spot_placer = {
-    'SpotHedge': ('SPOT_ON_DEMAND_REQUEST_RATE_AUTOSCALER', 'DYNAMIC_FAILOVER'),
+    # Spot with dynamic on-demand Fallback.
+    'SpotHedge':
+        ('SPOT_ON_DEMAND_FALLBACK_REQUEST_RATE_AUTOSCALER', 'DYNAMIC_FAILOVER'),
+    # Autoscaling spot instances with fixed on-demand instances.
+    'SpotOnDemandMix':
+        ('SPOT_ON_DEMAND_REQUEST_RATE_AUTOSCALER', 'DYNAMIC_FAILOVER'),
+    # Autoscaling spot instances with no on-demand instances.
     'SpotOnly': ('SPOT_REQUEST_RATE_AUTOSCALER', 'DYNAMIC_FAILOVER'),
 }
 

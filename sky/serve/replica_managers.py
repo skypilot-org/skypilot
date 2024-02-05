@@ -72,8 +72,12 @@ def launch_cluster(task_yaml_path: str,
         if resources_override is not None:
             resource_config = config.get('resources', {})
             # SkyServe does not support ordered resources.
-            # Remove 'any_of' as it only contains zone/region/cloud
-            resource_config.update(resources_override)
+            # Remove resources_override fields from 'any_of'
+            if 'any_of' in resource_config:
+                for any_of_config in resource_config['any_of']:
+                    any_of_config.update(resources_override)
+            else:
+                resource_config.update(resources_override)
             config['resources'] = resource_config
         logger.info(f'Launching replica cluster {cluster_name} with '
                     f'resource_config: {resource_config}')

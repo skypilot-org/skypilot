@@ -21,6 +21,12 @@ class Location:
         self.region = region
         self.zone = zone
 
+    def __eq__(self, other):
+        if isinstance(other, Location):
+            return (self.cloud == other.cloud and
+                    self.region == other.region and self.zone == other.zone)
+        return False
+
     def __hash__(self):
         return hash(self.cloud + self.region + self.zone)
 

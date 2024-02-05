@@ -258,11 +258,11 @@ class RequestRateAutoscaler(Autoscaler,
         num_requests_per_second = len(
             self.request_timestamps) / self.qps_window_size
         logger.info(
-            f'Requests per second: {num_requests_per_second}, '
-            f'Current target number of replicas: {old_target_num_replicas}'
-            f'Final target number of replicas: {self.target_num_replicas}'
-            f'{overprovision_str}, Upscale counter: {self.upscale_counter}/'
-            f'{self.scale_up_consecutive_periods}, '
+            f'Requests per second: {num_requests_per_second}. '
+            f'Current target number of replicas: {old_target_num_replicas}. '
+            f'Final target number of replicas: {self.target_num_replicas}. '
+            f'{overprovision_str}. Upscale counter: {self.upscale_counter}/'
+            f'{self.scale_up_consecutive_periods}. '
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_consecutive_periods}')
 
@@ -409,11 +409,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
         # specify multiple zones, regions and clouds.
         return {
             'use_spot': True,
-            'spot_recovery': None,
             'region': location.region,
             'zone': location.zone,
             'cloud': location.cloud,
-            'any_of': None
         }
 
     def evaluate_scaling(
@@ -501,7 +499,13 @@ class SpotOnDemandRequestRateAutoscaler(
             is not None else constants.AUTOSCALER_DEFAULT_EXTRA_ON_DEMAND)
 
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
-        return {'use_spot': False, 'spot_recovery': None}
+        return {'use_spot': False}
+
+    def evaluate_spot_scaling(
+        self, replica_infos: List['replica_managers.ReplicaInfo']
+    ) -> List[AutoscalerDecision]:
+        # Will also be called by SpotOnDemandFallbackRequestRateAutoscaler
+        return super().evaluate_scaling(replica_infos)
 
     def evaluate_scaling(
         self,
@@ -513,26 +517,77 @@ class SpotOnDemandRequestRateAutoscaler(
                 lambda info: info.is_launched and info.version == self.
                 latest_version, replica_infos))
 
-        num_launched_spot, num_ready_spot = 0, 0
+        num_launched_on_demand, num_ready_on_demand = 0, 0
+        for info in provisioning_and_launched_new_replicas:
+            if not info.is_spot:
+                if info.status == serve_state.ReplicaStatus.READY:
+                    num_ready_on_demand += 1
+                num_launched_on_demand += 1
+        logger.info(
+            f'Number of alive on-demand instances: {num_launched_on_demand}, '
+            f'Number of ready on-demand instances: {num_ready_on_demand}')
+
+        # Obtain scaling options for spot_instances (SpotRequestRateAutoscaler)
+        scaling_options: List[AutoscalerDecision] = self.evaluate_spot_scaling(
+            replica_infos)
+
+        # Decide how many on-demand instances to launch.
+        if self.extra_on_demand_replicas > num_launched_on_demand:
+            for _ in range(self.extra_on_demand_replicas -
+                           num_launched_on_demand):
+                scaling_options.append(
+                    AutoscalerDecision(
+                        AutoscalerDecisionOperator.SCALE_UP,
+                        target=self._get_on_demand_resources_override_dict()))
+        elif num_launched_on_demand > self.extra_on_demand_replicas:
+            for replica_id in (
+                    RequestRateAutoscaler.get_replica_ids_to_scale_down(
+                        num_launched_on_demand - self.extra_on_demand_replicas,
+                        list(
+                            filter(lambda info: not info.is_spot,
+                                   provisioning_and_launched_new_replicas)))):
+                scaling_options.append(
+                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                       target=replica_id))
+
+        return scaling_options
+
+
+class SpotOnDemandFallbackRequestRateAutoscaler(
+        SpotOnDemandRequestRateAutoscaler,
+        name='SPOT_ON_DEMAND_FALLBACK_REQUEST_RATE_AUTOSCALER',
+        default=False):
+    """SpotOnDemandFallbackRequestRateAutoscaler: Use spot/on-demand mixture
+    to autoscale based on request rate. Use SpotHedge policy for fallback
+    """
+
+    def evaluate_scaling(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+
+        provisioning_and_launched_new_replicas = list(
+            filter(
+                lambda info: info.is_launched and info.version == self.
+                latest_version, replica_infos))
+
+        num_ready_spot = 0
         num_launched_on_demand, num_ready_on_demand = 0, 0
         for info in provisioning_and_launched_new_replicas:
             if info.is_spot:
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_spot += 1
-                num_launched_spot += 1
             else:
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_on_demand += 1
                 num_launched_on_demand += 1
         logger.info(
-            f'Number of alive spot instances: {num_launched_spot}, '
-            f'Number of ready spot instances: {num_ready_spot}, '
             f'Number of alive on-demand instances: {num_launched_on_demand}, '
             f'Number of ready on-demand instances: {num_ready_on_demand}')
 
         # Obtain scaling options for spot_instances (SpotRequestRateAutoscaler)
-        scaling_options: List[AutoscalerDecision] = super().evaluate_scaling(
-            replica_infos)
+        scaling_options: List[AutoscalerDecision] = super(
+        ).evaluate_spot_scaling(replica_infos)
 
         # Decide how many on-demand instances to launch.
         num_to_provision = self.target_num_replicas + self.num_overprovision

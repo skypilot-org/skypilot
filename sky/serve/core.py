@@ -55,6 +55,10 @@ def _serve_check_service(task: 'sky.Task'):
         if resource.use_spot_specified and resource.use_spot:
             use_spot = True
             break
+        if resource.spot_recovery is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('spot_recovery is disabled for SkyServe.'
+                                 'Please specify `spot_policy` instead.')
 
     if task.service.spot_placer is not None:
         if use_spot:
