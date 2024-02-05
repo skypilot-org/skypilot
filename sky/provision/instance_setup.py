@@ -411,7 +411,8 @@ def _max_workers_for_file_mounts(common_file_mounts: Dict[str, str]) -> int:
 
     max_workers = (fd_limit - fd_reserve) // fd_per_rsync
     # At least 1 worker, and avoid too many workers overloading the system.
-    max_workers = min(max(max_workers, 1), subprocess_utils.get_parallel_threads())
+    max_workers = min(max(max_workers, 1),
+                      subprocess_utils.get_parallel_threads())
     logger.debug(f'Using {max_workers} workers for file mounts.')
     return max_workers
 
