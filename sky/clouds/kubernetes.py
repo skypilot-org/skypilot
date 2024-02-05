@@ -357,17 +357,6 @@ class Kubernetes(clouds.Cloud):
                              ' Cluster used is determined by the kubeconfig.')
         return region, zone
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        try:
-            # Check if accelerator is available by checking node labels
-            _, _ = kubernetes_utils.get_gpu_label_key_value(accelerator)
-            return True
-        except exceptions.ResourcesUnavailableError:
-            return False
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

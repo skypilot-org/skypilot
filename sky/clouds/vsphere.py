@@ -318,13 +318,3 @@ class Vsphere(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds=_CLOUD_VSPHERE)
-
-    def accelerator_in_region_or_zone(
-        self,
-        accelerator: str,
-        acc_count: int,
-        region: Optional[str] = None,
-        zone: Optional[str] = None,
-    ) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, _CLOUD_VSPHERE)

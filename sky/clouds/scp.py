@@ -343,13 +343,6 @@ class SCP(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         return service_catalog.validate_region_zone(region, zone, clouds='scp')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'scp')
 
     @staticmethod
     def _is_disk_size_allowed(resources):

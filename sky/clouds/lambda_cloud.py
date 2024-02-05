@@ -265,13 +265,6 @@ class Lambda(clouds.Cloud):
                                                     zone,
                                                     clouds='lambda')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'lambda')
 
     @classmethod
     def regions(cls) -> List['clouds.Region']:
