@@ -38,7 +38,6 @@ from sky import skypilot_config
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.clouds import cloud_registry
-from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants

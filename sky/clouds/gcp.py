@@ -13,7 +13,6 @@ import colorama
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
