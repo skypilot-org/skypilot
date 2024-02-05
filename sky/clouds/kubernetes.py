@@ -5,7 +5,6 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
@@ -356,7 +355,6 @@ class Kubernetes(clouds.Cloud):
             raise ValueError('Kubernetes support does not support setting zone.'
                              ' Cluster used is determined by the kubeconfig.')
         return region, zone
-
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

@@ -127,8 +127,6 @@ def validate_region_zone(
                                zone_name)
 
 
-
-
 def regions(clouds: CloudFilter = None) -> 'List[cloud.Region]':
     """Returns the list of regions in a Cloud's catalog.
     Each Region object contains a list of Zones, if available.

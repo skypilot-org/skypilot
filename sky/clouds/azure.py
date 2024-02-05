@@ -438,7 +438,6 @@ class Azure(clouds.Cloud):
         return service_catalog.instance_type_exists(instance_type,
                                                     clouds='azure')
 
-
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def get_current_user_identity(cls) -> Optional[List[str]]:

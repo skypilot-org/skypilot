@@ -314,8 +314,6 @@ def validate_region_zone(
     return common.validate_region_zone_impl('gcp', _df, region, zone)
 
 
-
-
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]

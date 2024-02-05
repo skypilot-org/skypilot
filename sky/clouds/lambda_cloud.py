@@ -265,7 +265,6 @@ class Lambda(clouds.Cloud):
                                                     zone,
                                                     clouds='lambda')
 
-
     @classmethod
     def regions(cls) -> List['clouds.Region']:
         return service_catalog.regions(clouds='lambda')

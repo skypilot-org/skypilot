@@ -460,7 +460,6 @@ class Cloud:
                                                     zone,
                                                     clouds=self._REPR.lower())
 
-
     def need_cleanup_after_preemption(
             self, resource: 'resources_lib.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption.

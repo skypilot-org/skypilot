@@ -47,7 +47,6 @@ def validate_region_zone(
                                             zone)
 
 
-
 def get_hourly_cost(
     instance_type: str,
     use_spot: bool = False,

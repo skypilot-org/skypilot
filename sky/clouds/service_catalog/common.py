@@ -558,7 +558,6 @@ def get_region_zones(df: pd.DataFrame,
     return regions
 
 
-
 # Images
 def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
                                region: Optional[str]) -> Optional[str]:

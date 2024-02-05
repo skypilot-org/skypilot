@@ -29,8 +29,6 @@ def validate_region_zone(
     return common.validate_region_zone_impl('runpod', _df, region, zone)
 
 
-
-
 def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
