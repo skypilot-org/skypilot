@@ -69,8 +69,8 @@ def launch_cluster(task_yaml_path: str,
     """
     try:
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
+        resource_config = config.get('resources', {})
         if resources_override is not None:
-            resource_config = config.get('resources', {})
             # SkyServe does not support ordered resources.
             # Remove resources_override fields from 'any_of'
             if 'any_of' in resource_config:

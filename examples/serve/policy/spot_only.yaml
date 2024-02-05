@@ -1,4 +1,4 @@
-# SkyServe YAML to launch a service with spot instances
+# SkyServe YAML to launch a service with only spot instances
 
 service:
   readiness_probe:
