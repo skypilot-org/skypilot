@@ -178,8 +178,10 @@ class Vsphere(clouds.Cloud):
         cluster_name_on_cloud: str,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
+        dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         # TODO get image id here.
+        del cluster_name_on_cloud, dryrun  # unused
         assert zones is not None, (region, zones)
         zone_names = [zone.name for zone in zones]
         r = resources
