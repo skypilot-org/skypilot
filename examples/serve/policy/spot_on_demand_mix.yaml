@@ -1,5 +1,5 @@
 # SkyServe YAML to launch a service with mixed spot and on-demand instances.
-# The policy SpotOnDemandMix will maintain `extra_on_demand_replicas` number of on-demand instances, in addition to spot instances that autoscale from 1 to 3.
+# The policy SpotOnDemandMix will maintain `extra_on_demand_replicas` number of on-demand instances, in addition to spot instances.
 
 service:
   readiness_probe:
