@@ -257,7 +257,6 @@ class Azure(clouds.Cloud):
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del dryrun  # unused
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
@@ -327,7 +326,7 @@ class Azure(clouds.Cloud):
             **image_config,
             'disk_tier': Azure._get_disk_type(_failover_disk_tier()),
             'cloud_init_setup_commands': cloud_init_setup_commands,
-            'azure_subscription_id': self.get_project_id(),
+            'azure_subscription_id': self.get_project_id(dryrun),
             'resource_group': f'{cluster_name_on_cloud}-{region_name}',
         }
 
