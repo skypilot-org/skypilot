@@ -452,9 +452,9 @@ def list_accelerators(
     # have changed.
     for acc_name, acc_infos in new_infos.items():
         acc_infos.sort(
-            key=lambda info: (info.accelerator_count, info.instance_type, (info.
-                              cpu_count if not pd.isna(info.cpu_count) else 0),
-                              info.price, info.spot_price, info.region))
+            key=lambda info: (info.accelerator_count, info.instance_type, (
+                info.cpu_count if not pd.isna(info.cpu_count) else 0), info.
+                              price, info.spot_price, info.region))
         if not all_regions:
             # Only keep the cheapest instance type across all regions.
             new_acc_infos = []
