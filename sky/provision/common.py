@@ -201,7 +201,7 @@ class Endpoint:
     pass
 
     @abc.abstractmethod
-    def url(self, ip: str):
+    def url(self, override_ip: Optional[str] = None) -> str:
         raise NotImplementedError
 
 
@@ -211,30 +211,29 @@ class SocketEndpoint(Endpoint):
     port: Optional[int]
     host: str = ''
 
-    def url(self, ip: str):
-        if not self.host:
-            self.host = ip
-        return f'{self.host}{":" + str(self.port) if self.port else ""}'
+    def url(self, override_ip: Optional[str] = None) -> str:
+        host = override_ip if override_ip else self.host
+        return f'{host}{":" + str(self.port) if self.port else ""}'
 
 
 @dataclasses.dataclass
 class HTTPEndpoint(SocketEndpoint):
-    """HTTP endpoint accesible via a url."""
+    """HTTP endpoint accessible via a url."""
     path: str = ''
 
-    def url(self, ip: str):
-        del ip  # Unused.
-        return f'http://{os.path.join(super().url(self.host), self.path)}'
+    def url(self, override_ip: Optional[str] = None) -> str:
+        host = override_ip if override_ip else self.host
+        return f'http://{os.path.join(super().url(host), self.path)}'
 
 
 @dataclasses.dataclass
 class HTTPSEndpoint(SocketEndpoint):
-    """HTTPS endpoint accesible via a url."""
+    """HTTPS endpoint accessible via a url."""
     path: str = ''
 
-    def url(self, ip: str):
-        del ip  # Unused.
-        return f'https://{os.path.join(super().url(self.host), self.path)}'
+    def url(self, override_ip: Optional[str] = None) -> str:
+        host = override_ip if override_ip else self.host
+        return f'https://{os.path.join(super().url(host), self.path)}'
 
 
 def query_ports_passthrough(
@@ -246,9 +245,10 @@ def query_ports_passthrough(
 
     Returns a list of socket endpoint with empty host and the input ports."""
     del cluster_name_on_cloud, provider_config  # Unused.
+    handle = cluster_record['handle']
+    head_ip = handle.external_ips()[0]
     ports = list(port_ranges_to_set(ports))
     result: Dict[int, List[Endpoint]] = {}
     for port in ports:
-        result[port] = [SocketEndpoint(port=port)]
-
+        result[port] = [SocketEndpoint(port=port, host=head_ip)]
     return result

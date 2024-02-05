@@ -1991,69 +1991,19 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
             head_ip = handle.external_ips()[0]
             if show_endpoints:
-                launched_resources = handle.launched_resources
-                cloud = launched_resources.cloud
-                try:
-                    cloud.check_features_are_supported(
-                        launched_resources,
-                        {clouds.CloudImplementationFeatures.OPEN_PORTS})
-                except exceptions.NotSupportedError:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError('Querying endpoints is not supported '
-                                         f'for {cloud}.') from None
-
-                config = common_utils.read_yaml(handle.cluster_yaml)
-                port_details = provision_lib.query_ports(
-                    repr(cloud), handle.cluster_name_on_cloud,
-                    handle.launched_resources.ports, config['provider'])
-
-                if endpoint is not None:
-                    # If cluster had no ports to be exposed
-                    if str(endpoint) not in handle.launched_resources.ports:
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(f'Port {endpoint} is not exposed '
-                                             'on cluster '
-                                             f'{cluster_record["name"]!r}.')
-                    # If the user requested a specific port endpoint
-                    if endpoint not in port_details:
-                        error_msg = (f'Port {endpoint} not exposed yet. '
-                                     f'{_ENDPOINTS_RETRY_MESSAGE} ')
-                        if handle.launched_resources.cloud.is_same_cloud(
-                                clouds.Kubernetes()):
-                            # Add Kubernetes specific debugging info
-                            error_msg += (
-                                kubernetes_utils.get_endpoint_debug_message())
-                        with ux_utils.print_exception_no_traceback():
-                            raise RuntimeError(error_msg)
-                    click.echo(port_details[endpoint][0].url(ip=head_ip))
-                    return
-
-                if not port_details:
-                    # If cluster had no ports to be exposed
-                    if handle.launched_resources.ports is None:
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError('Cluster does not have any ports '
-                                             'to be exposed.')
-                    # Else wait for the ports to be exposed
-                    else:
-                        error_msg = (f'No endpoints exposed yet. '
-                                     f'{_ENDPOINTS_RETRY_MESSAGE} ')
-                        if handle.launched_resources.cloud.is_same_cloud(
-                                clouds.Kubernetes()):
-                            # Add Kubernetes specific debugging info
-                            error_msg += \
-                                kubernetes_utils.get_endpoint_debug_message()
-                        with ux_utils.print_exception_no_traceback():
-                            raise RuntimeError(error_msg)
-
-                for port, urls in port_details.items():
-                    click.echo(
-                        f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
-                        f'{colorama.Style.RESET_ALL}: '
-                        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                        f'{urls[0].url(ip=head_ip)}{colorama.Style.RESET_ALL}')
+                query_endpoint = endpoint   # Either port number of none if endpoints is ued
+                cluster_endpoints = core.get_endpoints(cluster_record['name'],
+                                                       query_endpoint)
+                if query_endpoint:
+                    click.echo(cluster_endpoints[endpoint])
+                else:
+                    for port, port_endpoint in cluster_endpoints.items():
+                        click.echo(
+                            f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
+                            f'{colorama.Style.RESET_ALL}: '
+                            f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                            f'{port_endpoint}{colorama.Style.RESET_ALL}')
                 return
-
             click.echo(head_ip)
             return
         hints = []
