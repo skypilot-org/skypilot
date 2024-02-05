@@ -153,6 +153,10 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
 
+# The maximum number of retries for workdir / file mounts, to handle transient
+# network issues.
+MAX_DATA_TRANSFER_RETRY = 3
+
 
 def is_ip(s: str) -> bool:
     """Returns whether this string matches IP_ADDR_REGEX."""
@@ -1256,10 +1260,25 @@ def parallel_data_transfer_to_nodes(
 
     def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
         if cmd is not None:
-            rc, stdout, stderr = runner.run(cmd,
-                                            log_path=log_path,
-                                            stream_logs=stream_logs,
-                                            require_outputs=True)
+            retry_cnt = 0
+            backoff = common_utils.Backoff()
+            while True:
+                # Retry on connection error to handle network instability.
+                rc, stdout, stderr = runner.run(cmd,
+                                                log_path=log_path,
+                                                stream_logs=stream_logs,
+                                                require_outputs=True)
+                if rc == 255 and retry_cnt < MAX_DATA_TRANSFER_RETRY:
+                    retry_cnt += 1
+                    backoff_seconds = backoff.current_backoff()
+                    logger.warning(
+                        f'{action_message}: connection error on {runner.ip}. '
+                        f'Retrying in {backoff_seconds:.1f}s...\n'
+                        f'  Details: {stdout + stderr}')
+                    time.sleep(backoff_seconds)
+                    continue
+                break
+
             err_msg = ('Failed to run command before rsync '
                        f'{origin_source} -> {target}. '
                        'Ensure that the network is stable, then retry.')
@@ -1280,6 +1299,7 @@ def parallel_data_transfer_to_nodes(
                 up=True,
                 log_path=log_path,
                 stream_logs=stream_logs,
+                max_retry=MAX_DATA_TRANSFER_RETRY,
             )
 
     num_nodes = len(runners)

@@ -245,7 +245,7 @@ class StrategyExecutor:
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
-                raise_on_failure: bool = True) -> Optional[float]:
+                raise_on_max_retry_reached: bool = True) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the
@@ -253,12 +253,13 @@ class StrategyExecutor:
 
         Args:
             max_retry: The maximum number of retries. If None, retry forever.
-            raise_on_failure: Whether to raise an exception if the launch fails.
+            raise_on_max_retry_reached: Whether to raise an exception if the launch
+                fails after reaching the maximum number of retries. Note that if non-retryable errors happened (e.g., precheck errors), we directly raise rather than retry them.
 
         Returns:
             The job's submit timestamp, or None if failed to submit the job
             (either provisioning fails or any error happens in job submission)
-            and raise_on_failure is False.
+            and raise_on_max_retry_reached is False.
 
         Raises:
             non-exhaustive list of exceptions:
@@ -270,6 +271,13 @@ class StrategyExecutor:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
+            exceptions.FileMountSyncError: The will be raised when the
+                underlying `sky.launch` fails due to file mounts errors only.
+                Since we retry the file mounts in the `sky.launch`, this
+                exception will be raised only when the sources of the file
+                mounts do not exist.
+                (This is checked on initial launch but a cloud bucket source may
+                be changed on a job's recovery attempt.)
             exceptions.SpotJobReachedMaxRetryError: This will be raised when
                 all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -300,9 +308,7 @@ class StrategyExecutor:
                     exceptions.ResourcesMismatchError) as e:
                 logger.error('Failure happened before provisioning. '
                              f'{common_utils.format_exception(e)}')
-                if raise_on_failure:
-                    raise exceptions.ProvisionPrechecksError(reasons=[e])
-                return None
+                raise exceptions.ProvisionPrechecksError(reasons=[e])
             except exceptions.ResourcesUnavailableError as e:
                 # This is raised when the launch fails due to prechecks or
                 # after failing over through all the candidates.
@@ -326,15 +332,41 @@ class StrategyExecutor:
                     logger.error(
                         'Failure happened before provisioning. Failover '
                         f'reasons: {reasons_str}')
-                    if raise_on_failure:
-                        raise exceptions.ProvisionPrechecksError(
-                            reasons=reasons)
-                    return None
+                    raise exceptions.ProvisionPrechecksError(reasons=reasons)
                 logger.info('Failed to launch the spot cluster with error: '
-                            f'{common_utils.format_exception(e)})')
+                            f'{common_utils.format_exception(e)}')
+            except exceptions.FileMountSyncError as e:
+                # If file mounting fails, the failure can be due to:
+                # 1. Errors before the job submission, e.g., invalid file mounts
+                #   -- user changed the bucket content on the cloud manually
+                #   during the launch/recovery. We should not retry the launch,
+                #   as the error is not recoverable.
+                # 2. Preemption during file mounting. We should be able to
+                #   find the cluster not in UP status, and we can retry the
+                #   launch.
+                #
+                # Pull the actual cluster status from the cloud provider to
+                # determine whether the cluster is preempted.
+                time.sleep(5)
+                (cluster_status,
+                 _) = backend_utils.refresh_cluster_status_handle(
+                     self.cluster_name,
+                     force_refresh_statuses=set(status_lib.ClusterStatus))
+                if cluster_status == status_lib.ClusterStatus.UP:
+                    # Case 1: Errors before the job submission. We should fail
+                    # fast and not retry the launch.
+                    # Note: the underlying file mounts will retry for the
+                    # network glitches, so we do not need to retry here.
+                    logger.info('User file mounts failed. Not retrying.\n'
+                                '  Detailed exception: '
+                                f'{common_utils.format_exception(e)}')
+                    raise
+                # Case 2: The cluster is preempted during the launch, retry
+                # the launch.
+                logger.info(
+                    'The cluster is preempted during the launch (status:'
+                    f'{cluster_status}). Retrying.')
             except Exception as e:  # pylint: disable=broad-except
-                # If the launch fails, it will be recovered by the following
-                # code.
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
                 with ux_utils.enable_traceback():
@@ -356,7 +388,7 @@ class StrategyExecutor:
             terminate_cluster(self.cluster_name)
             if max_retry is not None and retry_cnt >= max_retry:
                 # Retry forever if max_retry is None.
-                if raise_on_failure:
+                if raise_on_max_retry_reached:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.SpotJobReachedMaxRetriesError(
                             'Resources unavailable: failed to launch the spot '
@@ -386,8 +418,9 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
-                raise_on_failure: bool = True) -> Optional[float]:
-        job_submitted_at = super()._launch(max_retry, raise_on_failure)
+                raise_on_max_retry_reached: bool = True) -> Optional[float]:
+        job_submitted_at = super()._launch(max_retry,
+                                           raise_on_max_retry_reached)
         if job_submitted_at is not None:
             # Only record the cloud/region if the launch is successful.
             handle = global_user_state.get_handle_from_cluster_name(
@@ -422,7 +455,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                     cloud=launched_cloud, region=launched_region, zone=None)
                 task.set_resources({new_resources})
                 # Not using self.launch to avoid the retry until up logic.
-                job_submitted_at = self._launch(raise_on_failure=False)
+                job_submitted_at = self._launch(
+                    raise_on_max_retry_reached=False)
                 # Restore the original dag, i.e. reset the region constraint.
                 task.set_resources(original_resources)
                 if job_submitted_at is not None:
@@ -438,7 +472,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                          'cloud/region.')
             # Not using self.launch to avoid the retry until up logic.
             job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
-                                            raise_on_failure=False)
+                                            raise_on_max_retry_reached=False)
             if job_submitted_at is None:
                 # Failed to launch the cluster.
                 if self.retry_until_up:
@@ -516,7 +550,8 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                                              region=launched_region)
                 }
                 # Not using self.launch to avoid the retry until up logic.
-                job_submitted_at = self._launch(raise_on_failure=False)
+                job_submitted_at = self._launch(
+                    raise_on_max_retry_reached=False)
                 task.blocked_resources = None
                 if job_submitted_at is not None:
                     return job_submitted_at
@@ -527,7 +562,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                          'cloud/region.')
             # Not using self.launch to avoid the retry until up logic.
             job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
-                                            raise_on_failure=False)
+                                            raise_on_max_retry_reached=False)
             if job_submitted_at is None:
                 # Failed to launch the cluster.
                 if self.retry_until_up:
