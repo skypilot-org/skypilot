@@ -19,10 +19,11 @@ import filelock
 import psutil
 import requests
 
-from sky import backends, core
+from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import status_lib
+from sky.backends import backend_utils
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
@@ -678,10 +679,10 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     if load_balancer_port is None:
         return '-'
     try:
-        endpoint = core.get_endpoints(handle, load_balancer_port)
+        endpoint = backend_utils.get_endpoints(handle.cluster_name, load_balancer_port)
     except RuntimeError:
         return '-'
-    return endpoint.url()
+    return endpoint
 
 
 def format_service_table(service_records: List[Dict[str, Any]],

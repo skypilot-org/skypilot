@@ -1015,7 +1015,7 @@ def get_endpoints(cluster: str, endpoint: Optional[int]) -> \
         cluster:
         endpoint:
 
-    Returns: Endpoint URL st if endpoint is not None, else a dictionary of all
+    Returns: Endpoint URL if endpoint is not None, else a dictionary of all
 
     Raises:
         ValueError: if the cluster is not UP or the endpoint is not exposed.

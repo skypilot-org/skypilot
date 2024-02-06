@@ -370,7 +370,7 @@ class ReplicaInfo:
         handle = self.handle()
         if handle is None:
             return None
-        endpoints = core.get_endpoints(handle.cluster_name, self.replica_port)
+        endpoints = backend_utils.get_endpoints(handle.cluster_name, self.replica_port)
         # TODO(romilb): Fix this type casting mess before merging.
         return endpoints.get(int(self.replica_port), None)
 
