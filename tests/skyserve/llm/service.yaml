@@ -1,6 +1,9 @@
 service:
-  readiness_probe: /v1/models
+  readiness_probe: /${API_VERSION}/models
   replicas: 1
+
+envs:
+  API_VERSION: v1
 
 resources:
   ports: 8087
