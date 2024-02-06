@@ -370,9 +370,11 @@ class ReplicaInfo:
         handle = self.handle()
         if handle is None:
             return None
-        endpoints = backend_utils.get_endpoints(handle.cluster_name, self.replica_port)
-        # TODO(romilb): Fix this type casting mess before merging.
-        return endpoints.get(int(self.replica_port), None)
+        try:
+            endpoint = backend_utils.get_endpoints(handle.cluster_name, self.replica_port)
+            return endpoint
+        except RuntimeError:
+            return None
 
     @property
     def status(self) -> serve_state.ReplicaStatus:
@@ -390,6 +392,7 @@ class ReplicaInfo:
             'name': self.cluster_name,
             'status': self.status,
             'version': self.version,
+            'endpoint': self.url,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
         }
@@ -415,7 +418,15 @@ class ReplicaInfo:
         try:
             msg = ''
             # TODO(tian): Support HTTPS in the future.
-            readiness_path = (f'http://{self.url}{readiness_path}')
+            url = self.url
+            if url is None:
+                logger.info(f'Error when probing {replica_identity}: '
+                            'Cannot get the endpoint.')
+                return self, False, probe_time
+            elif not url.startswith('http://'):
+                url = f'http://{url}'
+            readiness_path = (f'{url}{readiness_path}')
+            logger.info(f'Probing {replica_identity} with {readiness_path}.')
             if post_data is not None:
                 msg += 'POST'
                 response = requests.post(
@@ -523,10 +534,16 @@ class SkyPilotReplicaManager(ReplicaManager):
         ready_replica_urls = []
         version2url = collections.defaultdict(list)
         for info in serve_state.get_replica_infos(self._service_name):
+            url = info.url
+            if not url:
+                # If URL is None, IP may not be ready. Skip for now.
+                continue
+            if not url.startswith('http://'):
+                url = f'http://{url}'
             if info.status == serve_state.ReplicaStatus.READY:
                 assert info.url is not None
-                version2url[info.version].append(info.url)
-                ready_replica_urls.append(info.url)
+                version2url[info.version].append(url)
+                ready_replica_urls.append(url)
         # Try all version in descending order. There is possibility that
         # user consecutively update the service several times, and some
         # version might not have any ready replicas.

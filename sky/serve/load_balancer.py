@@ -87,7 +87,7 @@ class SkyServeLoadBalancer:
                                         'Use "sky serve status [SERVICE_NAME]" '
                                         'to check the replica status.')
 
-        path = f'http://{ready_replica_url}{request.url.path}'
+        path = f'{ready_replica_url}{request.url.path}'
         logger.info(f'Redirecting request to {path}')
         return fastapi.responses.RedirectResponse(url=path)
 

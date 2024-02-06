@@ -1990,12 +1990,13 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
             head_ip = handle.external_ips()[0]
             if show_endpoints:
-                query_endpoint = endpoint   # Either port number of none if endpoints is ued
-                cluster_endpoints = core.get_endpoints(cluster_record['name'],
-                                                       query_endpoint)
-                if query_endpoint:
-                    click.echo(cluster_endpoints[endpoint])
+                if endpoint:
+                    cluster_endpoint = backend_utils.get_endpoints(cluster_record['name'],
+                                                           endpoint)
+                    click.echo(cluster_endpoint)
                 else:
+                    cluster_endpoints = backend_utils.get_endpoints(
+                        cluster_record['name'])
                     for port, port_endpoint in cluster_endpoints.items():
                         click.echo(
                             f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'

@@ -744,7 +744,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         return 'No existing replicas.'
 
     replica_columns = [
-        'SERVICE_NAME', 'ID', 'VERSION', 'IP', 'LAUNCHED', 'RESOURCES',
+        'SERVICE_NAME', 'ID', 'VERSION', 'ENDPOINT', 'LAUNCHED', 'RESOURCES',
         'STATUS', 'REGION'
     ]
     if show_all:
@@ -758,10 +758,11 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         replica_records = replica_records[:_REPLICA_TRUNC_NUM]
 
     for record in replica_records:
+        endpoint = record.get('endpoint', None)
         service_name = record['service_name']
         replica_id = record['replica_id']
         version = (record['version'] if 'version' in record else '-')
-        replica_ip = '-'
+        replica_ip = endpoint if endpoint else '-'
         launched_at = log_utils.readable_time_duration(record['launched_at'])
         resources_str = '-'
         replica_status = record['status']
@@ -771,8 +772,6 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
 
         replica_handle: 'backends.CloudVmRayResourceHandle' = record['handle']
         if replica_handle is not None:
-            if replica_handle.head_ip is not None:
-                replica_ip = replica_handle.head_ip
             resources_str = resources_utils.get_readable_resources_repr(
                 replica_handle, simplify=not show_all)
             if replica_handle.launched_resources.region is not None:
