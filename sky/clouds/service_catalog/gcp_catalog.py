@@ -461,8 +461,7 @@ def list_accelerators(
             cur_key = None
 
             def _get_key(info):
-                return (info.accelerator_name, info.accelerator_count,
-                        info.instance_type,
+                return (info.accelerator_count, info.instance_type,
                         (info.cpu_count if not pd.isna(info.cpu_count) else 0))
 
             for info in acc_infos:
