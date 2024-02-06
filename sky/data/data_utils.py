@@ -142,7 +142,7 @@ def verify_gcs_bucket(name: str) -> bool:
         return False
 
 
-def create_az_client(type: str, storage_account_name: str = None,
+def create_az_client(client_type: str, storage_account_name: str = None,
                      container_name: str = None) -> Client:
     """Helper method that connects to AZ client for diverse Resources.
 
@@ -154,13 +154,16 @@ def create_az_client(type: str, storage_account_name: str = None,
     Returns:
       Client object facing AZ Resource of the 'type'.
     """
+    if client_type == 'container':
+        assert storage_account_name is not None
+        assert container_name is not None
     subscription_id = azure.get_subscription_id()
-    return azure.get_client(type, subscription_id,
+    return azure.get_client(client_type, subscription_id,
                             storage_account_name,
                             container_name)
 
 
-def verify_az_bucket(name: str) -> bool:
+def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
     """Helper method that checks if the AZ Container exists
 
     Args:
@@ -169,13 +172,16 @@ def verify_az_bucket(name: str) -> bool:
     Returns:
       boolean; shows either or not the container exists.
     """
+    storage_client = create_az_client('storage')
+    resource_group_name = get_az_resource_group(storage_account_name,
+                                                storage_client)
     try:
         # TODO(Doyoung): This may need an additional handling for public
         # container. Test it, and if it doesn't work, update.
         storage_client.blob_containers.get(
             resource_group_name,
             storage_account_name,
-            name
+            container_name
         )
         return True
     except azure.core_exception().ResourceNotFoundError as e:
@@ -199,8 +205,8 @@ def get_az_resource_group(storage_account_name: str,
     for account in storage_client.storage_accounts.list():
         if account.name == storage_account_name:
             # Extract the resource group name from the account ID
-            resource_group = account.id.split('/')[4]
-            return resource_group
+            resource_group_name = account.id.split('/')[4]
+            return resource_group_name
     return None
 
 
