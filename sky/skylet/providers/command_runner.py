@@ -127,6 +127,11 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 docker_login_config.password,
                 docker_login_config.server,
             ))
+            # We automatically add the server prefix to the image name if
+            # the user did not add it.
+            server_prefix = f'{docker_login_config.server}/'
+            if not specific_image.startswith(server_prefix):
+                specific_image = f'{server_prefix}{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +

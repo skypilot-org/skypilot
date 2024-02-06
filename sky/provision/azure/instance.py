@@ -1,11 +1,18 @@
 """Azure instance provisioning."""
+import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import azure
+from sky.provision import common
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# Suppress noisy logs from Azure SDK. Reference:
+# https://github.com/Azure/azure-sdk-for-python/issues/9422
+azure_logger = logging.getLogger('azure')
+azure_logger.setLevel(logging.WARNING)
 
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
@@ -80,9 +87,20 @@ def open_ports(
 
 def cleanup_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
     # Azure will automatically cleanup network security groups when cleanup
     # resource group. So we don't need to do anything here.
-    del cluster_name_on_cloud, provider_config  # Unused.
+    del cluster_name_on_cloud, ports, provider_config  # Unused.
+
+
+def query_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[common.Endpoint]]:
+    """See sky/provision/__init__.py"""
+    return common.query_ports_passthrough(cluster_name_on_cloud, ports,
+                                          provider_config)

@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.clouds import service_catalog
 from sky.clouds.utils import scp_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -44,9 +45,11 @@ class SCP(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE,
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
-            (f'Migrating disk is not supported in {_REPR}.'),
+            (f'Migrating disk is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            (f'Specifying image ID is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            (f'Docker image is not supported in {_REPR}. '
+            (f'Docker image is currently not supported on {_REPR}. '
              'You can try running docker command inside the '
              '`run` section in task.yaml.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
@@ -54,15 +57,21 @@ class SCP(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tiers are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
-            (f'Opening ports is not supported in {_REPR}.'),
+            (f'Opening ports is currently not supported on {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        features = cls._CLOUD_UNSUPPORTED_FEATURES
+        if resources.use_spot:
+            features[clouds.CloudImplementationFeatures.STOP] = (
+                'Stopping spot instances is currently not supported on'
+                f' {cls._REPR}.')
+        return features
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -144,7 +153,8 @@ class SCP(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -302,7 +312,8 @@ class SCP(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
             scp_utils.SCPClient().list_instances()
-        except (AssertionError, KeyError, scp_utils.SCPClientError):
+        except (AssertionError, KeyError, scp_utils.SCPClientError,
+                scp_utils.SCPCreationFailError):
             return False, (
                 'Failed to access SCP with credentials. '
                 'To configure credentials, see: '

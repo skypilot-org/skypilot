@@ -153,9 +153,8 @@ Available fields and semantics:
     # zero cost) if the requested resources matches the reservation.
     # Ref: https://cloud.google.com/compute/docs/instances/reservations-overview#consumption-type
     specific_reservations:
-      # Only one element is allowed in this list, as GCP disallows multiple
-      # specific_reservations in a single request.
-      - projects/my-project/reservations/my-reservation
+      - projects/my-project/reservations/my-reservation1
+      - projects/my-project/reservations/my-reservation2
 
   # Advanced Kubernetes configurations (optional).
   kubernetes:
@@ -173,6 +172,25 @@ Available fields and semantics:
     # require opening ports the cluster nodes and is more secure. 'portforward'
     # is used as default if 'networking' is not specified.
     networking: portforward
+
+    # Additional fields to override the pod fields used by SkyPilot (optional)
+    #
+    # Any key:value pairs added here would get added to the pod spec used to
+    # create SkyPilot pods. The schema follows the same schema for a Pod object
+    # in the Kubernetes API:
+    # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core
+    #
+    # Example use cases: adding custom labels to SkyPilot pods, specifying
+    # imagePullSecrets for pulling images from private registries, overriding
+    # the default runtimeClassName etc.
+    pod_config:
+      metadata:
+        labels:
+          my-label: my-value
+      spec:
+        runtimeClassName: nvidia
+        imagePullSecrets:
+          - name: my-secret
 
   # Advanced OCI configurations (optional).
   oci:

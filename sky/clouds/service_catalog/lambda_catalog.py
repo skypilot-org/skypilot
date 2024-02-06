@@ -7,6 +7,7 @@ import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky.clouds.service_catalog import common
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -61,9 +62,10 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
@@ -126,13 +128,14 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 
 def list_accelerators(
-        gpus_only: bool,
-        name_filter: Optional[str],
-        region_filter: Optional[str],
-        quantity_filter: Optional[int],
-        case_sensitive: bool = True
+    gpus_only: bool,
+    name_filter: Optional[str],
+    region_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Lambda offering GPUs."""
     return common.list_accelerators_impl('Lambda', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
-                                         case_sensitive)
+                                         case_sensitive, all_regions)

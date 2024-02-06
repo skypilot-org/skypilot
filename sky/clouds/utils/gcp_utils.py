@@ -1,21 +1,59 @@
 """Utility functions for GCP.
 
-The functions that are used to access GCP APIs. We have the reservation-related
-functions here, so that the cache of the reservations can be shared across
-multiple clouds.GCP() objects.
+The functions that are used to access GCP APIs and TPU VM. We have the
+reservation-related functions here, so that the cache of the reservations can be
+shared across multiple clouds.GCP() objects.
 """
 
 import dataclasses
 import json
 import time
-from typing import List, Set
+import typing
+from typing import List, Optional, Set
 
 import cachetools
 
 from sky import sky_logging
+from sky import skypilot_config
+from sky.provision.gcp import constants
 from sky.utils import subprocess_utils
 
+if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
+
 logger = sky_logging.init_logger(__name__)
+
+
+def is_tpu(resources: Optional['resources_lib.Resources']) -> bool:
+    if resources is None or resources.accelerators is None:
+        return False
+    acc, _ = list(resources.accelerators.items())[0]
+    return acc.startswith('tpu')
+
+
+def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
+    if not is_tpu(resources):
+        return False
+    assert resources is not None
+    if resources.accelerator_args is None:
+        return True
+    return resources.accelerator_args.get('tpu_vm', True)
+
+
+def is_tpu_vm_pod(resources: Optional['resources_lib.Resources']) -> bool:
+    if not is_tpu_vm(resources):
+        return False
+    assert resources is not None
+    acc, _ = list(resources.accelerators.items())[0]
+    return not acc.endswith('-8')
+
+
+def get_num_tpu_devices(resources: Optional['resources_lib.Resources']) -> int:
+    if resources is None or not is_tpu(resources):
+        raise ValueError('resources must be a valid TPU resource.')
+    acc, _ = list(resources.accelerators.items())[0]
+    num_tpu_devices = int(int(acc.split('-')[2]) / 8)
+    return num_tpu_devices
 
 
 @dataclasses.dataclass
@@ -124,3 +162,12 @@ def _list_reservations_for_instance_type(
         stream_logs=True,
     )
     return [GCPReservation.from_dict(r) for r in json.loads(stdout)]
+
+
+def get_minimal_permissions() -> List[str]:
+    if skypilot_config.get_nested(('gcp', 'vpc_name'), None) is not None:
+        return constants.VM_MINIMAL_PERMISSIONS
+    # If custom VPC is not specified, permissions to modify network are
+    # required to ensure SkyPilot to be able to setup the network, and
+    # allow opening ports (e.g., via `resources.ports`).
+    return constants.VM_MINIMAL_PERMISSIONS + constants.FIREWALL_PERMISSIONS

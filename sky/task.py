@@ -149,11 +149,6 @@ def _with_docker_login_config(
         # Already checked in extract_docker_image
         assert len(resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
-        # We automatically add the server prefix to the image name if
-        # the user did not add it.
-        server_prefix = f'{docker_login_config.server}/'
-        if not docker_image.startswith(server_prefix):
-            docker_image = f'{server_prefix}{docker_image}'
         return resources.copy(image_id={region: 'docker:' + docker_image},
                               _docker_login_config=docker_login_config)
 

@@ -331,14 +331,27 @@ def get_service_schema():
                     'max_replicas': {
                         'type': 'integer',
                     },
+                    'target_qps_per_replica': {
+                        'type': 'number',
+                    },
+                    'upscale_delay_seconds': {
+                        'type': 'number',
+                    },
+                    'downscale_delay_seconds': {
+                        'type': 'number',
+                    },
+                    # TODO(MaoZiming): Fields `qps_upper_threshold`,
+                    # `qps_lower_threshold` and `auto_restart` are deprecated.
+                    # Temporarily keep these fields for backward compatibility.
+                    # Remove after 2 minor release, i.e., 0.6.0.
+                    'auto_restart': {
+                        'type': 'boolean',
+                    },
                     'qps_upper_threshold': {
                         'type': 'number',
                     },
                     'qps_lower_threshold': {
                         'type': 'number',
-                    },
-                    'auto_restart': {
-                        'type': 'boolean',
                     },
                 }
             },
@@ -555,8 +568,6 @@ def get_config_schema():
                         'items': {
                             'type': 'string',
                         },
-                        'minItems': 1,
-                        'maxItems': 1,
                     },
                     **_NETWORK_CONFIG_SCHEMA,
                 }
@@ -573,6 +584,19 @@ def get_config_schema():
                             kubernetes_enums.KubernetesNetworkingMode
                         ]
                     },
+                    'ports': {
+                        'type': 'string',
+                        'case_insensitive_enum': [
+                            type.value
+                            for type in kubernetes_enums.KubernetesPortMode
+                        ]
+                    },
+                    'pod_config': {
+                        'type': 'object',
+                        'required': [],
+                        # Allow arbitrary keys since validating pod spec is hard
+                        'additionalProperties': True,
+                    }
                 }
             },
             'oci': {

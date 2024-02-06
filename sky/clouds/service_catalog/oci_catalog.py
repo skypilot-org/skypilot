@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Tuple
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.service_catalog import common
 from sky.clouds.utils import oci_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -105,9 +106,10 @@ def get_hourly_cost(instance_type: str,
                                        region, zone)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None:
         cpus = f'{oci_utils.oci_config.DEFAULT_NUM_VCPUS}+'
@@ -167,16 +169,18 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 
 def list_accelerators(
-        gpus_only: bool,
-        name_filter: Optional[str],
-        region_filter: Optional[str],
-        quantity_filter: Optional[int],
-        case_sensitive: bool = True
+    gpus_only: bool,
+    name_filter: Optional[str],
+    region_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in OCI offering GPUs."""
     return common.list_accelerators_impl('OCI', _get_df(), gpus_only,
                                          name_filter, region_filter,
-                                         quantity_filter, case_sensitive)
+                                         quantity_filter, case_sensitive,
+                                         all_regions)
 
 
 def get_vcpus_mem_from_instance_type(

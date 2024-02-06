@@ -135,9 +135,7 @@ install_requires = [
     'cachetools',
     # NOTE: ray requires click>=7.0.
     'click >= 7.0',
-    # NOTE: required by awscli. To avoid ray automatically installing
-    # the latest version.
-    'colorama < 0.4.5',
+    'colorama',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
     # the version of the underlying markupsafe package. See:
@@ -207,7 +205,11 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
+    # NOTE: required by awscli. To avoid ray automatically installing
+    # the latest version.
+    'colorama < 0.4.5',
 ]
+
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
@@ -222,8 +224,7 @@ extras_require: Dict[str, List[str]] = {
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances.
     # Reference: https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
-    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'] +
-           local_ray,
+    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
     ] + local_ray,
@@ -232,8 +233,18 @@ extras_require: Dict[str, List[str]] = {
     'cloudflare': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
-    'kubernetes': ['kubernetes'] + local_ray,
+    'kubernetes': ['kubernetes>=20.0.0'],
     'remote': remote,
+    'runpod': ['runpod>=1.5.1'],
+    'vsphere': [
+        'pyvmomi==8.0.1.0.2',
+        # vsphere-automation-sdk is also required, but it does not have
+        # pypi release, which cause failure of our pypi release.
+        # https://peps.python.org/pep-0440/#direct-references
+        # We have the instruction for its installation in our
+        # docs instead.
+        # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0'
+    ],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

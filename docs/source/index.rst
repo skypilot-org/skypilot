@@ -1,11 +1,17 @@
 Welcome to SkyPilot!
 =========================
 
-.. figure:: ./images/skypilot-wide-light-1k.png
+.. image:: ./_static/SkyPilot_wide_light.svg
   :width: 60%
   :align: center
   :alt: SkyPilot
-  :class: no-scaled-link
+  :class: no-scaled-link, only-light
+
+.. image:: ./_static/SkyPilot_wide_dark.svg
+  :width: 60%
+  :align: center
+  :alt: SkyPilot
+  :class: no-scaled-link, only-dark
 
 .. raw:: html
 
@@ -41,17 +47,16 @@ SkyPilot **cuts your cloud costs**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported providers (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI, Cloudflare, any Kubernetes cluster):
+Current supported providers (AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, IBM, Samsung, Cloudflare, VMware vSphere, any Kubernetes cluster):
 
 .. raw:: html
 
    <p align="center">
    <picture>
-      <a href="https://skypilot.readthedocs.io/en/latest/getting-started/installation.html">
-      <img alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%></a>
+      <img class="only-light" alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%>
+      <img class="only-dark" alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png" width=80%>
    </picture>
    </p>
-
 
 More Information
 --------------------------
@@ -116,6 +121,8 @@ Documentation
 
    serving/sky-serve
    serving/service-yaml-spec
+   serving/autoscaling
+   serving/update
 
 .. toctree::
    :maxdepth: 1
@@ -143,7 +150,7 @@ Documentation
    reference/faq
 
 .. toctree::
-   :maxdepth: 0
+   :maxdepth: 1
    :caption: Developer Guides
 
    developers/CONTRIBUTING

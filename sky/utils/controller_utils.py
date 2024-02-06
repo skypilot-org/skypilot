@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Optional
 
 import colorama
 
+from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
@@ -25,7 +27,6 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import clouds
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
 
@@ -151,9 +152,11 @@ def _get_cloud_dependencies_installation_commands(
         # dependencies for sky serve controller.
         commands.append('pip list | grep oci > /dev/null 2>&1 || '
                         'pip install oci > /dev/null 2>&1')
-    else:
-        # We do not install azure dependencies for spot controller since our
-        # subscription does not support spot instances.
+    # TODO(tian): Make dependency installation command a method of cloud
+    # class and get all installation command for enabled clouds.
+    if any(
+            cloud.is_same_cloud(clouds.Azure())
+            for cloud in global_user_state.get_enabled_clouds()):
         commands.append(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
@@ -253,7 +256,7 @@ def shared_controller_vars_to_fill(
 def get_controller_resources(
     controller_type: str,
     controller_resources_config: Dict[str, Any],
-) -> resources.Resources:
+) -> 'resources.Resources':
     """Read the skypilot config and setup the controller resources.
 
     Returns:
