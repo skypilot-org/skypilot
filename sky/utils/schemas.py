@@ -334,9 +334,6 @@ def get_service_schema():
                     'target_qps_per_replica': {
                         'type': 'number',
                     },
-                    'autoscaler': {
-                        'type': 'string',
-                    },
                     'spot_policy': {
                         'type': 'string',
                     },

@@ -41,7 +41,6 @@ class SkyServiceSpec:
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         spot_policy: Optional[str] = None,
-        autoscaler: Optional[str] = None,
         num_overprovision: Optional[int] = None,
         init_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
@@ -87,6 +86,7 @@ class SkyServiceSpec:
 
         # Only let spot_policy to set spot_placer.
         spot_placer = None
+        autoscaler = None
         if spot_policy is not None:
             # TODO(MaoZiming): do not hardcode the name
             if spot_policy in _policy_to_autoscaler_and_spot_placer:
@@ -188,9 +188,6 @@ class SkyServiceSpec:
                 'upscale_delay_seconds', None)
             service_config['downscale_delay_seconds'] = policy_section.get(
                 'downscale_delay_seconds', None)
-
-            service_config['autoscaler'] = policy_section.get(
-                'autoscaler', None)
             service_config['num_overprovision'] = policy_section.get(
                 'num_overprovision', None)
             service_config['init_replicas'] = policy_section.get(
@@ -245,7 +242,6 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
         add_if_not_none('replica_policy', 'spot_policy', self._spot_policy)
-        add_if_not_none('replica_policy', 'autoscaler', self._autoscaler)
         add_if_not_none('replica_policy', 'num_overprovision',
                         self._num_overprovision)
         add_if_not_none('replica_policy', 'init_replicas', self._init_replicas)
