@@ -26,6 +26,7 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -1038,7 +1039,8 @@ def get_endpoints(cluster: str, endpoint: Optional[int]) -> Dict[int, provision_
 
     if endpoint is not None:
         # If cluster had no ports to be exposed
-        if str(endpoint) not in handle.launched_resources.ports:
+        port_set = resources_utils.port_ranges_to_set(handle.launched_resources.ports)
+        if endpoint not in port_set:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Port {endpoint} is not exposed '
                                  'on cluster '
