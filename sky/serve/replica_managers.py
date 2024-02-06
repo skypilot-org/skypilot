@@ -16,7 +16,7 @@ import psutil
 import requests
 
 import sky
-from sky import backends
+from sky import backends, core
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -370,7 +370,9 @@ class ReplicaInfo:
         handle = self.handle()
         if handle is None:
             return None
-        return f'{handle.head_ip}:{self.replica_port}'
+        endpoints = core.get_endpoints(handle.cluster_name, self.replica_port)
+        # TODO(romilb): Fix this type casting mess before merging.
+        return endpoints.get(int(self.replica_port), None)
 
     @property
     def status(self) -> serve_state.ReplicaStatus:

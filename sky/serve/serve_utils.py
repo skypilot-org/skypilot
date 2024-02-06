@@ -19,7 +19,7 @@ import filelock
 import psutil
 import requests
 
-from sky import backends
+from sky import backends, core
 from sky import exceptions
 from sky import global_user_state
 from sky import status_lib
@@ -672,12 +672,16 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     handle = global_user_state.get_handle_from_cluster_name(
         SKY_SERVE_CONTROLLER_NAME)
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    if handle is None or handle.head_ip is None:
+    if handle is None:
         return '-'
     load_balancer_port = service_record['load_balancer_port']
     if load_balancer_port is None:
         return '-'
-    return f'{handle.head_ip}:{load_balancer_port}'
+    try:
+        endpoint = core.get_endpoints(handle, load_balancer_port)
+    except RuntimeError:
+        return '-'
+    return endpoint.url()
 
 
 def format_service_table(service_records: List[Dict[str, Any]],

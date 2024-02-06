@@ -1007,7 +1007,28 @@ def storage_delete(name: str) -> None:
 _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
 
-def get_endpoints(cluster: str, endpoint: Optional[int]) -> Dict[int, provision_common.Endpoint]:
+def get_endpoints(cluster: str, endpoint: Optional[int]) -> \
+        Union[str, Dict[int, provision_common.Endpoint]]:
+    """
+
+    Args:
+        cluster:
+        endpoint:
+
+    Returns: Endpoint URL st if endpoint is not None, else a dictionary of all
+
+    Raises:
+        ValueError: if the cluster is not UP or the endpoint is not exposed.
+        RuntimeError: if the cluster has no ports to be exposed or no endpoints
+            are exposed yet.
+    """
+    # Cast endpoint to int if it is not None
+    if endpoint is not None:
+        try:
+            endpoint = int(endpoint)
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid endpoint {endpoint!r}.') from None
     cluster_records = status(cluster_names=[cluster])
     #TODO(romilb): Add error message for > 1 cluster records here before merging.
     cluster_record = cluster_records[0]
@@ -1056,7 +1077,7 @@ def get_endpoints(cluster: str, endpoint: Optional[int]) -> Dict[int, provision_
                     kubernetes_utils.get_endpoint_debug_message())
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(error_msg)
-        return {endpoint: port_details[endpoint][0].url()}
+        return port_details[endpoint][0].url()
     else:
         if not port_details:
             # If cluster had no ports to be exposed
