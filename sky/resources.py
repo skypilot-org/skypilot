@@ -926,8 +926,7 @@ class Resources:
                 'docker_login_config': self._docker_login_config
             })
 
-    def get_reservations_available_resources(
-            self, specific_reservations: Set[str]) -> Dict[str, int]:
+    def get_reservations_available_resources(self) -> Dict[str, int]:
         """Returns the number of available reservation resources."""
         if self.use_spot:
             # GCP's & AWS's reservations do not support spot instances. We
