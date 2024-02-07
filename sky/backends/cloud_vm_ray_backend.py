@@ -267,6 +267,7 @@ class RayCodeGen:
             )
             def wait_or_fail(futures) -> List[int]:
                 \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
+                returncodes = []
                 # Wait for at leat 1 task to be ready.
                 ready, unready = ray.wait(futures)
                 while unready:
@@ -284,6 +285,7 @@ class RayCodeGen:
                             returncodes.extend(ray.get(unready))
                         break
                     ready, unready = ray.wait(unready)
+                return returncodes
             run_fn = None
             futures = []
             """),
