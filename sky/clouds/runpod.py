@@ -162,10 +162,13 @@ class RunPod(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del zones  # unused
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del zones, dryrun  # unused
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -270,11 +273,3 @@ class RunPod(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='runpod')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'runpod')

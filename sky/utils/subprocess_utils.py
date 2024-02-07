@@ -1,5 +1,6 @@
 """Utility functions for subprocesses."""
 from multiprocessing import pool
+import os
 import random
 import subprocess
 import time
@@ -41,6 +42,14 @@ def run_no_outputs(cmd, **kwargs):
                **kwargs)
 
 
+def get_parallel_threads() -> int:
+    """Returns the number of idle CPUs."""
+    cpu_count = os.cpu_count()
+    if cpu_count is None:
+        cpu_count = 1
+    return max(4, cpu_count - 1)
+
+
 def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
@@ -49,7 +58,7 @@ def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     as the arguments.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    with pool.ThreadPool() as p:
+    with pool.ThreadPool(processes=get_parallel_threads()) as p:
         # Run the function in parallel on the arguments, keeping the order.
         return list(p.imap(func, args))
 
