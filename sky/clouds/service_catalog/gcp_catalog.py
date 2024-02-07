@@ -425,7 +425,6 @@ def list_accelerators(
                                    region=x['Region'],
                                    zone=x['AvailabilityZone']),
             axis=1)
-        # InstanceType, AcceleratorName, AcceleratorCount, Region, Zone
         acc_host_df.dropna(subset=['InstanceType', 'Price'], inplace=True)
         # Combine the price of the host VM and the GPU.
         acc_host_df = pd.merge(
