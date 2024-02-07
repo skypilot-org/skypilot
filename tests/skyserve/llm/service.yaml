@@ -1,9 +1,15 @@
 service:
-  readiness_probe: /${API_VERSION}/models
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: How to print hello world?
   replicas: 1
 
 envs:
-  API_VERSION: v1
+  MODEL_NAME: lmsys/fastchat-t5-3b-v1.0
 
 resources:
   ports: 8087
@@ -30,7 +36,7 @@ run: |
   sleep 10
   echo 'Starting model worker...'
   python -u -m fastchat.serve.model_worker \
-            --model-path lmsys/fastchat-t5-3b-v1.0 2>&1 \
+            --model-path $MODEL_NAME 2>&1 \
             | tee model_worker.log &
 
   echo 'Waiting for model worker to start...'
