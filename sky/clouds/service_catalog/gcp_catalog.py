@@ -276,14 +276,6 @@ def get_instance_type_for_accelerator(
         df = _df[_df['InstanceType'].notna()]
         instance_types = _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_count]
         df = df[df['InstanceType'].isin(instance_types)]
-        # We should filter the region and zone here, as sometimes the instance
-        # type may not exist in the region or zone, though the accelerator
-        # exists, e.g. A100:16 exists in asia-northeast1, but a2-megagpu-16g
-        # does not exist in asia-northeast1.
-        if region is not None:
-            df = df[df['Region'] == region]
-        if zone is not None:
-            df = df[df['AvailabilityZone'] == zone]
 
         # Check the cpus and memory specified by the user.
         instance_type = common.get_instance_type_for_cpus_mem_impl(
@@ -319,14 +311,6 @@ def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     return common.validate_region_zone_impl('gcp', _df, region, zone)
-
-
-def accelerator_in_region_or_zone(acc_name: str,
-                                  acc_count: int,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
-                                                     region, zone)
 
 
 def get_region_zones_for_instance_type(instance_type: str,

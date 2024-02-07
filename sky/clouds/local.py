@@ -159,17 +159,6 @@ class Local(clouds.Cloud):
         )
         return [resources], []
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        # In the public cloud case, an accelerator may not be in a region/zone.
-        # in the local cloud case, however, the region/zone is defined to be the
-        # location of the local cluster. This means that the local cluster's
-        # accelerators are guaranteed to be found within the region.
-        return True
-
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None

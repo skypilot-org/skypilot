@@ -450,14 +450,6 @@ class OCI(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         return service_catalog.validate_region_zone(region, zone, clouds='oci')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'oci')
-
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         # We ignore checking the image size because most of situations the

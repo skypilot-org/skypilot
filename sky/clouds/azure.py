@@ -438,14 +438,6 @@ class Azure(clouds.Cloud):
         return service_catalog.instance_type_exists(instance_type,
                                                     clouds='azure')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'azure')
-
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def get_current_user_identity(cls) -> Optional[List[str]]:
