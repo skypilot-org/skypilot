@@ -429,9 +429,9 @@ def list_accelerators(
             # and zone.
             acc_host_df['InstanceType'] = acc_host_df.apply(
                 lambda x: _get_host_vm(x['AcceleratorName'],
-                                    x['AcceleratorCount'],
-                                    region=x['Region'],
-                                    zone=x['AvailabilityZone']),
+                                       x['AcceleratorCount'],
+                                       region=x['Region'],
+                                       zone=x['AvailabilityZone']),
                 axis=1)
             acc_host_df.dropna(subset=['InstanceType', 'Price'], inplace=True)
             # Combine the price of the host VM and the GPU.
@@ -452,7 +452,7 @@ def list_accelerators(
                 'vCPUs_host': 'vCPUs',
                 'MemoryGiB_host': 'MemoryGiB'
             },
-                            inplace=True)
+                               inplace=True)
         acc_host_df = pd.concat([acc_host_df, tpu_df])
     results = common.list_accelerators_impl('GCP', acc_host_df, gpus_only,
                                             name_filter, region_filter,
