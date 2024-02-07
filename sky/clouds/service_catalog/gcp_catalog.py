@@ -402,6 +402,7 @@ def list_accelerators(
         acc_host_df = _df[_df['AcceleratorName'].notna()]
         # Filter the acc_host_df first before fetching the host VM information.
         # This is to reduce the rows to be processed for optimization.
+        # TODO: keep it sync with `list_accelerators_impl`
         if gpus_only:
             acc_host_df = acc_host_df[~acc_host_df['GpuInfo'].isna()]
         if name_filter is not None:
