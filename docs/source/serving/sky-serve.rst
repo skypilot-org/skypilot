@@ -525,12 +525,12 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
 Speedup Setup in Model Serving
 ------------------------------
 
-When serving AI models, the setup process like dependencies installation takes a lot of time on the cold-start time. According to one experiment we found that, dependencies installation can take 45% of times (271s out of 608s) of the setup process. To speed up this process, you can use the following methods:
+When serving AI models, the setup process like dependencies installation and model weights downloading takes a lot of time on the cold-start time. According to one experiment we found that, dependencies installation can take 45% of times (271s out of 608s) of the setup process, and 16% for model weights downloading (98s out of 608s). To speed up this process, you can use the following methods:
 
-Use Machine image
-~~~~~~~~~~~~~~~~~
+Use a Custom Image for VMs
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can use a machine image that has the dependencies preinstalled (also probably model weights preloaded). This can be done by creating a VM, installing the dependencies, and then creating a machine image from the VM. Then, you can use the machine image to launch the VMs for serving:
+You can use a custom image that has the dependencies preinstalled (also probably model weights preloaded). This can be done by creating a VM, installing the dependencies, and then creating a custom image from the VM on the cloud console. Then, you can use the custom image to launch the VMs for serving:
 
 .. code-block:: yaml
   :emphasize-lines: 7-8
