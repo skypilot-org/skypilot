@@ -813,14 +813,6 @@ class GCP(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'gcp')
-
     def need_cleanup_after_preemption(self,
                                       resources: 'resources.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption."""

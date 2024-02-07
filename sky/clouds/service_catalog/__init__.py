@@ -127,18 +127,6 @@ def validate_region_zone(
                                zone_name)
 
 
-def accelerator_in_region_or_zone(
-    acc_name: str,
-    acc_count: int,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
-    clouds: CloudFilter = None,
-) -> bool:
-    """Returns True if the accelerator is in the region or zone."""
-    return _map_clouds_catalog(clouds, 'accelerator_in_region_or_zone',
-                               acc_name, acc_count, region, zone)
-
-
 def regions(clouds: CloudFilter = None) -> 'List[cloud.Region]':
     """Returns the list of regions in a Cloud's catalog.
     Each Region object contains a list of Zones, if available.

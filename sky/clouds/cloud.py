@@ -460,14 +460,6 @@ class Cloud:
                                                     zone,
                                                     clouds=self._REPR.lower())
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        """Returns whether the accelerator is valid in the region or zone."""
-        raise NotImplementedError
-
     def need_cleanup_after_preemption(
             self, resource: 'resources_lib.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption.

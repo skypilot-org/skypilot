@@ -736,14 +736,6 @@ class AWS(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'aws')
-
     @classmethod
     def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
         return 'standard' if disk_tier == resources_utils.DiskTier.LOW else 'gp3'
