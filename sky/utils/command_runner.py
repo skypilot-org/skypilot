@@ -1,6 +1,5 @@
 """Runner for commands to be executed on the cluster."""
 import enum
-import getpass
 import hashlib
 import os
 import pathlib
@@ -36,9 +35,9 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     """Returns a temporary path to be used as the ssh control path."""
     if ssh_control_filename is None:
         return None
-    path = (
-+        f'/tmp/skypilot_ssh_{common_utils.get_user_hash()}/{ssh_control_filename}'
-    )
+    base_path = '/tmp/skypilot_ssh_'
+    user_hash = common_utils.get_user_hash()
+    path = os.path.join(base_path, f'{user_hash}/{ssh_control_filename}')
     os.makedirs(path, exist_ok=True)
     return path
 
