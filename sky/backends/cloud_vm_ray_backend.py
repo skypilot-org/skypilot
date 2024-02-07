@@ -273,16 +273,14 @@ class RayCodeGen:
                 while unready:
                     returncodes.extend(ray.get(ready))
                     if any(r != 0 for r in returncodes):
-                        # If any task failed, we should cancel all unready tasks.
-                        # Gracefully cancel all unready tasks.
-                        ray.cancel(unready, force=False)
-                        ready, unready = ray.wait(unready, timeout=1)
-                        returncodes.extend(ray.get(ready))
-                        # If any task failed to be cancelled, force cancel all
-                        # unready tasks.
+                        # ray.cancel without force fails to kill tasks. We use
+                        # force=True to kill unready tasks.
                         if unready:
-                            ray.cancel(unready, force=True)
-                            returncodes.extend(ray.get(unready))
+                            for task in unready:
+                                ray.cancel(task, force=True)
+                            # A random number to indicate the worker is forcely
+                            # killed by SkyPilot due to a worker failure.
+                            returncodes.extend([65 for _ in unready])
                         break
                     ready, unready = ray.wait(unready)
                 return returncodes
