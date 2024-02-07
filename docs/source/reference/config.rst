@@ -173,6 +173,22 @@ Available fields and semantics:
     # is used as default if 'networking' is not specified.
     networking: portforward
 
+    # The mode to use for opening ports on Kubernetes
+    #
+    # This must be either: 'ingress' or 'loadbalancer'. If not specified,
+    # defaults to 'loadbalancer'.
+    #
+    # loadbalancer: Creates services of type `LoadBalancer` to expose ports.
+    # See https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#loadbalancer-service.
+    # This mode is supported out of the box on most cloud managed Kubernetes
+    # environments (e.g., GKE, EKS).
+    #
+    # ingress: Creates an ingress and a ClusterIP service for each port opened.
+    # Requires an Nginx ingress controller to be configured on the Kubernetes cluster.
+    # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#nginx-ingress
+    # for details on deploying the NGINX ingress controller.
+    ports: loadbalancer
+
     # Additional fields to override the pod fields used by SkyPilot (optional)
     #
     # Any key:value pairs added here would get added to the pod spec used to
