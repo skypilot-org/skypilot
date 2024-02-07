@@ -265,24 +265,30 @@ class RayCodeGen:
                 log_to_driver=True,
                 **kwargs
             )
-            def wait_or_fail(futures) -> List[int]:
+            def get_or_fail(futures, pg) -> List[int]:
                 \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
                 returncodes = []
                 # Wait for at leat 1 task to be ready.
                 ready, unready = ray.wait(futures)
+                returncodes.extend(ray.get(ready))
                 while unready:
-                    returncodes.extend(ray.get(ready))
                     if any(r != 0 for r in returncodes):
-                        # ray.cancel without force fails to kill tasks. We use
-                        # force=True to kill unready tasks.
                         if unready:
                             for task in unready:
+                                # ray.cancel without force fails to kill tasks.
+                                # We use force=True to kill unready tasks.
                                 ray.cancel(task, force=True)
-                            # A random number to indicate the worker is forcely
-                            # killed by SkyPilot due to a worker failure.
-                            returncodes.extend([65 for _ in unready])
+                            # Use SIGKILL=128+9 to indicate the task is forcely
+                            # killed.
+                            returncodes.extend([137 for _ in unready])
                         break
                     ready, unready = ray.wait(unready)
+                    returncodes.extend(ray.get(ready))
+                # Remove the placement group after all tasks are done, so that the
+                # next job can be scheduled on the released resources immediately.
+                ray_util.remove_placement_group(pg)
+                sys.stdout.flush()
+                sys.stderr.flush()
                 return returncodes
             run_fn = None
             futures = []
@@ -418,8 +424,7 @@ class RayCodeGen:
                         with_ray=True,
                         use_sudo={self.is_local},
                     ) for i in range(total_num_nodes)]
-                setup_returncodes = wait_or_fail(setup_workers)
-                ray_util.remove_placement_group(setup_pg)
+                setup_returncodes = get_or_fail(setup_workers, setup_pg)
                 if sum(setup_returncodes) != 0:
                     job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
                     # This waits for all streaming logs to finish.
@@ -611,12 +616,7 @@ class RayCodeGen:
 
         self._code += [
             textwrap.dedent(f"""\
-            returncodes = wait_or_fail(futures)
-            # Remove the placement group after all tasks are done, so that the
-            # next job can be scheduled on the released resources immediately.
-            ray_util.remove_placement_group(pg)
-            sys.stdout.flush()
-            sys.stderr.flush()
+            returncodes = get_or_fail(futures, pg)
             if sum(returncodes) != 0:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # Schedule the next pending job immediately to make the job
