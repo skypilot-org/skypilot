@@ -187,7 +187,7 @@ class SCP(clouds.Cloud):
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud  # Unused.
+        del cluster_name_on_cloud, dryrun  # Unused.
         assert zones is None, 'SCP does not support zones.'
 
         r = resources
