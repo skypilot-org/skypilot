@@ -1,0 +1,12 @@
+resources:
+  cpus: 2+
+
+num_nodes: 3
+
+run: |
+  echo My hostname: $(hostname)
+  sleep 1
+  if [ "$SKYPILOT_NODE_RANK" == "1" ]; then
+      exit 1
+  fi
+  sleep 10000
