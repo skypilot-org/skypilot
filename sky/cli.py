@@ -1991,12 +1991,13 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             head_ip = handle.external_ips()[0]
             if show_endpoints:
                 if endpoint:
-                    cluster_endpoint = backend_utils.get_endpoints(cluster_record['name'],
-                                                           endpoint)
+                    cluster_endpoint = backend_utils.get_endpoints(
+                        cluster_record['name'], endpoint)
                     click.echo(cluster_endpoint)
                 else:
                     cluster_endpoints = backend_utils.get_endpoints(
                         cluster_record['name'])
+                    assert isinstance(cluster_endpoints, dict)
                     for port, port_endpoint in cluster_endpoints.items():
                         click.echo(
                             f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'

@@ -12,21 +12,15 @@ from sky import dag
 from sky import data
 from sky import exceptions
 from sky import global_user_state
-from sky import provision as provision_lib
 from sky import sky_logging
 from sky import spot
 from sky import status_lib
 from sky import task
 from sky.backends import backend_utils
-from sky.provision import common as provision_common
-# TODO(romilb): This is a bad import - refactor to avoid this.
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import common_utils
 from sky.utils import controller_utils
-from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils

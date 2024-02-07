@@ -1,13 +1,13 @@
 """SkyServe core APIs."""
 import re
 import tempfile
-import typing
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -24,9 +24,6 @@ from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    from sky import clouds
 
 
 @usage_lib.entrypoint
@@ -164,8 +161,8 @@ def up(
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
         idle_minutes_to_autostop = None if (
-                controller_cloud and
-                controller_cloud.is_same_cloud(clouds.Kubernetes())
+            controller_cloud and
+            controller_cloud.is_same_cloud(clouds.Kubernetes())
         ) else constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
         controller_job_id, controller_handle = execution.execute(
             entrypoint=controller_task,
@@ -232,7 +229,8 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            endpoint = backend_utils.get_endpoints(controller_handle.cluster_name, lb_port)
+            endpoint = backend_utils.get_endpoints(
+                controller_handle.cluster_name, lb_port)
 
         sky_logging.print(
             f'{fore.CYAN}Service name: '

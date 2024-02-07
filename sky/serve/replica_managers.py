@@ -16,7 +16,7 @@ import psutil
 import requests
 
 import sky
-from sky import backends, core
+from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -371,7 +371,9 @@ class ReplicaInfo:
         if handle is None:
             return None
         try:
-            endpoint = backend_utils.get_endpoints(handle.cluster_name, self.replica_port)
+            endpoint = backend_utils.get_endpoints(handle.cluster_name,
+                                                   self.replica_port)
+            assert isinstance(endpoint, str)
             return endpoint
         except RuntimeError:
             return None

@@ -64,7 +64,7 @@ def _load_config():
         os.environ['KUBERNETES_SERVICE_PORT'] = '443'
         # TODO(romilb) - THIS IS HACK! FIX THIS BEFORE MERGING.
         raise kubernetes.config.config_exception.ConfigException
-        kubernetes.config.load_incluster_config()
+        # kubernetes.config.load_incluster_config()
     except kubernetes.config.config_exception.ConfigException:
         try:
             kubernetes.config.load_kube_config()

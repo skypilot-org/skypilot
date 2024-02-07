@@ -817,15 +817,8 @@ def query_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
+    assert provider_config is not None
     cluster_info = get_cluster_info(provider_config['region'],
-                          cluster_name_on_cloud,
-                          provider_config=provider_config)
-    head_instance = cluster_info.instances.get(cluster_info.head_instance_id)
-    if head_instance is None:
-        return {}
-    head_ip = head_instance[0].external_ip
-    ports = list(resources_utils.port_ranges_to_set(ports))
-    result: Dict[int, List[common.Endpoint]] = {}
-    for port in ports:
-        result[port] = [common.SocketEndpoint(port=port, host=head_ip)]
-    return result
+                                    cluster_name_on_cloud,
+                                    provider_config=provider_config)
+    return common.query_ports_passthrough(ports, cluster_info)

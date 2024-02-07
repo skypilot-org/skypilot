@@ -341,17 +341,12 @@ class Kubernetes(clouds.Cloud):
                     f'check if {CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        # Okay, I need to
-        # 1) Generate a SA with the right permissions
-        # 2) Generate a kubeconfig file with the SA token
-        # 3) Mount the kubeconfig file into the container
-        # 4) Additionally, check in the container during auth if the API server IP is reachable. If not, resolve it using the service DNS and use that as the IP.
-        # 5) Use the same sky-key for all containers in the pod.
         return {
-                # TODO(romilb): This is a hack! Fix this before merging.
-                '~/.ssh/sky-key': '~/.ssh/sky-key',
-                '~/.ssh/sky-key.pub': '~/.ssh/sky-key.pub',
-                CREDENTIAL_PATH: CREDENTIAL_PATH}
+            # TODO(romilb): Fix before merging.
+            '~/.ssh/sky-key': '~/.ssh/sky-key',
+            '~/.ssh/sky-key.pub': '~/.ssh/sky-key.pub',
+            CREDENTIAL_PATH: CREDENTIAL_PATH
+        }
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(

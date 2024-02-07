@@ -4,7 +4,7 @@ import dataclasses
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from sky.utils.resources_utils import port_ranges_to_set
+from sky.utils import resources_utils
 
 # NOTE: we can use pydantic instead of dataclasses or namedtuples, because
 # pydantic provides more features like validation or parsing from
@@ -237,17 +237,19 @@ class HTTPSEndpoint(SocketEndpoint):
 
 
 def query_ports_passthrough(
-    cluster_name_on_cloud: str,
     ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
+    cluster_info: ClusterInfo,
 ) -> Dict[int, List[Endpoint]]:
     """Common function to query ports for AWS, GCP and Azure.
 
     Returns a list of socket endpoint with empty host and the input ports."""
-    del cluster_name_on_cloud, provider_config  # Unused.
-    handle = cluster_record['handle']
-    head_ip = handle.external_ips()[0]
-    ports = list(port_ranges_to_set(ports))
+    assert cluster_info.head_instance_id is not None, cluster_info
+    head_instance = cluster_info.instances.get(cluster_info.head_instance_id)
+    if head_instance is None:
+        return {}
+    head_ip = head_instance[0].external_ip
+    assert head_ip is not None, head_instance
+    ports = list(resources_utils.port_ranges_to_set(ports))
     result: Dict[int, List[Endpoint]] = {}
     for port in ports:
         result[port] = [SocketEndpoint(port=port, host=head_ip)]

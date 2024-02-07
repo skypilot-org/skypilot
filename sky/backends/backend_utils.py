@@ -47,8 +47,8 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
-from sky.utils import rich_utils
 from sky.utils import resources_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -108,6 +108,9 @@ CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
+
+_ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
+                            'please retry after a while.')
 
 # Include the fields that will be used for generating tags that distinguishes
 # the cluster in ray, to avoid the stopped cluster being discarded due to
@@ -2690,13 +2693,16 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
                     f'{cluster_name}{colorama.Style.RESET_ALL}'
                     f'\n--- Details ---\n{stderr.strip()}\n')
 
-def get_endpoints(cluster: str, endpoint: Optional[int]) -> \
-        Union[str, Dict[int, str]]:
-    """
+
+def get_endpoints(
+        cluster: str,
+        endpoint: Optional[Union[int,
+                                 str]] = None) -> Union[str, Dict[int, str]]:
+    """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
-        cluster:
-        endpoint:
+        cluster: The name of the cluster.
+        endpoint: The port number to get the endpoint for. If None, all
 
     Returns: Endpoint URL if endpoint is not None, else a dictionary of all
 
@@ -2705,10 +2711,6 @@ def get_endpoints(cluster: str, endpoint: Optional[int]) -> \
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
     """
-
-    _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
-                                'please retry after a while.')
-
     # Cast endpoint to int if it is not None
     if endpoint is not None:
         try:
@@ -2735,21 +2737,22 @@ def get_endpoints(cluster: str, endpoint: Optional[int]) -> \
     cloud = launched_resources.cloud
     try:
         cloud.check_features_are_supported(
-            launched_resources,
-            {clouds.CloudImplementationFeatures.OPEN_PORTS})
+            launched_resources, {clouds.CloudImplementationFeatures.OPEN_PORTS})
     except exceptions.NotSupportedError:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Querying endpoints is not supported '
                              f'for {cloud}.') from None
 
     config = common_utils.read_yaml(handle.cluster_yaml)
-    port_details = provision_lib.query_ports(
-        repr(cloud), handle.cluster_name_on_cloud,
-        handle.launched_resources.ports, config['provider'])
+    port_details = provision_lib.query_ports(repr(cloud),
+                                             handle.cluster_name_on_cloud,
+                                             handle.launched_resources.ports,
+                                             config['provider'])
 
     if endpoint is not None:
         # If cluster had no ports to be exposed
-        port_set = resources_utils.port_ranges_to_set(handle.launched_resources.ports)
+        port_set = resources_utils.port_ranges_to_set(
+            handle.launched_resources.ports)
         if endpoint not in port_set:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Port {endpoint} is not exposed '
@@ -2762,8 +2765,7 @@ def get_endpoints(cluster: str, endpoint: Optional[int]) -> \
             if handle.launched_resources.cloud.is_same_cloud(
                     clouds.Kubernetes()):
                 # Add Kubernetes specific debugging info
-                error_msg += (
-                    kubernetes_utils.get_endpoint_debug_message())
+                error_msg += (kubernetes_utils.get_endpoint_debug_message())
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(error_msg)
         return port_details[endpoint][0].url()
