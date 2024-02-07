@@ -396,6 +396,7 @@ def list_accelerators(
         return row['InstanceType']
 
     acc_host_df = _df
+    tpu_df = None
     # If price information is not required, we do not need to fetch the host VM
     # information.
     if require_price:
@@ -414,41 +415,65 @@ def list_accelerators(
         if quantity_filter is not None:
             acc_host_df = acc_host_df[acc_host_df['AcceleratorCount'] ==
                                       quantity_filter]
-        assert acc_host_df['InstanceType'].isna().all(), acc_host_df
-        acc_host_df = acc_host_df.drop(
-            columns=['InstanceType', 'vCPUs', 'MemoryGiB'])
-        # Fetch the host VM information for each accelerator in its region and
-        # zone.
-        acc_host_df['InstanceType'] = acc_host_df.apply(
-            lambda x: _get_host_vm(x['AcceleratorName'],
-                                   x['AcceleratorCount'],
-                                   region=x['Region'],
-                                   zone=x['AvailabilityZone']),
-            axis=1)
-        acc_host_df.dropna(subset=['InstanceType', 'Price'], inplace=True)
-        # Combine the price of the host VM and the GPU.
-        acc_host_df = pd.merge(
-            acc_host_df,
-            _df[[
-                'InstanceType', 'vCPUs', 'MemoryGiB', 'Region',
-                'AvailabilityZone', 'Price', 'SpotPrice'
-            ]],
-            on=['InstanceType', 'Region', 'AvailabilityZone'],
-            how='inner',
-            suffixes=('', '_host'))
-        acc_host_df['Price'] = (acc_host_df['Price'] +
-                                acc_host_df['Price_host'])
-        acc_host_df['SpotPrice'] = (acc_host_df['SpotPrice'] +
-                                    acc_host_df['SpotPrice_host'])
-        acc_host_df.rename(columns={
-            'vCPUs_host': 'vCPUs',
-            'MemoryGiB_host': 'MemoryGiB'
-        },
-                           inplace=True)
+        # Split the TPU and GPU information, as we should not combine the price
+        # of the TPU and the host VM.
+        # TODO: Fix the price for TPU VMs.
+        is_tpu = acc_host_df['AcceleratorName'].str.startswith('tpu-')
+        tpu_df = acc_host_df[is_tpu]
+        acc_host_df = acc_host_df[~is_tpu]
+        if not acc_host_df.empty:
+            assert acc_host_df['InstanceType'].isna().all(), acc_host_df
+            acc_host_df = acc_host_df.drop(
+                columns=['InstanceType', 'vCPUs', 'MemoryGiB'])
+            # Fetch the host VM information for each accelerator in its region
+            # and zone.
+            acc_host_df['InstanceType'] = acc_host_df.apply(
+                lambda x: _get_host_vm(x['AcceleratorName'],
+                                    x['AcceleratorCount'],
+                                    region=x['Region'],
+                                    zone=x['AvailabilityZone']),
+                axis=1)
+            acc_host_df.dropna(subset=['InstanceType', 'Price'], inplace=True)
+            # Combine the price of the host VM and the GPU.
+            acc_host_df = pd.merge(
+                acc_host_df,
+                _df[[
+                    'InstanceType', 'vCPUs', 'MemoryGiB', 'Region',
+                    'AvailabilityZone', 'Price', 'SpotPrice'
+                ]],
+                on=['InstanceType', 'Region', 'AvailabilityZone'],
+                how='inner',
+                suffixes=('', '_host'))
+            acc_host_df['Price'] = (acc_host_df['Price'] +
+                                    acc_host_df['Price_host'])
+            acc_host_df['SpotPrice'] = (acc_host_df['SpotPrice'] +
+                                        acc_host_df['SpotPrice_host'])
+            acc_host_df.rename(columns={
+                'vCPUs_host': 'vCPUs',
+                'MemoryGiB_host': 'MemoryGiB'
+            },
+                            inplace=True)
+        acc_host_df = pd.concat([acc_host_df, tpu_df])
     results = common.list_accelerators_impl('GCP', acc_host_df, gpus_only,
                                             name_filter, region_filter,
                                             quantity_filter, case_sensitive,
                                             all_regions)
+    if tpu_df is not None and not tpu_df.empty:
+        # Combine the entries for TPUs.
+        for acc_name in list(results.keys()):
+            if acc_name.startswith('tpu-'):
+                version = acc_name.split('-')[1]
+                acc_info = results.pop(acc_name)
+                tpu_group = f'tpu-{version}'
+                if tpu_group not in results:
+                    results[tpu_group] = []
+                results[tpu_group].extend(acc_info)
+        for acc_group in list(results.keys()):
+            if acc_group.startswith('tpu-'):
+                results[acc_group] = sorted(
+                    results[acc_group],
+                    key=lambda x: (x.price, x.spot_price, x.region),
+                )
     return results
 
 
