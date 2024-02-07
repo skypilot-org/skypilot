@@ -277,14 +277,6 @@ def get_instance_type_for_accelerator(
         df = _df[_df['InstanceType'].notna()]
         instance_types = _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_count]
         df = df[df['InstanceType'].isin(instance_types)]
-        # We should filter the region and zone here, as sometimes the instance
-        # type may not exist in the region or zone, though the accelerator
-        # exists, e.g. A100:16 exists in asia-northeast1, but a2-megagpu-16g
-        # does not exist in asia-northeast1.
-        if region is not None:
-            df = df[df['Region'] == region]
-        if zone is not None:
-            df = df[df['AvailabilityZone'] == zone]
 
         # Check the cpus and memory specified by the user.
         instance_type = common.get_instance_type_for_cpus_mem_impl(
@@ -374,16 +366,9 @@ def list_accelerators(
     all_regions: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
-    # We keep all the regions, as the cheapest region may change, after
-    # combining the VM and GPU prices.
-    results = common.list_accelerators_impl('GCP',
-                                            _df,
-                                            gpus_only,
-                                            name_filter,
-                                            region_filter,
-                                            quantity_filter,
-                                            case_sensitive,
-                                            all_regions=True)
+    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
+                                            region_filter, quantity_filter,
+                                            case_sensitive, all_regions)
 
     # Remove GPUs that are unsupported by SkyPilot.
     new_results = {}
@@ -409,14 +394,14 @@ def list_accelerators(
             continue
         vm_types, _ = get_instance_type_for_accelerator(info.accelerator_name,
                                                         info.accelerator_count,
-                                                        region=info.region)
-        if vm_types is None:
-            # It is possible that the instance type is not available in the
-            # region. In this case, we will not show the accelerator.
-            logger.debug(f'Skipping region {info.region} for '
-                         f'{info.accelerator_name}:{info.accelerator_count} '
-                         f'as no instance type is available.')
-            continue
+                                                        region=region_filter)
+        # The acc name & count in `info` are retrieved from the table so we
+        # could definitely find a column in the original table
+        # Additionally the way get_instance_type_for_accelerator works
+        # we will always get either a specialized instance type
+        # or a default instance type. So we can safely assume that
+        # vm_types is not None.
+        assert vm_types is not None
         for vm_type in vm_types:
             df = _df[_df['InstanceType'] == vm_type]
             cpu_count = df['vCPUs'].iloc[0]
@@ -424,12 +409,12 @@ def list_accelerators(
             vm_price = common.get_hourly_cost_impl(_df,
                                                    vm_type,
                                                    use_spot=False,
-                                                   region=info.region,
+                                                   region=region_filter,
                                                    zone=None)
             vm_spot_price = common.get_hourly_cost_impl(_df,
                                                         vm_type,
                                                         use_spot=True,
-                                                        region=info.region,
+                                                        region=region_filter,
                                                         zone=None)
             new_infos[info.accelerator_name].append(
                 info._replace(
@@ -440,29 +425,6 @@ def list_accelerators(
                     price=info.price + vm_price,
                     spot_price=info.spot_price + vm_spot_price,
                 ))
-    # Sort the instances again after adding the vm price, as the order may
-    # have changed.
-    for acc_name, acc_infos in new_infos.items():
-        acc_infos.sort(
-            key=lambda info: (info.accelerator_count, info.instance_type, (
-                info.cpu_count if not pd.isna(info.cpu_count) else 0), info.
-                              price, info.spot_price, info.region))
-        if not all_regions:
-            # Only keep the cheapest instance type across all regions.
-            new_acc_infos = []
-            cur_key = None
-
-            def _get_key(info):
-                return (info.accelerator_count, info.instance_type,
-                        (info.cpu_count if not pd.isna(info.cpu_count) else 0))
-
-            for info in acc_infos:
-                info_key = _get_key(info)
-                if cur_key != info_key:
-                    cur_key = info_key
-                    new_acc_infos.append(info)
-            new_infos[acc_name] = new_acc_infos
-
     return new_infos
 
 
