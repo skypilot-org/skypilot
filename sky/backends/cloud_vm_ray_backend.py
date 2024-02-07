@@ -265,6 +265,25 @@ class RayCodeGen:
                 log_to_driver=True,
                 **kwargs
             )
+            def wait_or_fail(futures) -> List[int]:
+                \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
+                # Wait for at leat 1 task to be ready.
+                ready, unready = ray.wait(futures)
+                while unready:
+                    returncodes.extend(ray.get(ready))
+                    if any(r != 0 for r in returncodes):
+                        # If any task failed, we should cancel all unready tasks.
+                        # Gracefully cancel all unready tasks.
+                        ray.cancel(unready, force=False)
+                        ready, unready = ray.wait(unready, timeout=1)
+                        returncodes.extend(ray.get(ready))
+                        # If any task failed to be cancelled, force cancel all
+                        # unready tasks.
+                        if unready:
+                            ray.cancel(unready, force=True)
+                            returncodes.extend(ray.get(unready))
+                        break
+                    ready, unready = ray.wait(unready)
             run_fn = None
             futures = []
             """),
@@ -399,7 +418,7 @@ class RayCodeGen:
                         with_ray=True,
                         use_sudo={self.is_local},
                     ) for i in range(total_num_nodes)]
-                setup_returncodes = ray.get(setup_workers)
+                setup_returncodes = wait_or_fail(setup_workers)
                 ray_util.remove_placement_group(setup_pg)
                 if sum(setup_returncodes) != 0:
                     job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
@@ -592,7 +611,7 @@ class RayCodeGen:
 
         self._code += [
             textwrap.dedent(f"""\
-            returncodes = ray.get(futures)
+            returncodes = wait_or_fail(futures)
             # Remove the placement group after all tasks are done, so that the
             # next job can be scheduled on the released resources immediately.
             ray_util.remove_placement_group(pg)
