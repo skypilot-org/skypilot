@@ -195,7 +195,7 @@ class OCI(clouds.Cloud):
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud  # Unused.
+        del cluster_name_on_cloud, dryrun  # Unused.
         assert region is not None, resources
 
         acc_dict = self.get_accelerators_from_instance_type(

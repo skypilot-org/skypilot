@@ -934,6 +934,9 @@ class Resources:
             # assume other clouds behave the same. We can move this check down
             # to each cloud if any cloud supports reservations for spot.
             return {}
+        specific_reservations = set(
+            skypilot_config.get_nested(
+                (str(self.cloud).lower(), 'specific_reservations'), set()))
         return self.cloud.get_reservations_available_resources(
             self._instance_type, self._region, self._zone,
             specific_reservations)

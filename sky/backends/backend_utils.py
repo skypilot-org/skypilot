@@ -785,14 +785,6 @@ def write_cluster_config(
         skypilot_config.get_nested(
             (str(to_provision.cloud).lower(), 'specific_reservations'), set()))
 
-    reservations = to_provision.get_reservations_available_resources(
-        specific_reservations)
-
-    filtered_specific_reservations = [
-        r for r, available_resources in reservations.items()
-        if r in specific_reservations and available_resources > 0
-    ]
-
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
 
@@ -874,7 +866,9 @@ def write_cluster_config(
 
                 # User-supplied instance tags.
                 'instance_tags': instance_tags,
-                'specific_reservations': filtered_specific_reservations,
+                # The reservation pools that specified by the user. This is
+                # currently only used by GCP.
+                'specific_reservations': specific_reservations,
 
                 # Conda setup
                 'conda_installation_commands':
