@@ -406,26 +406,35 @@ def list_accelerators(
         row = df.loc[df['Price'].idxmin()]
         return row['InstanceType']
 
-    accelerator_host_df = _df
+    acc_host_df = _df
     # If price information is not required, we do not need to fetch the host VM
     # information.
     if require_price:
-        accelerator_host_df = _df[_df['AcceleratorName'].notna()]
-        assert accelerator_host_df['InstanceType'].isna().all(
-        ), accelerator_host_df
-        accelerator_host_df = accelerator_host_df.drop(
+        acc_host_df = _df[_df['AcceleratorName'].notna()]
+        if gpus_only:
+            acc_host_df = acc_host_df[~acc_host_df['GpuInfo'].isna()]
+        if name_filter is not None:
+            acc_host_df = acc_host_df[
+                acc_host_df['AcceleratorName'].str.contains(
+                    name_filter, case=case_sensitive)]
+        if region_filter is not None:
+            acc_host_df = acc_host_df[acc_host_df['Region'] == region_filter]
+        if quantity_filter is not None:
+            acc_host_df = acc_host_df[acc_host_df['AcceleratorCount'] ==
+                                      quantity_filter]
+        assert acc_host_df['InstanceType'].isna().all(), acc_host_df
+        acc_host_df = acc_host_df.drop(
             columns=['InstanceType', 'vCPUs', 'MemoryGiB'])
-        accelerator_host_df['InstanceType'] = accelerator_host_df.apply(
+        acc_host_df['InstanceType'] = acc_host_df.apply(
             lambda x: _get_host_vm(x['AcceleratorName'],
                                    x['AcceleratorCount'],
                                    region=x['Region'],
                                    zone=x['AvailabilityZone']),
             axis=1)
         # InstanceType, AcceleratorName, AcceleratorCount, Region, Zone
-        accelerator_host_df = accelerator_host_df.dropna(
-            subset=['InstanceType', 'Price'])
-        accelerator_host_df = pd.merge(
-            accelerator_host_df,
+        acc_host_df.dropna(subset=['InstanceType', 'Price'], inplace=True)
+        acc_host_df = pd.merge(
+            acc_host_df,
             _df[[
                 'InstanceType', 'vCPUs', 'MemoryGiB', 'Region',
                 'AvailabilityZone', 'Price', 'SpotPrice'
@@ -433,22 +442,21 @@ def list_accelerators(
             on=['InstanceType', 'Region', 'AvailabilityZone'],
             how='inner',
             suffixes=('', '_host'))
-        accelerator_host_df['Price'] = (accelerator_host_df['Price'] +
-                                        accelerator_host_df['Price_host'])
-        accelerator_host_df['SpotPrice'] = (
-            accelerator_host_df['SpotPrice'] +
-            accelerator_host_df['SpotPrice_host'])
-        accelerator_host_df.rename(columns={
+        acc_host_df['Price'] = (acc_host_df['Price'] +
+                                acc_host_df['Price_host'])
+        acc_host_df['SpotPrice'] = (acc_host_df['SpotPrice'] +
+                                    acc_host_df['SpotPrice_host'])
+        acc_host_df.rename(columns={
             'vCPUs_host': 'vCPUs',
             'MemoryGiB_host': 'MemoryGiB'
         },
-                                   inplace=True)
+                           inplace=True)
     # We keep all the regions, as the cheapest region may change, after
     # combining the VM and GPU prices.
-    results = common.list_accelerators_impl('GCP', accelerator_host_df,
-                                            gpus_only, name_filter,
-                                            region_filter, quantity_filter,
-                                            case_sensitive, all_regions)
+    results = common.list_accelerators_impl('GCP', acc_host_df, gpus_only,
+                                            name_filter, region_filter,
+                                            quantity_filter, case_sensitive,
+                                            all_regions)
     return results
 
 
