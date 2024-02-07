@@ -367,6 +367,9 @@ def list_accelerators(
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
 
+    # This is a simplified version of get_instance_type_for_accelerator, as it
+    # has to be applied to all the entries in acc_host_df, and the input is more
+    # restricted.
     def _get_host_vm(acc_name: str, acc_count: int, region: str,
                      zone: str) -> Optional[str]:
         df = _df[(_df['Region'] == region) & (_df['AvailabilityZone'] == zone) &
@@ -385,6 +388,8 @@ def list_accelerators(
             df = df[df['InstanceType'].str.startswith(_DEFAULT_HOST_VM_FAMILY)]
             df = df[(df['vCPUs'] >= cpus) & (df['MemoryGiB'] >= memory)]
         df = df.dropna(subset=['Price'])
+        # Some regions may not have the host VM available, although the GPU is
+        # offered, e.g., a2-megagpu-16g in asia-northeast1.
         if df.empty:
             return None
         row = df.loc[df['Price'].idxmin()]
@@ -395,6 +400,8 @@ def list_accelerators(
     # information.
     if require_price:
         acc_host_df = _df[_df['AcceleratorName'].notna()]
+        # Filter the acc_host_df first before fetching the host VM information.
+        # This is to reduce the rows to be processed for optimization.
         if gpus_only:
             acc_host_df = acc_host_df[~acc_host_df['GpuInfo'].isna()]
         if name_filter is not None:
@@ -409,6 +416,8 @@ def list_accelerators(
         assert acc_host_df['InstanceType'].isna().all(), acc_host_df
         acc_host_df = acc_host_df.drop(
             columns=['InstanceType', 'vCPUs', 'MemoryGiB'])
+        # Fetch the host VM information for each accelerator in its region and
+        # zone.
         acc_host_df['InstanceType'] = acc_host_df.apply(
             lambda x: _get_host_vm(x['AcceleratorName'],
                                    x['AcceleratorCount'],
@@ -417,6 +426,7 @@ def list_accelerators(
             axis=1)
         # InstanceType, AcceleratorName, AcceleratorCount, Region, Zone
         acc_host_df.dropna(subset=['InstanceType', 'Price'], inplace=True)
+        # Combine the price of the host VM and the GPU.
         acc_host_df = pd.merge(
             acc_host_df,
             _df[[
@@ -435,8 +445,6 @@ def list_accelerators(
             'MemoryGiB_host': 'MemoryGiB'
         },
                            inplace=True)
-    # We keep all the regions, as the cheapest region may change, after
-    # combining the VM and GPU prices.
     results = common.list_accelerators_impl('GCP', acc_host_df, gpus_only,
                                             name_filter, region_filter,
                                             quantity_filter, case_sensitive,
