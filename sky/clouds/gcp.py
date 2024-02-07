@@ -381,9 +381,12 @@ class GCP(clouds.Cloud):
                                                          clouds='gcp')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources', cluster_name_on_cloud: str,
+            self,
+            resources: 'resources.Resources',
+            cluster_name_on_cloud: str,
             region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
         assert zones is not None, (region, zones)
 
         region_name = region.name
@@ -408,6 +411,7 @@ class GCP(clouds.Cloud):
             'tpu_vm': False,
             'custom_resources': None,
             'use_spot': r.use_spot,
+            'gcp_project_id': self.get_project_id(dryrun),
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -470,6 +474,14 @@ class GCP(clouds.Cloud):
             firewall_rule = (
                 USER_PORTS_FIREWALL_RULE_NAME.format(cluster_name_on_cloud))
         resources_vars['firewall_rule'] = firewall_rule
+
+        # For TPU nodes. TPU VMs do not need TPU_NAME.
+        tpu_node_name = resources_vars.get('tpu_name')
+        if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
+            if tpu_node_name is None:
+                tpu_node_name = cluster_name_on_cloud
+
+        resources_vars['tpu_name'] = tpu_node_name
 
         return resources_vars
 
