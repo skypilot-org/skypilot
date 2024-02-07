@@ -17,6 +17,7 @@ import threading
 import time
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+import uuid
 
 import colorama
 import filelock
@@ -290,6 +291,7 @@ class RayCodeGen:
                 sys.stdout.flush()
                 sys.stderr.flush()
                 return returncodes
+            
             run_fn = None
             futures = []
             """),
@@ -3113,83 +3115,82 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if task.setup is None:
             return
+        # Sync the setup script up and run it.
+        ip_list = handle.external_ips()
+        internal_ips = handle.internal_ips()
+        port_list = handle.external_ssh_ports()
+        assert ip_list is not None, 'external_ips is not cached in handle'
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
+        # Disable connection sharing for setup script to avoid old
+        # connections being reused, which may cause stale ssh agent
+        # forwarding.
+        ssh_credentials.pop('ssh_control_name')
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, port_list=port_list, **ssh_credentials)
 
-        setup_script = log_lib.make_task_bash_script(task.setup,
-                                                     env_vars=task.envs)
-        with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
-            f.write(setup_script)
-            f.flush()
-            setup_sh_path = f.name
-            setup_file = os.path.basename(setup_sh_path)
-            # Sync the setup script up and run it.
-            ip_list = handle.external_ips()
-            port_list = handle.external_ssh_ports()
-            assert ip_list is not None, 'external_ips is not cached in handle'
-            ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                handle.cluster_yaml, handle.docker_user, handle.ssh_user)
-            # Disable connection sharing for setup script to avoid old
-            # connections being reused, which may cause stale ssh agent
-            # forwarding.
-            ssh_credentials.pop('ssh_control_name')
-            runners = command_runner.SSHCommandRunner.make_runner_list(
-                ip_list, port_list=port_list, **ssh_credentials)
+        random_suffix = uuid.uuid4().hex[:8]
+        remote_setup_file_name = f'/tmp/sky_setup_{random_suffix}'
+        # Need this `-i` option to make sure `source ~/.bashrc` work
+        setup_cmd = f'/bin/bash -i {remote_setup_file_name} 2>&1'
 
-            # Need this `-i` option to make sure `source ~/.bashrc` work
-            setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-
-            def _setup_node(runner: command_runner.SSHCommandRunner) -> None:
+        def _setup_node(runner: command_runner.SSHCommandRunner) -> None:
+            setup_envs = task.envs.copy()
+            setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
+            setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(runners.index(runner))
+            setup_script = log_lib.make_task_bash_script(task.setup,
+                                                         env_vars=setup_envs)
+            with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
+                f.write(setup_script)
+                f.flush()
+                setup_sh_path = f.name
                 runner.rsync(source=setup_sh_path,
-                             target=f'/tmp/{setup_file}',
+                             target=remote_setup_file_name,
                              up=True,
                              stream_logs=False)
-                if detach_setup:
-                    return
-                setup_log_path = os.path.join(self.log_dir,
-                                              f'setup-{runner.ip}.log')
-                returncode = runner.run(
-                    setup_cmd,
-                    log_path=setup_log_path,
-                    process_stream=False,
-                )
+            if detach_setup:
+                return
+            setup_log_path = os.path.join(self.log_dir,
+                                          f'setup-{runner.ip}.log')
+            returncode = runner.run(
+                setup_cmd,
+                log_path=setup_log_path,
+                process_stream=False,
+            )
 
-                def error_message() -> str:
-                    # Use the function to avoid tailing the file in success case
-                    try:
-                        last_10_lines = subprocess.run(
-                            [
-                                'tail', '-n10',
-                                os.path.expanduser(setup_log_path)
-                            ],
-                            stdout=subprocess.PIPE,
-                            check=True).stdout.decode('utf-8')
-                    except subprocess.CalledProcessError:
-                        last_10_lines = None
+            def error_message() -> str:
+                # Use the function to avoid tailing the file in success case
+                try:
+                    last_10_lines = subprocess.run(
+                        ['tail', '-n10',
+                         os.path.expanduser(setup_log_path)],
+                        stdout=subprocess.PIPE,
+                        check=True).stdout.decode('utf-8')
+                except subprocess.CalledProcessError:
+                    last_10_lines = None
 
-                    err_msg = (
-                        f'Failed to setup with return code {returncode}. '
-                        f'Check the details in log: {setup_log_path}')
-                    if last_10_lines:
-                        err_msg += (
-                            f'\n\n{colorama.Fore.RED}'
-                            '****** START Last lines of setup output ******'
-                            f'{colorama.Style.RESET_ALL}\n'
-                            f'{last_10_lines}'
-                            f'{colorama.Fore.RED}'
-                            '******* END Last lines of setup output *******'
-                            f'{colorama.Style.RESET_ALL}')
-                    return err_msg
+                err_msg = (f'Failed to setup with return code {returncode}. '
+                           f'Check the details in log: {setup_log_path}')
+                if last_10_lines:
+                    err_msg += (f'\n\n{colorama.Fore.RED}'
+                                '****** START Last lines of setup output ******'
+                                f'{colorama.Style.RESET_ALL}\n'
+                                f'{last_10_lines}'
+                                f'{colorama.Fore.RED}'
+                                '******* END Last lines of setup output *******'
+                                f'{colorama.Style.RESET_ALL}')
+                return err_msg
 
-                subprocess_utils.handle_returncode(returncode=returncode,
-                                                   command=setup_cmd,
-                                                   error_msg=error_message)
+            subprocess_utils.handle_returncode(returncode=returncode,
+                                               command=setup_cmd,
+                                               error_msg=error_message)
 
-            num_nodes = len(ip_list)
-            plural = 's' if num_nodes > 1 else ''
-            if not detach_setup:
-                logger.info(
-                    f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
-                    f'{style.RESET_ALL}')
-            subprocess_utils.run_in_parallel(_setup_node, runners)
+        num_nodes = len(ip_list)
+        plural = 's' if num_nodes > 1 else ''
+        if not detach_setup:
+            logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
+                        f'{style.RESET_ALL}')
+        subprocess_utils.run_in_parallel(_setup_node, runners)
 
         if detach_setup:
             # Only set this when setup needs to be run outside the self._setup()
