@@ -62,7 +62,7 @@ def get_az_mount_install_cmd() -> str:
     Returns:
         str: installation command of the mounting utility blobdfuse2
     """
-    install_cmd = ('sudo apt-get update && '
+    install_cmd = ('sudo apt-get update --allow-releaseinfo-change && '
                    'sudo apt-get install -y '
                    '-o Dpkg::Options::="--force-confdef" '
                    'fuse3 libfuse3-dev && '
