@@ -168,7 +168,7 @@ class RunPod(clouds.Cloud):
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del zones  # unused
+        del zones, dryrun  # unused
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
