@@ -379,6 +379,7 @@ def list_accelerators(
     quantity_filter: Optional[int] = None,
     case_sensitive: bool = True,
     all_regions: bool = False,
+    require_price: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
 
@@ -405,37 +406,43 @@ def list_accelerators(
         row = df.loc[df['Price'].idxmin()]
         return row['InstanceType']
 
-    accelerator_host_df = _df[_df['AcceleratorName'].notna()]
-    assert accelerator_host_df['InstanceType'].isna().all(), accelerator_host_df
-    accelerator_host_df = accelerator_host_df.drop(
-        columns=['InstanceType', 'vCPUs', 'MemoryGiB'])
-    accelerator_host_df['InstanceType'] = accelerator_host_df.apply(
-        lambda x: _get_host_vm(x['AcceleratorName'],
-                               x['AcceleratorCount'],
-                               region=x['Region'],
-                               zone=x['AvailabilityZone']),
-        axis=1)
-    # InstanceType, AcceleratorName, AcceleratorCount, Region, Zone
-    accelerator_host_df = accelerator_host_df.dropna(
-        subset=['InstanceType', 'Price'])
-    accelerator_host_df = pd.merge(
-        accelerator_host_df,
-        _df[[
-            'InstanceType', 'vCPUs', 'MemoryGiB', 'Region', 'AvailabilityZone',
-            'Price', 'SpotPrice'
-        ]],
-        on=['InstanceType', 'Region', 'AvailabilityZone'],
-        how='inner',
-        suffixes=('', '_host'))
-    accelerator_host_df['Price'] = (accelerator_host_df['Price'] +
-                                    accelerator_host_df['Price_host'])
-    accelerator_host_df['SpotPrice'] = (accelerator_host_df['SpotPrice'] +
-                                        accelerator_host_df['SpotPrice_host'])
-    accelerator_host_df.rename(columns={
-        'vCPUs_host': 'vCPUs',
-        'MemoryGiB_host': 'MemoryGiB'
-    },
-                               inplace=True)
+    accelerator_host_df = _df
+    # If price information is not required, we do not need to fetch the host VM
+    # information.
+    if require_price:
+        accelerator_host_df = _df[_df['AcceleratorName'].notna()]
+        assert accelerator_host_df['InstanceType'].isna().all(
+        ), accelerator_host_df
+        accelerator_host_df = accelerator_host_df.drop(
+            columns=['InstanceType', 'vCPUs', 'MemoryGiB'])
+        accelerator_host_df['InstanceType'] = accelerator_host_df.apply(
+            lambda x: _get_host_vm(x['AcceleratorName'],
+                                   x['AcceleratorCount'],
+                                   region=x['Region'],
+                                   zone=x['AvailabilityZone']),
+            axis=1)
+        # InstanceType, AcceleratorName, AcceleratorCount, Region, Zone
+        accelerator_host_df = accelerator_host_df.dropna(
+            subset=['InstanceType', 'Price'])
+        accelerator_host_df = pd.merge(
+            accelerator_host_df,
+            _df[[
+                'InstanceType', 'vCPUs', 'MemoryGiB', 'Region',
+                'AvailabilityZone', 'Price', 'SpotPrice'
+            ]],
+            on=['InstanceType', 'Region', 'AvailabilityZone'],
+            how='inner',
+            suffixes=('', '_host'))
+        accelerator_host_df['Price'] = (accelerator_host_df['Price'] +
+                                        accelerator_host_df['Price_host'])
+        accelerator_host_df['SpotPrice'] = (
+            accelerator_host_df['SpotPrice'] +
+            accelerator_host_df['SpotPrice_host'])
+        accelerator_host_df.rename(columns={
+            'vCPUs_host': 'vCPUs',
+            'MemoryGiB_host': 'MemoryGiB'
+        },
+                                   inplace=True)
     # We keep all the regions, as the cheapest region may change, after
     # combining the VM and GPU prices.
     results = common.list_accelerators_impl('GCP', accelerator_host_df,

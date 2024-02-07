@@ -445,15 +445,15 @@ def get_instance_type_for_accelerator_impl(
 
 
 def list_accelerators_impl(
-    cloud: str,
-    df: pd.DataFrame,
-    gpus_only: bool,
-    name_filter: Optional[str],
-    region_filter: Optional[str],
-    quantity_filter: Optional[int],
-    case_sensitive: bool = True,
-    all_regions: bool = False,
-) -> Dict[str, List[InstanceTypeInfo]]:
+        cloud: str,
+        df: pd.DataFrame,
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        quantity_filter: Optional[int],
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
     `name_filter` is a regular expression used to filter accelerator names
@@ -462,6 +462,7 @@ def list_accelerators_impl(
     Returns a mapping from the canonical names of accelerators to a list of
     instance types offered by this cloud.
     """
+    del require_price  # Unused.
     if gpus_only:
         df = df[~df['GpuInfo'].isna()]
     df = df.copy()  # avoid column assignment warning

@@ -172,8 +172,10 @@ def list_accelerators(
         region_filter: Optional[str],
         quantity_filter: Optional[int],
         case_sensitive: bool = True,
-        all_regions: bool = False) -> Dict[str, List[common.InstanceTypeInfo]]:
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Azure offering GPUs."""
+    del require_price  # Unused.
     return common.list_accelerators_impl('Azure', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
                                          case_sensitive, all_regions)
