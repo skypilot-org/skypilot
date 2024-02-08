@@ -11,8 +11,7 @@ pip install "skypilot-nightly[all]"
 sky check
 ```
 
-## Serving Llama-2 with SGLang for more traffic using SkyServe
-To scale up the model serving for more traffic, we introduced SkyServe to enable a user to easily deploy multiple replica of the model:
+## Serving Llama-2 with SGLang using SkyServe
 1. Adding an `service` section to make it an [`SkyServe Service YAML`](https://skypilot.readthedocs.io/en/latest/serving/service-yaml-spec.html):
 
 ```yaml
