@@ -3193,6 +3193,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if not detach_setup:
             logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
                         f'{style.RESET_ALL}')
+        # TODO(zhwu): run_in_parallel uses multi-thread to run the commands,
+        # which can cause the program waiting for all the threads to finish,
+        # even if some of them raise exceptions. We should replace it with
+        # multi-process.
         subprocess_utils.run_in_parallel(_setup_node, runners)
 
         if detach_setup:
