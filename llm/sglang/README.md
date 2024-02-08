@@ -3,6 +3,7 @@
 This README contains instructions to run a demo for SGLang, an open-source library for fast and expressive LLM inference and serving with **5x throughput**.
 
 * [Repo](https://github.com/sgl-project/sglang)
+* [Blog](https://lmsys.org/blog/2024-01-17-sglang)
 
 ## Prerequisites
 Install the latest SkyPilot and check your setup of the cloud credentials:
