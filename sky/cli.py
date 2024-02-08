@@ -367,12 +367,6 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
 
 
 _TASK_OPTIONS = [
-    click.option('--name',
-                 '-n',
-                 required=False,
-                 type=str,
-                 help=('Task name. Overrides the "name" '
-                       'config in the YAML if both are supplied.')),
     click.option(
         '--workdir',
         required=False,
@@ -475,6 +469,14 @@ _TASK_OPTIONS = [
         same value of ``$MY_ENV3`` in the local environment.""",
     )
 ]
+_TASK_OPTIONS_WITH_NAME = [
+    click.option('--name',
+                 '-n',
+                 required=False,
+                 type=str,
+                 help=('Task name. Overrides the "name" '
+                       'config in the YAML if both are supplied.')),
+] + _TASK_OPTIONS
 _EXTRA_RESOURCES_OPTIONS = [
     click.option(
         '--gpus',
@@ -1335,7 +1337,7 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1515,7 +1517,7 @@ def launch(
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(
@@ -3946,7 +3948,7 @@ def spot():
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--spot-recovery',
               default=None,
               type=str,
@@ -4351,7 +4353,6 @@ def serve():
 
 def _generate_task_with_service(
     service_yaml_args: List[str],
-    name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -4378,7 +4379,9 @@ def _generate_task_with_service(
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
         service_yaml_args,
-        name=name,
+        # For Service YAML, we disabled the `name` field override as
+        # it might be confusing with `service_name` field.
+        name=None,
         workdir=workdir,
         cloud=cloud,
         region=region,
@@ -4457,7 +4460,6 @@ def _generate_task_with_service(
 def serve_up(
     service_yaml: List[str],
     service_name: Optional[str],
-    name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -4505,22 +4507,10 @@ def serve_up(
         sky serve up service.yaml
     """
     if service_name is None:
-        if name is None:
-            name = service_name = serve_lib.generate_service_name()
-        else:
-            service_name = name
-    else:
-        if name is None:
-            name = service_name
-        else:
-            raise click.UsageError(
-                'Cannot specify both --name and --service-name. '
-                'Both of them are used to specify the name of the service. '
-                f'Got: {name!r} and {service_name!r}.')
+        service_name = serve_lib.generate_service_name()
 
     task = _generate_task_with_service(
         service_yaml_args=service_yaml,
-        name=name,
         workdir=workdir,
         cloud=cloud,
         region=region,
@@ -4578,7 +4568,6 @@ def serve_up(
 def serve_update(
     service_name: str,
     service_yaml: List[str],
-    name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -4607,16 +4596,8 @@ def serve_update(
 
         sky serve update sky-service-16aa new_service.yaml
     """
-    if name is None:
-        name = service_name
-    else:
-        raise click.UsageError(
-            'Cannot specify --name with a different service name. '
-            'Both of them are used to specify the name of the service. '
-            f'Got: {name!r} and {service_name!r}.')
     task = _generate_task_with_service(
         service_yaml_args=service_yaml,
-        name=name,
         workdir=workdir,
         cloud=cloud,
         region=region,
@@ -4972,7 +4953,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
               required=True,
               type=str,
               help='Benchmark name.')
-@_add_click_options(_TASK_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME)
 @click.option('--gpus',
               required=False,
               type=str,
