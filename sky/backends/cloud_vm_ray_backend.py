@@ -629,6 +629,7 @@ class RayCodeGen:
                 # This waits for all streaming logs to finish.
                 time.sleep(0.5)
                 reason = ''
+                # 139 is the return code of SIGSEGV, i.e. Segmentation Fault.
                 if any(r == 139 for r in returncodes):
                     reason = '(likely due to Segmentation Fault)'
                 print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
