@@ -12,7 +12,7 @@ sky check
 ```
 
 ## Serving Llama-2 with SGLang using SkyServe
-1. Adding an `service` section to make it an [`SkyServe Service YAML`](https://skypilot.readthedocs.io/en/latest/serving/service-yaml-spec.html):
+1. Create a [`SkyServe Service YAML`](https://skypilot.readthedocs.io/en/latest/serving/service-yaml-spec.html) with a  `service` section:
 
 ```yaml
 service:
