@@ -14,7 +14,7 @@ class TestAdjustClusterName:
         assert adjust_cluster_name("cuda11-8") == "cuda11-8"
 
     def test_adjust_cluster_names_starting_with_number(self):
-        assert adjust_cluster_name("2bert") == "x2bert"
+        assert adjust_cluster_name("2bert") == "sky-2bert"
 
     def test_adjust_cluster_name_with_multiple_invalid_characters(self):
-        assert adjust_cluster_name("2Lo_R.A") == "x2lo-r-a"
+        assert adjust_cluster_name("2Lo_R.A") == "sky-2lo-r-a"
