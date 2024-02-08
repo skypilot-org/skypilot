@@ -1505,7 +1505,7 @@ def test_multi_hostname(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_scp
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_multi_node_failure(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
