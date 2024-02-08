@@ -269,12 +269,13 @@ class RayCodeGen:
             def get_or_fail(futures, pg) -> List[int]:
                 \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
                 returncodes = [1] * len(futures)
-                # Wait for at leat 1 task to be ready.
+                # Wait for 1 task to be ready.
                 ready, unready = ray.wait(futures)
                 idx = futures.index(ready[0])
                 returncodes[idx] = ray.get(ready[0])
                 while unready:
-                    if any(r != 0 for r in returncodes):
+                    if returncodes[idx] != 0:
+                        print('returncodes', returncodes)
                         for task in unready:
                             # ray.cancel without force fails to kill tasks.
                             # We use force=True to kill unready tasks.
