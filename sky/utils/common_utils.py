@@ -128,6 +128,8 @@ def adjust_cluster_name(cluster_name: str) -> str:
     for ch in cluster_name:
         if ch.isalnum() or ch == '-':
             adjusted_cluster_name_arr.append(ch.lower())
+        elif ch == '.' or ch == '_':
+            adjusted_cluster_name_arr.append('-')
     if not adjusted_cluster_name_arr[0].isalpha():
         adjusted_cluster_name_arr.insert(0, CLUSTER_NAME_VALID_PREFIX)
     return ''.join(adjusted_cluster_name_arr)
