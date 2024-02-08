@@ -1,6 +1,6 @@
 # SGLang: Fast and Expressive LLM Inference with RadixAttention for 5x throughput
 
-This README contains instructions to run a demo for SGLang, an open-source library for fast and expressive LLM inference and serving.
+This README contains instructions to run a demo for SGLang, an open-source library for fast and expressive LLM inference and serving with **5x throughput**.
 
 * [Repo](https://github.com/sgl-project/sglang)
 
