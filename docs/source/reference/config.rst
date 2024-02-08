@@ -196,17 +196,28 @@ Available fields and semantics:
     # in the Kubernetes API:
     # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core
     #
-    # Example use cases: adding custom labels to SkyPilot pods, specifying
-    # imagePullSecrets for pulling images from private registries, overriding
-    # the default runtimeClassName etc.
+    # Some example use cases are shown below. All fields are optional.
     pod_config:
       metadata:
         labels:
-          my-label: my-value
+          my-label: my-value    # Custom labels to SkyPilot pods
       spec:
-        runtimeClassName: nvidia
+        runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods. Required on K3s.
         imagePullSecrets:
-          - name: my-secret
+          - name: my-secret     # Pull images from a private registry using a secret
+        containers:
+          - env:                # Custom environment variables for the pod, e.g., for proxy
+            - name: HTTP_PROXY
+              value: http://proxy-host:3128
+            volumeMounts:       # Custom volume mounts for the pod
+              - mountPath: /foo
+                name: example-volume
+                readOnly: true
+        volumes:
+          - name: example-volume
+            hostPath:
+              path: /tmp
+              type: Directory
 
   # Advanced OCI configurations (optional).
   oci:
