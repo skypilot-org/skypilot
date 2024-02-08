@@ -177,6 +177,25 @@ FAQs
 
   For isolation, you can create separate Kubernetes namespaces and set them in the kubeconfig distributed to users. SkyPilot will use the namespace set in the kubeconfig for running all tasks.
 
+* **How can I specify custom configuration for the pods created by SkyPilot?**
+
+  You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
+  The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#pod-v1-core>`_.
+
+  For example, to set custom environment variables in the pod, you can add the following to your :code:`~/.sky/config.yaml` file:
+
+  .. code-block:: yaml
+
+      kubernetes:
+        pod_config:
+          spec:
+            containers:
+              - env:
+                - name: MY_ENV_VAR
+                  value: MY_ENV_VALUE
+
+  For more details refer to, :ref:`config-yaml`.
+
 Features and Roadmap
 --------------------
 
