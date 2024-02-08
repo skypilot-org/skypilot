@@ -88,7 +88,29 @@ it available in your current shell, then using ``--env`` to pass it to SkyPilot:
 SkyPilot environment variables
 ------------------------------------------------------------------
 
-SkyPilot exports these environment variables for a task's execution (while ``run`` commands are running):
+SkyPilot exports these environment variables for a task's execution. ``setup``
+and ``run`` stages have different environment variables available.
+
+Setup Stage
+~~~~~~~~~~~
+
+.. list-table::
+  :widths: 20 70 10
+  :header-rows: 1
+
+  * - Name
+    - Definition
+    - Example
+  * - ``SKYPILOT_SETUP_NODE_RANK``
+    - Rank (an integer ID from 0 to :code:`num_nodes-1`) of the node being set up.
+    - 0
+  * - ``SKYPILOT_SETUP_NODE_IPS``
+    - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
+    - 1.2.3.4
+
+
+Run stage
+~~~~~~~~~~
 
 .. list-table::
    :widths: 20 70 10
@@ -120,6 +142,6 @@ The values of these variables are filled in by SkyPilot at task execution time.
 
 You can access these variables in the following ways:
 
-* In the task YAML's ``run`` commands (a Bash script), access them using the ``${MYVAR}`` syntax;
-* In the program(s) launched in ``run``, access them using the
+* In the task YAML's ``setup``/``run`` commands (a Bash script), access them using the ``${MYVAR}`` syntax;
+* In the program(s) launched in ``setup``/``run``, access them using the
   language's standard method (e.g., ``os.environ`` for Python).

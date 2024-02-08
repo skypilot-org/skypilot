@@ -268,23 +268,25 @@ class RayCodeGen:
             )
             def get_or_fail(futures, pg) -> List[int]:
                 \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
-                returncodes = []
+                returncodes = [1] * len(futures)
                 # Wait for at leat 1 task to be ready.
                 ready, unready = ray.wait(futures)
-                returncodes.extend(ray.get(ready))
+                idx = futures.index(ready[0])
+                returncodes[idx] = ray.get(ready[0])
                 while unready:
                     if any(r != 0 for r in returncodes):
-                        if unready:
-                            for task in unready:
-                                # ray.cancel without force fails to kill tasks.
-                                # We use force=True to kill unready tasks.
-                                ray.cancel(task, force=True)
+                        for task in unready:
+                            # ray.cancel without force fails to kill tasks.
+                            # We use force=True to kill unready tasks.
+                            ray.cancel(task, force=True)
                             # Use SIGKILL=128+9 to indicate the task is forcely
                             # killed.
-                            returncodes.extend([137 for _ in unready])
+                            idx = futures.index(task)
+                            returncodes[idx] = 137
                         break
                     ready, unready = ray.wait(unready)
-                    returncodes.extend(ray.get(ready))
+                    idx = futures.index(ready[0])
+                    returncodes[idx] = ray.get(ready[0])
                 # Remove the placement group after all tasks are done, so that the
                 # next job can be scheduled on the released resources immediately.
                 ray_util.remove_placement_group(pg)
@@ -3115,6 +3117,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if task.setup is None:
             return
+        setup = task.setup
         # Sync the setup script up and run it.
         ip_list = handle.external_ips()
         internal_ips = handle.internal_ips()
@@ -3138,7 +3141,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_envs = task.envs.copy()
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(runners.index(runner))
-            setup_script = log_lib.make_task_bash_script(task.setup,
+            setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
             with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                 f.write(setup_script)
