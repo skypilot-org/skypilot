@@ -372,7 +372,8 @@ def list_accelerators(
     # restricted.
     def _get_host_vm(acc_name: str, acc_count: int, region: str,
                      zone: str) -> Optional[str]:
-        df = _df[(_df['Region'] == region) & (_df['AvailabilityZone'] == zone) &
+        df = _df[(_df['Region'].str.lower() == region.lower()) &
+                 (_df['AvailabilityZone'].str.lower() == zone.lower()) &
                  (_df['InstanceType'].notna())]
         if acc_name in _ACC_INSTANCE_TYPE_DICTS:
             instance_types = _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_count]
