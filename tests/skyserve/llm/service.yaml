@@ -9,7 +9,7 @@ service:
   replicas: 1
 
 envs:
-  MODEL_NAME: lmsys/fastchat-t5-3b-v1.0
+  MODEL_NAME: fastchat-t5-3b-v1.0
 
 resources:
   ports: 8087
@@ -36,7 +36,7 @@ run: |
   sleep 10
   echo 'Starting model worker...'
   python -u -m fastchat.serve.model_worker \
-            --model-path $MODEL_NAME 2>&1 \
+            --model-path lmsys/$MODEL_NAME 2>&1 \
             | tee model_worker.log &
 
   echo 'Waiting for model worker to start...'
