@@ -9,12 +9,14 @@ reused across cloud object creation.
 """
 import collections
 import enum
+import re
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
+from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
