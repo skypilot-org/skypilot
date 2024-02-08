@@ -10,12 +10,16 @@ service:
   readiness_probe:
     path: /health
     initial_delay_seconds: 20
-  replicas: 2
+  replicas: 1
 
 resources:
   ports: 8081
-  cpus: 2+
+  cpus: 1+
+  cloud: kubernetes
 
-workdir: examples/serve/http_server
+setup: |
+  git clone https://www.github.com/skypilot-org/skypilot.git
 
-run: python3 server.py
+run: |
+  cd skypilot/examples/serve/http_server
+  python3 server.py

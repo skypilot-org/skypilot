@@ -182,7 +182,8 @@ Available fields and semantics:
     #
     # Example use cases: adding custom labels to SkyPilot pods, specifying
     # imagePullSecrets for pulling images from private registries, overriding
-    # the default runtimeClassName etc.
+    # the default runtimeClassName, adding pod environment variables for
+    # setting up proxies, adding custom volume mounts etc.
     pod_config:
       metadata:
         labels:
