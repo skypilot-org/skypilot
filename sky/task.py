@@ -20,6 +20,7 @@ import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
+from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -71,11 +72,11 @@ def _is_valid_name(name: Optional[str]) -> bool:
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
 
 
-def _fill_in_env_vars_in_file_mounts(
-    file_mounts: Dict[str, Any],
+def _fill_in_env_vars(
+    yaml_field: Dict[str, Any],
     task_envs: Dict[str, str],
 ) -> Dict[str, Any]:
-    """Detects env vars in file_mounts and fills them with task_envs.
+    """Detects env vars in yaml field and fills them with task_envs.
 
     Use cases of env vars in file_mounts:
     - dst/src paths; e.g.,
@@ -83,8 +84,19 @@ def _fill_in_env_vars_in_file_mounts(
     - storage's name (bucket name)
     - storage's source (local path)
 
-    We simply dump file_mounts into a json string, and replace env vars using
-    regex. This should be safe as file_mounts has been schema-validated.
+    Use cases of env vars in service:
+    - model type; e.g.,
+        service:
+          readiness_probe:
+            path: /v1/chat/completions
+            post_data:
+              model: $MODEL_NAME
+              messages:
+                - role: user
+                  content: How to print hello world?
+
+    We simply dump yaml_field into a json string, and replace env vars using
+    regex. This should be safe as yaml config has been schema-validated.
 
     Env vars of the following forms are detected:
         - ${ENV}
@@ -92,7 +104,7 @@ def _fill_in_env_vars_in_file_mounts(
     where <ENV> must appear in task.envs.
     """
     # TODO(zongheng): support ${ENV:-default}?
-    file_mounts_str = json.dumps(file_mounts)
+    yaml_field_str = json.dumps(yaml_field)
 
     def replace_var(match):
         var_name = match.group(1)
@@ -101,8 +113,8 @@ def _fill_in_env_vars_in_file_mounts(
 
     # Pattern for valid env var names in bash.
     pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
-    file_mounts_str = re.sub(pattern, replace_var, file_mounts_str)
-    return json.loads(file_mounts_str)
+    yaml_field_str = re.sub(pattern, replace_var, yaml_field_str)
+    return json.loads(yaml_field_str)
 
 
 def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
@@ -148,11 +160,6 @@ def _with_docker_login_config(
         # Already checked in extract_docker_image
         assert len(resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
-        # We automatically add the server prefix to the image name if
-        # the user did not add it.
-        server_prefix = f'{docker_login_config.server}/'
-        if not docker_image.startswith(server_prefix):
-            docker_image = f'{server_prefix}{docker_image}'
         return resources.copy(image_id={region: 'docker:' + docker_image},
                               _docker_login_config=docker_login_config)
 
@@ -187,7 +194,7 @@ class Task:
 
         Optionally, call ``Task.set_resources()`` to set the resource
         requirements for this task.  If not set, a default CPU-only requirement
-        is assumed (the same as ``sky cpunode``).
+        is assumed (the same as ``sky launch``).
 
         All setters of this class, ``Task.set_*()``, return ``self``, i.e.,
         they are fluent APIs and can be chained together.
@@ -256,6 +263,7 @@ class Task:
         # Default to CPUNode
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
+        self._service: Optional[service_spec.SkyServiceSpec] = None
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -266,6 +274,9 @@ class Task:
         # Only set when 'self' is a spot controller task: 'self.spot_dag' is
         # the underlying managed spot dag (sky.Dag object).
         self.spot_dag: Optional['sky.Dag'] = None
+
+        # Only set when 'self' is a sky serve controller task.
+        self.service_name: Optional[str] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
@@ -361,8 +372,13 @@ class Task:
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         if config.get('file_mounts') is not None:
-            config['file_mounts'] = _fill_in_env_vars_in_file_mounts(
-                config['file_mounts'], config.get('envs', {}))
+            config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
+                                                      config.get('envs', {}))
+
+        # Fill in any Task.envs into service (e.g. MODEL_NAME).
+        if config.get('service') is not None:
+            config['service'] = _fill_in_env_vars(config['service'],
+                                                  config.get('envs', {}))
 
         task = Task(
             config.pop('name', None),
@@ -427,67 +443,15 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
+        # Parse resources field.
         resources_config = config.pop('resources', None)
-        if resources_config and resources_config.get(
-                'any_of') is not None and resources_config.get(
-                    'ordered') is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cannot specify both "any_of" and "ordered" in resources.')
-        if resources_config and resources_config.get('any_of') is not None:
-            # TODO(Ziming) In the future we can consider to allow
-            # additional field when any_of is specified,
-            # which means we override the fields in all the
-            # resources under any_of with the fields specified outsied any_of.
-            if len(resources_config) > 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify "any_of" with other resource fields.')
-            resources_set = set()
-            for resource in resources_config['any_of']:
-                resources_set.add(sky.Resources.from_yaml_config(resource))
-            task.set_resources(resources_set)
-        elif resources_config and resources_config.get('ordered') is not None:
-            if len(resources_config) > 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify "ordered" with other resource fields.')
-            resources_list = []
-            for resource in resources_config['ordered']:
-                resources_list.append(sky.Resources.from_yaml_config(resource))
-            task.set_resources(resources_list)
-        # Translate accelerators field to potential multiple resources.
-        elif resources_config and resources_config.get(
-                'accelerators') is not None:
-            accelerators = resources_config.get('accelerators')
-            if isinstance(accelerators, str):
-                accelerators = {accelerators}
-            elif isinstance(accelerators, dict):
-                accelerators = [
-                    f'{k}:{v}' if v is not None else f'{k}'
-                    for k, v in accelerators.items()
-                ]
-                accelerators = set(accelerators)
+        task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
-            # In yaml file, we store accelerators as a list.
-            # In Task, we store a list of resources, each with 1 accelerator.
-            # This for loop is for format conversion.
-            tmp_resources_list = []
-            for acc in accelerators:
-                tmp_resource = resources_config.copy()
-                tmp_resource['accelerators'] = acc
-                tmp_resources_list.append(
-                    sky.Resources.from_yaml_config(tmp_resource))
+        service = config.pop('service', None)
+        if service is not None:
+            service = service_spec.SkyServiceSpec.from_yaml_config(service)
+        task.set_service(service)
 
-            if isinstance(accelerators, list):
-                task.set_resources(tmp_resources_list)
-            elif isinstance(accelerators, set):
-                task.set_resources(set(tmp_resources_list))
-            else:
-                raise RuntimeError('Accelerators must be a list or a set.')
-        else:
-            task.set_resources(
-                {sky.Resources.from_yaml_config(resources_config)})
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -664,6 +628,23 @@ class Task:
         self.set_resources(type(self.resources)(new_resources_list))
         return self
 
+    @property
+    def service(self) -> Optional[service_spec.SkyServiceSpec]:
+        return self._service
+
+    def set_service(self,
+                    service: Optional[service_spec.SkyServiceSpec]) -> 'Task':
+        """Sets the service spec for this task.
+
+        Args:
+          service: a SkyServiceSpec object.
+
+        Returns:
+          self: The current task, with service set.
+        """
+        self._service = service
+        return self
+
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
         """Sets a func mapping resources to estimated time (secs).
@@ -731,8 +712,9 @@ class Task:
                     raise ValueError(
                         'File mount destination paths cannot be cloud storage')
             if not data_utils.is_cloud_store_url(source):
-                if not os.path.exists(
-                        os.path.abspath(os.path.expanduser(source))):
+                if (not os.path.exists(
+                        os.path.abspath(os.path.expanduser(source))) and
+                        not source.startswith('skypilot:')):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
                             f'File mount source {source!r} does not exist '
@@ -1044,6 +1026,10 @@ class Task:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
 
         add_if_not_none('resources', tmp_resource_config)
+
+        if self.service is not None:
+            add_if_not_none('service', self.service.to_yaml_config())
+
         add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:

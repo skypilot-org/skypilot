@@ -105,7 +105,7 @@ def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
     # Remove clusters that are in global user state but are not in
     # ~/.sky/local.
     records = backend_utils.get_clusters(
-        include_reserved=False,
+        include_controller=False,
         refresh=False,
         cloud_filter=backend_utils.CloudFilter.LOCAL)
     saved_clusters = [r['name'] for r in records]
@@ -139,8 +139,12 @@ def get_python_executable(cluster_name: str) -> str:
     return config['python']
 
 
-def get_job_owner(cluster_yaml: str, docker_user: Optional[str] = None) -> str:
+def get_job_owner(cluster_yaml: str,
+                  docker_user: Optional[str] = None,
+                  ssh_user: Optional[str] = None) -> str:
     """Get the owner of the job."""
+    if ssh_user is not None:
+        return ssh_user
     if docker_user is not None:
         return docker_user
     cluster_config = common_utils.read_yaml(os.path.expanduser(cluster_yaml))

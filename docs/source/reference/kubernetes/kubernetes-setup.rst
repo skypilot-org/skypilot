@@ -167,10 +167,23 @@ Please follow their respective guides to deploy your Kubernetes cluster.
 
 Setting up GPU support
 ~~~~~~~~~~~~~~~~~~~~~~
-If your Kubernetes cluster has Nvidia GPUs, make sure you have the Nvidia
-device plugin installed (i.e., ``nvidia.com/gpu`` resource is available on each node).
-Additionally, you will need to label each node in your cluster with the GPU type.
-For example, a node with v100 GPUs must have a label :code:`skypilot.co/accelerators: v100`.
+If your Kubernetes cluster has Nvidia GPUs, ensure that:
+
+1. The Nvidia GPU operator is installed (i.e., ``nvidia.com/gpu`` resource is available on each node) and ``nvidia`` is set as the default runtime for your container engine. See `Nvidia's installation guide <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_ for more details.
+2. Each node in your cluster is labelled with the GPU type. This labelling can be done by adding a label of the format ``skypilot.co/accelerators: <gpu_name>``, where the ``<gpu_name>`` is the lowercase name of the GPU. For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerators: v100`.
+
+.. tip::
+    You can check if GPU operator is installed and the ``nvidia`` runtime is set as default by running:
+
+    .. code-block:: console
+
+        $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/gpu_test_pod.yaml
+        $ watch kubectl get pods
+        # If the pod status changes to completed after a few minutes, your Kubernetes environment is set up correctly.
+
+
+.. note::
+    If you are using RKE2, the GPU operator installation through helm requires extra flags to set ``nvidia`` as the default runtime for containerd. Refer to instructions on `Nvidia GPU Operator installation with Helm on RKE2 <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#custom-configuration-for-runtime-containerd>`_ for details.
 
 We provide a convenience script that automatically detects GPU types and labels each node. You can run it with:
 
@@ -186,6 +199,9 @@ We provide a convenience script that automatically detects GPU types and labels 
 
 
 .. note::
+ GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerators`` label.
+
+.. note::
  GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
 
 
@@ -197,6 +213,99 @@ Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/co
 .. code-block:: console
 
     $ sky check
+
+
+.. _kubernetes-ports:
+
+Setting up Ports on Kubernetes
+-------------------------------
+
+
+.. note::
+    This is a guide on how to configure an existing Kubernetes cluster (along with the caveats involved) to successfully expose ports and services externally through SkyPilot.
+
+    If you are a SkyPilot user and your cluster has already been set up to expose ports,
+    :ref:`Opening Ports <ports>` explains how to expose services in your task through SkyPilot.
+
+SkyPilot clusters can :ref:`open ports <ports>` to expose services. For SkyPilot
+clusters running on Kubernetes, we support either of two modes to expose ports:
+
+* :ref:`LoadBalancer Service <kubernetes-loadbalancer>` (default)
+* :ref:`Nginx Ingress <kubernetes-ingress>`
+
+
+By default, SkyPilot creates a `LoadBalancer Service <https://kubernetes.io/docs/concepts/services-networking/service/>`__ on your Kubernetes cluster to expose the port.
+
+If your cluster does not support LoadBalancer services, SkyPilot can also use `an existing Nginx IngressController <https://kubernetes.github.io/ingress-nginx/>`_ to create an `Ingress <https://kubernetes.io/docs/concepts/services-networking/ingress/>`_ to expose your service.
+
+.. _kubernetes-loadbalancer:
+
+LoadBalancer Service
+^^^^^^^^^^^^^^^^^^^^
+
+This mode exposes ports through a Kubernetes `LoadBalancer Service <https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer>`__. This is the default mode used by SkyPilot.
+
+
+To use this mode, you must have a Kubernetes cluster that supports LoadBalancer Services:
+
+* On Google GKE, Amazon EKS or other cloud-hosted Kubernetes services, this mode is supported out of the box and no additional configuration is needed.
+* On bare metal and self-managed Kubernetes clusters, `MetalLB <https://metallb.universe.tf/>`_ can be used to support LoadBalancer Services.
+
+When using this mode, SkyPilot will create a single LoadBalancer Service for all ports that you expose on a cluster.
+Each port can be accessed using the LoadBalancer's external IP address and the port number. Use :code:`sky status --endpoints <cluster>` to view the external endpoints for all ports.
+
+.. note::
+    In cloud based Kubernetes clusters, this will automatically create an external Load Balancer.     GKE creates a (`pass-through load balancer <https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer>`__)
+    and AWS creates a `Network Load Balancer <https://docs.aws.amazon.com/eks/latest/userguide/network-load-balancing.html>`__). These load balancers will be automatically terminated when the cluster is deleted.
+
+.. note::
+    The default LoadBalancer implementation in EKS selects a random port from the list of opened ports for the
+    `LoadBalancer's health check <https://docs.aws.amazon.com/elasticloadbalancing/latest/network/target-group-health-checks.html>`_. This can cause issues if the selected port does not have a service running behind it.
+
+
+    For example, if a SkyPilot task exposes 5 ports but only 2 of them have services running behind them, EKS may select a port that does not have a service running behind it and the LoadBalancer will not pass the healthcheck. As a result, the service will not be assigned an external IP address.
+
+    To work around this issue, make sure all your ports have services running behind them.
+
+.. note::
+    LoadBalancer services are not supported on kind clusters created using :code:`sky local up`.
+
+
+.. _kubernetes-ingress:
+
+Nginx Ingress
+^^^^^^^^^^^^^
+
+This mode exposes ports by creating a Kubernetes `Ingress <https://kubernetes.io/docs/concepts/services-networking/ingress/>`_ backed by an existing `Nginx Ingress Controller <https://kubernetes.github.io/ingress-nginx/>`_.
+
+To use this mode:
+
+1. Install the Nginx Ingress Controller on your Kubernetes cluster. Refer to the `documentation <https://kubernetes.github.io/ingress-nginx/deploy/>`_ for installation instructions specific to your environment.
+2. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
+
+.. code-block:: yaml
+
+    kubernetes:
+      ports: ingress
+
+When using this mode, SkyPilot creates an ingress resource and a ClusterIP service for each port opened. The port can be accessed externally by using the Ingress URL plus a path prefix of the form :code:`/skypilot/{pod_name}/{port}`.
+
+Use :code:`sky status --endpoints <cluster>` to view the full endpoint URLs for all ports.
+
+.. code-block::
+
+    $ sky status --endpoints mycluster
+    8888: http://34.173.152.251/skypilot/test-2ea4/8888
+
+.. note::
+
+    When exposing a port under a sub-path such as an ingress, services expecting root path access, (e.g., Jupyter notebooks) may face issues. To resolve this, configure the service to operate under a different base URL. For Jupyter, use `--NotebookApp.base_url <https://jupyter-notebook.readthedocs.io/en/5.7.4/config.html>`_ flag during launch. Alternatively, consider using :ref:`LoadBalancer <kubernetes-loadbalancer>` mode.
+
+
+.. note::
+
+    Currently, SkyPilot does not support opening ports on a Kubernetes cluster using the `Gateway API <https://kubernetes.io/docs/concepts/services-networking/gateway/>`_.
+    If you are interested in this feature, please `reach out <https//slack.skypilot.co>`_.
 
 
 .. _kubernetes-observability:

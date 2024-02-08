@@ -1,0 +1,13 @@
+resources:
+  accelerators: {A10G, A10, L4, A100, A100-80GB}
+  memory: 32+
+  ports: 
+    - 8080
+
+envs:
+  MODEL_ID: mistralai/Mistral-7B-Instruct-v0.1
+
+run: |
+  docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
+    ghcr.io/predibase/lorax:latest \
+    --model-id $MODEL_ID

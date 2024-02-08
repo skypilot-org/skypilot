@@ -1,5 +1,6 @@
 """Utility functions for subprocesses."""
 from multiprocessing import pool
+import os
 import random
 import subprocess
 import time
@@ -41,6 +42,14 @@ def run_no_outputs(cmd, **kwargs):
                **kwargs)
 
 
+def get_parallel_threads() -> int:
+    """Returns the number of idle CPUs."""
+    cpu_count = os.cpu_count()
+    if cpu_count is None:
+        cpu_count = 1
+    return max(4, cpu_count - 1)
+
+
 def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
@@ -49,7 +58,7 @@ def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     as the arguments.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    with pool.ThreadPool() as p:
+    with pool.ThreadPool(processes=get_parallel_threads()) as p:
         # Run the function in parallel on the arguments, keeping the order.
         return list(p.imap(func, args))
 
@@ -81,8 +90,9 @@ def handle_returncode(returncode: int,
                                           stderr)
 
 
-def kill_children_processes(first_pid_to_kill: Optional[int] = None,
-                            force: bool = False):
+def kill_children_processes(
+        first_pid_to_kill: Optional[Union[int, List[Optional[int]]]] = None,
+        force: bool = False):
     """Kill children processes recursively.
 
     We need to kill the children, so that
@@ -92,35 +102,41 @@ def kill_children_processes(first_pid_to_kill: Optional[int] = None,
        etc. while we are cleaning up the clusters.
 
     Args:
-        first_pid_to_kill: Optional PID of a process to be killed first.
+        first_pid_to_kill: Optional PID of a process, or PIDs of a series of
+         processes to be killed first. If a list of PID is specified, it is
+         killed by the order in the list.
          This is for guaranteeing the order of cleaning up and suppress
          flaky errors.
     """
-    parent_process = psutil.Process()
+    pid_to_proc = dict()
     child_processes = []
-    for child in parent_process.children(recursive=True):
-        if child.pid == first_pid_to_kill:
+    if isinstance(first_pid_to_kill, int):
+        first_pid_to_kill = [first_pid_to_kill]
+    elif first_pid_to_kill is None:
+        first_pid_to_kill = []
+
+    def _kill_processes(processes: List[psutil.Process]) -> None:
+        for process in processes:
             try:
                 if force:
-                    child.kill()
+                    process.kill()
                 else:
-                    child.terminate()
-                child.wait()
+                    process.terminate()
             except psutil.NoSuchProcess:
-                # The child process may have already been terminated.
+                # The process may have already been terminated.
                 pass
+
+    parent_process = psutil.Process()
+    for child in parent_process.children(recursive=True):
+        if child.pid in first_pid_to_kill:
+            pid_to_proc[child.pid] = child
         else:
             child_processes.append(child)
 
-    for child in child_processes:
-        try:
-            if force:
-                child.kill()
-            else:
-                child.terminate()
-        except psutil.NoSuchProcess:
-            # The child process may have already been terminated.
-            pass
+    _kill_processes([
+        pid_to_proc[proc] for proc in first_pid_to_kill if proc in pid_to_proc
+    ])
+    _kill_processes(child_processes)
 
 
 def run_with_retries(

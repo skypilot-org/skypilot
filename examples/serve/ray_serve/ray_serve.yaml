@@ -1,0 +1,18 @@
+# SkyServe YAML to run a simple rayserve endpoint.
+# 
+# Usage:
+#   sky serve up examples/serve/ray_serve/ray_serve.yaml
+
+service:
+  readiness_probe: /
+  replicas: 1
+
+resources:
+  ports: 8000
+  cpus: 2+
+
+workdir: examples/serve/ray_serve
+
+setup: pip install "ray[serve]"
+
+run: serve run serve:app --host 0.0.0.0

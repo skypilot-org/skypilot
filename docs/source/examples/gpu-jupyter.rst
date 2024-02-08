@@ -5,22 +5,20 @@ Jupyter notebooks are a useful tool for interactive development, debugging, and
 visualization. SkyPilot makes the process of running a GPU-backed Jupyter notebook
 simple by automatically managing provisioning and port forwarding.
 
-To get a machine with a GPU attached, we recommend using an interactive **GPU node**.
-You can read more about interactive nodes :ref:`here <interactive-nodes>`.
+To get a machine with a GPU attached, use:
 
 .. code-block:: bash
 
    # Launch a VM with 1 NVIDIA GPU and forward port 8888 to localhost
-   sky gpunode -p 8888 -c jupyter-vm --gpus K80:1
+   sky launch -c jupyter-vm --gpus K80:1
+   ssh -L 8888:localhost:8888 jupyter-vm
 
 .. note::
 
   View the supported GPUs with the :code:`sky show-gpus` command.
 
-
-The above command will automatically log in to the cluster once the cluster is provisioned (or re-use an existing one).
-
-Inside the VM, you can run the following commands to start a Jupyter session:
+Use ``ssh jupyter-vm`` to SSH into the VM. Inside the VM, you can run the
+following commands to start a Jupyter session:
 
 .. code-block:: bash
 

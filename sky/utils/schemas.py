@@ -152,9 +152,12 @@ def get_resources_schema():
                 }, {
                     'type': 'object',
                     'required': [],
-                    'maxProperties': 1,
                     'additionalProperties': {
-                        'type': 'number'
+                        'anyOf': [{
+                            'type': 'null',
+                        }, {
+                            'type': 'number',
+                        }]
                     }
                 }, {
                     'type': 'array',
@@ -285,6 +288,80 @@ def get_storage_schema():
     }
 
 
+def get_service_schema():
+    """Schema for top-level `service:` field (for SkyServe)."""
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': ['readiness_probe'],
+        'additionalProperties': False,
+        'properties': {
+            'readiness_probe': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': ['path'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'path': {
+                            'type': 'string',
+                        },
+                        'initial_delay_seconds': {
+                            'type': 'number',
+                        },
+                        'post_data': {
+                            'anyOf': [{
+                                'type': 'string',
+                            }, {
+                                'type': 'object',
+                            }]
+                        }
+                    }
+                }]
+            },
+            'replica_policy': {
+                'type': 'object',
+                'required': ['min_replicas'],
+                'additionalProperties': False,
+                'properties': {
+                    'min_replicas': {
+                        'type': 'integer',
+                    },
+                    'max_replicas': {
+                        'type': 'integer',
+                    },
+                    'target_qps_per_replica': {
+                        'type': 'number',
+                    },
+                    'upscale_delay_seconds': {
+                        'type': 'number',
+                    },
+                    'downscale_delay_seconds': {
+                        'type': 'number',
+                    },
+                    # TODO(MaoZiming): Fields `qps_upper_threshold`,
+                    # `qps_lower_threshold` and `auto_restart` are deprecated.
+                    # Temporarily keep these fields for backward compatibility.
+                    # Remove after 2 minor release, i.e., 0.6.0.
+                    'auto_restart': {
+                        'type': 'boolean',
+                    },
+                    'qps_upper_threshold': {
+                        'type': 'number',
+                    },
+                    'qps_lower_threshold': {
+                        'type': 'number',
+                    },
+                }
+            },
+            'replicas': {
+                'type': 'integer',
+            },
+        }
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -310,6 +387,10 @@ def get_task_schema():
             },
             # storage config is validated separately using STORAGE_SCHEMA
             'file_mounts': {
+                'type': 'object',
+            },
+            # service config is validated separately using SERVICE_SCHEMA
+            'service': {
                 'type': 'object',
             },
             'setup': {
@@ -393,35 +474,75 @@ def get_cluster_schema():
     }
 
 
+_NETWORK_CONFIG_SCHEMA = {
+    'vpc_name': {
+        'oneOf': [{
+            'type': 'string',
+        }, {
+            'type': 'null',
+        }],
+    },
+    'use_internal_ips': {
+        'type': 'boolean',
+    },
+    'ssh_proxy_command': {
+        'oneOf': [{
+            'type': 'string',
+        }, {
+            'type': 'null',
+        }, {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': {
+                'anyOf': [
+                    {
+                        'type': 'string'
+                    },
+                    {
+                        'type': 'null'
+                    },
+                ]
+            }
+        }]
+    },
+}
+
+
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
     from sky.utils import kubernetes_enums
+
+    resources_schema = {
+        k: v
+        for k, v in get_resources_schema().items()
+        # Validation may fail if $schema is included.
+        if k != '$schema'
+    }
+    resources_schema['properties'].pop('ports')
+    controller_resources_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'controller': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'resources': resources_schema,
+                }
+            },
+        }
+    }
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'spot': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'controller': {
-                        'type': 'object',
-                        'required': [],
-                        'additionalProperties': False,
-                        'properties': {
-                            'resources': {
-                                k: v
-                                for k, v in get_resources_schema().items()
-                                # Validation may fail if $schema is included.
-                                if k != '$schema'
-                            },
-                        }
-                    },
-                }
-            },
+            'spot': controller_resources_schema,
+            'serve': controller_resources_schema,
             'aws': {
                 'type': 'object',
                 'required': [],
@@ -434,36 +555,7 @@ def get_config_schema():
                             'type': 'string',
                         },
                     },
-                    'vpc_name': {
-                        'oneOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'null',
-                        }],
-                    },
-                    'use_internal_ips': {
-                        'type': 'boolean',
-                    },
-                    'ssh_proxy_command': {
-                        'oneOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'null',
-                        }, {
-                            'type': 'object',
-                            'required': [],
-                            'additionalProperties': {
-                                'anyOf': [
-                                    {
-                                        'type': 'string'
-                                    },
-                                    {
-                                        'type': 'null'
-                                    },
-                                ]
-                            }
-                        }]
-                    },
+                    **_NETWORK_CONFIG_SCHEMA,
                 }
             },
             'gcp': {
@@ -476,16 +568,8 @@ def get_config_schema():
                         'items': {
                             'type': 'string',
                         },
-                        'minItems': 1,
-                        'maxItems': 1,
                     },
-                    'vpc_name': {
-                        'oneOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'null',
-                        }],
-                    },
+                    **_NETWORK_CONFIG_SCHEMA,
                 }
             },
             'kubernetes': {
@@ -500,6 +584,19 @@ def get_config_schema():
                             kubernetes_enums.KubernetesNetworkingMode
                         ]
                     },
+                    'ports': {
+                        'type': 'string',
+                        'case_insensitive_enum': [
+                            type.value
+                            for type in kubernetes_enums.KubernetesPortMode
+                        ]
+                    },
+                    'pod_config': {
+                        'type': 'object',
+                        'required': [],
+                        # Allow arbitrary keys since validating pod spec is hard
+                        'additionalProperties': True,
+                    }
                 }
             },
             'oci': {

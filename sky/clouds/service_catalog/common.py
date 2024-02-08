@@ -452,6 +452,7 @@ def list_accelerators_impl(
     region_filter: Optional[str],
     quantity_filter: Optional[int],
     case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
@@ -469,7 +470,7 @@ def list_accelerators_impl(
         gpu_info_df = df['GpuInfo'].apply(ast.literal_eval)
         df['DeviceMemoryGiB'] = gpu_info_df.apply(
             lambda row: row['Gpus'][0]['MemoryInfo']['SizeInMiB']) / 1024.0
-    except ValueError:
+    except (ValueError, SyntaxError):
         # TODO(zongheng,woosuk): GCP/Azure catalogs do not have well-formed
         # GpuInfo fields. So the above will throw:
         #  ValueError: malformed node or string: <_ast.Name object at ..>
@@ -486,6 +487,7 @@ def list_accelerators_impl(
         'SpotPrice',
         'Region',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
+
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter,
                                                    case=case_sensitive,
@@ -500,12 +502,18 @@ def list_accelerators_impl(
     grouped = df.groupby('AcceleratorName')
 
     def make_list_from_df(rows):
-        # Only keep the lowest prices across regions.
-        rows = rows.groupby([
+
+        sort_key = ['Price', 'SpotPrice']
+        subset = [
             'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
             'MemoryGiB'
-        ],
-                            dropna=False).aggregate('min').reset_index()
+        ]
+        if all_regions:
+            sort_key.append('Region')
+            subset.append('Region')
+
+        rows = rows.sort_values(by=sort_key).drop_duplicates(subset=subset,
+                                                             keep='first')
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
                 cloud,
@@ -521,8 +529,11 @@ def list_accelerators_impl(
             ),
             axis='columns',
         ).tolist()
-        ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
-                                   if info.cpu_count is not None else 0))
+        # Sort by price and region as well.
+        ret.sort(
+            key=lambda info: (info.accelerator_count, info.instance_type, info.
+                              cpu_count if not pd.isna(info.cpu_count) else 0,
+                              info.price, info.spot_price, info.region))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}
@@ -545,39 +556,6 @@ def get_region_zones(df: pd.DataFrame,
         for region in regions:
             region.set_zones(zones_in_region[region.name])
     return regions
-
-
-def _accelerator_in_region(df: pd.DataFrame, acc_name: str, acc_count: int,
-                           region: str) -> bool:
-    """Returns True if the accelerator is in the region."""
-    return len(df[(df['AcceleratorName'] == acc_name) &
-                  (df['AcceleratorCount'] == acc_count) &
-                  (df['Region'].str.lower() == region.lower())]) > 0
-
-
-def _accelerator_in_zone(df: pd.DataFrame, acc_name: str, acc_count: int,
-                         zone: str) -> bool:
-    """Returns True if the accelerator is in the zone."""
-    return len(df[(df['AcceleratorName'] == acc_name) &
-                  (df['AcceleratorCount'] == acc_count) &
-                  (df['AvailabilityZone'] == zone)]) > 0
-
-
-def accelerator_in_region_or_zone_impl(
-    df: pd.DataFrame,
-    accelerator_name: str,
-    acc_count: int,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
-) -> bool:
-    """Returns True if the accelerator is in the region or zone."""
-    assert region is not None or zone is not None, (
-        'Both region and zone are None.')
-    if zone is None:
-        assert region is not None
-        return _accelerator_in_region(df, accelerator_name, acc_count, region)
-    else:
-        return _accelerator_in_zone(df, accelerator_name, acc_count, zone)
 
 
 # Images

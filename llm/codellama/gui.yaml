@@ -1,0 +1,50 @@
+# Starts a GUI server that connects to the Code Llama OpenAI API server.
+# This works with the endpoint.yaml, please refer to llm/codellama/README.md
+# for more details.
+# Usage:
+#  1. If you have a endpoint started on a cluster (sky launch):
+#     `sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky status --ip code-llama):8000`
+#  2. If you have a SkyPilot Service started (sky serve up) called code-llama:
+#     `sky launch -c code-llama-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint code-llama)`
+# After the GUI server is started, you will see a gradio link in the output and
+# you can click on it to open the GUI.
+
+envs:
+  ENDPOINT: x.x.x.x:3031 # Address of the API server running codellama. 
+
+resources:
+  cpus: 2
+
+setup: |
+  conda activate codellama
+  if [ $? -ne 0 ]; then
+    conda create -n codellama python=3.10 -y
+    conda activate codellama
+  fi
+
+  pip install "fschat[model_worker,webui]"
+  pip install "openai<1"
+
+run: |
+  conda activate codellama
+  export PATH=$PATH:/sbin
+  WORKER_IP=$(hostname -I | cut -d' ' -f1)
+  CONTROLLER_PORT=21001
+  WORKER_PORT=21002
+
+  cat <<EOF > ~/model_info.json
+  {
+    "codellama/CodeLlama-70b-Instruct-hf": {
+      "model_name": "codellama/CodeLlama-70b-Instruct-hf",
+      "api_base": "http://${ENDPOINT}/v1",
+      "api_key": "empty",
+      "model_path": "codellama/CodeLlama-70b-Instruct-hf"
+    }
+  }
+  EOF
+
+  python3 -m fastchat.serve.controller --host 0.0.0.0 --port ${CONTROLLER_PORT} > ~/controller.log 2>&1 &
+
+  echo 'Starting gradio server...'
+  python -u -m fastchat.serve.gradio_web_server --share \
+    --register-openai-compatible-models ~/model_info.json | tee ~/gradio.log

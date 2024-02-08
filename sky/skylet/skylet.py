@@ -21,6 +21,10 @@ EVENTS = [
     # Otherwise, the abnormal spot job status update will be delayed
     # until the next job update event.
     events.SpotJobUpdateEvent(),
+    # This is for monitoring controller job status. If it becomes
+    # unhealthy, this event will correctly update the controller
+    # status to CONTROLLER_FAILED.
+    events.ServiceUpdateEvent(),
 ]
 
 while True:

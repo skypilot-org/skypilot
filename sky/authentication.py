@@ -8,7 +8,7 @@ with resource specific information, these functions are called with the filled
 in ray yaml config as input,
 1. Replace the placeholders in the ray yaml file `skypilot:ssh_user` and
    `skypilot:ssh_public_key_content` with the actual username and public key
-   content, i.e., `_replace_ssh_info_in_config`.
+   content, i.e., `configure_ssh_info`.
 2. Setup the `authorized_keys` on the remote VM with the public key content,
    by cloud-init or directly using cloud provider's API.
 
@@ -19,6 +19,7 @@ using SkyPilot, e.g., the node is used as a spot controller. (Lambda cloud
 is an exception, due to the limitation of the cloud provider. See the
 comments in setup_lambda_authentication)
 """
+import base64
 import copy
 import functools
 import os
@@ -40,10 +41,11 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
-from sky.utils import kubernetes_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -262,6 +264,36 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return configure_ssh_info(config)
 
 
+# In Azure, cloud-init script must be encoded in base64. See
+# https://learn.microsoft.com/en-us/azure/virtual-machines/custom-data
+# for more information. Here we decode it and replace the ssh user
+# and public key content, then encode it back.
+def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read().strip()
+    for node_type in config['available_node_types']:
+        node_config = config['available_node_types'][node_type]['node_config']
+        cloud_init = (
+            node_config['azure_arm_parameters']['cloudInitSetupCommands'])
+        cloud_init = base64.b64decode(cloud_init).decode('utf-8')
+        cloud_init = cloud_init.replace('skypilot:ssh_user',
+                                        config['auth']['ssh_user'])
+        cloud_init = cloud_init.replace('skypilot:ssh_public_key_content',
+                                        public_key)
+        cloud_init = base64.b64encode(
+            cloud_init.encode('utf-8')).decode('utf-8')
+        node_config['azure_arm_parameters']['cloudInitSetupCommands'] = (
+            cloud_init)
+    config_str = common_utils.dump_yaml_str(config)
+    config_str = config_str.replace('skypilot:ssh_user',
+                                    config['auth']['ssh_user'])
+    config_str = config_str.replace('skypilot:ssh_public_key_content',
+                                    public_key)
+    config = yaml.safe_load(config_str)
+    return config
+
+
 def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     get_or_generate_keys()
@@ -418,3 +450,17 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
 
     return config
+
+
+# ---------------------------------- RunPod ---------------------------------- #
+def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for RunPod.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's RunPod account.
+    """
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
+        public_key = pub_key_file.read().strip()
+        runpod.runpod().cli.groups.ssh.functions.add_ssh_key(public_key)
+
+    return configure_ssh_info(config)

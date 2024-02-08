@@ -99,6 +99,16 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
                     "iam:GetInstanceProfile"
                 ],
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
+            },
+            {
+                "Effect": "Allow",
+                "Action": "iam:CreateServiceLinkedRole",
+                "Resource": "*",
+                "Condition": {
+                    "StringEquals": {
+                        "iam:AWSServiceName": "spot.amazonaws.com"
+                    }
+                }
             }
         ]
     }
@@ -216,8 +226,15 @@ Using a specific VPC
 By default, SkyPilot uses the "default" VPC in each region.
 
 To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
-file ``~/.sky/config.yaml`` to specify the VPC name. See the ``aws.vpc_name``
-field in :ref:`config-yaml`.  Example use cases include using a private VPC or a
+file ``~/.sky/config.yaml`` to specify the VPC name in the ``aws.vpc_name``
+field:
+
+.. code-block:: yaml
+
+    aws:
+      vpc_name: my-vpc-name
+
+See details in :ref:`config-yaml`.  Example use cases include using a private VPC or a
 VPC with fine-grained constraints, typically created via Terraform or manually.
 
 To manually create a private VPC (i.e., all nodes will have internal IPs only),
