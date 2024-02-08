@@ -275,7 +275,6 @@ class RayCodeGen:
                 returncodes[idx] = ray.get(ready[0])
                 while unready:
                     if returncodes[idx] != 0:
-                        print('returncodes', returncodes)
                         for task in unready:
                             # ray.cancel without force fails to kill tasks.
                             # We use force=True to kill unready tasks.
