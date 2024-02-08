@@ -21,7 +21,7 @@ setup: |
   fi
 
   pip list | grep sglang || pip install "sglang[all]"
-  pip install git+https://github.com/huggingface/transformers
+  pip list | grep transformers || pip install transformers==4.37.2
 
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
