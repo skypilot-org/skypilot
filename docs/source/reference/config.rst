@@ -191,6 +191,19 @@ Available fields and semantics:
         runtimeClassName: nvidia
         imagePullSecrets:
           - name: my-secret
+        containers:
+          - env:
+            - name: HTTP_PROXY
+              value: http://proxy-host:3128
+            volumeMounts:
+              - mountPath: /foo
+                name: example-volume
+                readOnly: true
+        volumes:
+          - name: example-volume
+            hostPath:
+              path: /tmp
+              type: Directory
 
   # Advanced OCI configurations (optional).
   oci:
