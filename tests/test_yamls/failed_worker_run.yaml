@@ -4,9 +4,8 @@ resources:
 num_nodes: 3
 
 run: |
-  echo My hostname: $(hostname)
-  sleep 1
   if [ "$SKYPILOT_NODE_RANK" == "1" ]; then
       exit 1
   fi
+  echo My hostname: $(hostname)
   sleep 10000
