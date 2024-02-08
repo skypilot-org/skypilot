@@ -2,8 +2,8 @@
 import typing
 from typing import Dict, Generic, Optional
 
-import sky
 from sky import sky_logging
+from sky.backends import backend_utils
 from sky.usage import usage_lib
 from sky.utils import timeline
 from sky.utils.common_utils import adjust_cluster_name
@@ -55,7 +55,7 @@ class Backend(Generic[_ResourceHandleType]):
             cluster_name: Optional[str] = None,
             retry_until_up: bool = False) -> Optional[_ResourceHandleType]:
         if cluster_name is None:
-            cluster_name = sky.backends.backend_utils.generate_cluster_name()
+            cluster_name = backend_utils.generate_cluster_name()
         else:
             prev_cluster_name = cluster_name
             cluster_name = adjust_cluster_name(cluster_name)
