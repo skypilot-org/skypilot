@@ -194,7 +194,7 @@ FAQs
                 - name: MY_ENV_VAR
                   value: MY_ENV_VALUE
 
-  For more details refer to, :ref:`config-yaml`.
+  For more details refer to :ref:`config-yaml`.
 
 Features and Roadmap
 --------------------
