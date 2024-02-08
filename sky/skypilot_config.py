@@ -44,7 +44,7 @@ then:
 import copy
 import os
 import pprint
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 import yaml
 
@@ -151,6 +151,11 @@ def _try_load_config() -> None:
                 skip_none=False)
 
         logger.debug('Config syntax check passed.')
+
+
+def loaded_config_path() -> Optional[str]:
+    """Returns the path to the loaded config file."""
+    return _loaded_config_path
 
 
 # Load on import.

@@ -100,9 +100,31 @@ Available fields and semantics:
       us-east-1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-east-1.proxy
       us-east-2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ec2-user@<jump server public ip>
 
+    # The authentication method to use for GCP on the remote machine (optional).
+    #
+    # If 'USER_ACCOUNT' is specified, the user's credentials will be uploaded
+    # and used for accessing the cloud on the machine created by SkyPilot.
+    # If 'SERVICE_ACCOUNT' is specified, the service account will be used to
+    # authenticate on the remote machine. Note that this will only take
+    # effect if the remote machine is created on AWS, and machines created on
+    # other clouds will still use USER_ACCOUNT to authenticate AWS.
+    #
+    # Default: 'USER_ACCOUNT'. 
+    remote_authentication: USER_ACCOUNT
+
   # Advanced GCP configurations (optional).
   # Apply to all new instances but not existing ones.
   gcp:
+    # Labels to assign to all instances launched by SkyPilot (optional).
+    #
+    # Example use case: cost tracking by user/team/project.
+    #
+    # Users should guarantee that these key-values are valid GCP labels, otherwise
+    # errors from the cloud provider will be surfaced.
+    instance_tags:
+      Owner: user-unique-name
+      my-tag: my-value
+
     # VPC to use (optional).
     #
     # Default: null, which implies the following behavior. First, all existing
@@ -155,6 +177,19 @@ Available fields and semantics:
     specific_reservations:
       - projects/my-project/reservations/my-reservation1
       - projects/my-project/reservations/my-reservation2
+
+
+    # The authentication method to use for GCP on the remote machine (optional).
+    #
+    # If 'USER_ACCOUNT' is specified, the user's credentials will be uploaded
+    # and used for accessing the cloud on the machine created by SkyPilot.
+    # If 'SERVICE_ACCOUNT' is specified, the service account will be used to
+    # authenticate on the remote machine. Note that this will only take
+    # effect if the remote machine is created on GCP, and machines created on
+    # other clouds will still use USER_ACCOUNT to authenticate GCP.
+    #
+    # Default: 'USER_ACCOUNT'. 
+    remote_authentication: USER_ACCOUNT
 
   # Advanced Kubernetes configurations (optional).
   kubernetes:

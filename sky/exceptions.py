@@ -46,6 +46,14 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class InvalidConfigs(Exception):
+    """Raised when invalid configurations are provided for a given cloud.
+
+    The caller should handle this exception and skip the cloud.
+    """
+    pass
+
+
 class ProvisionPrechecksError(Exception):
     """Raised when a spot job fails prechecks before provision.
     Developer note: For now this should only be used by managed
