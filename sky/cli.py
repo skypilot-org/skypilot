@@ -4352,6 +4352,7 @@ def serve():
 
 
 def _generate_task_with_service(
+    service_name: str,
     service_yaml_args: List[str],
     workdir: Optional[str],
     cloud: Optional[str],
@@ -4379,9 +4380,8 @@ def _generate_task_with_service(
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
         service_yaml_args,
-        # For Service YAML, we disabled the `name` field override as
-        # it might be confusing with `service_name` field.
-        name=None,
+        # For Service YAML, we override the `name` field with service name.
+        name=service_name,
         workdir=workdir,
         cloud=cloud,
         region=region,
@@ -4510,6 +4510,7 @@ def serve_up(
         service_name = serve_lib.generate_service_name()
 
     task = _generate_task_with_service(
+        service_name=service_name,
         service_yaml_args=service_yaml,
         workdir=workdir,
         cloud=cloud,
@@ -4597,6 +4598,7 @@ def serve_update(
         sky serve update sky-service-16aa new_service.yaml
     """
     task = _generate_task_with_service(
+        service_name=service_name,
         service_yaml_args=service_yaml,
         workdir=workdir,
         cloud=cloud,
