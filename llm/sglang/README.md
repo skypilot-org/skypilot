@@ -2,7 +2,7 @@
 
 
 <p align="center">
-    <img src="https://imgur.com/juCzh0y.png" alt="vLLM"/>
+    <img src="https://imgur.com/juCzh0y.png" alt="SGLang"/>
 </p>
 
 This README contains instructions to run a demo for SGLang, an open-source library for fast and expressive LLM inference and serving with **5x throughput**.
