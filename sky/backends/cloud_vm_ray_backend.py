@@ -1593,22 +1593,19 @@ class RetryingVmProvisioner(object):
                 handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           **kwargs)
                 handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
-
-                # Guard against two cases:
-                #   1. there's an existing cluster, with ray runtime messed up
-                #      (e.g., manually killed)
-                #   2. the cluster is freshly launched, and ray cluster is not
-                #      ready yet. (ray runtime still initializing)
-                # The function will (1) querying ray status (2) restarting ray
-                # if needed.
-                #
-                # The above 'ray up' will not restart it automatically due
-                # to 'ray up --no-restart' flag.
-                #
-                # NOTE: this is performance sensitive and has been observed
-                # to take 9s. It's okay to be slow, because the new provisioner
-                # will not go through this code path.
-                self._ensure_cluster_ray_started(handle, log_abs_path)
+                if cluster_exists:
+                    # Guard against the case where there's an existing cluster
+                    # with ray runtime messed up (e.g., manually killed) by (1)
+                    # querying ray status (2) restarting ray if needed.
+                    #
+                    # The above 'ray up' will not restart it automatically due
+                    # to 'ray up # --no-restart' flag.
+                    #
+                    # NOTE: this is performance sensitive and has been observed
+                    # to take 9s. Only do this for existing clusters, not
+                    # freshly launched ones (which should have ray runtime
+                    # started).
+                    self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 config_dict['handle'] = handle
                 plural = '' if num_nodes == 1 else 's'
