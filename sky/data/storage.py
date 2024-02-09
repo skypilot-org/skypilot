@@ -1860,10 +1860,10 @@ class AzureBlobStore(AbstractStore):
                  sync_on_reconstruction: bool = True):
         self.storage_client: 'storage.Client'
         self.resource_client: 'storage.Client'
-        self.resource_group_name: str
-        self.storage_account_name: str
-        self.storage_account_key: str
-        self.bucket: 'StorageHandle'
+        self.bucket_name: str
+        self.resource_group_name: str = None
+        self.storage_account_name: str = None
+        self.storage_account_key: str = None
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
 
@@ -2008,59 +2008,65 @@ class AzureBlobStore(AbstractStore):
         if isinstance(self.source, str) and self.source.startswith('az://'):
             bucket_name, _, storage_account_name = data_utils.split_az_path(self.source)
             # Using externally created storage
-            if self.name == bucket_name:
-                self.storage_account_name = storage_account_name
-                self.resource_group_name = data_utils.get_az_resource_group(
-                    storage_account_name)
-        # TODO(Doyoung): May need to do some handling for what to do for non az
-        # cloud urls passed as a source.
+            assert self.name == bucket_name
+            self.storage_account_name = storage_account_name
+            self.resource_group_name = data_utils.get_az_resource_group(
+                storage_account_name)
         else:
             # creating new container
             # If resource group or storage account names are not provided from
             # config, then use default names.
             self.storage_account_name = skypilot_config.get_nested(
                 ('azure', 'storage_account'),
-                f'sky{common_utils.get_user_hash()}')
+                f'skytest{common_utils.get_user_hash()}')
             self.resource_group_name = skypilot_config.get_nested(
                 ('azure', 'resource_group'),
-                f'sky{common_utils.get_user_hash()}')
+                f'skytest{common_utils.get_user_hash()}')
             # If the resource group or storage account already exist with name
-            # used to create below, both create functions will silently move on
-            # TODO(Doyoung) Need to handle any other errors when the storage account or
-            # resource group creation fails for some reason.
+            # used to create below, both create functions will silently move on.
             self.resource_client.resource_groups.create_or_update(
                 self.resource_group_name,
                 {"location": self.region}
             )
-            # TODO(Doyoung): storage account names are globally unique. Check what happens
-            # if the passed storage account name already exists(not under the user's account)
-            # If it throws out an error, handle the error notifying the user to use another account name.
-            self.storage_client.storage_accounts.begin_create(
-                self.resource_group_name,
-                self.storage_account_name,
-                {
-                    "sku": {
-                    "name": "Standard_GRS"
-                    },
-                    "kind": "StorageV2",
-                    "location": "westus",
-                    "encryption": {
-                    "services": {
-                        "blob": {
-                        "key_type": "Account",
-                        "enabled": True
-                        }
-                    },
-                    "key_source": "Microsoft.Storage"
-                    },
-                }
-            ).result()
-        self.storage_account_key = data_utils.get_az_storage_account_key(
-            self.storage_account_name, self.resource_group_name,
-            self.storage_client, self.resource_client)
+            try:
+                self.storage_client.storage_accounts.begin_create(
+                    self.resource_group_name,
+                    self.storage_account_name,
+                    {
+                        "sku": {
+                        "name": "Standard_GRS"
+                        },
+                        "kind": "StorageV2",
+                        "location": "westus",
+                        "encryption": {
+                        "services": {
+                            "blob": {
+                            "key_type": "Account",
+                            "enabled": True
+                            }
+                        },
+                        "key_source": "Microsoft.Storage"
+                        },
+                    }
+                ).result()
+            except azure.core_exception().ResourceExistsError as e:
+                error_message = e.message
+                if 'StorageAccountAlreadyTaken' in error_message:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketCreateError(
+                            'The storage account name '
+                            f'{self.storage_account_name!r} is already taken. '
+                            'Please try with another name.')
+
+        # resource_group_name is set to None when using non-sky-managed
+        # public container.
+        if self.resource_group_name is not None:
+            self.storage_account_key = data_utils.get_az_storage_account_key(
+                self.storage_account_name, self.resource_group_name,
+                self.storage_client, self.resource_client)
         # TODO(Doyoung): Add naming convention check from storage account name
         # and resource group name
-        self.bucket, is_new_bucket = self._get_bucket()
+        self.bucket_name, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
             # object (i.e., did not exist in global_user_state) and we should
@@ -2151,14 +2157,14 @@ class AzureBlobStore(AbstractStore):
                             f'{includes} '
                             '--delete-destination false '
                             f'--source {base_dir_path} '
-                            f'--container {self.bucket.name}')
+                            f'--container {self.bucket_name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
-            excluded_list.append('.git')
+            excluded_list.append('.git/')
             excludes_list = ';'.join([
                 file_name.rstrip('*') for file_name in excluded_list
             ])
@@ -2173,7 +2179,7 @@ class AzureBlobStore(AbstractStore):
                             f'{excludes} '
                             '--delete-destination false '
                             f'--source {src_dir_path} '
-                            f'--container {self.bucket.name}/{dest_dir_name}')
+                            f'--container {self.bucket_name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -2218,58 +2224,90 @@ class AzureBlobStore(AbstractStore):
                 attempted to be fetched while reconstructing the Storage for
                 'sky storage delete' or 'sky start'
         """
-        
-        try:
-            # TODO(Doyoung): This may need an additional handling for public
-            # container. Test it, and if it doesn't work, update.
-            # Get a public container url and try out from jupyter.
-            container = self.storage_client.blob_containers.get(
-                self.resource_group_name,
-                self.storage_account_name,
-                self.name
-            )
-            return container, False
-        except azure.core_exception().ResourceNotFoundError as e:
-            error_code = e.error.code
-            if error_code == 'ResourceGroupNotFound':
-                with ux_utils.print_exception_no_traceback():
-                    # TODO(Doyoung): Update the raised debug message.
-                    raise exceptions.StorageBucketGetError(
-                        'Attempted to use a non-existent resource group to '
-                        f'create a container: {self.resource_group_name}. '
-                        f'Consider using `aws s3 ls {self.source}` to debug.')
-
-            if error_code == 'ParentResourceNotFound':
-                with ux_utils.print_exception_no_traceback():
-                    # TODO(Doyoung): Update the raised debug message.
-                    raise exceptions.StorageBucketGetError(
-                        'Attempted to use a non-existent storage account to '
-                        f'create a container: {self.storage_account_name}. '
-                        f'Consider using `aws s3 ls {self.source}` to debug.')     
-            
-            if error_code == 'ContainerNotFound':
-                if isinstance(self.source, str) and self.source.startswith('az://'):
+        # When using non-sky-managed public container
+        if self.resource_group_name is None:
+            from azure.storage.blob import ContainerClient
+            try:
+                container_url = f"https://{self.storage_account_name}.blob.core.windows.net/{self.name}"
+                container = ContainerClient.from_container_url(container_url)
+                # Here, exists() is used to check if the public container
+                # exists. exists() will return False only when the credentials
+                # are provided for from_container_url(), but there is no 
+                # credentials to provide for public container. In this case,
+                # if the public container doesn't exist, it raises an error
+                # instead of returning False.
+                container.exists(timeout=5)
+                return container.container_name, False
+            except azure.core_exception().ClientAuthenticationError as e:
+                error_message = e.message
+                # raised when attempted to access a container without rights.
+                if 'ErrorCode:NoAuthenticationInformation' in error_message:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketGetError(
+                            _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                                name=self.name))
+            except azure.core_exception().ServiceRequestError as e:
+                # raised when storage account name to be used publicly is wrong
+                error_message = e.message
+                if 'Name or service not known' in error_message:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketGetError(
+                            'Attempted to fetch public container from '
+                            'non-existant storage account '
+                            f'name: {self.storage_account_name}.')
+        else:
+            try:
+                container = self.storage_client.blob_containers.get(
+                    self.resource_group_name,
+                    self.storage_account_name,
+                    self.name
+                )
+                return container.name, False
+            # except ValueError as e:
+            #     error_msg = str(e)
+            #     if 'No value for given attribute' in error_msg:
+            #         # when the provided container is
+            #         if self.resource_group_name is None and self.source.startswith('az://'):
+            #             pass
+            except azure.core_exception().ResourceNotFoundError as e:
+                error_code = e.error.code
+                if error_code == 'ResourceGroupNotFound':
                     with ux_utils.print_exception_no_traceback():
                         # TODO(Doyoung): Update the raised debug message.
                         raise exceptions.StorageBucketGetError(
-                            'Attempted to use a non-existent bucket as a source: '
-                            f'{self.source}. Consider using `aws s3 ls '
-                            f'{self.source}` to debug.')
+                            'Attempted to use a non-existent resource group to '
+                            f'create a container: {self.resource_group_name}.')
 
-                # If bucket cannot be found in both private and public settings,
-                # the bucket is to be created by Sky. However, creation is skipped if
-                # Store object is being reconstructed for deletion or re-mount with
-                # sky start, and error is raised instead.
-                if self.sync_on_reconstruction:
-                    container = self._create_az_bucket(self.name)
-                    return container, True
+                if error_code == 'ParentResourceNotFound':
+                    with ux_utils.print_exception_no_traceback():
+                        # TODO(Doyoung): Update the raised debug message.
+                        raise exceptions.StorageBucketGetError(
+                            'Attempted to use a non-existent storage account to '
+                            f'create a container: {self.storage_account_name}.')     
+                
+                if error_code == 'ContainerNotFound':
+                    if isinstance(self.source, str) and self.source.startswith('az://'):
+                        with ux_utils.print_exception_no_traceback():
+                            # TODO(Doyoung): Update the raised debug message.
+                            raise exceptions.StorageBucketGetError(
+                                'Attempted to use a non-existent bucket as a source: '
+                                f'{self.source}. Consider using `aws s3 ls '
+                                f'{self.source}` to debug.')
 
-        # Raised when Storage object is reconstructed for sky storage
-        # delete or to re-mount Storages with sky start but the storage
-        # is already removed externally.
-        raise exceptions.StorageExternalDeletionError(
-            'Attempted to fetch a non-existent bucket: '
-            f'{self.name}')
+                    # If bucket cannot be found in both private and public settings,
+                    # the bucket is to be created by Sky. However, creation is skipped if
+                    # Store object is being reconstructed for deletion or re-mount with
+                    # sky start, and error is raised instead.
+                    if self.sync_on_reconstruction:
+                        container = self._create_az_bucket(self.name)
+                        return container.name, True
+
+            # Raised when Storage object is reconstructed for sky storage
+            # delete or to re-mount Storages with sky start but the storage
+            # is already removed externally.
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
 
 
     def mount_command(self, mount_path: str) -> str:
@@ -2284,7 +2322,7 @@ class AzureBlobStore(AbstractStore):
             str: a heredoc used to setup the AZ Container mount
         """
         install_cmd = mounting_utils.get_az_mount_install_cmd()
-        mount_cmd = mounting_utils.get_az_mount_cmd(self.bucket.name,
+        mount_cmd = mounting_utils.get_az_mount_cmd(self.bucket_name,
                                                     self.storage_account_name,
                                                     self.storage_account_key,
                                                     mount_path)

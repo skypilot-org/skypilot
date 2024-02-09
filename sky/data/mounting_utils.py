@@ -1,5 +1,6 @@
 """Helper functions for object store mounting in Sky Storage"""
 import random
+import shlex
 import textwrap
 from typing import Optional
 
@@ -77,22 +78,31 @@ def get_az_mount_install_cmd() -> str:
 
 
 def get_az_mount_cmd(container_name: str, storage_account_name: str,
-                     storage_account_access_key: str,mount_path: str) -> str:
+                     storage_account_key: str,mount_path: str) -> str:
     """Returns a command to mount an AZ Container using blobfuse2.
     
     Args:
         container_name: str; name of the mounting container
         storage_account_name: str; name of the storage account the given
             container belongs to
-        storage_account_access_key: str; access key for the given storage
+        storage_account_key: str; access key for the given storage
             account
         mount_path: str; path where the container will be mounting
     
     Returns:
         str: command used to mount AZ container with blobfuse2
     """
+    # storage_account_key is set to None when mounting public container
+    # mounting public clouds are not officially supported by blobfuse2 yet,
+    # and the following SAS token value is a suggested workaround.
+    # https://github.com/Azure/azure-storage-fuse/issues/1338
+    if storage_account_key is None:   
+        key_env_var = f'AZURE_STORAGE_SAS_TOKEN={shlex.quote(" ")}'
+    else:
+        key_env_var = f'AZURE_STORAGE_KEY={storage_account_key}'
+        
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
-                 f'AZURE_STORAGE_ACCESS_KEY={storage_account_access_key} '
+                 f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
                  f'--tmp-path {_BLOBFUSE_CACHE_DIR} '
                  f'--container-name {container_name}')

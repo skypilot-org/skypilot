@@ -207,6 +207,8 @@ def get_az_resource_group(storage_account_name: str,
             # Extract the resource group name from the account ID
             resource_group_name = account.id.split('/')[4]
             return resource_group_name
+    # resource group cannot be found when using container not created
+    # under the user's subscription id, i.e. public container.
     return None
 
 
@@ -233,6 +235,7 @@ def get_az_storage_account_key(storage_account_name: str,
         storage_client = create_az_client('storage')
     resources = resource_client.resources.list_by_resource_group(
         resource_group_name)
+    assert resources is not None
     for resource in resources:
         if(resource.type=='Microsoft.Storage/storageAccounts' and 
             resource.name == storage_account_name):

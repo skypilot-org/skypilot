@@ -177,7 +177,7 @@ class AzureCloudStorage(CloudStorage):
             return True
         # If there's more, we'd need to check if it's a directory or a file.
         container_client = data_utils.create_az_client(
-            type='container',
+            client_type='container',
             storage_account_name=storage_account_name,
             container_name=container_name)
         num_objects = 0
@@ -193,12 +193,8 @@ class AzureCloudStorage(CloudStorage):
 
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Downloads a directory using AZs CLI."""
-        # TODO(Doyoung): May need to update the argument passed into --source
-        # depending on either the directory being downloaded is the container
-        # itself or the subdirectory of the container. Confirm if we support
-        # syncing from subdirectory of the bucket first.
-        container_name, path, storage_account_name = data_utils.split_az_path(
+        """Downloads a directory using AZ CLI."""
+        container_name, _, storage_account_name = data_utils.split_az_path(
             source)
         resource_group_name = data_utils.get_az_resource_group(storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
