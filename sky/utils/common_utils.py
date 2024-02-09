@@ -21,6 +21,7 @@ import jinja2
 import jsonschema
 import yaml
 
+from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import ux_utils
@@ -117,7 +118,7 @@ def base36_encode(hex_str: str) -> str:
     return _base36_encode(int_value)
 
 
-def make_cluster_name_on_cloud(cluster_name: str,
+def make_cluster_name_on_cloud(local_cluster_name: str,
                                max_length: Optional[int] = 15,
                                add_user_hash: bool = True) -> str:
     """Generate valid cluster name on cloud that is unique to the user.
@@ -129,11 +130,30 @@ def make_cluster_name_on_cloud(cluster_name: str,
       2. Append the hash of the cluster name
 
     Args:
-        cluster_name: The cluster name to be truncated and hashed.
+        local_cluster_name: The cluster name to be truncated and hashed.
         max_length: The maximum length of the cluster name. If None, no
             truncation is performed.
         add_user_hash: Whether to append user hash to the cluster name.
     """
+
+    def _process_cluster_name(name: str) -> str:
+        processed_cluster_name_arr = []
+        for ch in name:
+            if ch.isalnum() or ch == '-':
+                processed_cluster_name_arr.append(ch.lower())
+            elif ch in ('.', '_'):
+                processed_cluster_name_arr.append('-')
+            else:
+                raise exceptions.UnexpectedCharacterInClusterName(
+                    f'Did not expect character "{ch}" when processing '
+                    f'cluster name for the cloud')
+        return ''.join(processed_cluster_name_arr)
+
+    cloud_cluster_name = _process_cluster_name(local_cluster_name)
+    if local_cluster_name != cloud_cluster_name:
+        logger.info(f'Cluster name will be called {cloud_cluster_name} on '
+                    f'the cloud. The user specified cluster name '
+                    f'({local_cluster_name}) would be invalid in the cloud.')
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
@@ -141,20 +161,21 @@ def make_cluster_name_on_cloud(cluster_name: str,
     user_hash_length = len(user_hash)
 
     if (max_length is None or
-            len(cluster_name) <= max_length - user_hash_length):
-        return f'{cluster_name}{user_hash}'
+            len(cloud_cluster_name) <= max_length - user_hash_length):
+        return f'{cloud_cluster_name}{user_hash}'
     # -1 is for the dash between cluster name and cluster name hash.
     truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH - 1 -
                                     user_hash_length)
-    truncate_cluster_name = cluster_name[:truncate_cluster_name_length]
+    truncate_cluster_name = cloud_cluster_name[:truncate_cluster_name_length]
     if truncate_cluster_name.endswith('-'):
         truncate_cluster_name = truncate_cluster_name.rstrip('-')
-    assert truncate_cluster_name_length > 0, (cluster_name, max_length)
-    cluster_name_hash = hashlib.md5(cluster_name.encode()).hexdigest()
+    assert truncate_cluster_name_length > 0, (cloud_cluster_name, max_length)
+    local_cluster_name_hash = hashlib.md5(
+        local_cluster_name.encode()).hexdigest()
     # Use base36 to reduce the length of the hash.
-    cluster_name_hash = base36_encode(cluster_name_hash)
+    local_cluster_name_hash = base36_encode(local_cluster_name_hash)
     return (f'{truncate_cluster_name}'
-            f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
+            f'-{local_cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
 
 
 def cluster_name_in_hint(cluster_name: str, cluster_name_on_cloud: str) -> str:
