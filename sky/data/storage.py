@@ -2245,7 +2245,7 @@ class AzureBlobStore(AbstractStore):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageBucketGetError(
                             _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                                name=self.name))
+                                name=self.name)) from e
             except azure.core_exception().ServiceRequestError as e:
                 # raised when storage account name to be used publicly is wrong
                 error_message = e.message

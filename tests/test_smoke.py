@@ -3845,9 +3845,11 @@ class TestStorageWithCredentials:
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
-        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc if \
-              urllib.parse.urlsplit(private_bucket).scheme != 'cos' else \
-                  urllib.parse.urlsplit(private_bucket).path.strip('/')
+        store_type = urllib.parse.urlsplit(private_bucket).scheme
+        if store_type == 'az' or store_type == 'cos':
+            private_bucket_name = urllib.parse.urlsplit(private_bucket).path.strip('/')
+        else:
+            private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc 
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
                 match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
