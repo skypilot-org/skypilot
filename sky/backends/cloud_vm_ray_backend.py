@@ -3133,8 +3133,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=port_list, **ssh_credentials)
 
-        random_suffix = uuid.uuid4().hex[:8]
-        remote_setup_file_name = f'/tmp/sky_setup_{random_suffix}'
+        remote_setup_file_name = f'/tmp/sky_setup_{self.run_timestamp}'
         # Need this `-i` option to make sure `source ~/.bashrc` work
         setup_cmd = f'/bin/bash -i {remote_setup_file_name} 2>&1'
 
