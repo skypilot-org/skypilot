@@ -118,7 +118,7 @@ def base36_encode(hex_str: str) -> str:
     return _base36_encode(int_value)
 
 
-def make_cluster_name_on_cloud(local_cluster_name: str,
+def make_cluster_name_on_cloud(display_name: str,
                                max_length: Optional[int] = 15,
                                add_user_hash: bool = True) -> str:
     """Generate valid cluster name on cloud that is unique to the user.
@@ -130,7 +130,7 @@ def make_cluster_name_on_cloud(local_cluster_name: str,
       2. Append the hash of the cluster name
 
     Args:
-        local_cluster_name: The cluster name to be truncated and hashed.
+        display_name: The cluster name to be truncated and hashed.
         max_length: The maximum length of the cluster name. If None, no
             truncation is performed.
         add_user_hash: Whether to append user hash to the cluster name.
@@ -149,11 +149,11 @@ def make_cluster_name_on_cloud(local_cluster_name: str,
                     f'cluster name for the cloud')
         return ''.join(processed_cluster_name_arr)
 
-    cloud_cluster_name = _process_cluster_name(local_cluster_name)
-    if local_cluster_name != cloud_cluster_name:
+    cloud_cluster_name = _process_cluster_name(display_name)
+    if display_name != cloud_cluster_name:
         logger.info(f'Cluster name will be called {cloud_cluster_name} on '
                     f'the cloud. The user specified cluster name '
-                    f'("{local_cluster_name}") would be invalid in the cloud.')
+                    f'("{display_name}") would be invalid in the cloud.')
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
@@ -170,8 +170,7 @@ def make_cluster_name_on_cloud(local_cluster_name: str,
     if truncate_cluster_name.endswith('-'):
         truncate_cluster_name = truncate_cluster_name.rstrip('-')
     assert truncate_cluster_name_length > 0, (cloud_cluster_name, max_length)
-    local_cluster_name_hash = hashlib.md5(
-        local_cluster_name.encode()).hexdigest()
+    local_cluster_name_hash = hashlib.md5(display_name.encode()).hexdigest()
     # Use base36 to reduce the length of the hash.
     local_cluster_name_hash = base36_encode(local_cluster_name_hash)
     return (f'{truncate_cluster_name}'
