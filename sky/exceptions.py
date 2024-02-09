@@ -213,11 +213,6 @@ class InvalidClusterNameError(Exception):
     pass
 
 
-class UnexpectedCharacterInClusterName(Exception):
-    """Raised when cluster name has unexpected character."""
-    pass
-
-
 class CloudUserIdentityError(Exception):
     """Raised when the cloud identity is invalid."""
     pass

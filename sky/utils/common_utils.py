@@ -160,11 +160,11 @@ def make_cluster_name_on_cloud(display_name: str,
     if truncate_cluster_name.endswith('-'):
         truncate_cluster_name = truncate_cluster_name.rstrip('-')
     assert truncate_cluster_name_length > 0, (cluster_name_on_cloud, max_length)
-    local_cluster_name_hash = hashlib.md5(display_name.encode()).hexdigest()
+    display_name_hash = hashlib.md5(display_name.encode()).hexdigest()
     # Use base36 to reduce the length of the hash.
-    local_cluster_name_hash = base36_encode(local_cluster_name_hash)
+    display_name_hash = base36_encode(display_name_hash)
     return (f'{truncate_cluster_name}'
-            f'-{local_cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
+            f'-{display_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
 
 
 def cluster_name_in_hint(cluster_name: str, cluster_name_on_cloud: str) -> str:
