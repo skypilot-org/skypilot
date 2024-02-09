@@ -153,7 +153,7 @@ def make_cluster_name_on_cloud(local_cluster_name: str,
     if local_cluster_name != cloud_cluster_name:
         logger.info(f'Cluster name will be called {cloud_cluster_name} on '
                     f'the cloud. The user specified cluster name '
-                    f'"({local_cluster_name})" would be invalid in the cloud.')
+                    f'("{local_cluster_name}") would be invalid in the cloud.')
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
