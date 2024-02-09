@@ -3,11 +3,11 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: nvidia-smi
+  name: skygputest
 spec:
   restartPolicy: Never
   containers:
-  - name: nvidia-smi
+  - name: skygputest
     image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu:latest
     command: ["nvidia-smi"]
     resources:

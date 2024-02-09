@@ -15,7 +15,7 @@ Step A0 - Is Kubectl functional?
 
 Are you able to run :code:`kubectl get nodes` without any errors?
 
-.. code-block:: console
+.. code-block:: bash
 
     $ kubectl get nodes
     # This should list all the nodes in your cluster.
@@ -36,7 +36,7 @@ As a sanity check, we will now try creating a simple pod running a HTTP server a
 
 We will use the SkyPilot default image :code:`us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest` to verify that the image can be pulled from the registry.
 
-.. code-block:: console
+.. code-block:: bash
 
     $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/cpu_test_pod.yaml
 
@@ -54,11 +54,11 @@ We will use the SkyPilot default image :code:`us-central1-docker.pkg.dev/skypilo
 If your pod does not start, check the pod's logs for errors with :code:`kubectl describe skytest` and :code:`kubectl logs skytest`.
 
 Step A2 - Can SkyPilot access your cluster?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Run :code:`sky check` to verify that SkyPilot can access your cluster.
 
-.. code-block:: console
+.. code-block:: bash
 
     $ sky check
     # Should show `Kubernetes: Enabled`
@@ -71,7 +71,7 @@ Step A3 - Can you launch a SkyPilot task?
 
 Next, try running a simple hello world task to verify that SkyPilot can launch tasks on your cluster.
 
-.. code-block:: console
+.. code-block:: bash
 
     $ sky launch -y -c mycluster --cloud kubernetes -- "echo hello world"
     # Task should run and print "hello world" to the console
@@ -91,29 +91,38 @@ If you are trying to run a GPU task, make sure you have followed the instruction
 In this section, we will verify that your cluster has GPU support and that SkyPilot can access it.
 
 Step B0 - Is your cluster GPU-enabled?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Run :code:`kubectl describe nodes` to verify that your nodes have GPU support.
+Run :code:`kubectl describe nodes` or the below snippet to verify that your nodes have :code:`nvidia.com/gpu` resources.
 
-.. code-block:: console
+.. code-block:: bash
 
-    $ kubectl describe nodes
+    $ kubectl get nodes -o json | jq '.items[] | {name: .metadata.name, capacity: .status.capacity}'
     # Look for the `nvidia.com/gpu` field under resources in the output. It should show the number of GPUs available for each node.
 
 If you do not see the :code:`nvidia.com/gpu` field, your cluster likely does not have the Nvidia GPU operator installed. Please follow the instructions in :ref:`kubernetes-setup-gpusupport` to install the Nvidia GPU operator.
 
+.. tip::
+
+    If you are using GKE, refer to :ref:`kubernetes-setup-gke` to install the appropriate drivers.
+
 Step B1 - Can you run a GPU pod?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To verify can check if GPU operator is installed and the ``nvidia`` runtime is set as default by running:
+Verify if GPU operator is installed and the ``nvidia`` runtime is set as default by running:
 
-.. code-block:: console
+.. code-block:: bash
 
     $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/gpu_test_pod.yaml
-    $ watch kubectl get pods
-    # If the pod status changes to completed after a few minutes, your Kubernetes environment is set up correctly.
+    $ kubectl logs nvidia-smi
+    # Should print the nvidia-smi output to the console
 
-If the pod does not start, check the pod's logs for errors with :code:`kubectl describe gpu-test` and :code:`kubectl logs gpu-test`.
+If the pod does not start, check the pod's logs for errors with :code:`kubectl describe skygputest` and :code:`kubectl logs skygputest`.
+
+If the logs show `nvidia-smi: command not found`, likely the ``nvidia`` runtime is not set as default. Please install the Nvidia GPU operator and make sure the ``nvidia`` runtime is set as default.
+For example, for RKE2, refer to instructions on `Nvidia GPU Operator installation with Helm on RKE2 <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#custom-configuration-for-runtime-containerd>`_ to set the ``nvidia`` runtime as default.
+
+
 
 Step B2 - Are your nodes labeled correctly?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -124,7 +133,7 @@ SkyPilot requires nodes to be labeled with the correct GPU type to run GPU tasks
 
     If you are using GKE, your nodes should be automatically labeled with :code:`cloud.google.com/gke-accelerator`. You can skip this step.
 
-.. code-block:: console
+.. code-block:: bash
 
     $ kubectl get nodes -o json | jq '.items[] | {name: .metadata.name, labels: .metadata.labels}'
     # Look for the `skypilot.co/accelerator` label in the output. It should show the GPU type for each node.
@@ -136,17 +145,17 @@ Step B3 - Can SkyPilot access your GPU?
 
 Run :code:`sky check` to verify that SkyPilot can access your GPU.
 
-.. code-block:: console
+.. code-block:: bash
 
     $ sky check
     # Should show `Kubernetes: Enabled` and should not print any warnings about GPU support.
 
 Step B4 - Try launching a dummy GPU task
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Next, try running a simple GPU task to verify that SkyPilot can launch GPU tasks on your cluster.
 
-.. code-block:: console
+.. code-block:: bash
 
     # List the available GPUs in your cluster
     $ sky show-gpus --cloud kubernetes
