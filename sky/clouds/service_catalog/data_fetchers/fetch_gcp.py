@@ -464,12 +464,12 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
             break
         
         if tpu_price is None:
-            # Find the line with the same accelerator name, count and region in
+            # Find the line with the same accelerator name, region, zone in
             # the hidden TPU dataframe for the row.
             hidden_tpu = HIDDEN_TPU_DF[
                 (HIDDEN_TPU_DF['AcceleratorName'] == row['AcceleratorName']) &
-                (HIDDEN_TPU_DF['AcceleratorCount'] == row['AcceleratorCount']) &
-                (HIDDEN_TPU_DF['Region'] == row['Region'])]
+                (HIDDEN_TPU_DF['Region'] == row['Region']) &
+                (HIDDEN_TPU_DF['AvailabilityZone'] == row['AvailabilityZone'])]
             if not hidden_tpu.empty:
                 price_str = 'SpotPrice' if spot else 'Price'
                 tpu_price = hidden_tpu[price_str].values[0]
