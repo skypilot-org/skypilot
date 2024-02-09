@@ -129,7 +129,7 @@ def label():
               '`kubectl get jobs -n kube-system -l job=sky-gpu-labeler`'
               '\nYou can check if nodes have been labeled by running '
               '`kubectl describe nodes` and looking for labels of the format '
-              '`skypilot.co/accelerators: <gpu_name>`. ')
+              '`skypilot.co/accelerator: <gpu_name>`. ')
 
 
 def main():
@@ -138,7 +138,7 @@ def main():
         'SkyPilot. Operates by running a job on each node that '
         'parses nvidia-smi and patches the node with new labels. '
         'Labels created are of the format '
-        'skypilot.co/accelerators: <gpu_name>. Automatically '
+        'skypilot.co/accelerator: <gpu_name>. Automatically '
         'creates a service account and cluster role binding with '
         'permissions to list nodes and create labels.')
     parser.add_argument('--cleanup',
