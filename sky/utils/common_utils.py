@@ -123,7 +123,7 @@ def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
 
     Bans (including but not limited to) names that:
     - are digits-only
-    - starts with invalid character, like hyphen
+    - start with invalid character, like hyphen
 
     Raises:
         exceptions.InvalidClusterNameError: If the cluster name is invalid.
