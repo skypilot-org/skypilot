@@ -7,6 +7,8 @@ If you're unable to run SkyPilot tasks on your Kubernetes cluster, this guide wi
 
 If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <http://www.github.com/skypilot-org/skypilot>`_.
 
+.. _kubernetes-debugging-basic:
+
 Verifying basic setup
 ---------------------
 
@@ -82,6 +84,7 @@ Next, try running a simple hello world task to verify that SkyPilot can launch t
 If your task does not run, check the terminal and provisioning logs for errors. Path to provisioning logs can be found at the start of the SkyPilot output,
 starting with "To view detailed progress: ...".
 
+.. _kubernetes-debugging-gpus:
 
 Checking GPU support
 --------------------
@@ -114,14 +117,20 @@ Verify if GPU operator is installed and the ``nvidia`` runtime is set as default
 .. code-block:: bash
 
     $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/gpu_test_pod.yaml
-    $ kubectl logs nvidia-smi
+
+    # Verify that the pod is running by checking the status of the pod
+    $ kubectl get pod skygputest
+
+    $ kubectl logs skygputest
     # Should print the nvidia-smi output to the console
 
-If the pod does not start, check the pod's logs for errors with :code:`kubectl describe skygputest` and :code:`kubectl logs skygputest`.
+    # Once you have verified that the pod is running, you can delete it
+    $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/gpu_test_pod.yaml
+
+If the pod status is pending, make the :code:`nvidia.com/gpu` resources available on your nodes in the previous step. You can debug further by running :code:`kubectl describe pod skygputest`.
 
 If the logs show `nvidia-smi: command not found`, likely the ``nvidia`` runtime is not set as default. Please install the Nvidia GPU operator and make sure the ``nvidia`` runtime is set as default.
 For example, for RKE2, refer to instructions on `Nvidia GPU Operator installation with Helm on RKE2 <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#custom-configuration-for-runtime-containerd>`_ to set the ``nvidia`` runtime as default.
-
 
 
 Step B2 - Are your nodes labeled correctly?
@@ -140,15 +149,18 @@ SkyPilot requires nodes to be labeled with the correct GPU type to run GPU tasks
 
 If you do not see the `skypilot.co/accelerator` label, your nodes are not labeled correctly. Please follow the instructions in :ref:`kubernetes-setup-gpusupport` to label your nodes.
 
-Step B3 - Can SkyPilot access your GPU?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Step B3 - Can SkyPilot see your GPUs?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Run :code:`sky check` to verify that SkyPilot can access your GPU.
+Run :code:`sky check` to verify that SkyPilot can see your GPUs.
 
 .. code-block:: bash
 
     $ sky check
     # Should show `Kubernetes: Enabled` and should not print any warnings about GPU support.
+
+    # List the available GPUs in your cluster
+    $ sky show-gpus --cloud kubernetes
 
 Step B4 - Try launching a dummy GPU task
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -157,15 +169,112 @@ Next, try running a simple GPU task to verify that SkyPilot can launch GPU tasks
 
 .. code-block:: bash
 
-    # List the available GPUs in your cluster
-    $ sky show-gpus --cloud kubernetes
-
     # Use the GPU type from the output in your task launch command
-    $ sky launch -y -c mycluster --cloud kubernetes --gpu <specify-a-gpu-type>:1 -- "nvidia-smi"
+    $ sky launch -y -c mygpucluster --cloud kubernetes --gpu <specify-a-gpu-type>:1 -- "nvidia-smi"
 
     # Task should run and print the nvidia-smi output to the console
 
     # Once you have verified that the task runs, you can delete it
-    $ sky down -y mycluster
+    $ sky down -y mygpucluster
 
-If your task does not run, check the terminal and provisioning logs for errors.
+If your task does not run, check the terminal and provisioning logs for errors. Path to provisioning logs can be found at the start of the SkyPilot output,
+starting with "To view detailed progress: ...".
+
+.. _kubernetes-debugging-ports:
+
+Verifying ports support
+-----------------------
+
+If you are trying to run a task that requires ports to be opened, make sure you have followed the instructions in :ref:_kubernetes-ports`
+to configure SkyPilot and your cluster to use the desired method (LoadBalancer service or Nginx Ingress) for port support.
+
+In this section, we will first verify that your cluster has ports support and services launched by SkyPilot can be accessed.
+
+.. _kubernetes-debugging-ports-loadbalancer:
+
+Step C0 - Verifying LoadBalancer service setup
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you are using LoadBalancer services for ports support, follow the below steps to verify that your cluster is configured correctly.
+
+.. tip::
+
+    If you are using Nginx Ingress for ports support, skip to :ref:`kubernetes-debugging-ports-nginx`.
+
+Does your cluster support LoadBalancer services?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To verify that your cluster supports LoadBalancer services, we will create an example service and verify that it gets an external IP.
+
+.. code-block:: bash
+
+    $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/cpu_test_pod.yaml
+    $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/loadbalancer_test_svc.yaml
+
+    # Verify that the service gets an external IP
+    # Note: It may take some time on cloud providers to change from pending to an external IP
+    $ watch kubectl get svc skytest-loadbalancer
+
+    # Once you get an IP, try accessing the HTTP server by curling the external IP
+    $ IP=$(kubectl get svc skytest-loadbalancer -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+    $ curl $IP:8080
+
+    # Once you have verified that the service is accessible, you can delete it
+    $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/cpu_test_pod.yaml
+    $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/loadbalancer_test_svc.yaml
+
+If your service does not get an external IP, check the service's status with :code:`kubectl describe svc skytest-loadbalancer`. Your cluster may not support LoadBalancer services.
+
+
+.. _kubernetes-debugging-ports-nginx:
+
+Step C0 - Verifying Nginx Ingress setup
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you are using Nginx Ingress for ports support, refer to :ref:`kubernetes-ingress` for instructions on how to install and configure Nginx Ingress.
+
+.. tip::
+
+    If you are using LoadBalancer services for ports support, you can skip this section.
+
+Does your cluster support Nginx Ingress?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To verify that your cluster supports Nginx Ingress, we will create an example ingress.
+
+
+Is SkyPilot configured to use Nginx Ingress?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Take a look at your :code:`~/.sky/config.yaml` file to verify that the :code:`ports: ingress` section is configured correctly.
+
+.. code-block:: bash
+
+    $ cat ~/.sky/config.yaml
+
+    # Output should contain:
+    #
+    # kubernetes:
+    #   ports: ingress
+
+If not, add the :code:`ports: ingress` section to your :code:`~/.sky/config.yaml` file.
+
+.. _kubernetes-debugging-ports-dryrun:
+
+Step C1 - Verifying SkyPilot can launch services
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Next, try running a simple task with a service to verify that SkyPilot can launch services on your cluster.
+
+.. code-block:: bash
+
+    $ sky launch -y -c myserver --cloud kubernetes --port 8080 -- "python -m http.server 8080"
+
+    # Obtain the endpoint of the service
+    $ sky status --endpoint 8080 myserver
+
+    # Try curling the endpoint to verify that the service is accessible
+    $ curl <endpoint>
+
+If you are unable to get the endpoint from SkyPilot,
+consider running :code:`kubectl describe services` or :code:`kubectl describe ingress` to debug it.
