@@ -1514,6 +1514,8 @@ def test_multi_node_failure(generic_cloud: str):
             # TODO(zhwu): we use multi-thread to run the commands in setup
             # commands in parallel, which makes it impossible to fail fast
             # when one of the nodes fails. We should fix this in the future.
+            # The --detach-setup version can fail fast, as the setup is
+            # submitted to the remote machine, which does not use multi-thread.
             # Refer to the comment in `subprocess_utils.run_in_parallel`.
             # f'sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/failed_worker_setup.yaml && exit 1',  # Ensure the job setup failed.
             f'sky launch -y -c {name} --cloud {generic_cloud} --detach-setup tests/test_yamls/failed_worker_setup.yaml',

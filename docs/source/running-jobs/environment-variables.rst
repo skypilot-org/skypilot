@@ -94,6 +94,8 @@ and ``run`` stages have different environment variables available.
 Setup Stage
 ~~~~~~~~~~~
 
+Since setup commands always run on all nodes of a cluster, SkyPilot ensures both of these environment variables (the ranks and the IP list) never change across multiple setups on the same cluster.
+
 .. list-table::
   :widths: 20 70 10
   :header-rows: 1
