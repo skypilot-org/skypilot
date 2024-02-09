@@ -3129,7 +3129,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Disable connection sharing for setup script to avoid old
         # connections being reused, which may cause stale ssh agent
         # forwarding.
-        ssh_credentials.pop('ssh_control_name')
+        ssh_credentials.pop('ssh_control_name', None)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=port_list, **ssh_credentials)
 
