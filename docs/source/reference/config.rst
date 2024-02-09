@@ -104,6 +104,9 @@ Available fields and semantics:
     #
     # The name of the security group to use for all instances. If not specified,
     # SkyPilot will use the default name for the security group: sky-sg-<hash>
+    # Note: please ensure the security group name specified exists in the
+    # regions the instances are going to be launched or the AWS account has the
+    # permission to create a security group.
     security_group_name: my-security-group
 
   # Advanced GCP configurations (optional).
