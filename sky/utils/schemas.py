@@ -555,6 +555,9 @@ def get_config_schema():
                             'type': 'string',
                         },
                     },
+                    'security_group_name': {
+                        'type': 'string',
+                    },
                     **_NETWORK_CONFIG_SCHEMA,
                 }
             },

@@ -100,6 +100,15 @@ Available fields and semantics:
       us-east-1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-east-1.proxy
       us-east-2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ec2-user@<jump server public ip>
 
+    # Security group (optional).
+    #
+    # The name of the security group to use for all instances. If not specified,
+    # SkyPilot will use the default name for the security group: sky-sg-<hash>
+    # Note: please ensure the security group name specified exists in the
+    # regions the instances are going to be launched or the AWS account has the
+    # permission to create a security group.
+    security_group_name: my-security-group
+
   # Advanced GCP configurations (optional).
   # Apply to all new instances but not existing ones.
   gcp:
