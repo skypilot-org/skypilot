@@ -33,6 +33,7 @@ Step A1 - Can you create pods and services?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 As a sanity check, we will now try creating a simple pod running a HTTP server and a service to verify that your cluster and it's networking is functional.
+
 We will use the SkyPilot default image :code:`us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest` to verify that the image can be pulled from the registry.
 
 .. code-block:: console
@@ -99,7 +100,7 @@ Run :code:`kubectl describe nodes` to verify that your nodes have GPU support.
     $ kubectl describe nodes
     # Look for the `nvidia.com/gpu` field under resources in the output. It should show the number of GPUs available for each node.
 
-If you do not see the `nvidia.com/gpu` field, your cluster likely does not have the Nvidia GPU operator installed. Please follow the instructions in :ref:`kubernetes-setup-gpusupport` to install the Nvidia GPU operator.
+If you do not see the :code:`nvidia.com/gpu` field, your cluster likely does not have the Nvidia GPU operator installed. Please follow the instructions in :ref:`kubernetes-setup-gpusupport` to install the Nvidia GPU operator.
 
 Step B1 - Can you run a GPU pod?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
