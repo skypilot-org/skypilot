@@ -475,7 +475,7 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
         if tpu_price is None:
             spot_str = 'spot ' if spot else ''
             print(f'The {spot_str}price of {tpu_name} in {tpu_region} is '
-                    'not found in SKUs or hidden TPU price DF.')
+                  'not found in SKUs or hidden TPU price DF.')
         assert spot or tpu_price is not None, (row, hidden_tpu, HIDDEN_TPU_DF)
         return tpu_price
 
