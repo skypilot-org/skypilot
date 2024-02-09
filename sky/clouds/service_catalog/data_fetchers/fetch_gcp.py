@@ -421,7 +421,7 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
     if df.empty:
         return df
 
-    def get_tpu_price(row: pd.Series, spot: bool) -> float:
+    def get_tpu_price(row: pd.Series, spot: bool) -> Optional[float]:
         assert row['AcceleratorCount'] == 1, row
         tpu_price = None
         tpu_region = row['Region']
@@ -447,7 +447,6 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
                 if 'Preemptible' in description:
                     continue
 
-
             if f'Tpu-{tpu_version}' not in description:
                 continue
             if is_pod:
@@ -462,7 +461,7 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
             tpu_core_price = tpu_device_price / 8
             tpu_price = num_cores * tpu_core_price
             break
-        
+
         if tpu_price is None:
             # Find the line with the same accelerator name, region, zone in
             # the hidden TPU dataframe for the row.
