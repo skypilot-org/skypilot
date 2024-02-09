@@ -655,15 +655,62 @@ class SkyPilotReplicaManager(ReplicaManager):
     def scale_down(self, replica_id: int) -> None:
         self._terminate_replica(replica_id, sync_down_logs=False)
 
-    def _handle_preemption(self, replica_id: int) -> None:
-        logger.info(f'Beginning handle for preempted replica {replica_id}.')
+    def _handle_preemption(self, info: ReplicaInfo) -> bool:
+        """Handle preemption of the replica if any error happened.
+        Returns:
+            bool: Whether the replica is preempted.
+        """
+        logger.info('Beginning handle for preempted '
+                    f'replica {info.replica_id}.')
+        handle = info.handle()
+        if handle is None:
+            logger.error(f'Cannot find handle for replica {info.replica_id}. '
+                         'Skipping preemption handling.')
+            return False
+        if handle.launched_resources is None:
+            logger.error('Cannot find launched_resources in handle for '
+                         f'replica {info.replica_id}. Skipping preemption '
+                         'handling.')
+            return False
+        if not handle.launched_resources.use_spot:
+            return False
         # TODO(MaoZiming): Support spot recovery policies
-        info = serve_state.get_replica_info_from_id(self._service_name,
-                                                    replica_id)
-        assert info is not None
+        cluster_status: Optional[status_lib.ClusterStatus] = None
+        status_checking_retry_cnt = 0
+        while (status_checking_retry_cnt <
+               controller_utils.MAX_STATUS_CHECKING_RETRY):
+            # Avoid the infinite loop, if any bug happens.
+            status_checking_retry_cnt += 1
+            try:
+                cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+                    info.cluster_name,
+                    force_refresh_statuses=set(status_lib.ClusterStatus))
+            except Exception as e:  # pylint: disable=broad-except
+                # If any unexpected error happens, retry the job checking
+                # loop.
+                # TODO(zhwu): log the unexpected error to usage collection
+                # for future debugging.
+                logger.info(f'Unexpected exception: {e}\nFailed to get the '
+                            'refresh the cluster status. Retrying.')
+                continue
+            break
+        if cluster_status is None:
+            logger.error('Failed to get the cluster status for replica '
+                         f'{info.replica_id}. Skipping preemption handling.')
+            return False
+        if cluster_status == status_lib.ClusterStatus.UP:
+            return False
+        # The cluster is (partially) preempted. It can be down, INIT or STOPPED,
+        # based on the interruption behavior of the cloud.
+        cluster_status_str = ('' if cluster_status is None else
+                              f' (status: {cluster_status.value})')
+        logger.info(f'Replica {info.replica_id} is preempted'
+                    f'{cluster_status_str}.')
         info.status_property.preempted = True
-        serve_state.add_or_update_replica(self._service_name, replica_id, info)
-        self._terminate_replica(replica_id, sync_down_logs=False)
+        serve_state.add_or_update_replica(self._service_name, info.replica_id,
+                                          info)
+        self._terminate_replica(info.replica_id, sync_down_logs=False)
+        return True
 
     #################################
     # ReplicaManager Daemon Threads #
@@ -902,36 +949,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                     if info.status_property.first_ready_time is None:
                         info.status_property.first_ready_time = probe_time
                 else:
-                    handle = info.handle()
-                    if handle is None:
-                        logger.error('Cannot find handle for '
-                                     f'replica {info.replica_id}.')
-                    elif handle.launched_resources is None:
-                        logger.error('Cannot find launched_resources in '
-                                     f'handle for replica {info.replica_id}.')
-                    elif handle.launched_resources.use_spot:
-                        # Pull the actual cluster status
-                        # from the cloud provider to
-                        # determine whether the cluster is preempted.
-                        (cluster_status,
-                         _) = backend_utils.refresh_cluster_status_handle(
-                             info.cluster_name,
-                             force_refresh_statuses=set(
-                                 status_lib.ClusterStatus))
-
-                        if cluster_status != status_lib.ClusterStatus.UP:
-                            # The cluster is (partially) preempted.
-                            # It can be down, INIT or STOPPED, based on the
-                            # interruption behavior of the cloud.
-                            # Spot recovery is needed.
-                            cluster_status_str = (
-                                '' if cluster_status is None else
-                                f' (status: {cluster_status.value})')
-                            logger.info(f'Replica {info.replica_id} '
-                                        f'is preempted{cluster_status_str}.')
-                            self._handle_preemption(info.replica_id)
-
-                            continue
+                    # TODO(tian): This might take a lot of time. Shouldn't
+                    # blocking probe to other replicas.
+                    is_preempted = self._handle_preemption(info)
+                    if is_preempted:
+                        continue
 
                     if info.first_not_ready_time is None:
                         info.first_not_ready_time = probe_time
