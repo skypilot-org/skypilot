@@ -3129,18 +3129,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Disable connection sharing for setup script to avoid old
         # connections being reused, which may cause stale ssh agent
         # forwarding.
-        ssh_credentials.pop('ssh_control_name')
-        runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, port_list=port_list, **ssh_credentials)
+        ssh_credentials.pop('ssh_control_name', None)
 
         remote_setup_file_name = f'/tmp/sky_setup_{self.run_timestamp}'
         # Need this `-i` option to make sure `source ~/.bashrc` work
         setup_cmd = f'/bin/bash -i {remote_setup_file_name} 2>&1'
 
-        def _setup_node(runner: command_runner.SSHCommandRunner) -> None:
+        def _setup_node(node_id: int) -> None:
             setup_envs = task.envs.copy()
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
-            setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(runners.index(runner))
+            setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
+            runner = command_runner.SSHCommandRunner(ip_list[node_id],
+                                                     port=port_list[node_id],
+                                                     **ssh_credentials)
             setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
             with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
@@ -3197,7 +3198,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # which can cause the program waiting for all the threads to finish,
         # even if some of them raise exceptions. We should replace it with
         # multi-process.
-        subprocess_utils.run_in_parallel(_setup_node, runners)
+        subprocess_utils.run_in_parallel(_setup_node, range(num_nodes))
 
         if detach_setup:
             # Only set this when setup needs to be run outside the self._setup()
