@@ -144,6 +144,7 @@ Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/
 ## More Information
 To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest/) and [Tutorials](https://github.com/skypilot-org/skypilot-tutorial).
 
+<!-- Keep this section in sync with index.rst in SkyPilot Docs -->
 Runnable examples:
 - LLMs on SkyPilot
   - [Mixtral 8x7B](./llm/mixtral/); [Mistral 7B](https://docs.mistral.ai/self-deployment/skypilot/) (from official Mistral team)
