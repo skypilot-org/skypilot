@@ -119,11 +119,11 @@ def base36_encode(hex_str: str) -> str:
 
 
 def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
-    """Errors out on invalid cluster names not supported by cloud providers.
+    """Errors out on invalid cluster names.
 
     Bans (including but not limited to) names that:
     - are digits-only
-    - contain underscore (_)
+    - starts with invalid character, like hyphen
 
     Raises:
         exceptions.InvalidClusterNameError: If the cluster name is invalid.
