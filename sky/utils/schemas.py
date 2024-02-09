@@ -572,6 +572,19 @@ def get_config_schema():
                     **_NETWORK_CONFIG_SCHEMA,
                 }
             },
+            'azure': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'storage_account': {
+                        'type': 'string'
+                        },
+                    'resource_group': {
+                        'type': 'string'
+                        },
+                }
+            },
             'kubernetes': {
                 'type': 'object',
                 'required': [],
