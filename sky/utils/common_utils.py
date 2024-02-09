@@ -151,8 +151,9 @@ def make_cluster_name_on_cloud(display_name: str,
     cluster name with user hash is longer than max_length:
       1. Truncate it to max_length - cluster_hash - user_hash_length.
       2. Append the hash of the cluster name
-    - e.g. Some cloud providers don't allow for uppercase letters, periods,
-    or underscores, so we map these to hyphens
+    - e.g. some cloud providers don't allow for uppercase letters, periods,
+    or underscores, so we convert it to lower case and replace those
+    characters with hyphens
 
     Args:
         display_name: The cluster name to be truncated, hashed, and
@@ -164,9 +165,9 @@ def make_cluster_name_on_cloud(display_name: str,
 
     cluster_name_on_cloud = re.sub(r'[._]', '-', display_name).lower()
     if display_name != cluster_name_on_cloud:
-        logger.debug(f'Cluster name will be called {cluster_name_on_cloud} on '
-                     f'the cloud. The user specified cluster name '
-                     f'("{display_name}") would be invalid in the cloud.')
+        logger.debug(
+            f'The user specified cluster name {display_name} might be invalid '
+            f'on the cloud, we convert it to {cluster_name_on_cloud}.')
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
