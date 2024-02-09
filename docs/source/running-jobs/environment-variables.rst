@@ -91,10 +91,9 @@ SkyPilot environment variables
 SkyPilot exports these environment variables for a task's execution. ``setup``
 and ``run`` stages have different environment variables available.
 
-Setup Stage
-~~~~~~~~~~~
+Environment variables for ``setup``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Since setup commands always run on all nodes of a cluster, SkyPilot ensures both of these environment variables (the ranks and the IP list) never change across multiple setups on the same cluster.
 
 .. list-table::
   :widths: 20 70 10
@@ -110,9 +109,10 @@ Since setup commands always run on all nodes of a cluster, SkyPilot ensures both
     - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
     - 1.2.3.4
 
+Since setup commands always run on all nodes of a cluster, SkyPilot ensures both of these environment variables (the ranks and the IP list) never change across multiple setups on the same cluster.
 
-Run stage
-~~~~~~~~~~
+Environment variables for ``run``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
    :widths: 20 70 10
