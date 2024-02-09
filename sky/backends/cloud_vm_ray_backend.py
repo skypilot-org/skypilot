@@ -17,7 +17,6 @@ import threading
 import time
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
-import uuid
 
 import colorama
 import filelock
