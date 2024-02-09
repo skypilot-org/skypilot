@@ -473,7 +473,7 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
             if not hidden_tpu.empty:
                 price_str = 'SpotPrice' if spot else 'Price'
                 tpu_price = hidden_tpu[price_str].values[0]
-        assert tpu_price is not None, row
+        assert tpu_price is not None, (row, hidden_tpu, HIDDEN_TPU_DF)
         return tpu_price
 
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)
