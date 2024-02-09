@@ -882,6 +882,10 @@ def write_cluster_config(
                 'dump_port_command': dump_port_command,
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
+                # Command for waiting ray cluster to be ready on head.
+                'ray_head_wait_initalized_command':
+                    instance_setup.RAY_HEAD_WAIT_INITALIZED_COMMAND,
+
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
                 # Sky remote utils.
