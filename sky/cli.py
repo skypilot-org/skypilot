@@ -4074,16 +4074,7 @@ def spot_launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    for task in dag.tasks:
-        # We try our best to validate the cluster name before we launch the
-        # task. If the cloud is not specified, this will only validate the
-        # cluster name against the regex, and the cloud-specific validation will
-        # be done by the spot controller when actually launching the spot
-        # cluster.
-        for resources in task.resources:
-            task_cloud = (resources.cloud
-                          if resources.cloud is not None else clouds.Cloud)
-            task_cloud.check_cluster_name_is_valid(name)
+    common_utils.check_cluster_name_is_valid(name)
 
     sky.spot_launch(dag,
                     name,

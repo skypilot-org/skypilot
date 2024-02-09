@@ -21,6 +21,7 @@ import jinja2
 import jsonschema
 import yaml
 
+from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import ux_utils
@@ -115,6 +116,28 @@ def base36_encode(hex_str: str) -> str:
         return base36
 
     return _base36_encode(int_value)
+
+
+def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
+    """Errors out on invalid cluster names not supported by cloud providers.
+
+    Bans (including but not limited to) names that:
+    - are digits-only
+    - contain underscore (_)
+
+    Raises:
+        exceptions.InvalidClusterNameError: If the cluster name is invalid.
+    """
+    if cluster_name is None:
+        return
+    valid_regex = constants.CLUSTER_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, cluster_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidClusterNameError(
+                f'Cluster name "{cluster_name}" is invalid; '
+                'ensure it is fully matched by regex (e.g., '
+                'only contains letters, numbers and dash): '
+                f'{valid_regex}')
 
 
 def make_cluster_name_on_cloud(display_name: str,
