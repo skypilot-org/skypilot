@@ -585,8 +585,9 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
 
 
 def get_cleaned_username(username: str = '') -> str:
-    """Cleans the username as some cloud provider have limitation on
-    characters usage such as dot (.) is not allowed in GCP.
+    """Cleans the username. Dots and underscores are allowed, as we will
+     handle it when mapping to the cluster_name_on_cloud in
+     common_utils.make_cluster_name_on_cloud.
 
     Clean up includes:
      1. Making all characters lowercase
@@ -601,7 +602,7 @@ def get_cleaned_username(username: str = '') -> str:
     """
     username = username or getpass.getuser()
     username = username.lower()
-    username = re.sub(r'[^a-z0-9-]', '', username)
+    username = re.sub(r'[^a-z0-9-._]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)
     username = re.sub(r'-$', '', username)
     return username
