@@ -139,3 +139,24 @@ __all__ = [
     'storage_ls',
     'storage_delete',
 ]
+
+def make_proxy_var_case_insensitive(proxy_var: str):
+    """Set both http_proxy and HTTP_PROXY if either is set.
+    
+    Although many of our underlying libraries are case-insensitive when it comes
+    to proxy environment variables, some are not. This function ensures that
+    both the upper and lower case versions of the proxy environment variables
+    are set if either is set to ensure maximum compatibility.
+    """
+    # Check for the uppercase version first
+    proxy = os.getenv(proxy_var.upper())
+
+    if proxy is not None:
+        os.environ[proxy_var.lower()] = proxy
+    
+    proxy = os.getenv(proxy_var.lower())
+    if proxy is not None:
+        os.environ[proxy_var.upper()] = proxy
+
+for proxy_var in ['http_proxy', 'https_proxy', 'all_proxy']:
+    make_proxy_var_case_insensitive(proxy_var)
