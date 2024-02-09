@@ -17,7 +17,7 @@ def test_cloud_get_reservations_available_resources(specific_reservations,
 
 class TestCheckClusterNameIsValid:
 
-    def test_simple_check(self):
+    def test_check(self):
         Cloud.check_cluster_name_is_valid("lora")
 
     def test_check_with_hyphen(self):
