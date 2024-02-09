@@ -121,7 +121,7 @@ head_start_ray_commands:
   # all the sessions to be reloaded. This is a workaround.
   - ray stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
-    {{dump_port_command}};
+    {{dump_port_command}}; {{ray_head_wait_initalized_command}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
