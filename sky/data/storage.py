@@ -2286,11 +2286,11 @@ class AzureBlobStore(AbstractStore):
 
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
-        """Downloads file from remote to local on r2 bucket
+        """Downloads file from remote to local on AZ container.
         using the boto3 API
 
         Args:
-          remote_path: str; Remote path on R2 bucket
+          remote_path: str; Remote path on AZ container.
           local_path: str; Local path on user's device
         """
         raise NotImplementedError
