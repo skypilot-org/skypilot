@@ -914,7 +914,7 @@ def test_azure_storage_mounts_with_stop():
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'output=$(az storage blob list -c {storage_name} --account-name {storage_account_name} --account-key {storage_account_key} --prefix hello.txt)'
             # if the file does not exist, az storage blob list returns '[]'
-            f'[ "$output" = "[]" ] && exit 1'
+            f'[ "$output" = "[]" ] && exit 1;'
             f'sky stop -y {name}',
             f'sky start -y {name}',
             # Check if hello.txt from mounting bucket exists after restart in
@@ -3156,7 +3156,7 @@ class TestStorageWithCredentials:
         'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1',
         'Abcdef',  # contains an uppercase letter
         '.abc',  # starts with a non-letter(dot)
-        'a--bc', # contains consecutive hyphens
+        'a--bc',  # contains consecutive hyphens
     ]
 
     IBM_INVALID_NAMES = [
@@ -3269,7 +3269,9 @@ class TestStorageWithCredentials:
                     path, substructure)
 
     @staticmethod
-    def cli_delete_cmd(store_type, bucket_name, storage_account_name: str = None):
+    def cli_delete_cmd(store_type,
+                       bucket_name,
+                       storage_account_name: str = None):
         if store_type == storage_lib.StoreType.S3:
             url = f's3://{bucket_name}'
             return f'aws s3 rb {url} --force'
@@ -3280,7 +3282,8 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.AZURE:
             storage_account_name = f'sky{common_utils.get_user_hash()}'
             url = f'az://{storage_account_name}/{bucket_name}'
-            resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+            resource_group_name = data_utils.get_az_resource_group(
+                storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name, resource_group_name)
             return ('az storage container delete '
@@ -3312,7 +3315,8 @@ class TestStorageWithCredentials:
             return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.AZURE:
             storage_account_name = f'sky{common_utils.get_user_hash()}'
-            resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+            resource_group_name = data_utils.get_az_resource_group(
+                storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name, resource_group_name)
             list_cmd = ('az storage blob list '
@@ -3347,7 +3351,8 @@ class TestStorageWithCredentials:
                 return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
             storage_account_name = f'sky{common_utils.get_user_hash()}'
-            resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+            resource_group_name = data_utils.get_az_resource_group(
+                storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name, resource_group_name)
             return ('az storage blob list '
@@ -3372,7 +3377,8 @@ class TestStorageWithCredentials:
             return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
             storage_account_name = f'sky{common_utils.get_user_hash()}'
-            resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+            resource_group_name = data_utils.get_az_resource_group(
+                storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name, resource_group_name)
             return ('az storage blob list '
@@ -3569,18 +3575,21 @@ class TestStorageWithCredentials:
         # Creates a temporary bucket using gsutil
 
         storage_account_name = f'sky{common_utils.get_user_hash()}'
-        resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+        resource_group_name = data_utils.get_az_resource_group(
+            storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
-        subprocess.check_call(['az', 'storage', 'container', 'create',
-         '--name', f'{tmp_bucket_name}',
-         '--account-name', f'{storage_account_name}',
-         '--account-key', f'{storage_account_key}'])
+        subprocess.check_call([
+            'az', 'storage', 'container', 'create', '--name',
+            f'{tmp_bucket_name}', '--account-name', f'{storage_account_name}',
+            '--account-key', f'{storage_account_key}'
+        ])
         yield tmp_bucket_name
-        subprocess.check_call(['az', 'storage', 'container', 'delete',
-         '--name', f'{tmp_bucket_name}',
-         '--account-name', f'{storage_account_name}',
-         '--account-key', f'{storage_account_key}'])
+        subprocess.check_call([
+            'az', 'storage', 'container', 'delete', '--name',
+            f'{tmp_bucket_name}', '--account-name', f'{storage_account_name}',
+            '--account-key', f'{storage_account_key}'
+        ])
 
     @pytest.fixture
     def tmp_awscli_bucket_r2(self, tmp_bucket_name):
@@ -3752,10 +3761,9 @@ class TestStorageWithCredentials:
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
          ('s3://digitalcorpora', storage_lib.StoreType.S3),
          ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS),
-         pytest.param(
-             'az://azuremlexampledata/data/imagenet',
-             storage_lib.StoreType.AZURE,
-             marks=pytest.mark.azure)],
+         pytest.param('az://azuremlexampledata/data/imagenet',
+                      storage_lib.StoreType.AZURE,
+                      marks=pytest.mark.azure)],
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not
@@ -3768,7 +3776,8 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('nonexist_bucket_url', [
         's3://{random_name}', 'gs://{random_name}',
-        pytest.param('az://{account_name}/{random_name}', marks=pytest.mark.azure),
+        pytest.param('az://{account_name}/{random_name}',
+                     marks=pytest.mark.azure),
         pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
         pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
     ])
@@ -3786,7 +3795,8 @@ class TestStorageWithCredentials:
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('az'):
                 storage_account_name = f'sky{common_utils.get_user_hash()}'
-                resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+                resource_group_name = data_utils.get_az_resource_group(
+                    storage_account_name)
                 storage_account_key = data_utils.get_az_storage_account_key(
                     storage_account_name, resource_group_name)
                 command = f'az storage container exists --account-name {storage_account_name} --account-key {storage_account_key} --name {nonexist_bucket_name}'
@@ -3833,12 +3843,15 @@ class TestStorageWithCredentials:
                 sky.exceptions.StorageBucketGetError,
                 match='Attempted to use a non-existent bucket as a source'):
             if nonexist_bucket_url.startswith('az'):
-                storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
-                    account_name=storage_account_name,
-                    random_name=nonexist_bucket_name))
+                storage_obj = storage_lib.Storage(
+                    source=nonexist_bucket_url.format(
+                        account_name=storage_account_name,
+                        random_name=nonexist_bucket_name))
             else:
-                storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
-                    random_name=nonexist_bucket_name))
+                storage_obj = storage_lib.Storage(
+                    source=nonexist_bucket_url.format(
+                        random_name=nonexist_bucket_name))
+
     @pytest.mark.parametrize('private_bucket', [
         f's3://imagenet', f'gs://imagenet',
         pytest.param('az://testprivateaccount/test', marks=pytest.mark.azure),
@@ -3850,9 +3863,10 @@ class TestStorageWithCredentials:
         # they are removed by their owners.
         store_type = urllib.parse.urlsplit(private_bucket).scheme
         if store_type == 'az' or store_type == 'cos':
-            private_bucket_name = urllib.parse.urlsplit(private_bucket).path.strip('/')
+            private_bucket_name = urllib.parse.urlsplit(
+                private_bucket).path.strip('/')
         else:
-            private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc 
+            private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
                 match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(

@@ -4,8 +4,8 @@ import json
 import os
 import re
 import typing
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, cast, Dict, Iterable, List, Optional, Set,
+                    Tuple, Union)
 
 import colorama
 import yaml
@@ -930,11 +930,12 @@ class Task:
                         blob_path = storage.source
                     else:
                         assert storage.name is not None, storage
-                        store_object = storage.stores[storage_lib.StoreType.AZURE]
+                        store_object = cast(
+                            storage_lib.AzureBlobStore,
+                            storage.stores[storage_lib.StoreType.AZURE])
                         storage_account_name = store_object.storage_account_name
-                        #TODO(Doyoung): May need to update the blob path to support
-                        # other form of sources
-                        blob_path = f'az://{storage_account_name}/{storage.name}'
+                        blob_path = (f'az://{storage_account_name}/'
+                                     f'{storage.name}')
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })

@@ -3,6 +3,7 @@
 # pylint: disable=import-outside-toplevel
 import functools
 import threading
+from typing import Optional
 
 azure = None
 _session_creation_lock = threading.RLock()
@@ -55,7 +56,10 @@ def http_error_exception():
 
 @functools.lru_cache()
 @import_package
-def get_client(name: str, subscription_id: str, storage_account_name: str = None, container_name: str = None):
+def get_client(name: str,
+               subscription_id: str,
+               storage_account_name: Optional[str] = None,
+               container_name: Optional[str] = None):
     # Sky only supports Azure CLI credential for now.
     # Increase the timeout to fix the Azure get-access-token timeout issue.
     # Tracked in
@@ -77,7 +81,8 @@ def get_client(name: str, subscription_id: str, storage_account_name: str = None
         elif name == 'storage':
             return StorageManagementClient(credential, subscription_id)
         elif name == 'container':
-            account_url = f'https://{storage_account_name}.blob.core.windows.net'
+            account_url = (f'https://{storage_account_name}.'
+                           'blob.core.windows.net')
             return ContainerClient(account_url=account_url,
                                    container_name=container_name,
                                    credential=credential)

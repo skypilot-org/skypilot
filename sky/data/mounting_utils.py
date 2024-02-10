@@ -16,6 +16,7 @@ GCSFUSE_VERSION = '1.3.0'
 BLOBFUSE2_VERSION = '2.2.0'
 _BLOBFUSE_CACHE_DIR = '~/.sky/blobfuse2_cache'
 
+
 def get_s3_mount_install_cmd() -> str:
     """Returns a command to install S3 mount utility goofys."""
     install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
@@ -46,7 +47,7 @@ def get_gcs_mount_install_cmd() -> str:
 
 def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
     """Returns a command to mount a GCS bucket using gcsfuse."""
-    
+
     mount_cmd = ('gcsfuse -o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
@@ -59,7 +60,7 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
 
 def get_az_mount_install_cmd() -> str:
     """Returns a command to install AZ Container mount utility blobfuse2.
-    
+
     Returns:
         str: installation command of the mounting utility blobdfuse2
     """
@@ -77,18 +78,20 @@ def get_az_mount_install_cmd() -> str:
     return install_cmd
 
 
-def get_az_mount_cmd(container_name: str, storage_account_name: str,
-                     storage_account_key: str,mount_path: str) -> str:
+def get_az_mount_cmd(container_name: str,
+                     storage_account_name: str,
+                     mount_path: str,
+                     storage_account_key: Optional[str] = None) -> str:
     """Returns a command to mount an AZ Container using blobfuse2.
-    
+
     Args:
         container_name: str; name of the mounting container
         storage_account_name: str; name of the storage account the given
             container belongs to
-        storage_account_key: str; access key for the given storage
-            account
         mount_path: str; path where the container will be mounting
-    
+        storage_account_key: Optional[str]; access key for the given storage
+            account
+
     Returns:
         str: command used to mount AZ container with blobfuse2
     """
@@ -96,11 +99,11 @@ def get_az_mount_cmd(container_name: str, storage_account_name: str,
     # mounting public clouds are not officially supported by blobfuse2 yet,
     # and the following SAS token value is a suggested workaround.
     # https://github.com/Azure/azure-storage-fuse/issues/1338
-    if storage_account_key is None:   
+    if storage_account_key is None:
         key_env_var = f'AZURE_STORAGE_SAS_TOKEN={shlex.quote(" ")}'
     else:
         key_env_var = f'AZURE_STORAGE_ACCESS_KEY={storage_account_key}'
-        
+
     mount_cmd = (f'sudo AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
@@ -154,10 +157,10 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
 
 def _get_mount_binary(mount_cmd: str) -> str:
     """Returns mounting binary in string given as the mount command.
-    
+
     Args:
         mount_cmd: str; command used to mount a cloud storage.
-    
+
     Returns:
         str: name of the binary used to mount a cloud storage.
     """
@@ -167,7 +170,7 @@ def _get_mount_binary(mount_cmd: str) -> str:
         return 'gcsfuse'
     elif 'blobfuse2' in mount_cmd:
         return 'blobfuse2'
-    else: # 'rclone' in mount_cmd
+    else:  # 'rclone' in mount_cmd
         return 'rclone'
 
 

@@ -9,14 +9,16 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
+from azure.identity import AzureCliCredential
+from azure.storage.blob import ContainerClient
 import colorama
 
 from sky import check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
-from sky import skypilot_config
 from sky import sky_logging
+from sky import skypilot_config
 from sky import status_lib
 from sky.adaptors import aws
 from sky.adaptors import azure
@@ -589,9 +591,9 @@ class Storage(object):
                 if mode == StorageMode.MOUNT:
                     if (split_path.scheme != 'az' and
                         ((split_path.scheme != 'cos' and
-                         split_path.path.strip('/') != '') or
-                        (split_path.scheme == 'cos' and
-                         not re.match(r'^/[-\w]+(/\s*)?$', split_path.path)))):
+                          split_path.path.strip('/') != '') or
+                         (split_path.scheme == 'cos' and
+                          not re.match(r'^/[-\w]+(/\s*)?$', split_path.path)))):
                         # regex allows split_path.path to include /bucket
                         # or /bucket/optional_whitespaces while considering
                         # cos URI's regions (cos://region/bucket_name)
@@ -1027,9 +1029,10 @@ class S3Store(AbstractStore):
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '
                     'the same as AZ bucket.')
-                assert data_utils.verify_az_bucket(storage_account_name, self.name), (
-                    f'Source specified as {self.source}, a AZ bucket. ',
-                    'AZ Bucket should exist.')
+                assert data_utils.verify_az_bucket(
+                    storage_account_name, self.name), (
+                        f'Source specified as {self.source}, a AZ bucket. ',
+                        'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '
@@ -1420,18 +1423,14 @@ class GcsStore(AbstractStore):
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
             if self.source.startswith('s3://'):
-                assert self.name == data_utils.split_s3_path(
-                    self.source
-                )[0], (
+                assert self.name == data_utils.split_s3_path(self.source)[0], (
                     'S3 Bucket is specified as path, the name should be the'
                     ' same as S3 bucket.')
                 assert data_utils.verify_s3_bucket(self.name), (
                     f'Source specified as {self.source}, an S3 bucket. ',
                     'S3 Bucket should exist.')
             elif self.source.startswith('gs://'):
-                assert self.name == data_utils.split_gcs_path(
-                    self.source
-                )[0], (
+                assert self.name == data_utils.split_gcs_path(self.source)[0], (
                     'GCS Bucket is specified as path, the name should be '
                     'the same as GCS bucket.')
             elif self.source.startswith('az://'):
@@ -1440,21 +1439,19 @@ class GcsStore(AbstractStore):
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '
                     'the same as AZ bucket.')
-                assert data_utils.verify_az_bucket(storage_account_name, self.name), (
-                    f'Source specified as {self.source}, a AZ bucket. ',
-                    'AZ Bucket should exist.')
+                assert data_utils.verify_az_bucket(
+                    storage_account_name, self.name), (
+                        f'Source specified as {self.source}, a AZ bucket. ',
+                        'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
-                assert self.name == data_utils.split_r2_path(
-                    self.source
-                )[0], ('R2 Bucket is specified as path, the name should be '
-                        'the same as R2 bucket.')
+                assert self.name == data_utils.split_r2_path(self.source)[0], (
+                    'R2 Bucket is specified as path, the name should be '
+                    'the same as R2 bucket.')
                 assert data_utils.verify_r2_bucket(self.name), (
                     f'Source specified as {self.source}, a R2 bucket. ',
                     'R2 Bucket should exist.')
             elif self.source.startswith('cos://'):
-                assert self.name == data_utils.split_cos_path(
-                    self.source
-                )[0], (
+                assert self.name == data_utils.split_cos_path(self.source)[0], (
                     'COS Bucket is specified as path, the name should be '
                     'the same as COS bucket.')
                 assert data_utils.verify_ibm_cos_bucket(self.name), (
@@ -1861,9 +1858,9 @@ class AzureBlobStore(AbstractStore):
         self.storage_client: 'storage.Client'
         self.resource_client: 'storage.Client'
         self.bucket_name: str
-        self.resource_group_name: str = None
-        self.storage_account_name: str = None
-        self.storage_account_key: str = None
+        self.storage_account_name: str
+        self.storage_account_key: Optional[str] = None
+        self.resource_group_name: Optional[str] = None
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
 
@@ -1884,8 +1881,7 @@ class AzureBlobStore(AbstractStore):
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
             elif self.source.startswith('az://'):
-                container_name, _, _ = (
-                    data_utils.split_az_path(self.source))
+                container_name, _, _ = (data_utils.split_az_path(self.source))
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '
                     'the same as AZ bucket.')
@@ -1921,13 +1917,13 @@ class AzureBlobStore(AbstractStore):
         """Validates the name of the AZ Container.
 
         Source for rules: https://learn.microsoft.com/en-us/rest/api/storageservices/Naming-and-Referencing-Containers--Blobs--and-Metadata#container-names # pylint: disable=line-too-long
-        
+
         Args:
             name: str; name of the container
-        
+
         Returns:
             name: str; name of the container
-        
+
         Raises:
             StorageNameError: if the given container name does not follow the
                 naming convention
@@ -1961,7 +1957,6 @@ class AzureBlobStore(AbstractStore):
             _raise_no_traceback_name_error('Store name must be specified.')
         return name
 
-
     def initialize(self):
         """Initializes the AZ Container object on the cloud.
 
@@ -1981,7 +1976,8 @@ class AzureBlobStore(AbstractStore):
         # from this function either using default value or user provided value from config.yaml.
         # We can tell if already existing bucket is used or not
         if isinstance(self.source, str) and self.source.startswith('az://'):
-            bucket_name, _, storage_account_name = data_utils.split_az_path(self.source)
+            bucket_name, _, storage_account_name = data_utils.split_az_path(
+                self.source)
             # Using externally created storage
             assert self.name == bucket_name
             self.storage_account_name = storage_account_name
@@ -2000,30 +1996,25 @@ class AzureBlobStore(AbstractStore):
             # If the resource group or storage account already exist with name
             # used to create below, both create functions will silently move on.
             self.resource_client.resource_groups.create_or_update(
-                self.resource_group_name,
-                {"location": self.region}
-            )
+                self.resource_group_name, {'location': self.region})
             try:
                 self.storage_client.storage_accounts.begin_create(
-                    self.resource_group_name,
-                    self.storage_account_name,
-                    {
-                        "sku": {
-                        "name": "Standard_GRS"
+                    self.resource_group_name, self.storage_account_name, {
+                        'sku': {
+                            'name': 'Standard_GRS'
                         },
-                        "kind": "StorageV2",
-                        "location": "westus",
-                        "encryption": {
-                        "services": {
-                            "blob": {
-                            "key_type": "Account",
-                            "enabled": True
-                            }
+                        'kind': 'StorageV2',
+                        'location': 'westus',
+                        'encryption': {
+                            'services': {
+                                'blob': {
+                                    'key_type': 'Account',
+                                    'enabled': True
+                                }
+                            },
+                            'key_source': 'Microsoft.Storage'
                         },
-                        "key_source": "Microsoft.Storage"
-                        },
-                    }
-                ).result()
+                    }).result()
             except azure.core_exception().ResourceExistsError as e:
                 error_message = e.message
                 if 'StorageAccountAlreadyTaken' in error_message:
@@ -2098,10 +2089,7 @@ class AzureBlobStore(AbstractStore):
     def get_handle(self) -> StorageHandle:
         """Returns the Storage Handle object."""
         return self.storage_client.blob_containers.get(
-            self.resource_group_name,
-            self.storage_account_name,
-            self.name
-            )
+            self.resource_group_name, self.storage_account_name, self.name)
 
     def batch_az_blob_sync(self,
                            source_path_list: List[Path],
@@ -2120,10 +2108,8 @@ class AzureBlobStore(AbstractStore):
         def get_file_sync_command(base_dir_path, file_names):
             # shlex.quote is not used as az storage blob sync already
             # deals with file names with empty spaces when used
-            # with --include-pattern. 
-            includes_list = ';'.join([
-                file_name for file_name in file_names
-            ])
+            # with --include-pattern.
+            includes_list = ';'.join(file_names)
             includes = f'--include-pattern "{includes_list}"'
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = (f'az storage blob sync '
@@ -2140,9 +2126,8 @@ class AzureBlobStore(AbstractStore):
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
             excluded_list.append('.git/')
-            excludes_list = ';'.join([
-                file_name.rstrip('*') for file_name in excluded_list
-            ])
+            excludes_list = ';'.join(
+                [file_name.rstrip('*') for file_name in excluded_list])
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
             container_path = (f'{self.bucket_name}/{dest_dir_name}'
@@ -2175,7 +2160,6 @@ class AzureBlobStore(AbstractStore):
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
-
     def _get_bucket(self) -> Tuple[str, bool]:
         """Obtains the AZ Container.
 
@@ -2198,19 +2182,18 @@ class AzureBlobStore(AbstractStore):
                 attempted to be fetched while reconstructing the Storage for
                 'sky storage delete' or 'sky start'
         """
-        from azure.storage.blob import ContainerClient
         try:
-            container_url = f"https://{self.storage_account_name}.blob.core.windows.net/{self.name}"
+            container_url = f'https://{self.storage_account_name}.blob.core.windows.net/{self.name}'
             # When using non-sky-managed public container
-            if self.resource_group_name is None:                
+            if self.resource_group_name is None:
                 container = ContainerClient.from_container_url(container_url)
             else:
-                from azure.identity import AzureCliCredential
                 credential = AzureCliCredential(process_timeout=30)
-                container = ContainerClient.from_container_url(container_url, credential)
+                container = ContainerClient.from_container_url(
+                    container_url, credential)
             # Here, exists() is used to check if the public container
             # exists. exists() will return False only when the credentials
-            # are provided for from_container_url() and there is no 
+            # are provided for from_container_url() and there is no
             # credentials to provide for public container. In this case,
             # if the public container doesn't exist, it raises an error
             # instead of returning False.
@@ -2220,11 +2203,12 @@ class AzureBlobStore(AbstractStore):
             # storage account name and credentials, and user has the rights to
             # access the storage account.
             else:
-                if isinstance(self.source, str) and self.source.startswith('az://'):
+                if isinstance(self.source,
+                              str) and self.source.startswith('az://'):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageBucketGetError(
                             'Attempted to use a non-existent bucket as a '
-                            f'source: {self.source}.') 
+                            f'source: {self.source}.')
         except azure.core_exception().ClientAuthenticationError as e:
             error_message = e.message
             # raised when attempted to access a storage account without rights.
@@ -2242,7 +2226,6 @@ class AzureBlobStore(AbstractStore):
                         'Attempted to fetch a bucket from non-existant '
                         'storage account '
                         f'name: {self.storage_account_name}.')
-                        
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if
@@ -2258,7 +2241,6 @@ class AzureBlobStore(AbstractStore):
         raise exceptions.StorageExternalDeletionError(
             f'Attempted to fetch a non-existent bucket: {self.name}')
 
-
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on AZ container.
         using the boto3 API
@@ -2269,7 +2251,6 @@ class AzureBlobStore(AbstractStore):
         """
         raise NotImplementedError
 
-
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the container to the mount_path.
 
@@ -2277,18 +2258,17 @@ class AzureBlobStore(AbstractStore):
 
         Args:
             mount_path: str; Path to mount the container to
-            
+
         Returns:
             str: a heredoc used to setup the AZ Container mount
         """
         install_cmd = mounting_utils.get_az_mount_install_cmd()
         mount_cmd = mounting_utils.get_az_mount_cmd(self.bucket_name,
                                                     self.storage_account_name,
-                                                    self.storage_account_key,
-                                                    mount_path)
+                                                    mount_path,
+                                                    self.storage_account_key)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
-
 
     def _create_az_bucket(self,
                           container_name: str,
@@ -2307,11 +2287,8 @@ class AzureBlobStore(AbstractStore):
         """
         try:
             container = self.storage_client.blob_containers.create(
-                self.resource_group_name,
-                self.storage_account_name,
-                container_name,
-                {}
-            )
+                self.resource_group_name, self.storage_account_name,
+                container_name, {})
             logger.info('Created AZ Container '
                         f'{container_name} in {region}.')
         except azure.core_exception().ResourceExistsError as e:
@@ -2325,7 +2302,6 @@ class AzureBlobStore(AbstractStore):
                             'before attempting to create a bucket with the '
                             'same name. This may take a few minutes. ')
         return container
-
 
     def _delete_az_bucket(self, container_name: str) -> bool:
         """Deletes AZ Container, including all objects in Container.
@@ -2386,9 +2362,10 @@ class R2Store(AbstractStore):
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '
                     'the same as AZ bucket.')
-                assert data_utils.verify_az_bucket(storage_account_name, self.name), (
-                    f'Source specified as {self.source}, a AZ bucket. ',
-                    'AZ Bucket should exist.')
+                assert data_utils.verify_az_bucket(
+                    storage_account_name, self.name), (
+                        f'Source specified as {self.source}, a AZ bucket. ',
+                        'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '
@@ -2768,9 +2745,10 @@ class IBMCosStore(AbstractStore):
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '
                     'the same as AZ bucket.')
-                assert data_utils.verify_az_bucket(storage_account_name, self.name), (
-                    f'Source specified as {self.source}, a AZ bucket. ',
-                    'AZ Bucket should exist.')
+                assert data_utils.verify_az_bucket(
+                    storage_account_name, self.name), (
+                        f'Source specified as {self.source}, a AZ bucket. ',
+                        'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '

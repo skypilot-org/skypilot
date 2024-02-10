@@ -170,7 +170,8 @@ class AzureCloudStorage(CloudStorage):
         name is a prefix of other objects.
         """
         # split the url using split_az_path
-        container_name, path, storage_account_name = data_utils.split_az_path(url)
+        container_name, path, storage_account_name = data_utils.split_az_path(
+            url)
         # If there aren't more than just container name and storage account,
         # that's a directory.
         if len(path) == 0:
@@ -191,12 +192,12 @@ class AzureCloudStorage(CloudStorage):
         # A directory with few or no items
         return True
 
-
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using AZ CLI."""
         container_name, _, storage_account_name = data_utils.split_az_path(
             source)
-        resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+        resource_group_name = data_utils.get_az_resource_group(
+            storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
         download_command = ('az storage blob download-batch '
@@ -209,12 +210,12 @@ class AzureCloudStorage(CloudStorage):
         all_commands.append(download_command)
         return ' && '.join(all_commands)
 
-
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AZ CLI."""
         container_name, path, storage_account_name = data_utils.split_az_path(
             source)
-        resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+        resource_group_name = data_utils.get_az_resource_group(
+            storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
         download_command = ('az storage blob download '
