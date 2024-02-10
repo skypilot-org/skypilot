@@ -2202,7 +2202,7 @@ class AzureBlobStore(AbstractStore):
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
 
-    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
+    def _get_bucket(self) -> Tuple[str, bool]:
         """Obtains the AZ Container.
 
         Buckets for Azure Blob Storage are referred as Containers.
@@ -2214,7 +2214,7 @@ class AzureBlobStore(AbstractStore):
           3) Create and return a new container otherwise
 
         Returns:
-            StorageHandle: handle to interact with the container
+            str: name of the bucket(container)
             bool: represents either or not the bucket is managed by skypilot
 
         Raises:
@@ -2224,91 +2224,65 @@ class AzureBlobStore(AbstractStore):
                 attempted to be fetched while reconstructing the Storage for
                 'sky storage delete' or 'sky start'
         """
-        # When using non-sky-managed public container
-        if self.resource_group_name is None:
-            from azure.storage.blob import ContainerClient
-            try:
-                container_url = f"https://{self.storage_account_name}.blob.core.windows.net/{self.name}"
+        from azure.storage.blob import ContainerClient
+        try:
+            container_url = f"https://{self.storage_account_name}.blob.core.windows.net/{self.name}"
+            # When using non-sky-managed public container
+            if self.resource_group_name is None:                
                 container = ContainerClient.from_container_url(container_url)
-                # Here, exists() is used to check if the public container
-                # exists. exists() will return False only when the credentials
-                # are provided for from_container_url(), but there is no 
-                # credentials to provide for public container. In this case,
-                # if the public container doesn't exist, it raises an error
-                # instead of returning False.
-                container.exists(timeout=5)
+            else:
+                from azure.identity import AzureCliCredential
+                credential = AzureCliCredential(process_timeout=30)
+                container = ContainerClient.from_container_url(container_url, credential)
+            # Here, exists() is used to check if the public container
+            # exists. exists() will return False only when the credentials
+            # are provided for from_container_url() and there is no 
+            # credentials to provide for public container. In this case,
+            # if the public container doesn't exist, it raises an error
+            # instead of returning False.
+            if container.exists(timeout=5):
                 return container.container_name, False
-            except azure.core_exception().ClientAuthenticationError as e:
-                error_message = e.message
-                # raised when attempted to access a container without rights.
-                if 'ErrorCode:NoAuthenticationInformation' in error_message:
+            # when the container name does not exist under the provided
+            # storage account name and credentials, and user has the rights to
+            # access the storage account.
+            else:
+                if isinstance(self.source, str) and self.source.startswith('az://'):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageBucketGetError(
-                            _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                                name=self.name)) from e
-            except azure.core_exception().ServiceRequestError as e:
-                # raised when storage account name to be used publicly is wrong
-                error_message = e.message
-                if 'Name or service not known' in error_message:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketGetError(
-                            'Attempted to fetch public container from '
-                            'non-existant storage account '
-                            f'name: {self.storage_account_name}.')
-        else:
-            try:
-                container = self.storage_client.blob_containers.get(
-                    self.resource_group_name,
-                    self.storage_account_name,
-                    self.name
-                )
-                return container.name, False
-            # except ValueError as e:
-            #     error_msg = str(e)
-            #     if 'No value for given attribute' in error_msg:
-            #         # when the provided container is
-            #         if self.resource_group_name is None and self.source.startswith('az://'):
-            #             pass
-            except azure.core_exception().ResourceNotFoundError as e:
-                error_code = e.error.code
-                if error_code == 'ResourceGroupNotFound':
-                    with ux_utils.print_exception_no_traceback():
-                        # TODO(Doyoung): Update the raised debug message.
-                        raise exceptions.StorageBucketGetError(
-                            'Attempted to use a non-existent resource group to '
-                            f'create a container: {self.resource_group_name}.')
+                            'Attempted to use a non-existent bucket as a '
+                            f'source: {self.source}.') 
+        except azure.core_exception().ClientAuthenticationError as e:
+            error_message = e.message
+            # raised when attempted to access a storage account without rights.
+            if 'ErrorCode:NoAuthenticationInformation' in error_message:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                            name=self.name)) from e
+        except azure.core_exception().ServiceRequestError as e:
+            # raised when storage account name to be does not exist.
+            error_message = e.message
+            if 'Name or service not known' in error_message:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        'Attempted to fetch a bucket from non-existant '
+                        'storage account '
+                        f'name: {self.storage_account_name}.')
+                        
 
-                if error_code == 'ParentResourceNotFound':
-                    with ux_utils.print_exception_no_traceback():
-                        # TODO(Doyoung): Update the raised debug message.
-                        raise exceptions.StorageBucketGetError(
-                            'Attempted to use a non-existent storage account to '
-                            f'create a container: {self.storage_account_name}.')     
-                
-                if error_code == 'ContainerNotFound':
-                    if isinstance(self.source, str) and self.source.startswith('az://'):
-                        with ux_utils.print_exception_no_traceback():
-                            # TODO(Doyoung): Update the raised debug message.
-                            raise exceptions.StorageBucketGetError(
-                                'Attempted to use a non-existent bucket as a source: '
-                                f'{self.source}. Consider using `aws s3 ls '
-                                f'{self.source}` to debug.')
+        # If bucket cannot be found in both private and public settings,
+        # the bucket is to be created by Sky. However, creation is skipped if
+        # Store object is being reconstructed for deletion or re-mount with
+        # sky start, and error is raised instead.
+        if self.sync_on_reconstruction:
+            container = self._create_az_bucket(self.name)
+            return container.name, True
 
-                    # If bucket cannot be found in both private and public settings,
-                    # the bucket is to be created by Sky. However, creation is skipped if
-                    # Store object is being reconstructed for deletion or re-mount with
-                    # sky start, and error is raised instead.
-                    if self.sync_on_reconstruction:
-                        container = self._create_az_bucket(self.name)
-                        return container.name, True
-
-            # Raised when Storage object is reconstructed for sky storage
-            # delete or to re-mount Storages with sky start but the storage
-            # is already removed externally.
-            raise exceptions.StorageExternalDeletionError(
-                'Attempted to fetch a non-existent bucket: '
-                f'{self.name}')
-
+        # Raised when Storage object is reconstructed for sky storage
+        # delete or to re-mount Storages with sky start but the storage
+        # is already removed externally.
+        raise exceptions.StorageExternalDeletionError(
+            f'Attempted to fetch a non-existent bucket: {self.name}')
 
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the container to the mount_path.
