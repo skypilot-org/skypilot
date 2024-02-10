@@ -2284,6 +2284,18 @@ class AzureBlobStore(AbstractStore):
         raise exceptions.StorageExternalDeletionError(
             f'Attempted to fetch a non-existent bucket: {self.name}')
 
+
+    def _download_file(self, remote_path: str, local_path: str) -> None:
+        """Downloads file from remote to local on r2 bucket
+        using the boto3 API
+
+        Args:
+          remote_path: str; Remote path on R2 bucket
+          local_path: str; Local path on user's device
+        """
+        raise NotImplementedError
+
+
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the container to the mount_path.
 
