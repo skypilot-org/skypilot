@@ -99,9 +99,9 @@ def get_az_mount_cmd(container_name: str, storage_account_name: str,
     if storage_account_key is None:   
         key_env_var = f'AZURE_STORAGE_SAS_TOKEN={shlex.quote(" ")}'
     else:
-        key_env_var = f'AZURE_STORAGE_KEY={storage_account_key}'
+        key_env_var = f'AZURE_STORAGE_ACCESS_KEY={storage_account_key}'
         
-    mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
+    mount_cmd = (f'sudo AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
                  f'--tmp-path {_BLOBFUSE_CACHE_DIR} '

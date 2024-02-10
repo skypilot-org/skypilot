@@ -2018,10 +2018,10 @@ class AzureBlobStore(AbstractStore):
             # config, then use default names.
             self.storage_account_name = skypilot_config.get_nested(
                 ('azure', 'storage_account'),
-                f'skytest{common_utils.get_user_hash()}')
+                f'sky{common_utils.get_user_hash()}')
             self.resource_group_name = skypilot_config.get_nested(
                 ('azure', 'resource_group'),
-                f'skytest{common_utils.get_user_hash()}')
+                f'sky{common_utils.get_user_hash()}')
             # If the resource group or storage account already exist with name
             # used to create below, both create functions will silently move on.
             self.resource_client.resource_groups.create_or_update(
@@ -2168,18 +2168,17 @@ class AzureBlobStore(AbstractStore):
             excludes_list = ';'.join([
                 file_name.rstrip('*') for file_name in excluded_list
             ])
-            # TODO(Doyoung): Currently, used --exclude-path instead of pattern
-            # as --exclude-pattern doesn't seem to recognize excluding certain
-            # directories correctly. Need to investigate further.
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
+            container_path = (f'{self.bucket_name}/{dest_dir_name}'
+                              if dest_dir_name else self.bucket_name)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
                             f'{excludes} '
                             '--delete-destination false '
                             f'--source {src_dir_path} '
-                            f'--container {self.bucket_name}/{dest_dir_name}')
+                            f'--container {container_path}')
             return sync_command
 
         # Generate message for upload

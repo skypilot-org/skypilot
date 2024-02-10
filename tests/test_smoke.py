@@ -896,7 +896,10 @@ def test_gcp_storage_mounts_with_stop():
 def test_azure_storage_mounts_with_stop():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
-    storage_account_name = f'skytest{common_utils.get_user_hash()}'
+    storage_account_name = f'sky{common_utils.get_user_hash()}'
+    resource_group_name = data_utils.get_az_resource_group(storage_account_name)
+    storage_account_key = data_utils.get_az_storage_account_key(
+        storage_account_name, resource_group_name)
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
@@ -909,7 +912,7 @@ def test_azure_storage_mounts_with_stop():
             *storage_setup_commands,
             f'sky launch -y -c {name} --cloud azure {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'output=$(az storage blob list -c {storage_name} --account-name {storage_account_name} --prefix hello.txt)'
+            f'output=$(az storage blob list -c {storage_name} --account-name {storage_account_name} --account-key {storage_account_key} --prefix hello.txt)'
             # if the file does not exist, az storage blob list returns '[]'
             f'[ "$output" = "[]" ] && exit 1'
             f'sky stop -y {name}',
@@ -3275,7 +3278,7 @@ class TestStorageWithCredentials:
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             return f'{alias_gen}; {gsutil_alias} rm -r {url}'
         if store_type == storage_lib.StoreType.AZURE:
-            storage_account_name = f'skytest{common_utils.get_user_hash()}'
+            storage_account_name = f'sky{common_utils.get_user_hash()}'
             url = f'az://{storage_account_name}/{bucket_name}'
             resource_group_name = data_utils.get_az_resource_group(storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
@@ -3308,7 +3311,7 @@ class TestStorageWithCredentials:
                 url = f'gs://{bucket_name}'
             return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.AZURE:
-            storage_account_name = f'skytest{common_utils.get_user_hash()}'
+            storage_account_name = f'sky{common_utils.get_user_hash()}'
             resource_group_name = data_utils.get_az_resource_group(storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name, resource_group_name)
@@ -3343,7 +3346,7 @@ class TestStorageWithCredentials:
             else:
                 return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
-            storage_account_name = f'skytest{common_utils.get_user_hash()}'
+            storage_account_name = f'sky{common_utils.get_user_hash()}'
             resource_group_name = data_utils.get_az_resource_group(storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name, resource_group_name)
@@ -3368,7 +3371,7 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.GCS:
             return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
-            storage_account_name = f'skytest{common_utils.get_user_hash()}'
+            storage_account_name = f'sky{common_utils.get_user_hash()}'
             resource_group_name = data_utils.get_az_resource_group(storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name, resource_group_name)
@@ -3565,7 +3568,7 @@ class TestStorageWithCredentials:
     def tmp_az_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using gsutil
 
-        storage_account_name = f'skytest{common_utils.get_user_hash()}'
+        storage_account_name = f'sky{common_utils.get_user_hash()}'
         resource_group_name = data_utils.get_az_resource_group(storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
@@ -3782,7 +3785,7 @@ class TestStorageWithCredentials:
                 command = f'gsutil ls {nonexist_bucket_url.format(random_name=nonexist_bucket_name)}'
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('az'):
-                storage_account_name = f'skytest{common_utils.get_user_hash()}'
+                storage_account_name = f'sky{common_utils.get_user_hash()}'
                 resource_group_name = data_utils.get_az_resource_group(storage_account_name)
                 storage_account_key = data_utils.get_az_storage_account_key(
                     storage_account_name, resource_group_name)
