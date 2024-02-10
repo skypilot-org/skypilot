@@ -1977,34 +1977,9 @@ class AzureBlobStore(AbstractStore):
         """
         self.storage_client = data_utils.create_az_client('storage')
         self.resource_client = data_utils.create_az_client('resource')
-        # To mount already existing bucket, source value(i.e. az://storage_account/container_name)
-        # can be used to _get_bucket
         # If creating a new container, it's necessary to obtain resource group name and storage account
         # from this function either using default value or user provided value from config.yaml.
         # We can tell if already existing bucket is used or not
-        
-        # 1. prep to run _get_bucket: Need to figure out either or not
-        # this bucket is externally created or being newly created.
-        # 1.1. If it's externally created, the source must be in a form of 'az://{}/{}'
-        #      Extract the storage account and return it
-        # 1.2. If it's newly being created,
-        # 1.2.1 check if the source is non-az cloud url: perhaps this is not necessary now.
-        # 1.2.2 check if the source is from local directory
-        #      Create storage account and resource group if they do not exist. 
-        # input: self.name, self.source, self.mode
-        # output: resource group and storage account name
-        
-        # TODO(Doyoung): Currently, assuming source starting with az:// to be 
-        # externally created az container. Need to confirm and test if the assumption
-        # is enough.
-        # Need to check if we allow to specifiy source to start with az:// for sky managed storages.
-        # If we allow to do so, 
-        # There are three possible scenarioes.
-        # 1. externally created storage (already created)
-        # 2. sky managed storage (already created)
-        # 3. user trying to create a new storage with the syntax (newly being created)
-        # The following currently only assumes 1. is allowed with the syntax. Check with 2. and 3.
-        # as well if we allow them, and handle accordingly.
         if isinstance(self.source, str) and self.source.startswith('az://'):
             bucket_name, _, storage_account_name = data_utils.split_az_path(self.source)
             # Using externally created storage
