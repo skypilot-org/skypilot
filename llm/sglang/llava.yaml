@@ -24,7 +24,6 @@ setup: |
   pip list | grep sglang || pip install "sglang[all]"
   pip list | grep transformers || pip install transformers==4.37.2
 
-  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 
 run: |
