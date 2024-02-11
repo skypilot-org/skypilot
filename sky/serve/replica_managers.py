@@ -538,7 +538,7 @@ class ReplicaManager:
         self.least_recent_version: int = serve_constants.INITIAL_VERSION
         serve_state.add_or_update_version(self._service_name,
                                           self.latest_version, spec)
-        self._use_spot_policy: bool = spec.spot_placer is not None
+        self._use_spot_policy: bool = spec.use_spot_policy
 
     def get_ready_replica_urls(self) -> List[str]:
         """Get all ready replica's IP addresses."""
@@ -1145,7 +1145,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_version(self._service_name, version, spec)
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
-        self._use_spot_policy = spec.spot_placer is not None
+        self._use_spot_policy = spec.use_spot_policy
 
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         spec = serve_state.get_spec(self._service_name, version)

@@ -334,16 +334,10 @@ def get_service_schema():
                     'target_qps_per_replica': {
                         'type': 'number',
                     },
-                    'spot_policy': {
-                        'type': 'string',
+                    'dynamic_on_demand_fallback': {
+                        'type': 'boolean',
                     },
-                    'num_overprovision': {
-                        'type': 'integer',
-                    },
-                    'init_replicas': {
-                        'type': 'integer',
-                    },
-                    'extra_on_demand_replicas': {
+                    'base_on_demand_fallback_replicas': {
                         'type': 'integer',
                     },
                     'upscale_delay_seconds': {

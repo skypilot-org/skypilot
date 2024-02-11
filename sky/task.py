@@ -628,7 +628,7 @@ class Task:
           self: The current task, with service set.
         """
 
-        if service is not None and service.spot_placer is not None:
+        if service is not None and service.use_spot_policy:
 
             enabled_clouds = global_user_state.get_enabled_clouds()
             feasible_locations: List[spot_policies.Location] = []

@@ -143,19 +143,19 @@ class SkyServeController:
 
                 self._replica_manager.update_version(version, service)
 
-                if self._autoscaler.NAME != service.autoscaler:
+                if (isinstance(self._autoscaler,
+                               autoscalers.RequestRateAutoscaler) and
+                        service.use_spot_policy
+                   ) or (isinstance(self._autoscaler,
+                                    autoscalers.SpotRequestRateAutoscaler) and
+                         not service.use_spot_policy):
                     old_autoscaler = self._autoscaler
                     self._autoscaler = autoscalers.Autoscaler.from_spec(service)
-                    if isinstance(
-                            self._autoscaler,
-                            autoscalers.RequestRateAutoscaler) and isinstance(
-                                old_autoscaler,
-                                autoscalers.RequestRateAutoscaler):
-                        self._autoscaler.request_timestamps = (
-                            old_autoscaler.request_timestamps)
+                    assert isinstance(self._autoscaler,
+                                      autoscalers.RequestRateAutoscaler)
+                    self._autoscaler.request_timestamps = (
+                        old_autoscaler.request_timestamps)
                     self._autoscaler.latest_version = version
-                    logger.info('Not recommended: '
-                                f'Update autoscaler to {service.autoscaler}')
                 else:
                     self._autoscaler.update_version(version, service)
                 return {'message': 'Success'}

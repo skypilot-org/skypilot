@@ -60,7 +60,7 @@ def _serve_check_service(task: 'sky.Task'):
                 raise ValueError('spot_recovery is disabled for SkyServe.'
                                  'Please specify `spot_policy` instead.')
 
-    if task.service.spot_placer is not None:
+    if task.service.use_spot_policy:
         if use_spot:
             logger.info('use_spot will be override to True, '
                         'because spot placer is enabled.')
@@ -89,7 +89,7 @@ def _serve_check_service(task: 'sky.Task'):
             if key in requested_resources_dict:
                 requested_resources_dict.pop(key)
         if (first_resource_dict != requested_resources_dict and
-                task.service.spot_placer is not None):
+                task.service.use_spot_policy):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Require multiple resources to have the same fields '
