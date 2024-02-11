@@ -649,7 +649,8 @@ class Azure(clouds.Cloud):
         statuses = []
         for s in original_statuses_list:
             if s not in status_map:
-                raise exceptions.ClusterStatusFetchingError(
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ClusterStatusFetchingError(
                     f'Failed to parse status from Azure response: {stdout}')
             node_status = status_map[s]
             if node_status is not None:

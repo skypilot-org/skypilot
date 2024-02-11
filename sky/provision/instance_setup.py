@@ -50,7 +50,7 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
-RAY_HEAD_WAIT_INITALIZED_COMMAND = (
+RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
     f'while `RAY_ADDRESS=127.0.0.1:{constants.SKY_REMOTE_RAY_PORT} '
     'ray status | grep -q "No cluster status."`; do '
     'sleep 0.5; '
@@ -253,7 +253,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
            f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
-           _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITALIZED_COMMAND)
+           _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = ssh_runner.run(cmd,
