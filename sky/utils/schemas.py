@@ -518,9 +518,9 @@ _INSTANCE_TAGS_SCHEMA = {
 }
 
 _REMOTE_AUTH_SCHEMA = {
-    'remote_authentication': {
+    'remote_identity': {
         'type': 'string',
-        'case_insensitive_enum': ['USER_ACCOUNT', 'SERVICE_ACCOUNT'],
+        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'],
     }
 }
 

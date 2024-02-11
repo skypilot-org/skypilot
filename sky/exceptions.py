@@ -46,11 +46,8 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
-class InvalidConfigs(Exception):
-    """Raised when invalid configurations are provided for a given cloud.
-
-    The caller should handle this exception and skip the cloud.
-    """
+class InvalidCloudConfigs(Exception):
+    """Raised when invalid configurations are provided for a given cloud."""
     pass
 
 

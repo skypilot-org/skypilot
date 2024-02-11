@@ -757,7 +757,7 @@ def write_cluster_config(
             not for the given region, or GPUs are requested in a Kubernetes
             cluster but the cluster does not have nodes labeled with GPU types.
         exceptions.InvalidConfigs: if the user specifies some config for the
-            cloud that is not valid, e.g. remote_authentication: SERVICE_ACCOUNT
+            cloud that is not valid, e.g. remote_identity: SERVICE_ACCOUNT
             for a cloud that does not support it, the caller should skip the
             cloud in this case.
     """
@@ -791,14 +791,15 @@ def write_cluster_config(
 
     assert cluster_name is not None
     excluded_clouds = []
-    remote_authentication = skypilot_config.get_nested(
-        (str(cloud).lower(), 'remote_authentication'), 'USER_ACCOUNT')
-    if remote_authentication == 'SERVICE_ACCOUNT':
-        if cloud.require_credential_on_remote():
-            raise exceptions.InvalidConfigs(
-                'remote_authentication: SERVICE_ACCOUNT is specified in '
+    remote_identity = skypilot_config.get_nested(
+        (str(cloud).lower(), 'remote_identity'), 'LOCAL_CREDENTIALS')
+    if remote_identity == 'SERVICE_ACCOUNT':
+        if not cloud.supports_service_account_on_remote():
+            raise exceptions.InvalidCloudConfigs(
+                'remote_identity: SERVICE_ACCOUNT is specified in '
                 f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
-                'not supported this cloud, please use \'USER\' instead.')
+                'is not supported by this cloud. Remove the config or set: '
+                '`remote_identity: LOCAL_CREDENTIALS`.')
         excluded_clouds = [cloud]
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 

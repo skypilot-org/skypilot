@@ -103,23 +103,28 @@ Available fields and semantics:
     # Security group (optional).
     #
     # The name of the security group to use for all instances. If not specified,
-    # SkyPilot will use the default name for the security group: sky-sg-<hash>
+    # SkyPilot will use the default name for the security group: sky-sg-<hash>  
     # Note: please ensure the security group name specified exists in the
     # regions the instances are going to be launched or the AWS account has the
     # permission to create a security group.
     security_group_name: my-security-group
-    
-    # The authentication method to use for GCP on the remote machine (optional).
+
+    # The identity to use for AWS on the remote instance (optional).
     #
-    # If 'USER_ACCOUNT' is specified, the user's credentials will be uploaded
-    # and used for accessing the cloud on the machine created by SkyPilot.
+    # If 'LOCAL_CREDENTIALS' is specified, the user's credentials will be
+    # uploaded and used for accessing the cloud on the instance created by
+    # SkyPilot.
+    #
     # If 'SERVICE_ACCOUNT' is specified, the service account will be used to
-    # authenticate on the remote machine. Note that this will only take
-    # effect if the remote machine is created on AWS, and machines created on
-    # other clouds will still use USER_ACCOUNT to authenticate AWS.
+    # authenticate on the remote instance. Note that this will only take
+    # effect if the remote instance is created on AWS, and LOCAL_CREDENTIALS 
+    # will still be uploaded to the instances created on other clouds for
+    # accessing resources on AWS. Also, if `SERVICE_ACCOUNT` is specified, it
+    # will cause the managed spot jobs, or the service replicas fail to access
+    # any resources on AWS, when the SkyPilot controller is running on AWS.
     #
-    # Default: 'USER_ACCOUNT'. 
-    remote_authentication: USER_ACCOUNT
+    # Default: 'LOCAL_CREDENTIALS'. 
+    remote_identity: LOCAL_CREDENTIALS
 
   # Advanced GCP configurations (optional).
   # Apply to all new instances but not existing ones.
@@ -188,17 +193,21 @@ Available fields and semantics:
       - projects/my-project/reservations/my-reservation2
 
 
-    # The authentication method to use for GCP on the remote machine (optional).
+    # The identity to use for GCP on the remote instance (optional).
     #
-    # If 'USER_ACCOUNT' is specified, the user's credentials will be uploaded
-    # and used for accessing the cloud on the machine created by SkyPilot.
+    # If 'LOCAL_CREDENTIALS' is specified, the user's credentials will be
+    # uploaded and used for accessing the cloud on the instance created by
+    # SkyPilot.
     # If 'SERVICE_ACCOUNT' is specified, the service account will be used to
-    # authenticate on the remote machine. Note that this will only take
-    # effect if the remote machine is created on GCP, and machines created on
-    # other clouds will still use USER_ACCOUNT to authenticate GCP.
+    # authenticate on the remote instance. Note that this will only take
+    # effect if the remote instance is created on GCP, and LOCAL_CREDENTIALS 
+    # will still be uploaded to the instances created on other clouds for
+    # accessing resources on GCP. Also, if `SERVICE_ACCOUNT` is specified, it
+    # will cause the managed spot jobs, or the service replicas fail to access
+    # any resources on GCP, when the SkyPilot controller is running on GCP.
     #
-    # Default: 'USER_ACCOUNT'. 
-    remote_authentication: USER_ACCOUNT
+    # Default: 'LOCAL_CREDENTIALS'. 
+    remote_identity: LOCAL_CREDENTIALS
 
   # Advanced Kubernetes configurations (optional).
   kubernetes:

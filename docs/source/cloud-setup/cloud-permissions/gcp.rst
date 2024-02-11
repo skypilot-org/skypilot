@@ -110,7 +110,6 @@ User
     storage.objects.delete
     storage.objects.get
     storage.objects.list
-    storage.objects.update
 
 5. **Optional**: If the user needs to access TPU VMs, you can additionally add the following permissions (the following may not be exhaustive, please file an issue if you find any missing permissions):
 

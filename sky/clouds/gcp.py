@@ -134,7 +134,7 @@ class GCP(clouds.Cloud):
     # lower limit.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 35
 
-    _REQUIRE_CREDENTIAL_ON_REMOTE = False
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _INDENT_PREFIX = '    '
     _DEPENDENCY_HINT = (

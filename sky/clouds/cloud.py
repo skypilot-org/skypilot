@@ -99,7 +99,7 @@ class Cloud:
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
-    _REQUIRE_CREDENTIAL_ON_REMOTE = True
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
     # The version of provisioner and status query. This is used to determine
     # the code path to use for each cloud in the backend.
@@ -119,13 +119,19 @@ class Cloud:
         return None
 
     @classmethod
-    def require_credential_on_remote(cls) -> bool:
-        """Returns whether the cloud requires credential on remote cluster.
+    def supports_service_account_on_remote(cls) -> bool:
+        """Returns whether the cloud supports service account on remote cluster.
 
         This method is used by backend_utils.write_cluster_config() to decide
-        whether to upload the cloud credential files to the remote cluster.
+        whether to upload user's local cloud credential files to the remote
+        cluster.
+
+        If a cloud supports service account on remote cluster, the user's local
+        cloud credential files are not needed to be uploaded to the remote
+        instance, as the remote instance can be assigned with a service account
+        that has the necessary permissions to access the cloud resources.
         """
-        return cls._REQUIRE_CREDENTIAL_ON_REMOTE
+        return cls._SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE
 
     #### Regions/Zones ####
 

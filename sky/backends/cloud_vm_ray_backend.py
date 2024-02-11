@@ -1509,7 +1509,7 @@ class RetryingVmProvisioner(object):
                 # does not have nodes labeled with GPU types.
                 logger.info(f'{e}')
                 continue
-            except exceptions.InvalidConfigs as e:
+            except exceptions.InvalidCloudConfigs as e:
                 # Failed due to invalid user input, e.g. invalid configs in
                 # ~/.sky/config.yaml.
                 logger.info(f'{common_utils.format_exception(e)}')
