@@ -174,6 +174,7 @@ class IBM(clouds.Cloud):
         cluster_name_on_cloud: str,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
+        dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
@@ -186,7 +187,7 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
-        del cluster_name_on_cloud  # Unused.
+        del cluster_name_on_cloud, dryrun  # Unused.
 
         def _get_profile_resources(instance_profile):
             """returns a dict representing the

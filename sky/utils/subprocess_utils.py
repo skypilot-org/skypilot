@@ -4,7 +4,7 @@ import os
 import random
 import subprocess
 import time
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 import colorama
 import psutil
@@ -50,7 +50,7 @@ def get_parallel_threads() -> int:
     return max(4, cpu_count - 1)
 
 
-def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
+def run_in_parallel(func: Callable, args: Iterable[Any]) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
     The function should raise a CommandError if the command fails.
