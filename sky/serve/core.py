@@ -580,10 +580,10 @@ def status(
 @usage_lib.entrypoint
 def sync_down(service_name: str) -> None:
     sky_logging.print(f'Syncing down logs for {service_name}')
-    controller_status, handle = backend_utils.is_controller_up(
+    controller_status, controller_handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
-    if handle is None or handle.head_ip is None:
+    if controller_handle is None or controller_handle.head_ip is None:
         msg = 'No service is found.'
         if controller_status == status_lib.ClusterStatus.INIT:
             msg = ''
@@ -591,10 +591,10 @@ def sync_down(service_name: str) -> None:
                                            cluster_status=controller_status)
 
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
-        handle.cluster_yaml, handle.docker_user)
+        controller_handle.cluster_yaml, controller_handle.docker_user)
     runner = command_runner.SSHCommandRunner(
-        handle.head_ip,
-        port=handle.head_ssh_port,
+        controller_handle.head_ip,
+        port=controller_handle.head_ssh_port,
         **ssh_credentials,
     )
     controller_log_file_name = (
@@ -610,6 +610,20 @@ def sync_down(service_name: str) -> None:
                  target=target_directory,
                  up=False,
                  stream_logs=False)
+
+    timestamp = backend_utils.get_run_timestamp()
+    code = serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
+        service_name, timestamp)
+    backend = backend_utils.get_backend_from_handle(controller_handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
+    returncode, _, _ = backend.run_on_head(controller_handle,
+                                           code,
+                                           require_outputs=False,
+                                           stream_logs=False)
+    subprocess_utils.handle_returncode(
+        returncode, code, 'Failed to prepare logs to sync down for replicas.')
+    # sync down logs in timestamped directory
 
 
 @usage_lib.entrypoint

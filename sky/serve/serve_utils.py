@@ -613,6 +613,11 @@ def stream_replica_logs(service_name: str, replica_id: int,
     return ''
 
 
+def prepare_replica_logs_for_download(service_name: str,
+                                      timestamp: str) -> None:
+    print(service_name, timestamp)
+
+
 def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
                  exit_if_stream_end: bool) -> Iterator[str]:
     line = ''
@@ -849,6 +854,16 @@ class ServeCodeGen:
             'msg = serve_utils.stream_replica_logs('
             f'{service_name!r}, {replica_id!r}, follow={follow})',
             'print(msg, flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def prepare_replica_logs_for_download(cls, service_name: str,
+                                          timestamp: str) -> str:
+        code = [
+            'msg = service_utils.prepare_replica_logs_for_download('
+            f'{service_name!r}, {timestamp!r})',
+            'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
