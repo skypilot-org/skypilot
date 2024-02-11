@@ -1903,10 +1903,10 @@ class AzureBlobStore(AbstractStore):
         self.name = self.validate_container_name(self.name)
 
         # Check if the storage is enabled
-        if not _is_storage_cloud_enabled(str(clouds.AWS())):
+        if not _is_storage_cloud_enabled(str(clouds.Azure())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: az\' specified, but ' \
+                    'Storage \'store: azure\' specified, but ' \
                     'Azure access is disabled. To fix, enable '\
                     'Azure by running `sky check`. More info: '\
                     'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
