@@ -1,6 +1,5 @@
 # SkyServe YAML to launch a service with mixed spot and on-demand instances.
-# The policy will dynamically fallback to on-demand instances when
-# spot instances are not available. 
+# The policy will dynamically fallback to on-demand instances when spot instances are not available. 
 
 service:
   readiness_probe:
