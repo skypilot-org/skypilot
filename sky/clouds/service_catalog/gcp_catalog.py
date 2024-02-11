@@ -370,8 +370,8 @@ def list_accelerators(
     # This is a simplified version of get_instance_type_for_accelerator, as it
     # has to be applied to all the entries in acc_host_df, and the input is more
     # restricted.
-    def _get_host_vm(acc_name: str, acc_count: int, region: str,
-                     zone: str) -> Optional[str]:
+    def _get_host_instance_type(acc_name: str, acc_count: int, region: str,
+                                zone: str) -> Optional[str]:
         df = _df[(_df['Region'].str.lower() == region.lower()) &
                  (_df['AvailabilityZone'].str.lower() == zone.lower()) &
                  (_df['InstanceType'].notna())]
@@ -409,10 +409,14 @@ def list_accelerators(
             acc_host_df = acc_host_df[~acc_host_df['GpuInfo'].isna()]
         if name_filter is not None:
             acc_host_df = acc_host_df[
-                acc_host_df['AcceleratorName'].str.contains(
-                    name_filter, case=case_sensitive)]
+                acc_host_df['AcceleratorName'].str.contains(name_filter,
+                                                            case=case_sensitive,
+                                                            regex=True)]
         if region_filter is not None:
-            acc_host_df = acc_host_df[acc_host_df['Region'] == region_filter]
+            acc_host_df = acc_host_df[acc_host_df['Region'].str.contains(
+                region_filter, case=case_sensitive, regex=True)]
+        acc_host_df['AcceleratorCount'] = acc_host_df[
+            'AcceleratorCount'].astype(int)
         if quantity_filter is not None:
             acc_host_df = acc_host_df[acc_host_df['AcceleratorCount'] ==
                                       quantity_filter]
@@ -429,10 +433,10 @@ def list_accelerators(
             # Fetch the host VM information for each accelerator in its region
             # and zone.
             acc_host_df['InstanceType'] = acc_host_df.apply(
-                lambda x: _get_host_vm(x['AcceleratorName'],
-                                       x['AcceleratorCount'],
-                                       region=x['Region'],
-                                       zone=x['AvailabilityZone']),
+                lambda x: _get_host_instance_type(x['AcceleratorName'],
+                                                  x['AcceleratorCount'],
+                                                  region=x['Region'],
+                                                  zone=x['AvailabilityZone']),
                 axis=1)
             acc_host_df.dropna(subset=['InstanceType', 'Price'], inplace=True)
             # Combine the price of the host VM and the GPU.
@@ -445,6 +449,7 @@ def list_accelerators(
                 on=['InstanceType', 'Region', 'AvailabilityZone'],
                 how='inner',
                 suffixes=('', '_host'))
+            # Combine the price of the host instance type and the GPU.
             acc_host_df['Price'] = (acc_host_df['Price'] +
                                     acc_host_df['Price_host'])
             acc_host_df['SpotPrice'] = (acc_host_df['SpotPrice'] +
@@ -460,7 +465,9 @@ def list_accelerators(
                                             quantity_filter, case_sensitive,
                                             all_regions)
     if tpu_df is not None and not tpu_df.empty:
-        # Combine the entries for TPUs.
+        # Combine the entries for TPUs with the same version.
+        # TODO: The current TPU prices are the price of the TPU itself, not the
+        # TPU VM. We should fix this in the future.
         for acc_name in list(results.keys()):
             if acc_name.startswith('tpu-'):
                 version = acc_name.split('-')[1]
