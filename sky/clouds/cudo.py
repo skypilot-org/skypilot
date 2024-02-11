@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.utils import common_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -160,7 +161,8 @@ class Cudo(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          clouds='cudo')
@@ -178,9 +180,13 @@ class Cudo(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: clouds.Region,
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        dryrun: bool = False,
+    ) -> Dict[str, Optional[str]]:
         del zones
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -305,11 +311,3 @@ class Cudo(clouds.Cloud):
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         return service_catalog.validate_region_zone(region, zone, clouds='cudo')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'cudo')
