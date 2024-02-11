@@ -69,10 +69,13 @@ class JobSchedulerEvent(SkyletEvent):
 
 class SpotJobUpdateEvent(SkyletEvent):
     """Skylet event for updating spot job status."""
-    EVENT_INTERVAL_SECONDS = 300
+    EVENT_INTERVAL_SECONDS = 300  # 5 minutes
 
     def _run(self):
+        # Update spot job status and cleanup abnormal spot jobs every
+        # CLEANUP_INTERVAL_SECONDS.
         spot_utils.update_spot_job_status()
+        spot_utils.cleanup_zombie_spot_jobs()
 
 
 class ServiceUpdateEvent(SkyletEvent):
