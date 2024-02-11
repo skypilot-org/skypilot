@@ -7,7 +7,6 @@ service:
 envs:
   MODEL_NAME: liuhaotian/llava-v1.6-vicuna-7b
   TOKENIZER_NAME: llava-hf/llava-1.5-7b-hf
-  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
 
 resources:
   accelerators: {L4:1, A10G:1, A10:1, A100:1, A100-80GB:1}
