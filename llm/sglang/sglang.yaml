@@ -1,12 +1,9 @@
-# service.yaml
-# The newly-added `service` section to the `serve-openai-api.yaml` file.
 service:
   # Specifying the path to the endpoint to check the readiness of the service.
-  readiness_probe: /v1/models
+  readiness_probe: /health
   # How many replicas to manage.
   replicas: 2
 
-# Fields below are the same with `serve-openai-api.yaml`.
 envs:
   MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
   HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
@@ -17,22 +14,21 @@ resources:
     - 8000
 
 setup: |
-  conda activate vllm
+  conda activate sglang
   if [ $? -ne 0 ]; then
-    conda create -n vllm python=3.10 -y
-    conda activate vllm
+    conda create -n sglang python=3.10 -y
+    conda activate sglang
   fi
 
-  pip list | grep vllm || pip install vllm==0.3.0
+  pip list | grep sglang || pip install "sglang[all]"
   pip list | grep transformers || pip install transformers==4.37.2
 
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 
 run: |
-  conda activate vllm
-  echo 'Starting vllm openai api server...'
-  python -m vllm.entrypoints.openai.api_server \
-    --model $MODEL_NAME --tokenizer hf-internal-testing/llama-tokenizer \
-    --host 0.0.0.0
+  conda activate sglang
+  echo 'Starting sglang openai api server...'
+  export PATH=$PATH:/sbin/
+  python -m sglang.launch_server --model-path $MODEL_NAME --host 0.0.0.0 --port 8000
 

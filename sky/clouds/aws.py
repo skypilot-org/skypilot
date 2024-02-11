@@ -365,10 +365,13 @@ class AWS(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='aws')
 
-    def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Any]:
+    def make_deploy_resources_variables(self,
+                                        resources: 'resources_lib.Resources',
+                                        cluster_name_on_cloud: str,
+                                        region: 'clouds.Region',
+                                        zones: Optional[List['clouds.Zone']],
+                                        dryrun: bool = False) -> Dict[str, Any]:
+        del dryrun  # unused
         assert zones is not None, (region, zones)
 
         region_name = region.name
@@ -737,14 +740,6 @@ class AWS(clouds.Cloud):
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'aws')
 
     @classmethod
     def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:

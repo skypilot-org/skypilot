@@ -251,10 +251,12 @@ class Azure(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources', cluster_name_on_cloud: str,
+            self,
+            resources: 'resources.Resources',
+            cluster_name_on_cloud: str,
             region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud  # Unused.
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
@@ -323,7 +325,9 @@ class Azure(clouds.Cloud):
             'zones': None,
             **image_config,
             'disk_tier': Azure._get_disk_type(_failover_disk_tier()),
-            'cloud_init_setup_commands': cloud_init_setup_commands
+            'cloud_init_setup_commands': cloud_init_setup_commands,
+            'azure_subscription_id': self.get_project_id(dryrun),
+            'resource_group': f'{cluster_name_on_cloud}-{region_name}',
         }
 
     def _get_feasible_launchable_resources(
@@ -437,14 +441,6 @@ class Azure(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type,
                                                     clouds='azure')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'azure')
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.

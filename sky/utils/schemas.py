@@ -557,6 +557,9 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'security_group_name': {
+                    'type': 'string',
+                },
                 **_INSTANCE_TAGS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             }

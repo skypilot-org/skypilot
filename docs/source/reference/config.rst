@@ -100,6 +100,15 @@ Available fields and semantics:
       us-east-1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-east-1.proxy
       us-east-2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ec2-user@<jump server public ip>
 
+    # Security group (optional).
+    #
+    # The name of the security group to use for all instances. If not specified,
+    # SkyPilot will use the default name for the security group: sky-sg-<hash>
+    # Note: please ensure the security group name specified exists in the
+    # regions the instances are going to be launched or the AWS account has the
+    # permission to create a security group.
+    security_group_name: my-security-group
+    
     # The authentication method to use for GCP on the remote machine (optional).
     #
     # If 'USER_ACCOUNT' is specified, the user's credentials will be uploaded
@@ -208,6 +217,22 @@ Available fields and semantics:
     # is used as default if 'networking' is not specified.
     networking: portforward
 
+    # The mode to use for opening ports on Kubernetes
+    #
+    # This must be either: 'ingress' or 'loadbalancer'. If not specified,
+    # defaults to 'loadbalancer'.
+    #
+    # loadbalancer: Creates services of type `LoadBalancer` to expose ports.
+    # See https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#loadbalancer-service.
+    # This mode is supported out of the box on most cloud managed Kubernetes
+    # environments (e.g., GKE, EKS).
+    #
+    # ingress: Creates an ingress and a ClusterIP service for each port opened.
+    # Requires an Nginx ingress controller to be configured on the Kubernetes cluster.
+    # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#nginx-ingress
+    # for details on deploying the NGINX ingress controller.
+    ports: loadbalancer
+
     # Additional fields to override the pod fields used by SkyPilot (optional)
     #
     # Any key:value pairs added here would get added to the pod spec used to
@@ -215,17 +240,28 @@ Available fields and semantics:
     # in the Kubernetes API:
     # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core
     #
-    # Example use cases: adding custom labels to SkyPilot pods, specifying
-    # imagePullSecrets for pulling images from private registries, overriding
-    # the default runtimeClassName etc.
+    # Some example use cases are shown below. All fields are optional.
     pod_config:
       metadata:
         labels:
-          my-label: my-value
+          my-label: my-value    # Custom labels to SkyPilot pods
       spec:
-        runtimeClassName: nvidia
+        runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods. Required on K3s.
         imagePullSecrets:
-          - name: my-secret
+          - name: my-secret     # Pull images from a private registry using a secret
+        containers:
+          - env:                # Custom environment variables for the pod, e.g., for proxy
+            - name: HTTP_PROXY
+              value: http://proxy-host:3128
+            volumeMounts:       # Custom volume mounts for the pod
+              - mountPath: /foo
+                name: example-volume
+                readOnly: true
+        volumes:
+          - name: example-volume
+            hostPath:
+              path: /tmp
+              type: Directory
 
   # Advanced OCI configurations (optional).
   oci:
