@@ -32,7 +32,7 @@ The entire Service YAML can be found here: [llava.yaml](llava.yaml).
 
 2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
 ```bash
-sky serve up -n sglang-llava llava.yaml --env HF_TOKEN=<your-huggingface-token>
+sky serve up -n sglang-llava llava.yaml
 ```
 
 3. Use `sky serve status` to check the status of the serving:
