@@ -1,5 +1,5 @@
 # SkyServe YAML to launch a service with mixed spot and on-demand instances.
-# The policy SpotHedge will dynamically fallback to on-demand instances when
+# The policy will dynamically fallback to on-demand instances when
 # spot instances are not available. 
 
 service:
@@ -9,6 +9,7 @@ service:
     min_replicas: 1
     max_replicas: 3
     target_qps_per_replica: 1
+    dynamic_on_demand_fallback: true
 
 resources:
   any_of:

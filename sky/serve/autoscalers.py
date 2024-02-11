@@ -18,9 +18,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Default autoscaler
-DEFAULT_AUTOSCALER = None
-
 
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
@@ -103,19 +100,6 @@ class Autoscaler:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
-    def __init_subclass__(cls, name: str, default: bool = False) -> None:
-        if default:
-            global DEFAULT_AUTOSCALER
-            assert DEFAULT_AUTOSCALER is None, (
-                'Only one autoscaler can be default.')
-            DEFAULT_AUTOSCALER = name
-        assert name not in cls.REGISTRY, f'Name {name} already exists'
-        cls.REGISTRY[name] = cls
-
-    @classmethod
-    def get_autoscaler_names(cls) -> List[str]:
-        return list(cls.REGISTRY.keys())
-
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         if spec.use_spot_policy:
@@ -124,9 +108,7 @@ class Autoscaler:
             return RequestRateAutoscaler(spec)
 
 
-class RequestRateAutoscaler(Autoscaler,
-                            name='REQUEST_RATE_AUTOSCALER',
-                            default=True):
+class RequestRateAutoscaler(Autoscaler):
     """RequestRateAutoscaler: Autoscale according to request rate.
 
     Scales when the number of requests in the given interval is above or below
@@ -363,9 +345,7 @@ class RequestRateAutoscaler(Autoscaler,
         return scaling_options
 
 
-class SpotRequestRateAutoscaler(RequestRateAutoscaler,
-                                name='SPOT_REQUEST_RATE_AUTOSCALER',
-                                default=False):
+class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     """SpotRequestRateAutoscaler: Use spot to autoscale based on request rate.
 
     This autoscaler uses spot instances to save cost.
@@ -381,6 +361,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
         self.dynamic_on_demand_fallback: bool = (
             spec.dynamic_on_demand_fallback
             if spec.dynamic_on_demand_fallback is not None else False)
+        self.is_initialized: bool = False
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
@@ -392,6 +373,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
         self.dynamic_on_demand_fallback = (spec.dynamic_on_demand_fallback
                                            if spec.dynamic_on_demand_fallback
                                            is not None else False)
+        self.is_initialized = False
 
     def handle_active_history(self,
                               history: List[spot_policies.Location]) -> None:
@@ -443,7 +425,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
 
         logger.info(
             f'Number of alive spot instances: {num_launched_spot}, '
-            f'Number of ready spot instances: {num_ready_spot}', ''
+            f'Number of ready spot instances: {num_ready_spot}, '
             f'Number of alive on-demand instances: {num_launched_on_demand}, '
             f'Number of ready on-demand instances: {num_ready_on_demand}')
 
@@ -479,6 +461,10 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
                                        target=replica_id))
+        elif (num_ready_spot == num_spot_to_provision and
+              self.is_initialized is False):
+            # Used to not launch on_demand fallback during initialization.
+            self.is_initialized = True
 
         # Once there is min_replicas number of
         # ready new replicas, we will direct all traffic to them,
@@ -490,7 +476,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler,
 
         # Decide how many on-demand instances to launch.
         num_on_demand_to_provision = self.base_on_demand_fallback_replicas
-        if self.dynamic_on_demand_fallback:
+        if self.dynamic_on_demand_fallback is True and self.is_initialized:
             num_on_demand_to_provision += (num_spot_to_provision -
                                            num_launched_spot)
 

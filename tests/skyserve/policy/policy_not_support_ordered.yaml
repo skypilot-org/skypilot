@@ -5,6 +5,7 @@ service:
   readiness_probe: /health
   replica_policy:
     min_replicas: 2
+    dynamic_on_demand_fallback: true
 
 resources:
   ports: 8081

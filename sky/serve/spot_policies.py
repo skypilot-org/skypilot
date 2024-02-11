@@ -12,9 +12,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Default autoscaler
-DEFAULT_SPOT_PLACER = None
-
 
 class Location:
     """Location class of a spot instance."""
@@ -93,25 +90,13 @@ class SpotPlacer:
     def __repr__(self) -> str:
         return f'{self.NAME}SpotPlacer()'
 
-    def __init_subclass__(cls, name: str, default: bool = False) -> None:
-        if default:
-            global DEFAULT_SPOT_PLACER
-            assert DEFAULT_SPOT_PLACER is None, (
-                'Only one autoscaler can be default.')
-            DEFAULT_SPOT_PLACER = name
-        assert name not in cls.REGISTRY, f'Name {name} already exists'
-        cls.REGISTRY[name] = cls
-
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'SpotPlacer':
         # TODO(MaoZiming): Support more spot placers.
-        assert DEFAULT_SPOT_PLACER is not None
-        return cls.REGISTRY[DEFAULT_SPOT_PLACER](spec)
+        return DynamicFailoverSpotPlacer(spec)
 
 
-class DynamicFailoverSpotPlacer(SpotPlacer,
-                                name='DYNAMIC_FAILOVER',
-                                default=True):
+class DynamicFailoverSpotPlacer(SpotPlacer):
     """Dynamic failover to an active zone when preempted."""
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
