@@ -143,6 +143,9 @@ class SkyServeController:
 
                 self._replica_manager.update_version(version, service)
 
+                # TODO(MaoZiming): use NAME for autoscaler.
+                # Since for simplicity, users do not set the name for
+                # autoscaler, we only check with service.use_spot_policy
                 if (isinstance(self._autoscaler,
                                autoscalers.RequestRateAutoscaler) and
                         service.use_spot_policy

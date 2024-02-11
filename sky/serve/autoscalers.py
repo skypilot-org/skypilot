@@ -5,7 +5,7 @@ import enum
 import math
 import time
 import typing
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -58,7 +58,6 @@ class Autoscaler:
     """Abstract class for autoscalers."""
 
     NAME: Optional[str] = None
-    REGISTRY: Dict[str, Type['Autoscaler']] = dict()
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the autoscaler.
@@ -102,6 +101,7 @@ class Autoscaler:
 
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
+        # TODO(MaoZiming): use NAME to get the class.
         if spec.use_spot_policy:
             return SpotRequestRateAutoscaler(spec)
         else:
@@ -303,7 +303,6 @@ class RequestRateAutoscaler(Autoscaler):
                     provisioning_and_launched_new_replicas.append(info)
 
         self._set_desired_num_replicas()
-        num_to_provision = self.target_num_replicas
 
         scaling_options: List[AutoscalerDecision] = []
         all_replica_ids_to_scale_down: List[int] = []
@@ -316,9 +315,11 @@ class RequestRateAutoscaler(Autoscaler):
 
         # Case 2. when provisioning_and_launched_new_replicas is less
         # than num_to_provision, we always scale up new replicas.
-        if len(provisioning_and_launched_new_replicas) < num_to_provision:
+        if len(provisioning_and_launched_new_replicas
+              ) < self.target_num_replicas:
             num_replicas_to_scale_up = (
-                num_to_provision - len(provisioning_and_launched_new_replicas))
+                self.target_num_replicas -
+                len(provisioning_and_launched_new_replicas))
 
             for _ in range(num_replicas_to_scale_up):
                 scaling_options.append(
@@ -326,10 +327,12 @@ class RequestRateAutoscaler(Autoscaler):
                                        target=None))
 
         # Case 3: when provisioning_and_launched_new_replicas is more
-        # than num_to_provision, we scale down new replicas.
-        if len(provisioning_and_launched_new_replicas) > num_to_provision:
+        # than self.target_num_replicas, we scale down new replicas.
+        if len(provisioning_and_launched_new_replicas
+              ) > self.target_num_replicas:
             num_replicas_to_scale_down = (
-                len(provisioning_and_launched_new_replicas) - num_to_provision)
+                len(provisioning_and_launched_new_replicas) -
+                self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
                 RequestRateAutoscaler.get_replica_ids_to_scale_down(
                     num_limit=num_replicas_to_scale_down,
