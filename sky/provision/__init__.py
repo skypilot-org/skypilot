@@ -17,6 +17,9 @@ from sky.provision import azure
 from sky.provision import common
 from sky.provision import cudo
 from sky.provision import gcp
+from sky.provision import kubernetes
+from sky.provision import runpod
+from sky.provision import vsphere
 
 logger = sky_logging.init_logger(__name__)
 
@@ -91,7 +94,7 @@ def run_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
 def stop_instances(
     provider_name: str,
     cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
+    provider_config: Dict[str, Any],
     worker_only: bool = False,
 ) -> None:
     """Stop running instances."""
@@ -102,7 +105,7 @@ def stop_instances(
 def terminate_instances(
     provider_name: str,
     cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
+    provider_config: Dict[str, Any],
     worker_only: bool = False,
 ) -> None:
     """Terminate running or stopped instances."""
@@ -124,9 +127,25 @@ def open_ports(
 def cleanup_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
+    # TODO: make ports optional and allow cleaning up only specified ports.
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def query_ports(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[common.Endpoint]]:
+    """Query details about ports on a cluster.
+
+    Returns a dict with port as the key and a list of common.Endpoint.
+    """
     raise NotImplementedError
 
 

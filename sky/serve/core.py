@@ -9,13 +9,13 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
-from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
+from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -123,9 +123,9 @@ def up(
                 remote_user_config_path=remote_config_yaml_path,
             ),
         }
-        backend_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
-                                    vars_to_fill,
-                                    output_path=controller_file.name)
+        common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
+                                   vars_to_fill,
+                                   output_path=controller_file.name)
         controller_task = task_lib.Task.from_yaml(controller_file.name)
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
@@ -159,14 +159,15 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
-        controller_job_id, controller_handle = execution.execute(
-            entrypoint=controller_task,
+        controller_job_id, controller_handle = sky.launch(
+            task=controller_task,
             stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
             idle_minutes_to_autostop=constants.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
+            _disable_controller_check=True,
         )
 
         style = colorama.Style
@@ -260,6 +261,138 @@ def up(
             f'{style.RESET_ALL}'
             f'\n{fore.GREEN}The replicas should be ready within a '
             f'short time.{style.RESET_ALL}')
+
+
+@usage_lib.entrypoint
+def update(task: 'sky.Task', service_name: str) -> None:
+
+    cluster_status, handle = backend_utils.is_controller_up(
+        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        stopped_message=
+        'Service controller is stopped. There is no service to update. '
+        f'To spin up a new service, use {backend_utils.BOLD}'
+        f'sky serve up{backend_utils.RESET_BOLD}',
+        non_existent_message='Service does not exist. '
+        'To spin up a new service, '
+        f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
+    )
+
+    if handle is None or handle.head_ip is None:
+        # The error message is already printed in
+        # backend_utils.is_controller_up
+        # TODO(zhwu): Move the error message into the exception.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(message='',
+                                               cluster_status=cluster_status)
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    code = serve_utils.ServeCodeGen.get_service_status([service_name])
+    returncode, serve_status_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code, 'Failed to get service status '
+                                           'when update service',
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    service_statuses = serve_utils.load_service_status(serve_status_payload)
+    if len(service_statuses) == 0:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Cannot find service {service_name!r}.'
+                               f'To spin up a service, use {backend_utils.BOLD}'
+                               f'sky serve up{backend_utils.RESET_BOLD}')
+
+    if len(service_statuses) > 1:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Multiple services found for {service_name!r}. ')
+    service_record = service_statuses[0]
+    prompt = None
+    if (service_record['status'] == serve_state.ServiceStatus.CONTROLLER_FAILED
+       ):
+        prompt = (f'Service {service_name!r} has a failed controller. '
+                  'Please clean up the service and try again.')
+    elif (service_record['status'] == serve_state.ServiceStatus.CONTROLLER_INIT
+         ):
+        prompt = (f'Service {service_name!r} is still initializing '
+                  'its controller. Please try again later.')
+    if prompt is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(prompt)
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Service section not found in the task. ')
+
+    controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
+                                                                   path='serve')
+
+    code = serve_utils.ServeCodeGen.add_version(service_name)
+    returncode, version_string_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to add version',
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    version_string = serve_utils.load_version_string(version_string_payload)
+    try:
+        current_version = int(version_string)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to parse version: {version_string}; '
+                             f'Returncode: {returncode}') from e
+
+    print(f'New version: {current_version}')
+    with tempfile.NamedTemporaryFile(
+            prefix=f'{service_name}-v{current_version}',
+            mode='w') as service_file:
+        task_config = task.to_yaml_config()
+        common_utils.dump_yaml(service_file.name, task_config)
+        remote_task_yaml_path = serve_utils.generate_task_yaml_file_name(
+            service_name, current_version, expand_user=False)
+
+        backend.sync_file_mounts(handle,
+                                 {remote_task_yaml_path: service_file.name},
+                                 storage_mounts=None)
+
+        code = serve_utils.ServeCodeGen.update_service(service_name,
+                                                       current_version)
+        returncode, _, stderr = backend.run_on_head(handle,
+                                                    code,
+                                                    require_outputs=True,
+                                                    stream_logs=False,
+                                                    separate_stderr=True)
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               'Failed to update services',
+                                               stderr,
+                                               stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
+
+    print(f'{colorama.Fore.GREEN}Service {service_name!r} update scheduled.'
+          f'{colorama.Style.RESET_ALL}\n'
+          f'Please use {backend_utils.BOLD}sky serve status {service_name} '
+          f'{backend_utils.RESET_BOLD}to check the latest status.')
 
 
 @usage_lib.entrypoint
@@ -369,6 +502,7 @@ def status(
             'replica_id': (int) replica id,
             'name': (str) replica name,
             'status': (sky.serve.ReplicaStatus) replica status,
+            'version': (int) replica version,
             'launched_at': (int) timestamp of launched,
             'handle': (ResourceHandle) handle of the replica cluster,
         }

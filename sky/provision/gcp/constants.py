@@ -3,7 +3,7 @@
 VERSION = 'v1'
 # Using v2 according to
 # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#create-curl # pylint: disable=line-too-long
-TPU_VERSION = 'v2'
+TPU_VM_VERSION = 'v2'
 
 RAY = 'ray-autoscaler'
 DEFAULT_SERVICE_ACCOUNT_ID = RAY + '-sa-' + VERSION
@@ -25,7 +25,7 @@ SKYPILOT_SERVICE_ACCOUNT_CONFIG = {
 # NOTE: `serviceAccountUser` allows the head node to create workers with
 # a serviceAccount. `roleViewer` allows the head node to run bootstrap_gcp.
 DEFAULT_SERVICE_ACCOUNT_ROLES = [
-    'roles/storage.objectAdmin',
+    'roles/storage.admin',
     'roles/compute.admin',
     'roles/iam.serviceAccountUser',
     'roles/iam.roleViewer',
@@ -146,13 +146,6 @@ FIREWALL_RULES_TEMPLATE = [
 VM_MINIMAL_PERMISSIONS = [
     'compute.disks.create',
     'compute.disks.list',
-    # TODO(skypilot): some users reported that firewalls changes
-    # (create/delete/update) should be removed if VPC/firewalls are separately
-    # set up. It is undesirable for a normal account to have these permissions.
-    # Note that if these permissions are removed, opening ports (e.g., via
-    # `resources.ports`) would fail.
-    'compute.firewalls.create',
-    'compute.firewalls.delete',
     'compute.firewalls.get',
     'compute.instances.create',
     'compute.instances.delete',
@@ -179,6 +172,11 @@ VM_MINIMAL_PERMISSIONS = [
     'serviceusage.services.use',
     'resourcemanager.projects.get',
     'resourcemanager.projects.getIamPolicy',
+]
+
+FIREWALL_PERMISSIONS = [
+    'compute.firewalls.create',
+    'compute.firewalls.delete',
 ]
 
 TPU_MINIMAL_PERMISSIONS = [

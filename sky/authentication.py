@@ -41,10 +41,11 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
-from sky.utils import kubernetes_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -449,3 +450,17 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
 
     return config
+
+
+# ---------------------------------- RunPod ---------------------------------- #
+def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for RunPod.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's RunPod account.
+    """
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
+        public_key = pub_key_file.read().strip()
+        runpod.runpod().cli.groups.ssh.functions.add_ssh_key(public_key)
+
+    return configure_ssh_info(config)

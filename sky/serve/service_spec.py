@@ -33,14 +33,18 @@ class SkyServiceSpec:
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
     ) -> None:
-        if min_replicas <= 0:
+        if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('min_replicas must be greater than 0')
+                raise ValueError('min_replicas must be greater or equal to 0')
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'max_replicas must be greater than or equal to min_replicas'
                 )
+        if target_qps_per_replica is not None and target_qps_per_replica <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'target_qps_per_replica must be greater than 0')
         if not readiness_path.startswith('/'):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '
@@ -66,13 +70,8 @@ class SkyServiceSpec:
         self._max_replicas = max_replicas
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
-
-        self._upscale_delay_seconds = (
-            upscale_delay_seconds if upscale_delay_seconds is not None else
-            constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
-        self._downscale_delay_seconds = (
-            downscale_delay_seconds if downscale_delay_seconds is not None else
-            constants.AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS)
+        self._upscale_delay_seconds = upscale_delay_seconds
+        self._downscale_delay_seconds = downscale_delay_seconds
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -238,9 +237,9 @@ class SkyServiceSpec:
         return self._post_data
 
     @property
-    def upscale_delay_seconds(self) -> int:
+    def upscale_delay_seconds(self) -> Optional[int]:
         return self._upscale_delay_seconds
 
     @property
-    def downscale_delay_seconds(self) -> int:
+    def downscale_delay_seconds(self) -> Optional[int]:
         return self._downscale_delay_seconds

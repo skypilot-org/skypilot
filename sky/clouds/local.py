@@ -3,7 +3,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import exceptions
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -36,6 +36,8 @@ class Local(clouds.Cloud):
             ('Docker image is not supported in Local. '
              'You can try running docker command inside the '
              '`run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            ('Custom disk tier is not supported for Local.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is not supported for Local.'),
     }
@@ -106,10 +108,11 @@ class Local(clouds.Cloud):
         return isinstance(other, Local)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[str] = None) -> str:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[resources_utils.DiskTier] = None) -> str:
         # There is only "1" instance type for local cloud: on-prem
         del cpus, memory, disk_tier  # Unused.
         return Local._DEFAULT_INSTANCE_TYPE
@@ -134,9 +137,12 @@ class Local(clouds.Cloud):
         return [Local.LOCAL_REGION]
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
         return {}
 
     def _get_feasible_launchable_resources(
@@ -155,17 +161,6 @@ class Local(clouds.Cloud):
             accelerators=None,
         )
         return [resources], []
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        # In the public cloud case, an accelerator may not be in a region/zone.
-        # in the local cloud case, however, the region/zone is defined to be the
-        # location of the local cluster. This means that the local cluster's
-        # accelerators are guaranteed to be found within the region.
-        return True
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -196,9 +191,3 @@ class Local(clouds.Cloud):
             raise ValueError(f'Region {region!r} does not match the Local'
                              f' cloud region {Local.LOCAL_REGION.name!r}.')
         return region, zone
-
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
-        raise exceptions.NotSupportedError(
-            'Local cloud does not support disk tiers.')

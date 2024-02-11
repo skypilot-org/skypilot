@@ -8,14 +8,15 @@ from sky.clouds.service_catalog.config import fallback_to_default_catalog
 from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
 from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
 from sky.clouds.service_catalog.constants import LOCAL_CATALOG_DIR
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
     from sky.clouds.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
-ALL_CLOUDS = ('aws', 'azure', 'cudo', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
-              'kubernetes')
+ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
+              'kubernetes', 'runpod', 'vsphere', 'cudo')
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
@@ -126,18 +127,6 @@ def validate_region_zone(
                                zone_name)
 
 
-def accelerator_in_region_or_zone(
-    acc_name: str,
-    acc_count: int,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
-    clouds: CloudFilter = None,
-) -> bool:
-    """Returns True if the accelerator is in the region or zone."""
-    return _map_clouds_catalog(clouds, 'accelerator_in_region_or_zone',
-                               acc_name, acc_count, region, zone)
-
-
 def regions(clouds: CloudFilter = None) -> 'List[cloud.Region]':
     """Returns the list of regions in a Cloud's catalog.
     Each Region object contains a list of Zones, if available.
@@ -184,7 +173,8 @@ def get_vcpus_mem_from_instance_type(
 
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None,
+                              disk_tier: Optional[
+                                  resources_utils.DiskTier] = None,
                               clouds: CloudFilter = None) -> Optional[str]:
     """Returns the cloud's default instance type for given #vCPUs and memory.
 

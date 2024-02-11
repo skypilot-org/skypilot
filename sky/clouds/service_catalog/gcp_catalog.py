@@ -12,6 +12,7 @@ import pandas as pd
 from sky import exceptions
 from sky import sky_logging
 from sky.clouds.service_catalog import common
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -233,9 +234,10 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
@@ -312,14 +314,6 @@ def validate_region_zone(
     return common.validate_region_zone_impl('gcp', _df, region, zone)
 
 
-def accelerator_in_region_or_zone(acc_name: str,
-                                  acc_count: int,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
-                                                     region, zone)
-
-
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
@@ -385,21 +379,29 @@ def list_accelerators(
             new_results[acc_name] = acc_info
     results = new_results
 
-    # Unlike other GPUs that can be attached to different sizes of N1 VMs,
-    # A100 GPUs can only be attached to fixed-size A2 VMs,
-    # and L4 GPUs can only be attached to G2 VMs.
-    # Thus, we can show their exact cost including the host VM prices.
-
-    acc_infos: List[common.InstanceTypeInfo] = sum(
-        [results.get(a, []) for a in _ACC_INSTANCE_TYPE_DICTS], [])
-    if not acc_infos:
-        return results
+    # Figure out which instance type to use.
+    infos_with_instance_type: List[common.InstanceTypeInfo] = sum(
+        results.values(), [])
 
     new_infos = defaultdict(list)
-    for info in acc_infos:
-        assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
-        vm_types = _ACC_INSTANCE_TYPE_DICTS[info.accelerator_name][
-            info.accelerator_count]
+    for info in infos_with_instance_type:
+        assert pd.isna(info.instance_type) and pd.isna(info.memory), info
+        # We show TPU-VM prices here, so no instance type is needed.
+        # Set it as `TPU-VM` to be shown in the table.
+        if info.accelerator_name.startswith('tpu'):
+            new_infos[info.accelerator_name].append(
+                info._replace(instance_type='TPU-VM'))
+            continue
+        vm_types, _ = get_instance_type_for_accelerator(info.accelerator_name,
+                                                        info.accelerator_count,
+                                                        region=region_filter)
+        # The acc name & count in `info` are retrieved from the table so we
+        # could definitely find a column in the original table
+        # Additionally the way get_instance_type_for_accelerator works
+        # we will always get either a specialized instance type
+        # or a default instance type. So we can safely assume that
+        # vm_types is not None.
+        assert vm_types is not None
         for vm_type in vm_types:
             df = _df[_df['InstanceType'] == vm_type]
             cpu_count = df['vCPUs'].iloc[0]
@@ -407,12 +409,12 @@ def list_accelerators(
             vm_price = common.get_hourly_cost_impl(_df,
                                                    vm_type,
                                                    use_spot=False,
-                                                   region=None,
+                                                   region=region_filter,
                                                    zone=None)
             vm_spot_price = common.get_hourly_cost_impl(_df,
                                                         vm_type,
                                                         use_spot=True,
-                                                        region=None,
+                                                        region=region_filter,
                                                         zone=None)
             new_infos[info.accelerator_name].append(
                 info._replace(
@@ -423,8 +425,7 @@ def list_accelerators(
                     price=info.price + vm_price,
                     spot_price=info.spot_price + vm_spot_price,
                 ))
-    results.update(new_infos)
-    return results
+    return new_infos
 
 
 def get_region_zones_for_accelerators(
