@@ -15,6 +15,7 @@ resources:
     - cpus: 256+
     - disk_size: 1024
     - memory: 512+
+  use_spot: true
 
 workdir: examples/serve/http_server
 

@@ -221,7 +221,7 @@ class SkyServiceSpec:
     def spot_policy_str(self):
         policy = ''
         if (self.dynamic_on_demand_fallback is not None and
-                self.dynamic_on_demand_fallback is True):
+                self.dynamic_on_demand_fallback):
             policy += 'Dynamic on-demand fallback'
         else:
             return 'No spot policy'
@@ -298,7 +298,7 @@ class SkyServiceSpec:
     @property
     def use_spot_policy(self) -> bool:
         if (self.dynamic_on_demand_fallback is not None and
-                self.dynamic_on_demand_fallback is True):
+                self.dynamic_on_demand_fallback):
             return True
         if (self.base_on_demand_fallback_replicas is not None and
                 self.base_on_demand_fallback_replicas > 0):

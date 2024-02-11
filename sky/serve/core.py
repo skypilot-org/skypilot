@@ -61,9 +61,20 @@ def _serve_check_service(task: 'sky.Task'):
                                  'Please specify `spot_policy` instead.')
 
     if task.service.use_spot_policy:
-        if use_spot:
-            logger.info('use_spot will be override to True, '
-                        'because spot placer is enabled.')
+        if not use_spot:
+            override_reason = ''
+            if (task.service.base_on_demand_fallback_replicas is not None and
+                    task.service.base_on_demand_fallback_replicas > 0):
+                override_reason = 'base_on_demand_fallback_replicas' \
+                                    ' is larger than 0'
+            if (task.service.dynamic_on_demand_fallback is not None and
+                    task.service.dynamic_on_demand_fallback):
+                if override_reason:
+                    override_reason += ' and '
+                override_reason += 'dynamic_on_demand_fallback is enabled'
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('use_spot needs to be True, '
+                                 f'because {override_reason}.')
         if isinstance(task.resources, list):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Does not support both spot_policy '

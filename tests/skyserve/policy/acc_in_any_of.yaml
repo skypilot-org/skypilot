@@ -12,6 +12,7 @@ resources:
     - accelerators: A100:1
     - accelerators: T4:1
   ports: 8081
+  use_spot: true
 
 workdir: examples/serve/http_server
 

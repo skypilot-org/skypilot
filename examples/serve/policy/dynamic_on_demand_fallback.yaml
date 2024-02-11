@@ -18,6 +18,7 @@ resources:
   ports: 8081
   cloud: gcp
   cpus: 2+
+  use_spot: true
 
 workdir: examples/serve/http_server
 

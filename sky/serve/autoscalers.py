@@ -476,7 +476,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
 
         # Decide how many on-demand instances to launch.
         num_on_demand_to_provision = self.base_on_demand_fallback_replicas
-        if self.dynamic_on_demand_fallback is True and self.is_initialized:
+        if self.dynamic_on_demand_fallback and self.is_initialized:
             num_on_demand_to_provision += (num_spot_to_provision -
                                            num_launched_spot)
 
