@@ -2,7 +2,7 @@
 import collections
 import enum
 import typing
-from typing import Dict, List, Optional, Type
+from typing import Dict, List
 
 from sky import sky_logging
 
@@ -39,18 +39,12 @@ class LocationStatus(enum.Enum):
 
 class SpotPlacer:
     """Spot Placement specification."""
-    NAME: Optional[str] = None
-    REGISTRY: Dict[str, Type['SpotPlacer']] = dict()
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         assert spec.spot_locations is not None
         self.location2type: Dict[Location, LocationStatus] = {
             location: LocationStatus.ACTIVE for location in spec.spot_locations
         }
-
-    @classmethod
-    def get_policy_names(cls) -> List[str]:
-        return list(cls.REGISTRY.keys())
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
                num_replicas: int) -> List[Location]:
@@ -86,9 +80,6 @@ class SpotPlacer:
             location for location, location_type in self.location2type.items()
             if location_type == LocationStatus.PREEMPTED
         ]
-
-    def __repr__(self) -> str:
-        return f'{self.NAME}SpotPlacer()'
 
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'SpotPlacer':

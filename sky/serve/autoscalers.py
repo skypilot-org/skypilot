@@ -57,8 +57,6 @@ class AutoscalerDecision:
 class Autoscaler:
     """Abstract class for autoscalers."""
 
-    NAME: Optional[str] = None
-
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the autoscaler.
 
