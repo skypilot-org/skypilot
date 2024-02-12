@@ -109,21 +109,28 @@ Available fields and semantics:
     # permission to create a security group.
     security_group_name: my-security-group
 
-    # The identity to use for AWS on the remote instance (optional).
+    # Identity to use for all AWS instances (optional).
     #
-    # If 'LOCAL_CREDENTIALS' is specified, the user's credentials will be
-    # uploaded and used for accessing the cloud on the instance created by
-    # SkyPilot.
+    # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
+    # AWS instances created by SkyPilot. They are used for accessing cloud
+    # resources (e.g., private buckets) or launching new instances (e.g., for
+    # spot/serve controllers).
     #
-    # If 'SERVICE_ACCOUNT' is specified, the service account will be used to
-    # authenticate on the remote instance. Note that this will only take
-    # effect if the remote instance is created on AWS, and LOCAL_CREDENTIALS 
-    # will still be uploaded to the instances created on other clouds for
-    # accessing resources on AWS. Also, if `SERVICE_ACCOUNT` is specified, it
-    # will cause the managed spot jobs, or the service replicas fail to access
-    # any resources on AWS, when the SkyPilot controller is running on AWS.
+    # SERVICE_ACCOUNT: Local credential files are not uploaded to AWS
+    # instances. SkyPilot will auto-create and reuse a service account (IAM
+    # role) for AWS instances.
     #
-    # Default: 'LOCAL_CREDENTIALS'. 
+    # Two caveats of SERVICE_ACCOUNT for multicloud users:
+    #
+    # - This only affect AWS instances. Local AWS credentials will still be
+    #   uploaded to non-AWS instances (since those instances may need to access
+    #   AWS resources).
+    # - If the SkyPilot spot/serve controller is on AWS, this setting will make
+    #   non-AWS managed spot jobs / non-AWS service replicas fail to access any
+    #   resources on AWS (since the controllers don't have AWS credential
+    #   files to assign to these non-AWS instances).
+    #
+    # Default: 'LOCAL_CREDENTIALS'.
     remote_identity: LOCAL_CREDENTIALS
 
   # Advanced GCP configurations (optional).
