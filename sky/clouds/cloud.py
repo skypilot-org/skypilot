@@ -9,14 +9,12 @@ reused across cloud object creation.
 """
 import collections
 import enum
-import re
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
-from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -535,28 +533,6 @@ class Cloud:
         """
         del resources
         raise NotImplementedError
-
-    @classmethod
-    def check_cluster_name_is_valid(cls, cluster_name: str) -> None:
-        """Errors out on invalid cluster names not supported by cloud providers.
-
-        Bans (including but not limited to) names that:
-        - are digits-only
-        - contain underscore (_)
-
-        Raises:
-            exceptions.InvalidClusterNameError: If the cluster name is invalid.
-        """
-        if cluster_name is None:
-            return
-        valid_regex = constants.CLUSTER_NAME_VALID_REGEX
-        if re.fullmatch(valid_regex, cluster_name) is None:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name "{cluster_name}" is invalid; '
-                    'ensure it is fully matched by regex (e.g., '
-                    'only contains lower letters, numbers and dash): '
-                    f'{valid_regex}')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
