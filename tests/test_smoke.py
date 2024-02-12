@@ -3112,47 +3112,6 @@ def test_skyserve_update_autoscale():
     run_one_test(test)
 
 
-@pytest.mark.gcp
-@pytest.mark.sky_serve
-def test_skyserve_spot_policy():
-    """Test skyserve with spot policy error handling"""
-    name = _get_service_name()
-
-    def run_skyserve_command(service_name, yaml_file):
-        command = f'sky serve up -n {service_name} -y {yaml_file}'
-        try:
-            result = subprocess.run(command,
-                                    shell=True,
-                                    check=True,
-                                    stderr=subprocess.PIPE,
-                                    stdout=subprocess.PIPE,
-                                    text=True)
-            return result.stdout
-        except subprocess.CalledProcessError as e:
-            raise ValueError(f"Error running SkyServe command: {e.stderr}")
-
-    with pytest.raises(
-            ValueError,
-            match=
-            'Require multiple resources to have the same fields except zones/regions/clouds for fallback.'
-    ):
-        run_skyserve_command(name, 'tests/skyserve/policy/acc_in_any_of.yaml')
-
-    with pytest.raises(
-            ValueError,
-            match=
-            'Require multiple resources to have the same fields except zones/regions/clouds for fallback.'
-    ):
-        run_skyserve_command(
-            name, 'tests/skyserve/policy/other_fields_in_any_of.yaml')
-
-    with pytest.raises(
-            ValueError,
-            match='Does not support both fallback and ordered resources.'):
-        run_skyserve_command(
-            name, 'tests/skyserve/policy/policy_not_support_ordered.yaml')
-
-
 # ------- Testing user ray cluster --------
 def test_user_ray_cluster(generic_cloud: str):
     name = _get_cluster_name()

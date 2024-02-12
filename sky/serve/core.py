@@ -77,11 +77,6 @@ def _serve_check_service(task: 'sky.Task'):
                 raise ValueError('use_spot needs to be True, '
                                  f'because {override_reason}.')
 
-    if task.service.fallback_enabled and isinstance(task.resources, list):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Does not support both fallback '
-                             'and ordered resources.')
-
     assert len(task.resources) >= 1
     first_resource_dict = list(task.resources)[0].to_yaml_config()
     for requested_resources in task.resources:
@@ -91,12 +86,6 @@ def _serve_check_service(task: 'sky.Task'):
                 first_resource_dict.pop(key)
             if key in requested_resources_dict:
                 requested_resources_dict.pop(key)
-        if (first_resource_dict != requested_resources_dict and
-                task.service.fallback_enabled):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Require multiple resources to have the same fields '
-                    'except zones/regions/clouds for fallback.')
         if requested_resources.ports is None or len(
                 requested_resources.ports) != 1:
             with ux_utils.print_exception_no_traceback():

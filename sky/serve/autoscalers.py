@@ -100,7 +100,7 @@ class Autoscaler:
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
-        if spec.use_spot_placer:
+        if spec.use_fallback:
             return SpotRequestRateAutoscaler(spec)
         else:
             return RequestRateAutoscaler(spec)
@@ -354,8 +354,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         super().__init__(spec)
-        self.spot_placer: 'spot_policies.SpotPlacer' = (
-            spot_policies.SpotPlacer.from_spec(spec))
+        self.spot_placer: Optional['spot_policies.SpotPlacer'] = (
+            spot_policies.SpotPlacer.from_spec(spec)
+        ) if spec.use_spot_placer else None
         self.base_ondemand_fallback_replicas: int = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
@@ -367,7 +368,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
         super().update_version(version, spec)
-        self.spot_placer = spot_policies.SpotPlacer.from_spec(spec)
+        self.spot_placer = (spot_policies.SpotPlacer.from_spec(spec)
+                           ) if spec.use_spot_placer else None
         self.base_ondemand_fallback_replicas = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
@@ -378,11 +380,15 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
 
     def handle_active_history(self,
                               history: List[spot_policies.Location]) -> None:
+        if self.spot_placer is None:
+            return
         for location in history:
             self.spot_placer.handle_active(location)
 
     def handle_preemption_history(
             self, history: List[spot_policies.Location]) -> None:
+        if self.spot_placer is None:
+            return
         for location in history:
             self.spot_placer.handle_preemption(location)
 
@@ -439,16 +445,24 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             # Not enough spot instances, scale up.
             # Consult spot_placer for the zone to launch spot instance.
             num_spot_to_scale_up = num_spot_to_provision - num_launched_spot
-            locations = self.spot_placer.select(
-                provisioning_and_launched_new_replicas, num_spot_to_scale_up)
-            assert len(locations) == num_spot_to_scale_up
-            for location in locations:
-                spot_override = self._get_spot_resources_override_dict(location)
-                logger.info(
-                    f'Chosen location {location} with {self.spot_placer}')
-                scaling_options.append(
-                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                       target=spot_override))
+            if self.spot_placer is not None:
+                locations = self.spot_placer.select(
+                    provisioning_and_launched_new_replicas,
+                    num_spot_to_scale_up)
+                assert len(locations) == num_spot_to_scale_up
+                for location in locations:
+                    spot_override = (
+                        self._get_spot_resources_override_dict(location))
+                    logger.info(
+                        f'Chosen location {location} with {self.spot_placer}')
+                    scaling_options.append(
+                        AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                                           target=spot_override))
+            else:
+                for _ in range(num_spot_to_scale_up):
+                    scaling_options.append(
+                        AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                                           {'use_spot': True}))
         elif num_launched_spot > num_spot_to_provision:
             # Too many spot instances, scale down.
             # Get the replica to scale down with get_replica_ids_to_scale_down

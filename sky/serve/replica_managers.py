@@ -71,10 +71,11 @@ def launch_cluster(task_yaml_path: str,
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         resource_config = config.get('resources', {})
         if resources_override is not None:
-            # SkyServe does not support ordered resources.
-            # Remove resources_override fields from 'any_of'
             if 'any_of' in resource_config:
                 for any_of_config in resource_config['any_of']:
+                    any_of_config.update(resources_override)
+            if 'ordered' in resource_config:
+                for any_of_config in resource_config['ordered']:
                     any_of_config.update(resources_override)
             else:
                 resource_config.update(resources_override)
@@ -121,7 +122,7 @@ def launch_cluster(task_yaml_path: str,
             logger.info('Failed to launch the sky serve replica cluster with '
                         f'error: {common_utils.format_exception(e)})')
             with ux_utils.enable_traceback():
-                logger.info(f'  Traceback: {traceback.format_exc()}')
+                logger.info(f'Traceback: {traceback.format_exc()}')
         else:  # No exception, the launch succeeds.
             return
 

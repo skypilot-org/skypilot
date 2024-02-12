@@ -92,6 +92,11 @@ class SkyServiceSpec:
         # _use_spot_placer will be set by
         # enable_use_spot_placer or disable_use_spot_placer.
         self._use_spot_placer: bool = False
+        self._use_fallback: bool = (
+            self.dynamic_ondemand_fallback is not None and
+            self.dynamic_ondemand_fallback) or (
+                self.base_ondemand_fallback_replicas is not None and
+                self.base_ondemand_fallback_replicas > 0)
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -310,11 +315,5 @@ class SkyServiceSpec:
         return self._use_spot_placer
 
     @property
-    def fallback_enabled(self) -> bool:
-        if (self.dynamic_ondemand_fallback is not None and
-                self.dynamic_ondemand_fallback):
-            return True
-        if (self.base_ondemand_fallback_replicas is not None and
-                self.base_ondemand_fallback_replicas > 0):
-            return True
-        return False
+    def use_fallback(self) -> bool:
+        return self._use_fallback

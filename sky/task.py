@@ -648,14 +648,14 @@ class Task:
                 if first_resource_dict != requested_resources_dict:
                     service.disable_use_spot_placer()
                     logger.info(
-                        'Disable spot spread policy, which '
+                        'Disable spot placer, which '
                         'requires multiple resources to have the same fields '
                         'except zones/regions/clouds.')
                     break
 
             if isinstance(self.resources, list):
                 service.disable_use_spot_placer()
-                logger.info('Disable spot spread policy, which '
+                logger.info('Disable spot placer, which '
                             'does not support ordered resources.')
 
         if service is not None and service.use_spot_placer:
