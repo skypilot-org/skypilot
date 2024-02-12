@@ -232,8 +232,16 @@ class SkyServiceSpec:
         if (self.dynamic_ondemand_fallback is not None and
                 self.dynamic_ondemand_fallback):
             policy += 'Dynamic on-demand fallback'
+            if self.base_ondemand_fallback_replicas is not None:
+                policy += (f'with {self.base_ondemand_fallback_replicas}'
+                           'base on-demand replicas')
         else:
-            return 'No spot policy'
+            if self.base_ondemand_fallback_replicas is not None:
+                plural = (''
+                          if self.base_ondemand_fallback_replicas == 1 else 's')
+                policy += ('Static spot mixture with '
+                           f'{self.base_ondemand_fallback_replicas} '
+                           f'base on-demand replica{plural}')
         return policy if policy else 'No spot policy'
 
     def policy_str(self):
