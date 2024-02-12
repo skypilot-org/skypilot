@@ -431,7 +431,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             f'Number of alive on-demand instances: {num_launched_on_demand}, '
             f'Number of ready on-demand instances: {num_ready_on_demand}')
 
-        scaling_options = []
+        scaling_options: List[AutoscalerDecision] = []
+        all_replica_ids_to_scale_down: List[int] = []
 
         # Decide how many spot instances to launch.
         num_spot_to_provision = (self.target_num_replicas -
@@ -463,15 +464,12 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             # Too many spot instances, scale down.
             # Get the replica to scale down with select_replicas_to_scale_down
             num_spot_to_scale_down = num_launched_spot - num_spot_to_provision
-            for replica_id in (
-                    RequestRateAutoscaler.select_replicas_to_scale_down(
-                        num_spot_to_scale_down,
-                        list(
-                            filter(lambda info: info.is_spot,
-                                   provisioning_and_launched_new_replicas)))):
-                scaling_options.append(
-                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                       target=replica_id))
+            all_replica_ids_to_scale_down.extend(
+                RequestRateAutoscaler.select_replicas_to_scale_down(
+                    num_spot_to_scale_down,
+                    list(
+                        filter(lambda info: info.is_spot,
+                               provisioning_and_launched_new_replicas))))
         elif (num_ready_spot == num_spot_to_provision and
               self.is_initialized is False):
             # Used to not launch on_demand fallback during initialization.
@@ -480,11 +478,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         # Once there is min_replicas number of
         # ready new replicas, we will direct all traffic to them,
         # we can scale down all old replicas.
-        for replica_id in self.select_outdated_replicas_to_scale_down(
-                replica_infos):
-            scaling_options.append(
-                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                   target=replica_id))
+        all_replica_ids_to_scale_down.extend(
+            self.select_outdated_replicas_to_scale_down(replica_infos))
 
         # Decide how many on-demand instances to launch.
         num_on_demand_to_provision = self.base_ondemand_fallback_replicas
@@ -499,14 +494,16 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                         AutoscalerDecisionOperator.SCALE_UP,
                         target=self._get_on_demand_resources_override_dict()))
         elif num_launched_on_demand > num_on_demand_to_provision:
-            for replica_id in (
-                    RequestRateAutoscaler.select_replicas_to_scale_down(
-                        num_launched_on_demand - num_on_demand_to_provision,
-                        list(
-                            filter(lambda info: not info.is_spot,
-                                   provisioning_and_launched_new_replicas)))):
-                scaling_options.append(
-                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                       target=replica_id))
+            all_replica_ids_to_scale_down.extend(
+                RequestRateAutoscaler.select_replicas_to_scale_down(
+                    num_launched_on_demand - num_on_demand_to_provision,
+                    list(
+                        filter(lambda info: not info.is_spot,
+                               provisioning_and_launched_new_replicas))))
+
+        for replica_id in all_replica_ids_to_scale_down:
+            scaling_options.append(
+                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                   target=replica_id))
 
         return scaling_options
