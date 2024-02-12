@@ -100,7 +100,7 @@ class Autoscaler:
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
-        if spec.use_spot_policy:
+        if spec.use_spot_placer:
             return SpotRequestRateAutoscaler(spec)
         else:
             return RequestRateAutoscaler(spec)
@@ -356,24 +356,24 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         super().__init__(spec)
         self.spot_placer: 'spot_policies.SpotPlacer' = (
             spot_policies.SpotPlacer.from_spec(spec))
-        self.base_on_demand_fallback_replicas: int = (
-            spec.base_on_demand_fallback_replicas
-            if spec.base_on_demand_fallback_replicas is not None else 0)
-        self.dynamic_on_demand_fallback: bool = (
-            spec.dynamic_on_demand_fallback
-            if spec.dynamic_on_demand_fallback is not None else False)
+        self.base_ondemand_fallback_replicas: int = (
+            spec.base_ondemand_fallback_replicas
+            if spec.base_ondemand_fallback_replicas is not None else 0)
+        self.dynamic_ondemand_fallback: bool = (
+            spec.dynamic_ondemand_fallback
+            if spec.dynamic_ondemand_fallback is not None else False)
         self.is_initialized: bool = False
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
         super().update_version(version, spec)
         self.spot_placer = spot_policies.SpotPlacer.from_spec(spec)
-        self.base_on_demand_fallback_replicas = (
-            spec.base_on_demand_fallback_replicas
-            if spec.base_on_demand_fallback_replicas is not None else 0)
-        self.dynamic_on_demand_fallback = (spec.dynamic_on_demand_fallback
-                                           if spec.dynamic_on_demand_fallback
-                                           is not None else False)
+        self.base_ondemand_fallback_replicas = (
+            spec.base_ondemand_fallback_replicas
+            if spec.base_ondemand_fallback_replicas is not None else 0)
+        self.dynamic_ondemand_fallback = (spec.dynamic_ondemand_fallback
+                                          if spec.dynamic_ondemand_fallback
+                                          is not None else False)
         self.is_initialized = False
 
     def handle_active_history(self,
@@ -434,7 +434,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
 
         # Decide how many spot instances to launch.
         num_spot_to_provision = (self.target_num_replicas -
-                                 self.base_on_demand_fallback_replicas)
+                                 self.base_ondemand_fallback_replicas)
         if num_launched_spot < num_spot_to_provision:
             # Not enough spot instances, scale up.
             # Consult spot_placer for the zone to launch spot instance.
@@ -476,8 +476,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                                    target=replica_id))
 
         # Decide how many on-demand instances to launch.
-        num_on_demand_to_provision = self.base_on_demand_fallback_replicas
-        if self.dynamic_on_demand_fallback and self.is_initialized:
+        num_on_demand_to_provision = self.base_ondemand_fallback_replicas
+        if self.dynamic_ondemand_fallback and self.is_initialized:
             num_on_demand_to_provision += (num_spot_to_provision -
                                            num_launched_spot)
 

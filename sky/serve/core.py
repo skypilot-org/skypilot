@@ -42,8 +42,8 @@ def _serve_check_service(task: 'sky.Task'):
             raise ValueError(
                 'Resources must either all use spot or none use spot. '
                 'To use on-demand and spot instances together, '
-                'use `spot_policy: SpotHedge` and only specify '
-                '`use_spot: true`.')
+                'use `dynamic_ondemand_fallback` or set '
+                'base_ondemand_fallback_replicas.')
 
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
@@ -57,38 +57,30 @@ def _serve_check_service(task: 'sky.Task'):
             break
         if resource.spot_recovery is not None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('spot_recovery is disabled for SkyServe.'
-                                 'Please specify `spot_policy` instead.')
+                raise ValueError(
+                    'spot_recovery is disabled for SkyServe.'
+                    'Please specify `dynamic_ondemand_fallback` instead.')
 
-    if task.service.use_spot_policy:
+    if task.service.use_spot_placer:
         if not use_spot:
             override_reason = ''
-            if (task.service.base_on_demand_fallback_replicas is not None and
-                    task.service.base_on_demand_fallback_replicas > 0):
-                override_reason = 'base_on_demand_fallback_replicas' \
+            if (task.service.base_ondemand_fallback_replicas is not None and
+                    task.service.base_ondemand_fallback_replicas > 0):
+                override_reason = 'base_ondemand_fallback_replicas' \
                                     ' is larger than 0'
-            if (task.service.dynamic_on_demand_fallback is not None and
-                    task.service.dynamic_on_demand_fallback):
+            if (task.service.dynamic_ondemand_fallback is not None and
+                    task.service.dynamic_ondemand_fallback):
                 if override_reason:
                     override_reason += ' and '
-                override_reason += 'dynamic_on_demand_fallback is enabled'
+                override_reason += 'dynamic_ondemand_fallback is enabled'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('use_spot needs to be True, '
                                  f'because {override_reason}.')
-        if isinstance(task.resources, list):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Does not support both spot_policy '
-                                 'and ordered resources.')
 
-    else:
-        if use_spot:
-            yellow = colorama.Fore.YELLOW
-            reset = colorama.Style.RESET_ALL
-            logger.info(f'{yellow}SkyServe uses spot instances as replica '
-                        f'but spot_policy is not specified.{reset} '
-                        f'Consider adding `spot_policy: SpotHedge` to '
-                        'automate spot replica management for better '
-                        'service quality and smaller downtime.')
+    if task.service.fallback_enabled and isinstance(task.resources, list):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Does not support both fallback '
+                             'and ordered resources.')
 
     assert len(task.resources) >= 1
     first_resource_dict = list(task.resources)[0].to_yaml_config()
@@ -100,11 +92,11 @@ def _serve_check_service(task: 'sky.Task'):
             if key in requested_resources_dict:
                 requested_resources_dict.pop(key)
         if (first_resource_dict != requested_resources_dict and
-                task.service.use_spot_policy):
+                task.service.fallback_enabled):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Require multiple resources to have the same fields '
-                    'except zones/regions/clouds.')
+                    'except zones/regions/clouds for fallback.')
         if requested_resources.ports is None or len(
                 requested_resources.ports) != 1:
             with ux_utils.print_exception_no_traceback():

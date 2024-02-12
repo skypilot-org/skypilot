@@ -3134,21 +3134,21 @@ def test_skyserve_spot_policy():
     with pytest.raises(
             ValueError,
             match=
-            'Require multiple resources to have the same fields except zones/regions/clouds.'
+            'Require multiple resources to have the same fields except zones/regions/clouds for fallback.'
     ):
         run_skyserve_command(name, 'tests/skyserve/policy/acc_in_any_of.yaml')
 
     with pytest.raises(
             ValueError,
             match=
-            'Require multiple resources to have the same fields except zones/regions/clouds.'
+            'Require multiple resources to have the same fields except zones/regions/clouds for fallback.'
     ):
         run_skyserve_command(
             name, 'tests/skyserve/policy/other_fields_in_any_of.yaml')
 
     with pytest.raises(
             ValueError,
-            match='Does not support both spot_policy and ordered resources.'):
+            match='Does not support both fallback and ordered resources.'):
         run_skyserve_command(
             name, 'tests/skyserve/policy/policy_not_support_ordered.yaml')
 

@@ -334,10 +334,10 @@ def get_service_schema():
                     'target_qps_per_replica': {
                         'type': 'number',
                     },
-                    'dynamic_on_demand_fallback': {
+                    'dynamic_ondemand_fallback': {
                         'type': 'boolean',
                     },
-                    'base_on_demand_fallback_replicas': {
+                    'base_ondemand_fallback_replicas': {
                         'type': 'integer',
                     },
                     'upscale_delay_seconds': {

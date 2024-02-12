@@ -538,7 +538,7 @@ class ReplicaManager:
         self.least_recent_version: int = serve_constants.INITIAL_VERSION
         serve_state.add_or_update_version(self._service_name,
                                           self.latest_version, spec)
-        self._use_spot_policy: bool = spec.use_spot_policy
+        self._use_spot_placer: bool = spec.use_spot_placer
 
     def get_ready_replica_urls(self) -> List[str]:
         """Get all ready replica's IP addresses."""
@@ -779,7 +779,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         if info.location is None:
             logger.error(f'Cannot find location for replica {info.replica_id}. '
                          'Skipping adding to preemption list.')
-        elif self._use_spot_policy:
+        elif self._use_spot_placer:
             self.preemption_history.append(info.location)
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
@@ -840,7 +840,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                             logger.error(f'Cannot find zone for replica '
                                          f'{replica_id}. Skipping adding '
                                          'active or preemption history.')
-                        elif self._use_spot_policy:
+                        elif self._use_spot_placer:
                             # If a spot fails to launch in a given zone.
                             if p.exitcode != 0:
                                 self.preemption_history.append(info.location)
@@ -1145,7 +1145,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_version(self._service_name, version, spec)
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
-        self._use_spot_policy = spec.use_spot_policy
+        self._use_spot_placer = spec.use_spot_placer
 
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         spec = serve_state.get_spec(self._service_name, version)

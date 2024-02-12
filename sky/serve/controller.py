@@ -145,13 +145,13 @@ class SkyServeController:
 
                 # TODO(MaoZiming): use NAME for autoscaler.
                 # Since for simplicity, users do not set the name for
-                # autoscaler, we only check with service.use_spot_policy
+                # autoscaler, we only check with service.use_spot_placer
                 if (isinstance(self._autoscaler,
                                autoscalers.RequestRateAutoscaler) and
-                        service.use_spot_policy
+                        service.use_spot_placer
                    ) or (isinstance(self._autoscaler,
                                     autoscalers.SpotRequestRateAutoscaler) and
-                         not service.use_spot_policy):
+                         not service.use_spot_placer):
                     old_autoscaler = self._autoscaler
                     self._autoscaler = autoscalers.Autoscaler.from_spec(service)
                     assert isinstance(self._autoscaler,

@@ -1,11 +1,11 @@
 # Dynamic on-demand fallback disables multiple accelerators in any_of field. 
-# ValueError: Require multiple resources to have the same fields except zones/regions/clouds.
+# ValueError: Require multiple resources to have the same fields except zones/regions/clouds  for fallback.
 
 service:
   readiness_probe: /health
   replica_policy:
     min_replicas: 2
-    dynamic_on_demand_fallback: true
+    dynamic_ondemand_fallback: true
 
 resources:
   any_of:

@@ -628,7 +628,37 @@ class Task:
           self: The current task, with service set.
         """
 
-        if service is not None and service.use_spot_policy:
+        use_spot = False
+        for resource in list(self.resources):
+            if resource.use_spot_specified and resource.use_spot:
+                use_spot = True
+                break
+
+        if use_spot and service is not None:
+            # If use_spot is specified, default use spot_policy.
+            service.enable_use_spot_placer()
+            first_resource_dict = list(self.resources)[0].to_yaml_config()
+            for requested_resources in self.resources:
+                requested_resources_dict = requested_resources.to_yaml_config()
+                for key in ['region', 'zone', 'cloud']:
+                    if key in first_resource_dict:
+                        first_resource_dict.pop(key)
+                    if key in requested_resources_dict:
+                        requested_resources_dict.pop(key)
+                if first_resource_dict != requested_resources_dict:
+                    service.disable_use_spot_placer()
+                    logger.info(
+                        'Disable spot spread policy, which '
+                        'requires multiple resources to have the same fields '
+                        'except zones/regions/clouds.')
+                    break
+
+            if isinstance(self.resources, list):
+                service.disable_use_spot_placer()
+                logger.info('Disable spot spread policy, which '
+                            'does not support ordered resources.')
+
+        if service is not None and service.use_spot_placer:
 
             enabled_clouds = global_user_state.get_enabled_clouds()
             feasible_locations: List[spot_policies.Location] = []

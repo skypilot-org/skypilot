@@ -1,11 +1,11 @@
 # Dynamic on-demand fallback does not support other fields in any_of
-# Expected output: ValueError: Require multiple resources to have the same fields except zones/regions/clouds.
+# Expected output: ValueError: Require multiple resources to have the same fields except zones/regions/clouds for fallback.
 
 service:
   readiness_probe: /health
   replica_policy:
     min_replicas: 2
-    dynamic_on_demand_fallback: true
+    dynamic_ondemand_fallback: true
 
 resources:
   ports: 8081

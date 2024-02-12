@@ -84,6 +84,7 @@ class SpotPlacer:
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'SpotPlacer':
         # TODO(MaoZiming): Support more spot placers.
+        assert spec.use_spot_placer
         return DynamicFailoverSpotPlacer(spec)
 
 
