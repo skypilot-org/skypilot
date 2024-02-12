@@ -122,7 +122,7 @@ Available fields and semantics:
     #
     # Two caveats of SERVICE_ACCOUNT for multicloud users:
     #
-    # - This only affect AWS instances. Local AWS credentials will still be
+    # - This only affects AWS instances. Local AWS credentials will still be
     #   uploaded to non-AWS instances (since those instances may need to access
     #   AWS resources).
     # - If the SkyPilot spot/serve controller is on AWS, this setting will make
@@ -213,7 +213,7 @@ Available fields and semantics:
     #
     # Two caveats of SERVICE_ACCOUNT for multicloud users:
     #
-    # - This only affect GCP instances. Local GCP credentials will still be
+    # - This only affects GCP instances. Local GCP credentials will still be
     #   uploaded to non-GCP instances (since those instances may need to access
     #   GCP resources).
     # - If the SkyPilot spot/serve controller is on GCP, this setting will make
