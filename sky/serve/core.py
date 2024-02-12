@@ -50,32 +50,12 @@ def _serve_check_service(task: 'sky.Task'):
             raise RuntimeError('Service section not found.')
 
     assert task.service is not None
-    use_spot = False
     for resource in list(task.resources):
-        if resource.use_spot_specified and resource.use_spot:
-            use_spot = True
-            break
         if resource.spot_recovery is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'spot_recovery is disabled for SkyServe.'
                     'Please specify `dynamic_ondemand_fallback` instead.')
-
-    if task.service.use_spot_placer:
-        if not use_spot:
-            override_reason = ''
-            if (task.service.base_ondemand_fallback_replicas is not None and
-                    task.service.base_ondemand_fallback_replicas > 0):
-                override_reason = 'base_ondemand_fallback_replicas' \
-                                    ' is larger than 0'
-            if (task.service.dynamic_ondemand_fallback is not None and
-                    task.service.dynamic_ondemand_fallback):
-                if override_reason:
-                    override_reason += ' and '
-                override_reason += 'dynamic_ondemand_fallback is enabled'
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('use_spot needs to be True, '
-                                 f'because {override_reason}.')
 
     assert len(task.resources) >= 1
     first_resource_dict = list(task.resources)[0].to_yaml_config()
