@@ -122,7 +122,7 @@ def launch_cluster(task_yaml_path: str,
             logger.info('Failed to launch the sky serve replica cluster with '
                         f'error: {common_utils.format_exception(e)})')
             with ux_utils.enable_traceback():
-                logger.info(f'Traceback: {traceback.format_exc()}')
+                logger.info(f'  Traceback: {traceback.format_exc()}')
         else:  # No exception, the launch succeeds.
             return
 
@@ -138,12 +138,13 @@ def launch_cluster(task_yaml_path: str,
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::terminate_cluster
-# replica_drain_delay_seconds is useful to
-# drain the node before node termination.
 def terminate_cluster(cluster_name: str,
                       replica_drain_delay_seconds: int = 0,
                       max_retry: int = 3) -> None:
-    """Terminate the sky serve replica cluster."""
+    """Terminate the sky serve replica cluster.
+    replica_drain_delay_seconds is useful to
+    drain the node before node termination.
+    """
     time.sleep(replica_drain_delay_seconds)
     retry_cnt = 0
     backoff = common_utils.Backoff()
@@ -207,7 +208,8 @@ def _get_location(
         cloud = resource_override.get('cloud', None)
         region = resource_override.get('region', None)
         zone = resource_override.get('zone', None)
-        if cloud is not None and region is not None and zone is not None:
+        # For Azure, zone can be None.
+        if cloud is not None and region is not None:
             location = spot_policies.Location(cloud, region, zone)
             return location
     return None

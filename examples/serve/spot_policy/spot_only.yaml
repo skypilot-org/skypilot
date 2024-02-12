@@ -1,8 +1,7 @@
 # SkyServe YAML to launch a service with only spot instances.
 
 service:
-  readiness_probe:
-    path: /health
+  readiness_probe: /health
   replica_policy:
     min_replicas: 1
     max_replicas: 3
@@ -13,7 +12,6 @@ resources:
   - zone: us-central1-a
   - region: us-east1
   ports: 8081
-  cloud: gcp
   cpus: 2+
   use_spot: true
 

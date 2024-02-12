@@ -628,15 +628,19 @@ class Task:
           self: The current task, with service set.
         """
 
+        if service is None:
+            return self
+
         use_spot = False
         for resource in list(self.resources):
             if resource.use_spot_specified and resource.use_spot:
                 use_spot = True
                 break
 
-        if use_spot and service is not None:
+        if use_spot:
             # If use_spot is specified, default use spot_policy.
             service.enable_use_spot_placer()
+            disable_spot_placer_log = ''
             first_resource_dict = list(self.resources)[0].to_yaml_config()
             for requested_resources in self.resources:
                 requested_resources_dict = requested_resources.to_yaml_config()
@@ -647,18 +651,22 @@ class Task:
                         requested_resources_dict.pop(key)
                 if first_resource_dict != requested_resources_dict:
                     service.disable_use_spot_placer()
-                    logger.info(
-                        'Disable spot placer, which '
-                        'requires multiple resources to have the same fields '
-                        'except zones/regions/clouds.')
+                    disable_spot_placer_log += (
+                        'requires multiple resources '
+                        'to have the same fields except zones/regions/clouds ')
                     break
 
             if isinstance(self.resources, list):
                 service.disable_use_spot_placer()
-                logger.info('Disable spot placer, which '
-                            'does not support ordered resources.')
+                if disable_spot_placer_log:
+                    disable_spot_placer_log += 'and '
+                disable_spot_placer_log += 'does not support ordered resources'
 
-        if service is not None and service.use_spot_placer:
+            if disable_spot_placer_log:
+                logger.info('Disable spot placer, which '
+                            f'{disable_spot_placer_log}.')
+
+        if service.use_spot_placer:
 
             enabled_clouds = global_user_state.get_enabled_clouds()
             feasible_locations: List[spot_policies.Location] = []
@@ -675,14 +683,18 @@ class Task:
                         regions = (feasible_resource.
                                    get_valid_regions_for_launchable())
                         for region in regions:
-                            if region is None or region.zones is None:
+                            if region is None:
                                 continue
-                            for zone in region.zones:
-                                if zone is None:
-                                    continue
+                            # Azure does not support zones.
+                            if region.zones is None:
                                 feasible_locations.append(
                                     spot_policies.Location(
-                                        str(cloud), region.name, zone.name))
+                                        str(cloud), region.name, None))
+                            else:
+                                for zone in region.zones:
+                                    feasible_locations.append(
+                                        spot_policies.Location(
+                                            str(cloud), region.name, zone.name))
 
             location_print_list = [(location.cloud, location.region,
                                     location.zone)

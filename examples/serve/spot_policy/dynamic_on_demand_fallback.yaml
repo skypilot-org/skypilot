@@ -2,8 +2,7 @@
 # The policy will dynamically fallback to on-demand instances when spot instances are not available. 
 
 service:
-  readiness_probe:
-    path: /health
+  readiness_probe: /health
   replica_policy:
     min_replicas: 2
     target_qps_per_replica: 1
@@ -14,7 +13,6 @@ resources:
   - zone: us-central1-a
   - region: us-east1
   ports: 8081
-  cloud: gcp
   cpus: 2+
   use_spot: true
 

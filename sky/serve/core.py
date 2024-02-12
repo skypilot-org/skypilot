@@ -31,8 +31,13 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
-def _serve_check_service(task: 'sky.Task'):
+def _validate_service_task(task: 'sky.Task'):
+    """Validate the task for Sky Serve.
+    Raise ValueError if the task is invalid.
 
+    Args:
+        task: sky.Task to validate
+    """
     spot_use_resources: List['sky.Resources'] = [
         resource for resource in task.resources
         if resource.use_spot_specified and resource.use_spot
@@ -49,7 +54,6 @@ def _serve_check_service(task: 'sky.Task'):
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
-    assert task.service is not None
     for resource in list(task.resources):
         if resource.spot_recovery is not None:
             with ux_utils.print_exception_no_traceback():
@@ -57,7 +61,9 @@ def _serve_check_service(task: 'sky.Task'):
                     'spot_recovery is disabled for SkyServe.'
                     'Please specify `dynamic_ondemand_fallback` instead.')
 
-    assert len(task.resources) >= 1
+    if len(task.resources) == 0:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('At least one resource is required.')
     first_resource_dict = list(task.resources)[0].to_yaml_config()
     for requested_resources in task.resources:
         requested_resources_dict = requested_resources.to_yaml_config()
@@ -116,7 +122,7 @@ def up(
                              'only contains lower letters, numbers and dash): '
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
-    _serve_check_service(task)
+    _validate_service_task(task)
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
@@ -326,8 +332,15 @@ def up(
 
 @usage_lib.entrypoint
 def update(task: 'sky.Task', service_name: str) -> None:
+    """Update an existing service.
 
-    _serve_check_service(task)
+    Please refer to the sky.cli.serve_update for the document.
+
+    Args:
+        task: sky.Task to update.
+        service_name: Name of the service.
+    """
+    _validate_service_task(task)
     cluster_status, handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=

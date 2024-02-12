@@ -82,12 +82,8 @@ class SkyServiceSpec:
             int] = base_ondemand_fallback_replicas
         # _spot_locations will be set by set_spot_locations.
         self._spot_locations: Optional[List['spot_policies.Location']] = None
-        self._upscale_delay_seconds: int = (
-            upscale_delay_seconds if upscale_delay_seconds is not None else
-            constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
-        self._downscale_delay_seconds: int = (
-            downscale_delay_seconds if downscale_delay_seconds is not None else
-            constants.AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS)
+        self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
+        self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
 
         # _use_spot_placer will be set by
         # enable_use_spot_placer or disable_use_spot_placer.
@@ -311,7 +307,7 @@ class SkyServiceSpec:
         return self._dynamic_ondemand_fallback
 
     @property
-    def upscale_delay_seconds(self) -> int:
+    def upscale_delay_seconds(self) -> Optional[int]:
         return self._upscale_delay_seconds
 
     @property
