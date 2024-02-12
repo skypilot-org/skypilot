@@ -362,7 +362,6 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         self.dynamic_ondemand_fallback: bool = (
             spec.dynamic_ondemand_fallback
             if spec.dynamic_ondemand_fallback is not None else False)
-        self.is_initialized: bool = False
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
@@ -375,7 +374,6 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         self.dynamic_ondemand_fallback = (spec.dynamic_ondemand_fallback
                                           if spec.dynamic_ondemand_fallback
                                           is not None else False)
-        self.is_initialized = False
 
     def handle_active_history(self,
                               history: List[spot_policies.Location]) -> None:
@@ -471,10 +469,6 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                     list(
                         filter(lambda info: info.is_spot,
                                provisioning_and_launched_new_replicas))))
-        elif (num_ready_spot == num_spot_to_provision and
-              self.is_initialized is False):
-            # Used to not launch on_demand fallback during initialization.
-            self.is_initialized = True
 
         # Once there is min_replicas number of
         # ready new replicas, we will direct all traffic to them,
@@ -484,7 +478,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
 
         # Decide how many on-demand instances to launch.
         num_on_demand_to_provision = self.base_ondemand_fallback_replicas
-        if self.dynamic_ondemand_fallback and self.is_initialized:
+        if self.dynamic_ondemand_fallback:
             num_on_demand_to_provision += (num_spot_to_provision -
                                            num_launched_spot)
 

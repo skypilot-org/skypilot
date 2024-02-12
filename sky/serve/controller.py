@@ -62,19 +62,19 @@ class SkyServeController:
                                autoscalers.FallbackRequestRateAutoscaler) and
                         isinstance(self._replica_manager,
                                    replica_managers.SkyPilotReplicaManager)):
-                    assert self._replica_manager.active_history
-                    assert self._replica_manager.preemption_history
-
-                    logger.info('Handle active history: '
-                                f'{self._replica_manager.active_history}')
-                    self._autoscaler.handle_active_history(
-                        self._replica_manager.active_history)
-                    self._replica_manager.active_history.clear()
-                    logger.info('Handle preemption history: '
-                                f'{self._replica_manager.preemption_history}')
-                    self._autoscaler.handle_preemption_history(
-                        self._replica_manager.preemption_history)
-                    self._replica_manager.preemption_history.clear()
+                    if self._replica_manager.active_history:
+                        logger.info('Handle active history: '
+                                    f'{self._replica_manager.active_history}')
+                        self._autoscaler.handle_active_history(
+                            self._replica_manager.active_history)
+                        self._replica_manager.active_history.clear()
+                    if self._replica_manager.preemption_history:
+                        logger.info(
+                            'Handle preemption history: '
+                            f'{self._replica_manager.preemption_history}')
+                        self._autoscaler.handle_preemption_history(
+                            self._replica_manager.preemption_history)
+                        self._replica_manager.preemption_history.clear()
 
                 replica_info = serve_state.get_replica_infos(self._service_name)
                 replica_info_dicts = [
