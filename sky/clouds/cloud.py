@@ -10,7 +10,7 @@ reused across cloud object creation.
 import collections
 import enum
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import skypilot_config
@@ -97,6 +97,7 @@ class Cloud:
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
     # The version of provisioner and status query. This is used to determine
     # the code path to use for each cloud in the backend.
@@ -114,6 +115,21 @@ class Cloud:
         None means no limit.
         """
         return None
+
+    @classmethod
+    def supports_service_account_on_remote(cls) -> bool:
+        """Returns whether the cloud supports service account on remote cluster.
+
+        This method is used by backend_utils.write_cluster_config() to decide
+        whether to upload user's local cloud credential files to the remote
+        cluster.
+
+        If a cloud supports service account on remote cluster, the user's local
+        cloud credential files are not needed to be uploaded to the remote
+        instance, as the remote instance can be assigned with a service account
+        that has the necessary permissions to access the cloud resources.
+        """
+        return cls._SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE
 
     #### Regions/Zones ####
 
@@ -228,7 +244,7 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def is_same_cloud(self, other):
+    def is_same_cloud(self, other: 'Cloud'):
         raise NotImplementedError
 
     def make_deploy_resources_variables(
@@ -725,3 +741,9 @@ class Cloud:
         state.pop('PROVISIONER_VERSION', None)
         state.pop('STATUS_VERSION', None)
         return state
+
+
+# === Helper functions ===
+def cloud_in_list(cloud: Cloud, cloud_list: Iterable[Cloud]) -> bool:
+    """Returns whether the cloud is in the given cloud list."""
+    return any(cloud.is_same_cloud(c) for c in cloud_list)
