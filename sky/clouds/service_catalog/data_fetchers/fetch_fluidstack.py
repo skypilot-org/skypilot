@@ -1,13 +1,9 @@
 """A script that generates the Fluidstack catalog.
 
 Usage:
-    python fetch_fluidstack_cloud.py [-h] [--api-key API_KEY]
-                                 [--api-key-path API_KEY_PATH]
-
-If neither --api-key nor --api-key-path are provided, this script will parse
-`~/.fluidstack/api_key` to look for Lambda API key.
+    python fetch_fluidstack_cloud.py
 """
-import argparse
+
 import copy
 import csv
 import json
@@ -15,8 +11,6 @@ import os
 from typing import List
 
 import requests
-
-from sky.clouds.service_catalog import constants
 
 ENDPOINT = 'https://api.fluidstack.io/v1/plans'
 DEFAULT_FLUIDSTACK_API_KEY_PATH = os.path.expanduser('~/.fluidstack/api_key')

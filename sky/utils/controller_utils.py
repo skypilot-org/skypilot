@@ -256,7 +256,7 @@ def shared_controller_vars_to_fill(
 def get_controller_resources(
     controller_type: str,
     controller_resources_config: Dict[str, Any],
-) -> resources.Resources:
+) -> 'resources.Resources':
     """Read the skypilot config and setup the controller resources.
 
     Returns:

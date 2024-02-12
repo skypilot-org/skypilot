@@ -17,7 +17,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import env_options
@@ -103,7 +102,7 @@ class Optimizer:
 
     @staticmethod
     def optimize(dag: 'dag_lib.Dag',
-                 minimize=OptimizeTarget.COST,
+                 minimize: OptimizeTarget = OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[
                      resources_lib.Resources]] = None,
                  quiet: bool = False):
@@ -249,8 +248,6 @@ class Optimizer:
 
         # node -> cloud -> list of resources that satisfy user's requirements.
         node_to_candidate_map: _TaskToPerCloudCandidates = {}
-        specific_reservations = set(
-            skypilot_config.get_nested(('gcp', 'specific_reservations'), set()))
 
         # Compute the estimated cost/time for each node.
         for node_i, node in enumerate(topo_order):
@@ -311,7 +308,7 @@ class Optimizer:
                         cost_per_node = resources.get_cost(estimated_runtime)
                         num_available_reserved_nodes = sum(
                             resources.get_reservations_available_resources(
-                                specific_reservations).values())
+                            ).values())
 
                         # We consider the cost of the unused reservation
                         # resources to be 0 since we are already paying for

@@ -62,13 +62,7 @@ setup_commands:
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
-    sudo wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb -O /usr/local/cuda-keyring_1.1-1_all.deb; 
-    sudo dpkg -i /usr/local/cuda-keyring_1.1-1_all.deb;
-    sudo apt-get update;
-    sudo apt-get -y install cuda-toolkit-12-3;
-    sudo apt-get install -y cuda-drivers;
-    sudo apt-get install python3-pip fakeroot debhelper;
-    nvidia-smi;
+    {{ cuda_installation_commands }}
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;

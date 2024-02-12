@@ -135,9 +135,6 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(sky.__file__).resolve().parent / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
-# Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
-
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -266,6 +263,34 @@ class RayCodeGen:
                 log_to_driver=True,
                 **kwargs
             )
+            def get_or_fail(futures, pg) -> List[int]:
+                \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
+                returncodes = [1] * len(futures)
+                # Wait for 1 task to be ready.
+                ready, unready = ray.wait(futures)
+                idx = futures.index(ready[0])
+                returncodes[idx] = ray.get(ready[0])
+                while unready:
+                    if returncodes[idx] != 0:
+                        for task in unready:
+                            # ray.cancel without force fails to kill tasks.
+                            # We use force=True to kill unready tasks.
+                            ray.cancel(task, force=True)
+                            # Use SIGKILL=128+9 to indicate the task is forcely
+                            # killed.
+                            idx = futures.index(task)
+                            returncodes[idx] = 137
+                        break
+                    ready, unready = ray.wait(unready)
+                    idx = futures.index(ready[0])
+                    returncodes[idx] = ray.get(ready[0])
+                # Remove the placement group after all tasks are done, so that the
+                # next job can be scheduled on the released resources immediately.
+                ray_util.remove_placement_group(pg)
+                sys.stdout.flush()
+                sys.stderr.flush()
+                return returncodes
+            
             run_fn = None
             futures = []
             """),
@@ -400,7 +425,7 @@ class RayCodeGen:
                         with_ray=True,
                         use_sudo={self.is_local},
                     ) for i in range(total_num_nodes)]
-                setup_returncodes = ray.get(setup_workers)
+                setup_returncodes = get_or_fail(setup_workers, setup_pg)
                 if sum(setup_returncodes) != 0:
                     job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
                     # This waits for all streaming logs to finish.
@@ -592,25 +617,32 @@ class RayCodeGen:
 
         self._code += [
             textwrap.dedent(f"""\
-            returncodes = ray.get(futures)
+            returncodes = get_or_fail(futures, pg)
             if sum(returncodes) != 0:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
-                # This waits for all streaming logs to finish.
+                # Schedule the next pending job immediately to make the job
+                # scheduling more efficient.
                 job_lib.scheduler.schedule_step()
+                # This waits for all streaming logs to finish.
                 time.sleep(0.5)
+                reason = ''
+                # 139 is the return code of SIGSEGV, i.e. Segmentation Fault.
+                if any(r == 139 for r in returncodes):
+                    reason = '(likely due to Segmentation Fault)'
                 print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
+                      reason,
                       file=sys.stderr,
                       flush=True)
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
             else:
-                sys.stdout.flush()
-                sys.stderr.flush()
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
-                # This waits for all streaming logs to finish.
+                # Schedule the next pending job immediately to make the job
+                # scheduling more efficient.
                 job_lib.scheduler.schedule_step()
+                # This waits for all streaming logs to finish.
                 time.sleep(0.5)
             """)
         ]
@@ -1087,6 +1119,15 @@ class FailoverCloudErrorHandlerV2:
                     launchable_resources.copy(zone=zone.name))
             elif code in ['RESOURCE_NOT_READY']:
                 # This code is returned when the VM is still STOPPING.
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone.name))
+            elif code in ['RESOURCE_OPERATION_RATE_EXCEEDED']:
+                # This code can happen when the VM is being created with a
+                # machine image, and the VM and the machine image are on
+                # different zones. We already have the retry when calling the
+                # insert API, but if it still fails, we should block the zone
+                # to avoid infinite retry.
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
@@ -2163,7 +2204,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 6
+    _VERSION = 7
 
     def __init__(
             self,
@@ -2195,6 +2236,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
+        self.ssh_user: Optional[str] = None
         # Deprecated. SkyPilot new provisioner API handles the TPU node
         # creation/deletion.
         # Backward compatibility for TPU nodes created before #2943.
@@ -2217,6 +2259,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
+                f'\n\tssh_user={self.ssh_user},'
                 # TODO (zhwu): Remove this after 0.6.0.
                 f'\n\ttpu_create_script={self.tpu_create_script}, '
                 f'\n\ttpu_delete_script={self.tpu_delete_script})')
@@ -2525,6 +2568,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 6:
             state['cluster_name_on_cloud'] = state['cluster_name']
+
+        if version < 7:
+            self.ssh_user = None
 
         self.__dict__.update(state)
 
@@ -2845,6 +2891,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                           external_ips=list(external_ips))
                 handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
                 handle.docker_user = cluster_info.docker_user
+                handle.ssh_user = cluster_info.ssh_user
 
                 # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
@@ -2877,7 +2924,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # zone is None for Azure
                 if get_zone_cmd is not None:
                     ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                        handle.cluster_yaml, handle.docker_user)
+                        handle.cluster_yaml, handle.docker_user,
+                        handle.ssh_user)
                     runners = command_runner.SSHCommandRunner.make_runner_list(
                         ip_list, port_list=ssh_port_list, **ssh_credentials)
 
@@ -2920,7 +2968,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.debug('Checking if skylet is running on the head node.')
             with rich_utils.safe_status(
                     '[bold cyan]Preparing SkyPilot runtime'):
-                self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
+                self.run_on_head(handle,
+                                 instance_setup.MAYBE_SKYLET_RESTART_CMD)
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
@@ -2956,7 +3005,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # PENDING / RUNNING jobs for the real status, since we do not
             # know the actual previous status of the cluster.
             job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
-                                                   handle.docker_user)
+                                                   handle.docker_user,
+                                                   handle.ssh_user)
             cmd = job_lib.JobLibCodeGen.update_status(job_owner)
             logger.debug('Update job queue on remote cluster.')
             with rich_utils.safe_status(
@@ -3008,7 +3058,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
                                                       ip_list, auth_config,
                                                       ssh_port_list,
-                                                      handle.docker_user)
+                                                      handle.docker_user,
+                                                      handle.ssh_user)
 
             common_utils.remove_file_if_exists(lock_path)
 
@@ -3046,7 +3097,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user)
+            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3097,83 +3148,87 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if task.setup is None:
             return
+        setup = task.setup
+        # Sync the setup script up and run it.
+        ip_list = handle.external_ips()
+        internal_ips = handle.internal_ips()
+        port_list = handle.external_ssh_ports()
+        assert ip_list is not None, 'external_ips is not cached in handle'
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
+        # Disable connection sharing for setup script to avoid old
+        # connections being reused, which may cause stale ssh agent
+        # forwarding.
+        ssh_credentials.pop('ssh_control_name', None)
 
-        setup_script = log_lib.make_task_bash_script(task.setup,
-                                                     env_vars=task.envs)
-        with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
-            f.write(setup_script)
-            f.flush()
-            setup_sh_path = f.name
-            setup_file = os.path.basename(setup_sh_path)
-            # Sync the setup script up and run it.
-            ip_list = handle.external_ips()
-            port_list = handle.external_ssh_ports()
-            assert ip_list is not None, 'external_ips is not cached in handle'
-            ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                handle.cluster_yaml, handle.docker_user)
-            # Disable connection sharing for setup script to avoid old
-            # connections being reused, which may cause stale ssh agent
-            # forwarding.
-            ssh_credentials.pop('ssh_control_name')
-            runners = command_runner.SSHCommandRunner.make_runner_list(
-                ip_list, port_list=port_list, **ssh_credentials)
+        remote_setup_file_name = f'/tmp/sky_setup_{self.run_timestamp}'
+        # Need this `-i` option to make sure `source ~/.bashrc` work
+        setup_cmd = f'/bin/bash -i {remote_setup_file_name} 2>&1'
 
-            # Need this `-i` option to make sure `source ~/.bashrc` work
-            setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-
-            def _setup_node(runner: command_runner.SSHCommandRunner) -> None:
+        def _setup_node(node_id: int) -> None:
+            setup_envs = task.envs.copy()
+            setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
+            setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
+            runner = command_runner.SSHCommandRunner(ip_list[node_id],
+                                                     port=port_list[node_id],
+                                                     **ssh_credentials)
+            setup_script = log_lib.make_task_bash_script(setup,
+                                                         env_vars=setup_envs)
+            with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
+                f.write(setup_script)
+                f.flush()
+                setup_sh_path = f.name
                 runner.rsync(source=setup_sh_path,
-                             target=f'/tmp/{setup_file}',
+                             target=remote_setup_file_name,
                              up=True,
                              stream_logs=False)
-                if detach_setup:
-                    return
-                setup_log_path = os.path.join(self.log_dir,
-                                              f'setup-{runner.ip}.log')
-                returncode = runner.run(
-                    setup_cmd,
-                    log_path=setup_log_path,
-                    process_stream=False,
-                )
+            if detach_setup:
+                return
+            setup_log_path = os.path.join(self.log_dir,
+                                          f'setup-{runner.ip}.log')
+            returncode = runner.run(
+                setup_cmd,
+                log_path=setup_log_path,
+                process_stream=False,
+            )
 
-                def error_message() -> str:
-                    # Use the function to avoid tailing the file in success case
-                    try:
-                        last_10_lines = subprocess.run(
-                            [
-                                'tail', '-n10',
-                                os.path.expanduser(setup_log_path)
-                            ],
-                            stdout=subprocess.PIPE,
-                            check=True).stdout.decode('utf-8')
-                    except subprocess.CalledProcessError:
-                        last_10_lines = None
+            def error_message() -> str:
+                # Use the function to avoid tailing the file in success case
+                try:
+                    last_10_lines = subprocess.run(
+                        ['tail', '-n10',
+                         os.path.expanduser(setup_log_path)],
+                        stdout=subprocess.PIPE,
+                        check=True).stdout.decode('utf-8')
+                except subprocess.CalledProcessError:
+                    last_10_lines = None
 
-                    err_msg = (
-                        f'Failed to setup with return code {returncode}. '
-                        f'Check the details in log: {setup_log_path}')
-                    if last_10_lines:
-                        err_msg += (
-                            f'\n\n{colorama.Fore.RED}'
-                            '****** START Last lines of setup output ******'
-                            f'{colorama.Style.RESET_ALL}\n'
-                            f'{last_10_lines}'
-                            f'{colorama.Fore.RED}'
-                            '******* END Last lines of setup output *******'
-                            f'{colorama.Style.RESET_ALL}')
-                    return err_msg
+                err_msg = (f'Failed to setup with return code {returncode}. '
+                           f'Check the details in log: {setup_log_path}')
+                if last_10_lines:
+                    err_msg += (f'\n\n{colorama.Fore.RED}'
+                                '****** START Last lines of setup output ******'
+                                f'{colorama.Style.RESET_ALL}\n'
+                                f'{last_10_lines}'
+                                f'{colorama.Fore.RED}'
+                                '******* END Last lines of setup output *******'
+                                f'{colorama.Style.RESET_ALL}')
+                return err_msg
 
-                subprocess_utils.handle_returncode(returncode=returncode,
-                                                   command=setup_cmd,
-                                                   error_msg=error_message)
+            subprocess_utils.handle_returncode(returncode=returncode,
+                                               command=setup_cmd,
+                                               error_msg=error_message)
 
-            num_nodes = len(ip_list)
-            plural = 's' if num_nodes > 1 else ''
-            if not detach_setup:
-                logger.info(
-                    f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
-                    f'{style.RESET_ALL}')
-            subprocess_utils.run_in_parallel(_setup_node, runners)
+        num_nodes = len(ip_list)
+        plural = 's' if num_nodes > 1 else ''
+        if not detach_setup:
+            logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
+                        f'{style.RESET_ALL}')
+        # TODO(zhwu): run_in_parallel uses multi-thread to run the commands,
+        # which can cause the program waiting for all the threads to finish,
+        # even if some of them raise exceptions. We should replace it with
+        # multi-process.
+        subprocess_utils.run_in_parallel(_setup_node, range(num_nodes))
 
         if detach_setup:
             # Only set this when setup needs to be run outside the self._setup()
@@ -3197,7 +3252,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         style = colorama.Style
         fore = colorama.Fore
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user)
+            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         head_ssh_port = handle.head_ssh_port
         runner = command_runner.SSHCommandRunner(handle.head_ip,
                                                  port=head_ssh_port,
@@ -3331,7 +3386,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ):
         """Generates and prepares job submission code for local clusters."""
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user)
+            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         ssh_user = ssh_credentials['ssh_user']
         runner = command_runner.SSHCommandRunner(handle.head_ip,
                                                  port=handle.head_ssh_port,
@@ -3578,7 +3633,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             assert jobs is None, (
                 'If cancel_all=True, usage is to set jobs=None')
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
-                                               handle.docker_user)
+                                               handle.docker_user,
+                                               handle.ssh_user)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs, cancel_all)
 
         # All error messages should have been redirected to stdout.
@@ -3650,7 +3706,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert ssh_port_list is not None, 'external_ssh_ports is not cached ' \
                                           'in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user)
+            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=ssh_port_list, **ssh_credentials)
 
@@ -3689,7 +3745,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   spot_job_id: Optional[int] = None,
                   follow: bool = True) -> int:
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
-                                               handle.docker_user)
+                                               handle.docker_user,
+                                               handle.ssh_user)
         code = job_lib.JobLibCodeGen.tail_logs(job_owner,
                                                job_id,
                                                spot_job_id=spot_job_id,
@@ -4258,7 +4315,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         head_ssh_port = external_ssh_ports[0]
 
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user)
+            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runner = command_runner.SSHCommandRunner(head_ip,
                                                  port=head_ssh_port,
                                                  **ssh_credentials)
@@ -4434,7 +4491,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user)
+            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=port_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
@@ -4589,7 +4646,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user)
+            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=port_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')

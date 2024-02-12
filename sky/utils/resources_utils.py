@@ -129,7 +129,7 @@ def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
                     handle.launched_resources.instance_type)
                 hardware = f'vCPU={int(vcpu)}'
             else:
-                hardware = f'{handle.launched_resources.accelerators})'
+                hardware = f'{handle.launched_resources.accelerators}'
             spot = '[Spot]' if handle.launched_resources.use_spot else ''
             return f'{handle.launched_nodes}x {cloud}({spot}{hardware})'
         else:

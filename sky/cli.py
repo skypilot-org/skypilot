@@ -62,6 +62,7 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -70,7 +71,6 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
-from sky.utils import kubernetes_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -367,12 +367,6 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
 
 
 _TASK_OPTIONS = [
-    click.option('--name',
-                 '-n',
-                 required=False,
-                 type=str,
-                 help=('Task name. Overrides the "name" '
-                       'config in the YAML if both are supplied.')),
     click.option(
         '--workdir',
         required=False,
@@ -475,6 +469,14 @@ _TASK_OPTIONS = [
         same value of ``$MY_ENV3`` in the local environment.""",
     )
 ]
+_TASK_OPTIONS_WITH_NAME = [
+    click.option('--name',
+                 '-n',
+                 required=False,
+                 type=str,
+                 help=('Task name. Overrides the "name" '
+                       'config in the YAML if both are supplied.')),
+] + _TASK_OPTIONS
 _EXTRA_RESOURCES_OPTIONS = [
     click.option(
         '--gpus',
@@ -1053,9 +1055,12 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
             except yaml.YAMLError as e:
                 if yaml_file_provided:
                     logger.debug(e)
+                    detailed_error = f'\nYAML Error: {e}\n'
                     invalid_reason = ('contains an invalid configuration. '
-                                      ' Please check syntax.')
+                                      'Please check syntax.\n'
+                                      f'{detailed_error}')
                 is_yaml = False
+
     except OSError:
         if yaml_file_provided:
             entry_point_path = os.path.expanduser(entrypoint)
@@ -1332,7 +1337,7 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1512,7 +1517,7 @@ def launch(
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(
@@ -1803,7 +1808,7 @@ def _get_services(service_names: Optional[List[str]],
               required=False,
               default=None,
               type=int,
-              help=('Get the endpoint URL for the specified port number on the'
+              help=('Get the endpoint URL for the specified port number on the '
                     'cluster. This option will override all other options.'))
 @click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
@@ -2018,8 +2023,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                         if handle.launched_resources.cloud.is_same_cloud(
                                 clouds.Kubernetes()):
                             # Add Kubernetes specific debugging info
-                            error_msg += \
-                                kubernetes_utils.get_endpoint_debug_message()
+                            error_msg += (
+                                kubernetes_utils.get_endpoint_debug_message())
                         with ux_utils.print_exception_no_traceback():
                             raise RuntimeError(error_msg)
                     click.echo(port_details[endpoint][0].url(ip=head_ip))
@@ -3943,7 +3948,7 @@ def spot():
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--spot-recovery',
               default=None,
               type=str,
@@ -4346,15 +4351,54 @@ def serve():
     pass
 
 
-def _generate_task_with_service(service_yaml_args: List[str],
-                                not_supported_cmd: str) -> sky.Task:
+def _generate_task_with_service(
+    service_name: str,
+    service_yaml_args: List[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Tuple[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    not_supported_cmd: str,
+) -> sky.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
     if not is_yaml:
         raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
+    env = _merge_env_vars(env_file, env)
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
-        service_yaml_args, entrypoint_name='Service')
+        service_yaml_args,
+        # For Service YAML, we override the `name` field with service name.
+        name=service_name,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env=env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+        entrypoint_name='Service',
+    )
     if isinstance(task, sky.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command=not_supported_cmd))
@@ -4404,16 +4448,34 @@ def _generate_task_with_service(service_yaml_args: List[str],
               type=str,
               help='A service name. Unique for each service. If not provided, '
               'a unique name is autogenerated.')
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(tian): Support the task_option overrides for the service.
+@timeline.event
+@usage_lib.entrypoint
 def serve_up(
     service_yaml: List[str],
     service_name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Tuple[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
     yes: bool,
 ):
     """Launch a SkyServe service.
@@ -4447,8 +4509,27 @@ def serve_up(
     if service_name is None:
         service_name = serve_lib.generate_service_name()
 
-    task = _generate_task_with_service(service_yaml_args=service_yaml,
-                                       not_supported_cmd='sky serve up')
+    task = _generate_task_with_service(
+        service_name=service_name,
+        service_yaml_args=service_yaml,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env_file=env_file,
+        env=env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+        not_supported_cmd='sky serve up',
+    )
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
@@ -4476,13 +4557,36 @@ def serve_up(
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-def serve_update(service_name: str, service_yaml: List[str], yes: bool):
+@timeline.event
+@usage_lib.entrypoint
+def serve_update(
+    service_name: str,
+    service_yaml: List[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Tuple[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    yes: bool,
+):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
@@ -4493,8 +4597,27 @@ def serve_update(service_name: str, service_yaml: List[str], yes: bool):
 
         sky serve update sky-service-16aa new_service.yaml
     """
-    task = _generate_task_with_service(service_yaml_args=service_yaml,
-                                       not_supported_cmd='sky serve update')
+    task = _generate_task_with_service(
+        service_name=service_name,
+        service_yaml_args=service_yaml,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env_file=env_file,
+        env=env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+        not_supported_cmd='sky serve update',
+    )
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
@@ -4832,7 +4955,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
               required=True,
               type=str,
               help='Benchmark name.')
-@_add_click_options(_TASK_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME)
 @click.option('--gpus',
               required=False,
               type=str,

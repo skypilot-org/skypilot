@@ -3,6 +3,7 @@ from concurrent import futures
 import functools
 import hashlib
 import os
+import resource
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -33,7 +34,8 @@ _RAY_PRLIMIT = (
 _DUMP_RAY_PORTS = (
     'python -c \'import json, os; '
     f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\'')
+    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\';'
+)
 
 _RAY_PORT_COMMAND = (
     'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
@@ -46,8 +48,17 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     f'{_RAY_PORT_COMMAND}; '
     'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
+# Command that waits for the ray status to be initialized. Otherwise, a later
+# `sky status -r` may fail due to the ray cluster not being ready.
+RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
+    f'while `RAY_ADDRESS=127.0.0.1:{constants.SKY_REMOTE_RAY_PORT} '
+    'ray status | grep -q "No cluster status."`; do '
+    'sleep 0.5; '
+    'echo "Waiting ray cluster to be initialized"; '
+    'done;')
+
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
+MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet;'
 
 
 def _auto_retry(func):
@@ -96,11 +107,18 @@ def _hint_worker_log_path(cluster_name: str, cluster_info: common.ClusterInfo,
         logger.info(f'Logs of worker nodes can be found at: {worker_log_path}')
 
 
-def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
+def _parallel_ssh_with_cache(func,
+                             cluster_name: str,
+                             stage_name: str,
                              digest: Optional[str],
                              cluster_info: common.ClusterInfo,
-                             ssh_credentials: Dict[str, Any]) -> List[Any]:
-    with futures.ThreadPoolExecutor(max_workers=32) as pool:
+                             ssh_credentials: Dict[str, Any],
+                             max_workers: Optional[int] = None) -> List[Any]:
+    if max_workers is None:
+        # Not using the default value of `max_workers` in ThreadPoolExecutor,
+        # as 32 is too large for some machines.
+        max_workers = subprocess_utils.get_parallel_threads()
+    with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         results = []
         for instance_id, metadatas in cluster_info.instances.items():
             for i, metadata in enumerate(metadatas):
@@ -222,6 +240,10 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
+    if cluster_info.custom_ray_options:
+        for key, value in cluster_info.custom_ray_options.items():
+            ray_options += f' --{key}={value}'
+
     # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY to avoid using credentials
     # from environment variables set by user. SkyPilot's ray cluster should use
     # the `~/.aws/` credentials, as that is the one used to create the cluster,
@@ -232,7 +254,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
            f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
-           _DUMP_RAY_PORTS)
+           _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = ssh_runner.run(cmd,
@@ -281,6 +303,10 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         f'--object-manager-port=8076')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
+
+    if cluster_info.custom_ray_options:
+        for key, value in cluster_info.custom_ray_options.items():
+            ray_options += f' --{key}={value}'
 
     # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY, see the comment in
     # `start_ray_on_head_node`.
@@ -341,8 +367,8 @@ def start_skylet_on_head_node(cluster_name: str,
                                                  **ssh_credentials)
     assert cluster_info.head_instance_id is not None, cluster_info
     log_path_abs = str(provision_logging.get_log_path())
-    logger.info(f'Running command on head node: {_MAYBE_SKYLET_RESTART_CMD}')
-    returncode, stdout, stderr = ssh_runner.run(_MAYBE_SKYLET_RESTART_CMD,
+    logger.info(f'Running command on head node: {MAYBE_SKYLET_RESTART_CMD}')
+    returncode, stdout, stderr = ssh_runner.run(MAYBE_SKYLET_RESTART_CMD,
                                                 stream_logs=False,
                                                 require_outputs=True,
                                                 log_path=log_path_abs)
@@ -389,8 +415,29 @@ def _internal_file_mounts(file_mounts: Dict,
         )
 
 
+def _max_workers_for_file_mounts(common_file_mounts: Dict[str, str]) -> int:
+    fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+
+    fd_per_rsync = 5
+    for src in common_file_mounts.values():
+        if os.path.isdir(src):
+            # Assume that each file/folder under src takes 5 file descriptors
+            # on average.
+            fd_per_rsync = max(fd_per_rsync, len(os.listdir(src)) * 5)
+
+    # Reserve some file descriptors for the system and other processes
+    fd_reserve = 100
+
+    max_workers = (fd_limit - fd_reserve) // fd_per_rsync
+    # At least 1 worker, and avoid too many workers overloading the system.
+    max_workers = min(max(max_workers, 1),
+                      subprocess_utils.get_parallel_threads())
+    logger.debug(f'Using {max_workers} workers for file mounts.')
+    return max_workers
+
+
 @_log_start_end
-def internal_file_mounts(cluster_name: str, common_file_mounts: Dict,
+def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
                          cluster_info: common.ClusterInfo,
                          ssh_credentials: Dict[str, str]) -> None:
     """Executes file mounts - rsyncing internal local files"""
@@ -411,4 +458,5 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict,
         # is minimal and should not take too much time.
         digest=None,
         cluster_info=cluster_info,
-        ssh_credentials=ssh_credentials)
+        ssh_credentials=ssh_credentials,
+        max_workers=_max_workers_for_file_mounts(common_file_mounts))

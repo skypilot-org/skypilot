@@ -9,7 +9,6 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
-from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
@@ -124,9 +123,9 @@ def up(
                 remote_user_config_path=remote_config_yaml_path,
             ),
         }
-        backend_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
-                                    vars_to_fill,
-                                    output_path=controller_file.name)
+        common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
+                                   vars_to_fill,
+                                   output_path=controller_file.name)
         controller_task = task_lib.Task.from_yaml(controller_file.name)
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
@@ -160,14 +159,15 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
-        controller_job_id, controller_handle = execution.execute(
-            entrypoint=controller_task,
+        controller_job_id, controller_handle = sky.launch(
+            task=controller_task,
             stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
             idle_minutes_to_autostop=constants.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
+            _disable_controller_check=True,
         )
 
         style = colorama.Style
@@ -389,7 +389,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
         except exceptions.CommandError as e:
             raise RuntimeError(e.error_msg) from e
 
-    print(f'{colorama.Fore.GREEN}Service {service_name!r} update succeeded.'
+    print(f'{colorama.Fore.GREEN}Service {service_name!r} update scheduled.'
           f'{colorama.Style.RESET_ALL}\n'
           f'Please use {backend_utils.BOLD}sky serve status {service_name} '
           f'{backend_utils.RESET_BOLD}to check the latest status.')

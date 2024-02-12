@@ -177,9 +177,14 @@ class Fluidstack(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: 'str', region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
+        region: clouds.Region,
+        zones: Optional[List[clouds.Zone]],
+        dryrun: bool = False,
+    ) -> Dict[str, Optional[str]]:
+
         assert zones is None, 'FluidStack does not support zones.'
 
         r = resources
@@ -188,12 +193,21 @@ class Fluidstack(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
-
+        cuda_installation_commands = """
+        sudo wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb -O /usr/local/cuda-keyring_1.1-1_all.deb; 
+        sudo dpkg -i /usr/local/cuda-keyring_1.1-1_all.deb;
+        sudo apt-get update;
+        sudo apt-get -y install cuda-toolkit-12-3;
+        sudo apt-get install -y cuda-drivers;
+        sudo apt-get install -y python3-pip;
+        nvidia-smi;"""
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'fluidstack_username': self.default_username(region.name),
+            'cuda_installation_commands' : cuda_installation_commands if not fluidstack_utils.with_nvidia_drivers(region) else ''
+
         }
 
     def _get_feasible_launchable_resources(
@@ -289,19 +303,12 @@ class Fluidstack(clouds.Cloud):
                                                     zone,
                                                     clouds='fluidstack')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'fluidstack')
-
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
                                 disk_tier: DiskTier) -> None:
         raise exceptions.NotSupportedError(
             'FluidStack does not support disk tiers.')
+
 
     @classmethod
     def default_username(cls, region: str) -> str:

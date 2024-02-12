@@ -6,7 +6,7 @@ from sky import authentication as auth
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
-from sky.skylet.providers.fluidstack import fluidstack_utils as utils
+from sky.provision.fluidstack import fluidstack_utils as utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -18,12 +18,13 @@ _GET_INTERNAL_IP_CMD = ('ip -4 -br addr show | grep UP | grep -Eo '
                         r'2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|'
                         r'2[0-4][0-9]|[01]?[0-9][0-9]?)"')
 POLL_INTERVAL = 5
-POLL_INTERVAL = 5
+
 
 logger = sky_logging.init_logger(__name__)
 
 
 def get_internal_ip(node_info: Dict[str, Any]) -> None:
+    node_info['internal_ip'] = node_info['ip_address']
     runner = command_runner.SSHCommandRunner(
         node_info['ip_address'],
         ssh_user=node_info['capabilities']['default_user_name'],
@@ -31,11 +32,14 @@ def get_internal_ip(node_info: Dict[str, Any]) -> None:
     rc, stdout, stderr = runner.run(_GET_INTERNAL_IP_CMD,
                                     require_outputs=True,
                                     stream_logs=False)
-    subprocess_utils.handle_returncode(rc,
-                                       _GET_INTERNAL_IP_CMD,
-                                       'Failed get obtain private IP from node',
-                                       stderr=stdout + stderr)
-    node_info['internal_ip'] = stdout.strip()
+    if rc != 0:
+        logger.error('Failed get obtain private IP from node')
+    # subprocess_utils.handle_returncode(rc,
+    #                                   _GET_INTERNAL_IP_CMD,
+    #                                     'Failed get obtain private IP from node',
+    #                                     stderr=stdout + stderr)
+    else:
+        node_info['internal_ip'] = stdout.strip()
 
 
 def _filter_instances(cluster_name_on_cloud: str,
@@ -221,7 +225,7 @@ def get_cluster_info(
 
     return common.ClusterInfo(instances=instances,
                               head_instance_id=head_instance_id,
-                              custom_ray_options={'use_external_ip': True})
+                             )
 
 
 def query_instances(

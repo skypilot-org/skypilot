@@ -555,6 +555,9 @@ def get_config_schema():
                             'type': 'string',
                         },
                     },
+                    'security_group_name': {
+                        'type': 'string',
+                    },
                     **_NETWORK_CONFIG_SCHEMA,
                 }
             },
@@ -591,6 +594,12 @@ def get_config_schema():
                             for type in kubernetes_enums.KubernetesPortMode
                         ]
                     },
+                    'pod_config': {
+                        'type': 'object',
+                        'required': [],
+                        # Allow arbitrary keys since validating pod spec is hard
+                        'additionalProperties': True,
+                    }
                 }
             },
             'oci': {

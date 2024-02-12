@@ -1,3 +1,5 @@
+"""FluidStack API client."""
+
 import functools
 import json
 import os
@@ -19,11 +21,8 @@ FLUIDSTACK_API_TOKEN_PATH = '~/.fluidstack/api_token'
 
 
 def read_contents(path: str) -> str:
-    try:
-        with open(path, mode='r') as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        raise
+    with open(path, mode='r') as f:
+        return f.read().strip()
 
 
 class FluidstackAPIError(Exception):
@@ -41,14 +40,29 @@ def raise_fluidstack_error(response: requests.Response) -> None:
     try:
         resp_json = response.json()
         message = resp_json.get('error', response.text)
-    except (KeyError, json.decoder.JSONDecodeError):
+    except (KeyError, json.decoder.JSONDecodeError) as e:
         raise FluidstackAPIError(
-            f'Unexpected error. Status code: {status_code} \n {response.text}',
-            code=status_code)
+            f'Unexpected error. Status code: {status_code} \n {response.text}'
+            f'\n {str(e)}',
+            code=status_code) from e
     raise FluidstackAPIError(f'{message}', status_code)
 
+@functools.cache
+def with_nvidia_drivers(region : str):
+    client = FluidstackClient()
+    plans = client.get_plans()
+    for plan in plans:
+        if region in [r['id'] for r in plan['regions']]:
+            if "Ubuntu 20.04 LTS (Nvidia)" in plan["os_options"]:
+                return True
+    return False
+
+
+
+    
 
 class FluidstackClient:
+    """FluidStack API Client"""
 
     def __init__(self):
         self.api_key = read_contents(
@@ -69,7 +83,8 @@ class FluidstackClient:
 
     def list_instances(
             self,
-            tag_filters: Optional[Dict[str, str]] = {}) -> List[Dict[str, Any]]:
+            tag_filters: Optional[Dict[str,
+                                       str]] = None) -> List[Dict[str, Any]]:
         response = requests.get(
             ENDPOINT + 'servers',
             auth=(self.api_key, self.api_token),
@@ -79,7 +94,7 @@ class FluidstackClient:
         filtered_instances = []
 
         for instance in instances:
-            if type(instance['tags']) == str:
+            if isinstance(instance['tags'], str):
                 instance['tags'] = json.loads(instance['tags'])
             if not instance['tags']:
                 instance['tags'] = {}
@@ -107,7 +122,9 @@ class FluidstackClient:
         config = {}
         plans = self.get_plans()
         if 'custom' in instance_type:
-            label, index, instance_type = instance_type.split(':')
+            values = instance_type.split(':')
+            index = values[1]
+            instance_type = values[2]
             config = fetch_fluidstack.CUSTOM_PLANS_CONFIG[int(index)]
             plan = [plan for plan in plans if plan['plan_id'] == instance_type
                    ][0]
@@ -123,9 +140,10 @@ class FluidstackClient:
                 f'Plan {instance_type} out of stock in region {region}')
 
         ssh_key = self.get_or_add_ssh_key(ssh_pub_key)
+        os = "Ubuntu 20.04 LTS" if not with_nvidia_drivers(region) else "Ubuntu 20.04 LTS (Nvidia)"
         body = dict(plan=None if config else instance_type,
                     region=regions[region],
-                    os='Ubuntu 20.04 LTS',
+                    os=os,
                     hostname=hostname,
                     ssh_keys=[ssh_key['id']],
                     multiplicity=count,

@@ -76,12 +76,13 @@ class RedirectOutputForProcess:
     Plus redirect all stdout/stderr to file_name.
     """
 
-    def __init__(self, func: Callable, file: str) -> None:
+    def __init__(self, func: Callable, file: str, mode: str = 'w') -> None:
         self.func = func
         self.file = file
+        self.mode = mode
 
     def run(self, *args, **kwargs):
-        with open(self.file, 'w') as f:
+        with open(self.file, self.mode) as f:
             sys.stdout = f
             sys.stderr = f
             # reconfigure logger since the logger is initialized before

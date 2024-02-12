@@ -23,3 +23,25 @@ from sky.serve.serve_utils import SKY_SERVE_CONTROLLER_NAME
 from sky.serve.service_spec import SkyServiceSpec
 
 os.makedirs(os.path.expanduser(SKYSERVE_METADATA_DIR), exist_ok=True)
+
+__all__ = [
+    'down',
+    'ENDPOINT_PROBE_INTERVAL_SECONDS',
+    'format_service_table',
+    'generate_replica_cluster_name',
+    'generate_service_name',
+    'get_endpoint',
+    'INITIAL_VERSION',
+    'LB_CONTROLLER_SYNC_INTERVAL_SECONDS',
+    'ReplicaStatus',
+    'ServiceComponent',
+    'ServiceStatus',
+    'ServeCodeGen',
+    'SkyServiceSpec',
+    'SKY_SERVE_CONTROLLER_NAME',
+    'SKYSERVE_METADATA_DIR',
+    'status',
+    'tail_logs',
+    'up',
+    'update',
+]

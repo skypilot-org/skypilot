@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
 import colorama
+import jinja2
 import jsonschema
 import yaml
 
@@ -184,8 +185,8 @@ class Backoff:
     def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
         self._initial = True
         self._backoff = 0.0
-        self._inital_backoff = initial_backoff
-        self._max_backoff = max_backoff_factor * self._inital_backoff
+        self._initial_backoff = initial_backoff
+        self._max_backoff = max_backoff_factor * self._initial_backoff
 
     # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
     # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc
@@ -194,7 +195,7 @@ class Backoff:
         """Backs off once and returns the current backoff in seconds."""
         if self._initial:
             self._initial = False
-            self._backoff = min(self._inital_backoff, self._max_backoff)
+            self._backoff = min(self._initial_backoff, self._max_backoff)
         else:
             self._backoff = min(self._backoff * self.MULTIPLIER,
                                 self._max_backoff)
@@ -570,3 +571,23 @@ def get_cleaned_username(username: str = '') -> str:
     username = re.sub(r'^[0-9-]+', '', username)
     username = re.sub(r'-$', '', username)
     return username
+
+
+def fill_template(template_name: str, variables: Dict,
+                  output_path: str) -> None:
+    """Create a file from a Jinja template and return the filename."""
+    assert template_name.endswith('.j2'), template_name
+    root_dir = os.path.dirname(os.path.dirname(__file__))
+    template_path = os.path.join(root_dir, 'templates', template_name)
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
+    with open(template_path) as fin:
+        template = fin.read()
+    output_path = os.path.abspath(os.path.expanduser(output_path))
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    # Write out yaml config.
+    j2_template = jinja2.Template(template)
+    content = j2_template.render(**variables)
+    with open(output_path, 'w') as fout:
+        fout.write(content)
