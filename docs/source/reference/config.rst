@@ -65,11 +65,11 @@ Available fields and semantics:
     # Set to true to use private IPs to communicate between the local client and
     # any SkyPilot nodes. This requires the networking stack be properly set up.
     #
-    # Specifically, setting this flag means SkyPilot will only use subnets that
-    # satisfy *both* of the following to launch nodes:
-    #   1. Subnets with name tags containing the substring "private"
-    #   2. Subnets that are configured to not assign public IPs (the
-    #      `map_public_ip_on_launch` attribute is False)
+    # When set to true, SkyPilot will only use private subnets to launch nodes.
+    # Private subnets are defined as those satisfying both of these properties:
+    #   1. Subnets whose route tables have no routes to an internet gateway (IGW);
+    #   2. Subnets that are configured to not assign public IPs by default
+    #       (the `map_public_ip_on_launch` attribute is False).
     #
     # This flag is typically set together with 'vpc_name' above and
     # 'ssh_proxy_command' below.
@@ -100,6 +100,15 @@ Available fields and semantics:
       us-east-1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-east-1.proxy
       us-east-2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ec2-user@<jump server public ip>
 
+    # Security group (optional).
+    #
+    # The name of the security group to use for all instances. If not specified,
+    # SkyPilot will use the default name for the security group: sky-sg-<hash>
+    # Note: please ensure the security group name specified exists in the
+    # regions the instances are going to be launched or the AWS account has the
+    # permission to create a security group.
+    security_group_name: my-security-group
+
   # Advanced GCP configurations (optional).
   # Apply to all new instances but not existing ones.
   gcp:
@@ -121,6 +130,31 @@ Available fields and semantics:
     # will be added.
     vpc_name: skypilot-vpc
 
+    # Should instances be assigned private IPs only? (optional)
+    #
+    # Set to true to use private IPs to communicate between the local client and
+    # any SkyPilot nodes. This requires the networking stack be properly set up.
+    #
+    # This flag is typically set together with 'vpc_name' above and
+    # 'ssh_proxy_command' below.
+    #
+    # Default: false.
+    use_internal_ips: true
+    # SSH proxy command (optional).
+    #
+    # Please refer to the aws.ssh_proxy_command section above for more details.
+    ### Format 1 ###
+    # A string; the same proxy command is used for all regions.
+    ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no gcpuser@<jump server public ip>
+    ### Format 2 ###
+    # A dict mapping region names to region-specific proxy commands.
+    # NOTE: This restricts SkyPilot's search space for this cloud to only use
+    # the specified regions and not any other regions in this cloud.
+    ssh_proxy_command:
+      us-central1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
+      us-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no gcpuser@<jump server public ip>
+
+
     # Reserved capacity (optional).
     #
     # The specific reservation to be considered when provisioning clusters on GCP.
@@ -128,9 +162,8 @@ Available fields and semantics:
     # zero cost) if the requested resources matches the reservation.
     # Ref: https://cloud.google.com/compute/docs/instances/reservations-overview#consumption-type
     specific_reservations:
-      # Only one element is allowed in this list, as GCP disallows multiple
-      # specific_reservations in a single request.
-      - projects/my-project/reservations/my-reservation
+      - projects/my-project/reservations/my-reservation1
+      - projects/my-project/reservations/my-reservation2
 
   # Advanced Kubernetes configurations (optional).
   kubernetes:
@@ -148,6 +181,52 @@ Available fields and semantics:
     # require opening ports the cluster nodes and is more secure. 'portforward'
     # is used as default if 'networking' is not specified.
     networking: portforward
+
+    # The mode to use for opening ports on Kubernetes
+    #
+    # This must be either: 'ingress' or 'loadbalancer'. If not specified,
+    # defaults to 'loadbalancer'.
+    #
+    # loadbalancer: Creates services of type `LoadBalancer` to expose ports.
+    # See https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#loadbalancer-service.
+    # This mode is supported out of the box on most cloud managed Kubernetes
+    # environments (e.g., GKE, EKS).
+    #
+    # ingress: Creates an ingress and a ClusterIP service for each port opened.
+    # Requires an Nginx ingress controller to be configured on the Kubernetes cluster.
+    # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#nginx-ingress
+    # for details on deploying the NGINX ingress controller.
+    ports: loadbalancer
+
+    # Additional fields to override the pod fields used by SkyPilot (optional)
+    #
+    # Any key:value pairs added here would get added to the pod spec used to
+    # create SkyPilot pods. The schema follows the same schema for a Pod object
+    # in the Kubernetes API:
+    # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core
+    #
+    # Some example use cases are shown below. All fields are optional.
+    pod_config:
+      metadata:
+        labels:
+          my-label: my-value    # Custom labels to SkyPilot pods
+      spec:
+        runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods. Required on K3s.
+        imagePullSecrets:
+          - name: my-secret     # Pull images from a private registry using a secret
+        containers:
+          - env:                # Custom environment variables for the pod, e.g., for proxy
+            - name: HTTP_PROXY
+              value: http://proxy-host:3128
+            volumeMounts:       # Custom volume mounts for the pod
+              - mountPath: /foo
+                name: example-volume
+                readOnly: true
+        volumes:
+          - name: example-volume
+            hostPath:
+              path: /tmp
+              type: Directory
 
   # Advanced OCI configurations (optional).
   oci:

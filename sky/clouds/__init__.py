@@ -1,7 +1,9 @@
 """Clouds in Sky."""
 from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import CloudImplementationFeatures
+from sky.clouds.cloud import ProvisionerVersion
 from sky.clouds.cloud import Region
+from sky.clouds.cloud import StatusVersion
 from sky.clouds.cloud import Zone
 from sky.clouds.cloud_registry import CLOUD_REGISTRY
 
@@ -9,27 +11,35 @@ from sky.clouds.cloud_registry import CLOUD_REGISTRY
 # isort: split
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
+from sky.clouds.cudo import Cudo
 from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.local import Local
 from sky.clouds.oci import OCI
+from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
+from sky.clouds.vsphere import Vsphere
 
 __all__ = [
     'IBM',
     'AWS',
     'Azure',
     'Cloud',
+    'Cudo',
     'GCP',
     'Lambda',
     'Local',
     'SCP',
+    'RunPod',
     'OCI',
+    'Vsphere',
     'Kubernetes',
     'CloudImplementationFeatures',
     'Region',
     'Zone',
     'CLOUD_REGISTRY',
+    'ProvisionerVersion',
+    'StatusVersion',
 ]

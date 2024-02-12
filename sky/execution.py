@@ -20,7 +20,6 @@ from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.clouds import gcp
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -144,7 +143,7 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     return task
 
 
-def execute(
+def _execute(
     entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
     down: bool = False,
@@ -257,23 +256,18 @@ def execute(
                             f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
-
             if not down:
-                requested_features.add(
-                    clouds.CloudImplementationFeatures.AUTOSTOP)
-                # TODO(ewzeng): allow autostop for spot when stopping is
-                # supported.
-                if task.use_spot:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            'Autostop is not supported for spot instances.')
+                requested_features.add(clouds.CloudImplementationFeatures.STOP)
+        # NOTE: in general we may not have sufficiently specified info
+        # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
+        # the backend.
 
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f'Backend {backend.NAME} does not support autostop, please try '
-                f'{backends.CloudVmRayBackend.NAME}')
+                f'Backend {backend.NAME} does not support autostop, please try'
+                f' {backends.CloudVmRayBackend.NAME}')
 
     if Stage.CLONE_DISK in stages:
         task = _maybe_clone_disk_from_cluster(clone_disk_from, cluster_name,
@@ -408,6 +402,7 @@ def launch(
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    _disable_controller_check: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a cluster or task.
@@ -496,10 +491,11 @@ def launch(
         if dryrun.
     """
     entrypoint = task
-    controller_utils.check_cluster_name_not_controller(
-        cluster_name, operation_str='sky.launch')
+    if not _disable_controller_check:
+        controller_utils.check_cluster_name_not_controller(
+            cluster_name, operation_str='sky.launch')
 
-    return execute(
+    return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
         down=down,
@@ -596,7 +592,7 @@ def exec(  # pylint: disable=redefined-builtin
         operation='executing tasks',
         check_cloud_vm_ray_backend=False,
         dryrun=dryrun)
-    return execute(
+    return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
         down=down,
@@ -667,38 +663,29 @@ def spot_launch(
         prefix = spot.SPOT_TASK_YAML_PREFIX
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
-        extra_vars, controller_resources_config = (
-            controller_utils.skypilot_config_setup(
-                controller_type='spot',
-                controller_resources_config=spot.constants.CONTROLLER_RESOURCES,
-                remote_user_config_path=remote_user_config_path))
-        try:
-            controller_resources = sky.Resources.from_yaml_config(
-                controller_resources_config)
-        except ValueError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    controller_utils.CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.
-                    format(controller_type='spot',
-                           err=common_utils.format_exception(
-                               e, use_bracket=True))) from e
+        controller_resources = (controller_utils.get_controller_resources(
+            controller_type='spot',
+            controller_resources_config=spot.constants.CONTROLLER_RESOURCES))
+
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
             'spot_controller': controller_name,
             # Note: actual spot cluster name will be <task.name>-<spot job ID>
             'dag_name': dag.name,
-            'google_sdk_installation_commands':
-                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'retry_until_up': retry_until_up,
-            **extra_vars,
+            'remote_user_config_path': remote_user_config_path,
+            **controller_utils.shared_controller_vars_to_fill(
+                'spot',
+                remote_user_config_path=remote_user_config_path,
+            ),
         }
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{dag_uuid}.yaml')
-        backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
-                                    vars_to_fill,
-                                    output_path=yaml_path)
+        common_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
+                                   vars_to_fill,
+                                   output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         assert len(controller_task.resources) == 1, controller_task
         # Backward compatibility: if the user changed the
@@ -716,7 +703,7 @@ def spot_launch(
               f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
-        execute(
+        _execute(
             entrypoint=controller_task,
             stream_logs=stream_logs,
             cluster_name=controller_name,

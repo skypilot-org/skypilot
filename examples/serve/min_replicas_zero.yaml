@@ -1,0 +1,27 @@
+# SkyServe YAML to test min_replicas=0 with a simple http server.
+# The service will be initialized with no replica (min_replicas = 0).
+# Any traffic to the service will trigger an immediate scale-up.
+# The service will be scaled down to 0 replica when there is no traffic
+# for a long time. 
+# 
+# Usage:
+#   sky serve up -n min_replicas examples/serve/min_replicas_zero.yaml
+# The endpoint will be printed in the console.
+# Querying the endpoint will trigger a scale up.
+
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replica_policy:
+    min_replicas: 0
+    max_replicas: 2
+    target_qps_per_replica: 1
+
+resources:
+  ports: 8081
+  cpus: 2+
+
+workdir: examples/serve/http_server
+
+run: python3 server.py

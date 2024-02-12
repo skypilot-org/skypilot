@@ -1,15 +1,22 @@
-"""Interfaces: clouds, regions, and zones."""
+"""Interfaces: clouds, regions, and zones.
+
+clouds.Cloud is lightweight stateless objects. SkyPilot may create multiple such
+objects; therefore, subclasses should take care to make methods inexpensive to
+call, and should not store heavy state. If state needs to be queried from the
+cloud provider and cached, create a module in sky/clouds/utils/ and probably add
+caches for the return value (e.g., sky/clouds/utils/gcp_utils), so they can be
+reused across cloud object creation.
+"""
 import collections
 import enum
-import re
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
-from sky.skylet import constants
 from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -22,14 +29,14 @@ class CloudImplementationFeatures(enum.Enum):
 
     Used by Cloud.check_features_are_supported().
 
-    Note: If any new feature is added, please check and update
+    NOTE: If any new feature is added, please check and update
     _cloud_unsupported_features in all clouds to make sure the
     check_features_are_supported() works as expected.
     """
-    STOP = 'stop'
-    AUTOSTOP = 'autostop'
+    STOP = 'stop'  # Includes both stop and autostop.
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
+    IMAGE_ID = 'image_id'
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
@@ -54,25 +61,48 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     region: Region
 
 
+class ProvisionerVersion(enum.Enum):
+    """The version of the provisioner.
+
+    1: [Deprecated] ray node provider based implementation
+    2: [Deprecated] ray node provider for provisioning and SkyPilot provisioner
+    for stopping and termination
+    3: SkyPilot provisioner for both provisioning and stopping
+    """
+    RAY_AUTOSCALER = 1
+    RAY_PROVISIONER_SKYPILOT_TERMINATOR = 2
+    SKYPILOT = 3
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+
+class StatusVersion(enum.Enum):
+    """The version of the status query.
+
+    1: [Deprecated] cloud-CLI based implementation
+    2: SkyPilot provisioner based implementation
+    """
+    CLOUD_CLI = 1
+    SKYPILOT = 2
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+
 class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
-    _DEFAULT_DISK_TIER = 'medium'
+    _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
+    _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
+    _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
 
-    @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[CloudImplementationFeatures, str]:
-        """The features not supported by the cloud implementation.
-
-        This method is used by check_features_are_supported() to check if the
-        cloud implementation supports all the requested features.
-
-        Returns:
-            A dict of {feature: reason} for the features not supported by the
-            cloud implementation.
-        """
-        raise NotImplementedError
+    # The version of provisioner and status query. This is used to determine
+    # the code path to use for each cloud in the backend.
+    # NOTE: new clouds being added should use the latest version, i.e. SKYPILOT.
+    PROVISIONER_VERSION = ProvisionerVersion.RAY_AUTOSCALER
+    STATUS_VERSION = StatusVersion.CLOUD_CLI
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -207,6 +237,7 @@ class Cloud:
         cluster_name_on_cloud: str,
         region: 'Region',
         zones: Optional[List['Zone']],
+        dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
@@ -240,7 +271,8 @@ class Cloud:
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs, memory and
         disk tier.
 
@@ -252,10 +284,10 @@ class Cloud:
         memory.  If 'memory=4+', this method returns the default instance
         type with 4GB or more memory.
 
-        If disk_rier='medium', this method returns the default instance type
-        that support medium disk tier.
+        If disk_tier=DiskTier.MEDIUM, this method returns the default instance
+        type that support medium disk tier.
 
-        When cpus is None, memory is None or disk tier is None, this method will
+        When cpus is None, memory is None or disk_tier is None, this method will
         never return None. This method may return None if the cloud's default
         instance family does not have a VM with the given number of vCPUs
         (e.g., when cpus='7') or does not have a VM with the give disk tier
@@ -296,7 +328,8 @@ class Cloud:
                 CloudImplementationFeatures.MULTI_NODE)
 
         try:
-            self.check_features_are_supported(resources_required_features)
+            self.check_features_are_supported(resources,
+                                              resources_required_features)
         except exceptions.NotSupportedError:
             # TODO(zhwu): The resources are now silently filtered out. We
             # should have some logging telling the user why the resources
@@ -426,14 +459,6 @@ class Cloud:
                                                     zone,
                                                     clouds=self._REPR.lower())
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        """Returns whether the accelerator is valid in the region or zone."""
-        raise NotImplementedError
-
     def need_cleanup_after_preemption(
             self, resource: 'resources_lib.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption.
@@ -449,28 +474,35 @@ class Cloud:
 
     @classmethod
     def check_features_are_supported(
-            cls, requested_features: Set[CloudImplementationFeatures]) -> None:
+            cls, resources: 'resources_lib.Resources',
+            requested_features: Set[CloudImplementationFeatures]) -> None:
         """Errors out if the cloud does not support all requested features.
 
-        For instance, Lambda Cloud does not support autostop, so
-        Lambda.check_features_are_supported({
-            CloudImplementationFeatures.AUTOSTOP
+        For instance, Lambda Cloud does not support stop, so
+        Lambda.check_features_are_supported(to_provision, {
+            CloudImplementationFeatures.STOP
         }) raises the exception.
+
+        Resources are also passed as some features may depend on the resources
+        requested. For example, some clouds support stopping normal instances,
+        but not spot instances, e.g., AWS; or, GCP supports stopping TPU VMs but
+        not TPU VM pods.
 
         Raises:
             exceptions.NotSupportedError: If the cloud does not support all the
             requested features.
         """
-        unsupported_features2reason = cls._cloud_unsupported_features()
+        unsupported_features2reason = cls._unsupported_features_for_resources(
+            resources)
 
         # Docker image is not compatible with ssh proxy command.
         if skypilot_config.get_nested(
             (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
             unsupported_features2reason.update({
                 CloudImplementationFeatures.DOCKER_IMAGE: (
-                    f'Docker image is not supported in {cls._REPR} when proxy '
-                    'command is set. Please remove proxy command in the config.'
-                ),
+                    f'Docker image is currently not supported on {cls._REPR} '
+                    'when proxy command is set. Please remove proxy command in '
+                    'the config.'),
             })
 
         unsupported_features = set(unsupported_features2reason.keys())
@@ -487,36 +519,44 @@ class Cloud:
                     '\n\t' + table.get_string().replace('\n', '\n\t'))
 
     @classmethod
-    def check_cluster_name_is_valid(cls, cluster_name: str) -> None:
-        """Errors out on invalid cluster names not supported by cloud providers.
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[CloudImplementationFeatures, str]:
+        """The features not supported based on the resources provided.
 
-        Bans (including but not limited to) names that:
-        - are digits-only
-        - contain underscore (_)
+        This method is used by check_features_are_supported() to check if the
+        cloud implementation supports all the requested features.
 
-        Raises:
-            exceptions.InvalidClusterNameError: If the cluster name is invalid.
+        Returns:
+            A dict of {feature: reason} for the features not supported by the
+            cloud implementation.
         """
-        if cluster_name is None:
-            return
-        valid_regex = constants.CLUSTER_NAME_VALID_REGEX
-        if re.fullmatch(valid_regex, cluster_name) is None:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name "{cluster_name}" is invalid; '
-                    'ensure it is fully matched by regex (e.g., '
-                    'only contains lower letters, numbers and dash): '
-                    f'{valid_regex}')
+        del resources
+        raise NotImplementedError
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+                                disk_tier: resources_utils.DiskTier) -> None:
         """Errors out if the disk tier is not supported by the cloud provider.
 
         Raises:
             exceptions.NotSupportedError: If the disk tier is not supported.
         """
-        raise NotImplementedError
+        del instance_type  # unused
+        if disk_tier not in cls._SUPPORTED_DISK_TIERS:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'{disk_tier} is not supported by {cls._REPR}.')
+
+    @classmethod
+    def _translate_disk_tier(
+        cls, disk_tier: Optional[resources_utils.DiskTier]
+    ) -> resources_utils.DiskTier:
+        if disk_tier is None:
+            return cls._DEFAULT_DISK_TIER
+        if disk_tier == resources_utils.DiskTier.BEST:
+            return cls._BEST_DISK_TIER
+        return disk_tier
 
     @classmethod
     def _check_instance_type_accelerators_combination(
@@ -679,3 +719,9 @@ class Cloud:
 
     def __repr__(self):
         return self._REPR
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('PROVISIONER_VERSION', None)
+        state.pop('STATUS_VERSION', None)
+        return state

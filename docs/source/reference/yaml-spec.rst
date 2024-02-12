@@ -99,8 +99,9 @@ Available fields:
       disk_size: 256
 
       # Disk tier to use for OS (optional).
-      # Could be one of 'low', 'medium', or 'high' (default: 'medium').
-      # Rough performance estimates:
+      # Could be one of 'low', 'medium', 'high' or 'best' (default: 'medium').
+      # if 'best' is specified, use the best disk tier enabled.
+      # Rough performance estimate:
       #   low: 500 IOPS; read 20MB/s; write 40 MB/s
       #   medium: 3000 IOPS; read 220 MB/s; write 200 MB/s
       #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
@@ -136,22 +137,23 @@ Available fields:
       # and TPU VM.
       # Example usage:
       #
+      #   To request a TPU VM:
+      #     accelerator_args:
+      #       tpu_vm: True (optional, default: True)
+      #
       #   To request a TPU node:
       #     accelerator_args:
       #       tpu_name: ...
-      #
-      #   To request a TPU VM:
-      #     accelerator_args:
-      #       tpu_vm: True
+      #       tpu_vm: False
       #
       # By default, the value for "runtime_version" is decided based on which is
       # requested and should work for either case. If passing in an incompatible
       # version, GCP will throw an error during provisioning.
       accelerator_args:
-        # Default is "2.12.0" for TPU node and "tpu-vm-base" for TPU VM.
-        runtime_version: 2.12.0
-        tpu_name: mytpu
-        tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
+        # Default is "tpu-vm-base" for TPU VM and "2.12.0" for TPU node.
+        runtime_version: tpu-vm-base
+      # tpu_name: mytpu
+      # tpu_vm: True  # True to use TPU VM (the default); False to use TPU node.
 
       # Custom image id (optional, advanced). The image id used to boot the
       # instances. Only supported for AWS and GCP (for non-docker image). If not
@@ -198,6 +200,25 @@ Available fields:
       # https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure
       # To use a more limited but easier to manage tool:
       # https://github.com/IBM/vpc-img-inst
+
+      # Candidate resources (optional). If specified, SkyPilot will only use
+      # these candidate resources to launch the cluster. The fields specified
+      # outside of `any_of`, `ordered` will be used as the default values for
+      # all candidate resources, and any duplicate fields specified inside
+      # `any_of`, `ordered` will override the default values.
+      # `any_of:` means that SkyPilot will try to find a resource that matches
+      # any of the candidate resources, i.e. the failover order will be decided
+      # by the optimizer.
+      # `ordered:` means that SkyPilot will failover through the candidate
+      # resources with the specified order.
+      # Note: accelerators under `any_of` and `ordered` cannot be a list or set.
+      any_of:
+        - cloud: aws
+          region: us-west-2
+          acceraltors: V100
+        - cloud: gcp
+          acceraltors: A100
+
 
     # Environment variables (optional). These values can be accessed in the
     # `file_mounts`, `setup`, and `run` sections below.

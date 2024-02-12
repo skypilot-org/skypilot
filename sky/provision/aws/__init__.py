@@ -5,6 +5,7 @@ from sky.provision.aws.instance import cleanup_ports
 from sky.provision.aws.instance import get_cluster_info
 from sky.provision.aws.instance import open_ports
 from sky.provision.aws.instance import query_instances
+from sky.provision.aws.instance import query_ports
 from sky.provision.aws.instance import run_instances
 from sky.provision.aws.instance import stop_instances
 from sky.provision.aws.instance import terminate_instances
