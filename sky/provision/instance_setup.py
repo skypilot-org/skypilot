@@ -34,7 +34,8 @@ _RAY_PRLIMIT = (
 _DUMP_RAY_PORTS = (
     'python -c \'import json, os; '
     f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\'')
+    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\';'
+)
 
 _RAY_PORT_COMMAND = (
     'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
@@ -252,7 +253,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
            f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
-           _DUMP_RAY_PORTS)
+           _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = ssh_runner.run(cmd,
@@ -365,14 +366,11 @@ def start_skylet_on_head_node(cluster_name: str,
                                                  **ssh_credentials)
     assert cluster_info.head_instance_id is not None, cluster_info
     log_path_abs = str(provision_logging.get_log_path())
-    logger.info(
-        'Running command on head node: '
-        f'{MAYBE_SKYLET_RESTART_CMD + RAY_HEAD_WAIT_INITIALIZED_COMMAND}')
-    returncode, stdout, stderr = ssh_runner.run(
-        MAYBE_SKYLET_RESTART_CMD + RAY_HEAD_WAIT_INITIALIZED_COMMAND,
-        stream_logs=False,
-        require_outputs=True,
-        log_path=log_path_abs)
+    logger.info(f'Running command on head node: {MAYBE_SKYLET_RESTART_CMD}')
+    returncode, stdout, stderr = ssh_runner.run(MAYBE_SKYLET_RESTART_CMD,
+                                                stream_logs=False,
+                                                require_outputs=True,
+                                                log_path=log_path_abs)
     if returncode:
         raise RuntimeError('Failed to start skylet on the head node '
                            f'(exit code {returncode}). Error: '
