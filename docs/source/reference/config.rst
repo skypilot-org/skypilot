@@ -103,7 +103,7 @@ Available fields and semantics:
     # Security group (optional).
     #
     # The name of the security group to use for all instances. If not specified,
-    # SkyPilot will use the default name for the security group: sky-sg-<hash>  
+    # SkyPilot will use the default name for the security group: sky-sg-<hash>
     # Note: please ensure the security group name specified exists in the
     # regions the instances are going to be launched or the AWS account has the
     # permission to create a security group.
@@ -200,20 +200,28 @@ Available fields and semantics:
       - projects/my-project/reservations/my-reservation2
 
 
-    # The identity to use for GCP on the remote instance (optional).
+    # Identity to use for all GCP instances (optional).
     #
-    # If 'LOCAL_CREDENTIALS' is specified, the user's credentials will be
-    # uploaded and used for accessing the cloud on the instance created by
-    # SkyPilot.
-    # If 'SERVICE_ACCOUNT' is specified, the service account will be used to
-    # authenticate on the remote instance. Note that this will only take
-    # effect if the remote instance is created on GCP, and LOCAL_CREDENTIALS 
-    # will still be uploaded to the instances created on other clouds for
-    # accessing resources on GCP. Also, if `SERVICE_ACCOUNT` is specified, it
-    # will cause the managed spot jobs, or the service replicas fail to access
-    # any resources on GCP, when the SkyPilot controller is running on GCP.
+    # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
+    # GCP instances created by SkyPilot. They are used for accessing cloud
+    # resources (e.g., private buckets) or launching new instances (e.g., for
+    # spot/serve controllers).
     #
-    # Default: 'LOCAL_CREDENTIALS'. 
+    # SERVICE_ACCOUNT: Local credential files are not uploaded to GCP
+    # instances. SkyPilot will auto-create and reuse a service account for GCP
+    # instances.
+    #
+    # Two caveats of SERVICE_ACCOUNT for multicloud users:
+    #
+    # - This only affect GCP instances. Local GCP credentials will still be
+    #   uploaded to non-GCP instances (since those instances may need to access
+    #   GCP resources).
+    # - If the SkyPilot spot/serve controller is on GCP, this setting will make
+    #   non-GCP managed spot jobs / non-GCP service replicas fail to access any
+    #   resources on GCP (since the controllers don't have GCP credential
+    #   files to assign to these non-GCP instances).
+    #
+    # Default: 'LOCAL_CREDENTIALS'.
     remote_identity: LOCAL_CREDENTIALS
 
   # Advanced Kubernetes configurations (optional).
