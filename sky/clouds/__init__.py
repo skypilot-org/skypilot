@@ -41,5 +41,6 @@ __all__ = [
     'CLOUD_REGISTRY',
     'ProvisionerVersion',
     'StatusVersion',
-    'cloud_in_list'
+    # Utility functions
+    'cloud_in_list',
 ]
