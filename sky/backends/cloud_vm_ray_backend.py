@@ -135,14 +135,12 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(sky.__file__).resolve().parent / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
-# Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
-
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
+        clouds.Cudo: 'cudo-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
         clouds.Lambda: 'lambda-ray.yml.j2',
         clouds.IBM: 'ibm-ray.yml.j2',
@@ -2057,7 +2055,7 @@ class RetryingVmProvisioner(object):
             try:
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
-                to_provision.cloud.check_cluster_name_is_valid(cluster_name)
+                common_utils.check_cluster_name_is_valid(cluster_name)
                 if dryrun:
                     cloud_user = None
                 else:
@@ -2949,7 +2947,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.debug('Checking if skylet is running on the head node.')
             with rich_utils.safe_status(
                     '[bold cyan]Preparing SkyPilot runtime'):
-                self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
+                self.run_on_head(handle,
+                                 instance_setup.MAYBE_SKYLET_RESTART_CMD)
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
@@ -4392,10 +4391,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
-        for resources in task.resources:
-            task_cloud = (resources.cloud
-                          if resources.cloud is not None else clouds.Cloud)
-            task_cloud.check_cluster_name_is_valid(cluster_name)
+        common_utils.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
             # The cluster is recently terminated either by autostop or manually

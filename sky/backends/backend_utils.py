@@ -896,6 +896,10 @@ def write_cluster_config(
                 'dump_port_command': dump_port_command,
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
+                # Command for waiting ray cluster to be ready on head.
+                'ray_head_wait_initialized_command':
+                    instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
+
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
                 # Sky remote utils.
@@ -973,7 +977,9 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
-    if isinstance(cloud, (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere)):
+    if isinstance(
+            cloud,
+        (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere, clouds.Cudo)):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
