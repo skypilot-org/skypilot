@@ -97,8 +97,10 @@ def list_accelerators(
     quantity_filter: Optional[int] = None,
     case_sensitive: bool = True,
     all_regions: bool = False,
+    require_price: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Cudo offering GPUs."""
     return common.list_accelerators_impl('Cudo', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
-                                         case_sensitive, all_regions)
+                                         case_sensitive, all_regions,
+                                         require_price)
