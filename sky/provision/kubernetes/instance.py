@@ -285,8 +285,10 @@ def _check_nvidia_runtime_class() -> bool:
     runtime_classes = kubernetes.node_api().list_runtime_class()
 
     # Check if 'nvidia' RuntimeClass exists
-    nvidia_exists = any(rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
+    nvidia_exists = any(
+        rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
     return nvidia_exists
+
 
 def run_command_on_pods(node_name, node_namespace, command):
     cmd_output = kubernetes.stream()(

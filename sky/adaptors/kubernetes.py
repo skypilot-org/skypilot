@@ -136,6 +136,7 @@ def node_api():
 
     return _node_api
 
+
 @import_package
 def api_exception():
     return kubernetes.client.rest.ApiException

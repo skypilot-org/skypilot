@@ -39,7 +39,8 @@ def check_nvidia_runtime_class() -> bool:
     runtime_classes = node_api.list_runtime_class()
 
     # Check if 'nvidia' RuntimeClass exists
-    nvidia_exists = any(rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
+    nvidia_exists = any(
+        rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
     return nvidia_exists
 
 
@@ -129,10 +130,10 @@ def label():
 
         if nvidia_exists:
             print('Using nvidia RuntimeClass for GPU labeling.')
-            job_manifest['spec']['template']['spec']['runtimeClassName'] = 'nvidia'
+            job_manifest['spec']['template']['spec'][
+                'runtimeClassName'] = 'nvidia'
         else:
             print('Using default RuntimeClass for GPU labeling.')
-
 
         for node in gpu_nodes:
             node_name = node.metadata.name
