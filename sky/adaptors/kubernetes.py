@@ -16,6 +16,7 @@ _core_api = None
 _auth_api = None
 _networking_api = None
 _custom_objects_api = None
+_node_api = None
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
@@ -125,6 +126,15 @@ def custom_objects_api():
 
     return _custom_objects_api
 
+
+@import_package
+def node_api():
+    global _node_api
+    if _node_api is None:
+        _load_config()
+        _node_api = kubernetes.client.NodeV1Api()
+
+    return _node_api
 
 @import_package
 def api_exception():

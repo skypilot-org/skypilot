@@ -30,6 +30,19 @@ def prerequisite_check() -> Tuple[bool, str]:
     return prereq_ok, reason
 
 
+def check_nvidia_runtime_class() -> bool:
+    """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
+    config.load_kube_config()
+    node_api = client.NodeV1Api()
+
+    # Fetch the list of available RuntimeClasses
+    runtime_classes = node_api.list_runtime_class()
+
+    # Check if 'nvidia' RuntimeClass exists
+    nvidia_exists = any(rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
+    return nvidia_exists
+
+
 def cleanup() -> Tuple[bool, str]:
     """Deletes all Kubernetes resources created by this script
 
@@ -104,6 +117,22 @@ def label():
                 gpu_nodes.append(node)
 
         print(f'Found {len(gpu_nodes)} GPU nodes in the cluster')
+
+        # Check if the 'nvidia' RuntimeClass exists
+        try:
+            nvidia_exists = check_nvidia_runtime_class()
+        except Exception as e:  # pylint: disable=broad-except
+            print(f'Error occurred while checking for nvidia RuntimeClass: {e}')
+            print('Continuing without using nvidia RuntimeClass. '
+                  'This may fail on K3s clusters.')
+            nvidia_exists = False
+
+        if nvidia_exists:
+            print('Using nvidia RuntimeClass for GPU labeling.')
+            job_manifest['spec']['template']['spec']['runtimeClassName'] = 'nvidia'
+        else:
+            print('Using default RuntimeClass for GPU labeling.')
+
 
         for node in gpu_nodes:
             node_name = node.metadata.name
