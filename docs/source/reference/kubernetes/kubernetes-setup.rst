@@ -190,6 +190,8 @@ If your Kubernetes cluster has Nvidia GPUs, ensure that:
 
     GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerators`` label.
 
+.. _automatic-gpu-labelling:
+
 Automatic GPU labelling
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -291,7 +293,7 @@ After the GPU operator is installed, create the nvidia RuntimeClass required by 
     handler: nvidia
     EOF
 
-Now you can label your K3s nodes with the :code:`skypilot.co/accelerator` label using the SkyPilot GPU labelling script above.
+Now you can label your K3s nodes with the :code:`skypilot.co/accelerator` label using the `SkyPilot GPU labelling script <automatic-gpu-labelling_>`_ above.
 
 .. _kubernetes-ports:
 

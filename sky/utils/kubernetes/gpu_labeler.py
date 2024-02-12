@@ -123,9 +123,12 @@ def label():
         try:
             nvidia_exists = check_nvidia_runtime_class()
         except Exception as e:  # pylint: disable=broad-except
-            print(f'Error occurred while checking for nvidia RuntimeClass: {e}')
+            print('Error occurred while checking for nvidia RuntimeClass: '
+                  f'{str(e)}')
             print('Continuing without using nvidia RuntimeClass. '
-                  'This may fail on K3s clusters.')
+                  'This may fail on K3s clusters. '
+                  'For more details, refer to K3s deployment notes at: '
+                  'https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html')  # pylint: disable=line-too-long
             nvidia_exists = False
 
         if nvidia_exists:
