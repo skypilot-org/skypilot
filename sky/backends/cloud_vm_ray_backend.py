@@ -1513,7 +1513,7 @@ class RetryingVmProvisioner(object):
                 # Failed due to invalid user input, e.g. invalid configs in
                 # ~/.sky/config.yaml.
                 logger.info(f'{common_utils.format_exception(e)}')
-                # We should block the entire cloud if the user input is invalid.
+                # We should block the entire cloud if the user config is invalid.
                 _add_to_blocked_resources(
                     self._blocked_resources,
                     to_provision.copy(region=None, zone=None))
