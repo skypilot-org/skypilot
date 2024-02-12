@@ -9,6 +9,8 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
+from azure.identity import AzureCliCredential
+from azure.storage.blob import ContainerClient
 import colorama
 
 from sky import check
@@ -16,8 +18,10 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky import status_lib
 from sky.adaptors import aws
+from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
@@ -49,6 +53,7 @@ SourceType = Union[Path, List[Path]]
 STORE_ENABLED_CLOUDS: List[str] = [
     str(clouds.AWS()),
     str(clouds.GCP()),
+    str(clouds.Azure()),
     str(clouds.IBM()), cloudflare.NAME
 ]
 
@@ -108,6 +113,8 @@ class StoreType(enum.Enum):
             return StoreType.S3
         elif isinstance(store, GcsStore):
             return StoreType.GCS
+        elif isinstance(store, AzureBlobStore):
+            return StoreType.AZURE
         elif isinstance(store, R2Store):
             return StoreType.R2
         elif isinstance(store, IBMCosStore):
@@ -127,11 +134,10 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
         return StoreType.S3
     elif isinstance(cloud, clouds.GCP):
         return StoreType.GCS
+    elif isinstance(cloud, clouds.Azure):
+        return StoreType.AZURE
     elif isinstance(cloud, clouds.IBM):
         return StoreType.IBM
-    elif isinstance(cloud, clouds.Azure):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Azure Blob Storage is not supported yet.')
     elif isinstance(cloud, clouds.Lambda):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Lambda Cloud does not provide cloud storage.')
@@ -148,14 +154,13 @@ def get_store_prefix(storetype: StoreType) -> str:
         return 's3://'
     elif storetype == StoreType.GCS:
         return 'gs://'
+    elif storetype == StoreType.AZURE:
+        return 'az://'
     # R2 storages use 's3://' as a prefix for various aws cli commands
     elif storetype == StoreType.R2:
         return 's3://'
     elif storetype == StoreType.IBM:
         return 'cos://'
-    elif storetype == StoreType.AZURE:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Azure Blob Storage is not supported yet.')
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown store type: {storetype}')
@@ -493,6 +498,8 @@ class Storage(object):
                         self.add_store(StoreType.S3)
                     elif self.source.startswith('gs://'):
                         self.add_store(StoreType.GCS)
+                    elif self.source.startswith('az://'):
+                        self.add_store(StoreType.AZURE)
                     elif self.source.startswith('r2://'):
                         self.add_store(StoreType.R2)
                     elif self.source.startswith('cos://'):
@@ -577,15 +584,16 @@ class Storage(object):
                             'using a bucket by writing <destination_path>: '
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
-            elif split_path.scheme in ['s3', 'gs', 'r2', 'cos']:
+            elif split_path.scheme in ['s3', 'gs', 'az', 'r2', 'cos']:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
                 # cloud store - ensure path points to only a directory
                 if mode == StorageMode.MOUNT:
-                    if ((not split_path.scheme == 'cos' and
-                         split_path.path.strip('/') != '') or
-                        (split_path.scheme == 'cos' and
-                         not re.match(r'^/[-\w]+(/\s*)?$', split_path.path))):
+                    if (split_path.scheme != 'az' and
+                        ((split_path.scheme != 'cos' and
+                          split_path.path.strip('/') != '') or
+                         (split_path.scheme == 'cos' and
+                          not re.match(r'^/[-\w]+(/\s*)?$', split_path.path)))):
                         # regex allows split_path.path to include /bucket
                         # or /bucket/optional_whitespaces while considering
                         # cos URI's regions (cos://region/bucket_name)
@@ -666,6 +674,8 @@ class Storage(object):
                     if source.startswith('cos://'):
                         # cos url requires custom parsing
                         name = data_utils.split_cos_path(source)[0]
+                    elif source.startswith('az://'):
+                        name = data_utils.split_az_path(source)[0]
                     else:
                         name = urllib.parse.urlsplit(source).netloc
                     assert name is not None, source
@@ -708,6 +718,11 @@ class Storage(object):
                         sync_on_reconstruction=self.sync_on_reconstruction)
                 elif s_type == StoreType.GCS:
                     store = GcsStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
+                elif s_type == StoreType.AZURE:
+                    store = AzureBlobStore.from_metadata(
                         s_metadata,
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction)
@@ -783,6 +798,8 @@ class Storage(object):
             store_cls = S3Store
         elif store_type == StoreType.GCS:
             store_cls = GcsStore
+        elif store_type == StoreType.AZURE:
+            store_cls = AzureBlobStore
         elif store_type == StoreType.R2:
             store_cls = R2Store
         elif store_type == StoreType.IBM:
@@ -1006,6 +1023,16 @@ class S3Store(AbstractStore):
                 assert data_utils.verify_gcs_bucket(self.name), (
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
+            elif self.source.startswith('az://'):
+                container_name, _, storage_account_name = (
+                    data_utils.split_az_path(self.source))
+                assert self.name == container_name, (
+                    'AZ Bucket is specified as path, the name should be '
+                    'the same as AZ bucket.')
+                assert data_utils.verify_az_bucket(
+                    storage_account_name, self.name), (
+                        f'Source specified as {self.source}, a AZ bucket. ',
+                        'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '
@@ -1394,40 +1421,42 @@ class GcsStore(AbstractStore):
                          sync_on_reconstruction)
 
     def _validate(self):
-        if self.source is not None:
-            if isinstance(self.source, str):
-                if self.source.startswith('s3://'):
-                    assert self.name == data_utils.split_s3_path(
-                        self.source
-                    )[0], (
-                        'S3 Bucket is specified as path, the name should be the'
-                        ' same as S3 bucket.')
-                    assert data_utils.verify_s3_bucket(self.name), (
-                        f'Source specified as {self.source}, an S3 bucket. ',
-                        'S3 Bucket should exist.')
-                elif self.source.startswith('gs://'):
-                    assert self.name == data_utils.split_gcs_path(
-                        self.source
-                    )[0], (
-                        'GCS Bucket is specified as path, the name should be '
-                        'the same as GCS bucket.')
-                elif self.source.startswith('r2://'):
-                    assert self.name == data_utils.split_r2_path(
-                        self.source
-                    )[0], ('R2 Bucket is specified as path, the name should be '
-                           'the same as R2 bucket.')
-                    assert data_utils.verify_r2_bucket(self.name), (
-                        f'Source specified as {self.source}, a R2 bucket. ',
-                        'R2 Bucket should exist.')
-                elif self.source.startswith('cos://'):
-                    assert self.name == data_utils.split_cos_path(
-                        self.source
-                    )[0], (
-                        'COS Bucket is specified as path, the name should be '
-                        'the same as COS bucket.')
-                    assert data_utils.verify_ibm_cos_bucket(self.name), (
-                        f'Source specified as {self.source}, a COS bucket. ',
-                        'COS Bucket should exist.')
+        if self.source is not None and isinstance(self.source, str):
+            if self.source.startswith('s3://'):
+                assert self.name == data_utils.split_s3_path(self.source)[0], (
+                    'S3 Bucket is specified as path, the name should be the'
+                    ' same as S3 bucket.')
+                assert data_utils.verify_s3_bucket(self.name), (
+                    f'Source specified as {self.source}, an S3 bucket. ',
+                    'S3 Bucket should exist.')
+            elif self.source.startswith('gs://'):
+                assert self.name == data_utils.split_gcs_path(self.source)[0], (
+                    'GCS Bucket is specified as path, the name should be '
+                    'the same as GCS bucket.')
+            elif self.source.startswith('az://'):
+                container_name, _, storage_account_name = (
+                    data_utils.split_az_path(self.source))
+                assert self.name == container_name, (
+                    'AZ Bucket is specified as path, the name should be '
+                    'the same as AZ bucket.')
+                assert data_utils.verify_az_bucket(
+                    storage_account_name, self.name), (
+                        f'Source specified as {self.source}, a AZ bucket. ',
+                        'AZ Bucket should exist.')
+            elif self.source.startswith('r2://'):
+                assert self.name == data_utils.split_r2_path(self.source)[0], (
+                    'R2 Bucket is specified as path, the name should be '
+                    'the same as R2 bucket.')
+                assert data_utils.verify_r2_bucket(self.name), (
+                    f'Source specified as {self.source}, a R2 bucket. ',
+                    'R2 Bucket should exist.')
+            elif self.source.startswith('cos://'):
+                assert self.name == data_utils.split_cos_path(self.source)[0], (
+                    'COS Bucket is specified as path, the name should be '
+                    'the same as COS bucket.')
+                assert data_utils.verify_ibm_cos_bucket(self.name), (
+                    f'Source specified as {self.source}, a COS bucket. ',
+                    'COS Bucket should exist.')
         # Validate name
         self.name = self.validate_name(self.name)
         # Check if the storage is enabled
@@ -1815,6 +1844,484 @@ class GcsStore(AbstractStore):
                         f'Failed to delete GCS bucket {bucket_name}.')
 
 
+class AzureBlobStore(AbstractStore):
+    """Represents the backend for Azure Blob Storage Container. """
+
+    _ACCESS_DENIED_MESSAGE = 'Access Denied'
+
+    def __init__(self,
+                 name: str,
+                 source: str,
+                 region: Optional[str] = 'eastus',
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: bool = True):
+        self.storage_client: 'storage.Client'
+        self.resource_client: 'storage.Client'
+        self.bucket_name: str
+        self.storage_account_name: str
+        self.storage_account_key: Optional[str] = None
+        self.resource_group_name: Optional[str] = None
+        super().__init__(name, source, region, is_sky_managed,
+                         sync_on_reconstruction)
+
+    def _validate(self):
+        if self.source is not None and isinstance(self.source, str):
+            if self.source.startswith('s3://'):
+                assert self.name == data_utils.split_s3_path(self.source)[0], (
+                    'S3 Bucket is specified as path, the name should be the'
+                    ' same as S3 bucket.')
+                assert data_utils.verify_s3_bucket(self.name), (
+                    f'Source specified as {self.source}, a S3 bucket. ',
+                    'S3 Bucket should exist.')
+            elif self.source.startswith('gs://'):
+                assert self.name == data_utils.split_gcs_path(self.source)[0], (
+                    'GCS Bucket is specified as path, the name should be '
+                    'the same as GCS bucket.')
+                assert data_utils.verify_gcs_bucket(self.name), (
+                    f'Source specified as {self.source}, a GCS bucket. ',
+                    'GCS Bucket should exist.')
+            elif self.source.startswith('az://'):
+                container_name, _, _ = (data_utils.split_az_path(self.source))
+                assert self.name == container_name, (
+                    'AZ Bucket is specified as path, the name should be '
+                    'the same as AZ bucket.')
+            elif self.source.startswith('r2://'):
+                assert self.name == data_utils.split_r2_path(self.source)[0], (
+                    'R2 Bucket is specified as path, the name should be '
+                    'the same as R2 bucket.')
+                assert data_utils.verify_r2_bucket(self.name), (
+                    f'Source specified as {self.source}, a R2 bucket. ',
+                    'R2 Bucket should exist.')
+            elif self.source.startswith('cos://'):
+                assert self.name == data_utils.split_cos_path(self.source)[0], (
+                    'COS Bucket is specified as path, the name should be '
+                    'the same as COS bucket.')
+                assert data_utils.verify_ibm_cos_bucket(self.name), (
+                    f'Source specified as {self.source}, a COS bucket. ',
+                    'COS Bucket should exist.')
+        # Validate name
+        self.name = self.validate_container_name(self.name)
+
+        # Check if the storage is enabled
+        if not _is_storage_cloud_enabled(str(clouds.Azure())):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: azure\' specified, but ' \
+                    'Azure access is disabled. To fix, enable '\
+                    'Azure by running `sky check`. More info: '\
+                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    )
+
+    @classmethod
+    def validate_container_name(cls, name) -> str:
+        """Validates the name of the AZ Container.
+
+        Source for rules: https://learn.microsoft.com/en-us/rest/api/storageservices/Naming-and-Referencing-Containers--Blobs--and-Metadata#container-names # pylint: disable=line-too-long
+
+        Args:
+            name: str; name of the container
+
+        Returns:
+            name: str; name of the container
+
+        Raises:
+            StorageNameError: if the given container name does not follow the
+                naming convention
+        """
+
+        def _raise_no_traceback_name_error(err_str):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageNameError(err_str)
+
+        if name is not None and isinstance(name, str):
+            if not 3 <= len(name) <= 63:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must be between 3 (min) '
+                    'and 63 (max) characters long.')
+
+            # Check for valid characters and start/end with a letter or number
+            pattern = r'^[a-z0-9][-a-z0-9]*[a-z0-9]$'
+            if not re.match(pattern, name):
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} can consist only of '
+                    'lowercase letters, numbers, and hyphens (-). '
+                    'It must begin and end with a letter or number.')
+
+            # Check for two adjacent hyphens
+            if '--' in name:
+                _raise_no_traceback_name_error(
+                    f'Invalid store name: name {name} must not contain '
+                    'two adjacent hyphens.')
+
+        else:
+            _raise_no_traceback_name_error('Store name must be specified.')
+        return name
+
+    def initialize(self):
+        """Initializes the AZ Container object on the cloud.
+
+        Initialization involves fetching bucket if exists, or creating it if
+        it does not. Also, it checks for the existance of the storage account
+        and resource group if provided by the user. If not provided, those are
+        created with a default naming convention.
+
+        Raises:
+            StorageBucketCreateError: If bucket creation fails
+            StorageBucketGetError: If fetching existing bucket fails
+            StorageInitError: If general initialization fails.
+        """
+        self.storage_client = data_utils.create_az_client('storage')
+        self.resource_client = data_utils.create_az_client('resource')
+        # If creating a new container, it's necessary to obtain resource group name and storage account
+        # from this function either using default value or user provided value from config.yaml.
+        # We can tell if already existing bucket is used or not
+        if isinstance(self.source, str) and self.source.startswith('az://'):
+            bucket_name, _, storage_account_name = data_utils.split_az_path(
+                self.source)
+            # Using externally created storage
+            assert self.name == bucket_name
+            self.storage_account_name = storage_account_name
+            self.resource_group_name = data_utils.get_az_resource_group(
+                storage_account_name)
+        else:
+            # creating new container
+            # If resource group or storage account names are not provided from
+            # config, then use default names.
+            self.storage_account_name = skypilot_config.get_nested(
+                ('azure', 'storage_account'),
+                f'sky{common_utils.get_user_hash()}')
+            self.resource_group_name = skypilot_config.get_nested(
+                ('azure', 'resource_group'),
+                f'sky{common_utils.get_user_hash()}')
+            # If the resource group or storage account already exist with name
+            # used to create below, both create functions will silently move on.
+            self.resource_client.resource_groups.create_or_update(
+                self.resource_group_name, {'location': self.region})
+            try:
+                self.storage_client.storage_accounts.begin_create(
+                    self.resource_group_name, self.storage_account_name, {
+                        'sku': {
+                            'name': 'Standard_GRS'
+                        },
+                        'kind': 'StorageV2',
+                        'location': 'westus',
+                        'encryption': {
+                            'services': {
+                                'blob': {
+                                    'key_type': 'Account',
+                                    'enabled': True
+                                }
+                            },
+                            'key_source': 'Microsoft.Storage'
+                        },
+                    }).result()
+            except azure.core_exception().ResourceExistsError as e:
+                error_message = e.message
+                if 'StorageAccountAlreadyTaken' in error_message:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketCreateError(
+                            'The storage account name '
+                            f'{self.storage_account_name!r} is already taken. '
+                            'Please try with another name.')
+
+        # resource_group_name is set to None when using non-sky-managed
+        # public container.
+        if self.resource_group_name is not None:
+            self.storage_account_key = data_utils.get_az_storage_account_key(
+                self.storage_account_name, self.resource_group_name,
+                self.storage_client, self.resource_client)
+        # TODO(Doyoung): Add naming convention check from storage account name
+        # and resource group name
+        self.bucket_name, is_new_bucket = self._get_bucket()
+        if self.is_sky_managed is None:
+            # If is_sky_managed is not specified, then this is a new storage
+            # object (i.e., did not exist in global_user_state) and we should
+            # set the is_sky_managed property.
+            # If is_sky_managed is specified, then we take no action.
+            self.is_sky_managed = is_new_bucket
+
+    def upload(self):
+        """Uploads source to store bucket.
+
+        Upload must be called by the Storage handler - it is not called on
+        Store initialization.
+
+        Raises:
+            StorageUploadError: if upload fails.
+        """
+        try:
+            if isinstance(self.source, list):
+                self.batch_az_blob_sync(self.source, create_dirs=True)
+            elif self.source is not None:
+                error_message = (
+                    'Moving data directly from {cloud} to Azure is currently '
+                    'not supported. Please specify a local source for the '
+                    'storage object.')
+                if self.source.startswith('az://'):
+                    pass
+                elif self.source.startswith('s3://'):
+                    raise NotImplementedError(error_message.format('S3'))
+                elif self.source.startswith('gs://'):
+                    raise NotImplementedError(error_message.format('GCS'))
+                elif self.source.startswith('r2://'):
+                    raise NotImplementedError(error_message.format('R2'))
+                elif self.source.startswith('cos://'):
+                    raise NotImplementedError(error_message.format('IBM COS'))
+                else:
+                    self.batch_az_blob_sync([self.source])
+        except exceptions.StorageUploadError:
+            raise
+        except Exception as e:
+            raise exceptions.StorageUploadError(
+                f'Upload failed for store {self.name}') from e
+
+    def delete(self) -> None:
+        """Deletes the storage."""
+        deleted_by_skypilot = self._delete_az_bucket(self.name)
+        if deleted_by_skypilot:
+            msg_str = f'Deleted AZ Container {self.name}.'
+        else:
+            msg_str = (f'AZ Container {self.name} may have '
+                       'been deleted externally. Removing from local state.')
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
+    def get_handle(self) -> StorageHandle:
+        """Returns the Storage Handle object."""
+        return self.storage_client.blob_containers.get(
+            self.resource_group_name, self.storage_account_name, self.name)
+
+    def batch_az_blob_sync(self,
+                           source_path_list: List[Path],
+                           create_dirs: bool = False) -> None:
+        """Invokes az storage blob sync to batch upload a list of local paths.
+
+        Args:
+            source_path_list: List of paths to local files or directories
+            create_dirs: If the local_path is a directory and this is set to
+                False, the contents of the directory are directly uploaded to
+                root of the bucket. If the local_path is a directory and this is
+                set to True, the directory is created in the bucket root and
+                contents are uploaded to it.
+        """
+
+        def get_file_sync_command(base_dir_path, file_names):
+            # shlex.quote is not used as az storage blob sync already
+            # deals with file names with empty spaces when used
+            # with --include-pattern.
+            includes_list = ';'.join(file_names)
+            includes = f'--include-pattern "{includes_list}"'
+            base_dir_path = shlex.quote(base_dir_path)
+            sync_command = (f'az storage blob sync '
+                            f'--account-name {self.storage_account_name} '
+                            f'--account-key {self.storage_account_key} '
+                            f'{includes} '
+                            '--delete-destination false '
+                            f'--source {base_dir_path} '
+                            f'--container {self.bucket_name}')
+            return sync_command
+
+        def get_dir_sync_command(src_dir_path, dest_dir_name):
+            # we exclude .git directory from the sync
+            excluded_list = storage_utils.get_excluded_files_from_gitignore(
+                src_dir_path)
+            excluded_list.append('.git/')
+            excludes_list = ';'.join(
+                [file_name.rstrip('*') for file_name in excluded_list])
+            excludes = f'--exclude-path "{excludes_list}"'
+            src_dir_path = shlex.quote(src_dir_path)
+            container_path = (f'{self.bucket_name}/{dest_dir_name}'
+                              if dest_dir_name else self.bucket_name)
+            sync_command = (f'az storage blob sync '
+                            f'--account-name {self.storage_account_name} '
+                            f'--account-key {self.storage_account_key} '
+                            f'{excludes} '
+                            '--delete-destination false '
+                            f'--source {src_dir_path} '
+                            f'--container {container_path}')
+            return sync_command
+
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
+        else:
+            source_message = source_path_list[0]
+
+        with rich_utils.safe_status(
+                f'[bold cyan]Syncing '
+                f'[green]{source_message}[/] to '
+                f'[green]az://{self.storage_account_name}/{self.name}/[/]'):
+            data_utils.parallel_upload(
+                source_path_list,
+                get_file_sync_command,
+                get_dir_sync_command,
+                self.name,
+                self._ACCESS_DENIED_MESSAGE,
+                create_dirs=create_dirs,
+                max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+
+    def _get_bucket(self) -> Tuple[str, bool]:
+        """Obtains the AZ Container.
+
+        Buckets for Azure Blob Storage are referred as Containers.
+        If the container exists, this method will return the container.
+        If the container does not exist, there are three cases:
+          1) Raise an error if the container source starts with az://
+          2) Return None if container has been externally deleted and
+             sync_on_reconstruction is False
+          3) Create and return a new container otherwise
+
+        Returns:
+            str: name of the bucket(container)
+            bool: represents either or not the bucket is managed by skypilot
+
+        Raises:
+            StorageBucketCreateError: If creating the container fails
+            StorageBucketGetError: If fetching a container fails
+            StorageExternalDeletionError: If externally deleted container is
+                attempted to be fetched while reconstructing the Storage for
+                'sky storage delete' or 'sky start'
+        """
+        try:
+            container_url = f'https://{self.storage_account_name}.blob.core.windows.net/{self.name}'
+            # When using non-sky-managed public container
+            if self.resource_group_name is None:
+                container = ContainerClient.from_container_url(container_url)
+            else:
+                credential = AzureCliCredential(process_timeout=30)
+                container = ContainerClient.from_container_url(
+                    container_url, credential)
+            # Here, exists() is used to check if the public container
+            # exists. exists() will return False only when the credentials
+            # are provided for from_container_url() and there is no
+            # credentials to provide for public container. In this case,
+            # if the public container doesn't exist, it raises an error
+            # instead of returning False.
+            if container.exists(timeout=5):
+                return container.container_name, False
+            # when the container name does not exist under the provided
+            # storage account name and credentials, and user has the rights to
+            # access the storage account.
+            else:
+                if isinstance(self.source,
+                              str) and self.source.startswith('az://'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketGetError(
+                            'Attempted to use a non-existent bucket as a '
+                            f'source: {self.source}.')
+        except azure.core_exception().ClientAuthenticationError as e:
+            error_message = e.message
+            # raised when attempted to access a storage account without rights.
+            if 'ErrorCode:NoAuthenticationInformation' in error_message:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                            name=self.name)) from e
+        except azure.core_exception().ServiceRequestError as e:
+            # raised when storage account name to be does not exist.
+            error_message = e.message
+            if 'Name or service not known' in error_message:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        'Attempted to fetch a bucket from non-existant '
+                        'storage account '
+                        f'name: {self.storage_account_name}.')
+
+        # If bucket cannot be found in both private and public settings,
+        # the bucket is to be created by Sky. However, creation is skipped if
+        # Store object is being reconstructed for deletion or re-mount with
+        # sky start, and error is raised instead.
+        if self.sync_on_reconstruction:
+            container = self._create_az_bucket(self.name)
+            return container.name, True
+
+        # Raised when Storage object is reconstructed for sky storage
+        # delete or to re-mount Storages with sky start but the storage
+        # is already removed externally.
+        raise exceptions.StorageExternalDeletionError(
+            f'Attempted to fetch a non-existent bucket: {self.name}')
+
+    def _download_file(self, remote_path: str, local_path: str) -> None:
+        """Downloads file from remote to local on AZ container.
+        using the boto3 API
+
+        Args:
+          remote_path: str; Remote path on AZ container.
+          local_path: str; Local path on user's device
+        """
+        raise NotImplementedError
+
+    def mount_command(self, mount_path: str) -> str:
+        """Returns the command to mount the container to the mount_path.
+
+        Uses blobfuse2 to mount the container.
+
+        Args:
+            mount_path: str; Path to mount the container to
+
+        Returns:
+            str: a heredoc used to setup the AZ Container mount
+        """
+        install_cmd = mounting_utils.get_az_mount_install_cmd()
+        mount_cmd = mounting_utils.get_az_mount_cmd(self.bucket_name,
+                                                    self.storage_account_name,
+                                                    mount_path,
+                                                    self.storage_account_key)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cmd)
+
+    def _create_az_bucket(self,
+                          container_name: str,
+                          region='eastus') -> StorageHandle:
+        """Creates AZ Container.
+
+        Args:
+            bucket_name: str; Name of bucket
+            region: str; Region name, e.g. eastus, westus
+
+        Returns:
+            StorageHandle: handle to interact with the container
+
+        Raises:
+            StorageBucketCreateError: If bucket creation fails.
+        """
+        try:
+            container = self.storage_client.blob_containers.create(
+                self.resource_group_name, self.storage_account_name,
+                container_name, {})
+            logger.info('Created AZ Container '
+                        f'{container_name} in {region}.')
+        except azure.core_exception().ResourceExistsError as e:
+            error_msg, error_code = e.error.message, e.error.code
+            if error_code == 'ContainerOperationFailure':
+                if 'container is being deleted' in error_msg:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketCreateError(
+                            f'The bucket {self.name!r} is currently being '
+                            'deleted. Please wait for the deletion to complete'
+                            'before attempting to create a bucket with the '
+                            'same name. This may take a few minutes. ')
+        return container
+
+    def _delete_az_bucket(self, container_name: str) -> bool:
+        """Deletes AZ Container, including all objects in Container.
+
+        Args:
+            container_name: str; Name of container
+
+        Returns:
+            bool: True if bucket was deleted, False if it was deleted externally.
+        """
+        with rich_utils.safe_status(
+                f'[bold cyan]Deleting Azure bucket {container_name}[/]'):
+            self.storage_client.blob_containers.delete(
+                self.resource_group_name,
+                self.storage_account_name,
+                container_name,
+            )
+        return True
+
+
 class R2Store(AbstractStore):
     """R2Store inherits from S3Store Object and represents the backend
     for R2 buckets.
@@ -1849,6 +2356,16 @@ class R2Store(AbstractStore):
                 assert data_utils.verify_gcs_bucket(self.name), (
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
+            elif self.source.startswith('az://'):
+                container_name, _, storage_account_name = (
+                    data_utils.split_az_path(self.source))
+                assert self.name == container_name, (
+                    'AZ Bucket is specified as path, the name should be '
+                    'the same as AZ bucket.')
+                assert data_utils.verify_az_bucket(
+                    storage_account_name, self.name), (
+                        f'Source specified as {self.source}, a AZ bucket. ',
+                        'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '
@@ -2222,6 +2739,16 @@ class IBMCosStore(AbstractStore):
                 assert data_utils.verify_gcs_bucket(self.name), (
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
+            elif self.source.startswith('az://'):
+                container_name, _, storage_account_name = (
+                    data_utils.split_az_path(self.source))
+                assert self.name == container_name, (
+                    'AZ Bucket is specified as path, the name should be '
+                    'the same as AZ bucket.')
+                assert data_utils.verify_az_bucket(
+                    storage_account_name, self.name), (
+                        f'Source specified as {self.source}, a AZ bucket. ',
+                        'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
                     'R2 Bucket is specified as path, the name should be '

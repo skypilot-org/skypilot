@@ -3,6 +3,7 @@
 # pylint: disable=import-outside-toplevel
 import functools
 import threading
+from typing import Optional
 
 azure = None
 _session_creation_lock = threading.RLock()
@@ -40,6 +41,13 @@ def get_current_account_user() -> str:
 
 
 @import_package
+def core_exception():
+    """HttpError exception."""
+    from azure.core import exceptions
+    return exceptions
+
+
+@import_package
 def http_error_exception():
     """HttpError exception."""
     from azure.core import exceptions
@@ -48,7 +56,10 @@ def http_error_exception():
 
 @functools.lru_cache()
 @import_package
-def get_client(name: str, subscription_id: str):
+def get_client(name: str,
+               subscription_id: str,
+               storage_account_name: Optional[str] = None,
+               container_name: Optional[str] = None):
     # Sky only supports Azure CLI credential for now.
     # Increase the timeout to fix the Azure get-access-token timeout issue.
     # Tracked in
@@ -56,6 +67,8 @@ def get_client(name: str, subscription_id: str):
     from azure.identity import AzureCliCredential
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.resource import ResourceManagementClient
+    from azure.mgmt.storage import StorageManagementClient
+    from azure.storage.blob import ContainerClient
     with _session_creation_lock:
         credential = AzureCliCredential(process_timeout=30)
         if name == 'compute':
@@ -65,6 +78,14 @@ def get_client(name: str, subscription_id: str):
             return NetworkManagementClient(credential, subscription_id)
         elif name == 'resource':
             return ResourceManagementClient(credential, subscription_id)
+        elif name == 'storage':
+            return StorageManagementClient(credential, subscription_id)
+        elif name == 'container':
+            account_url = (f'https://{storage_account_name}.'
+                           'blob.core.windows.net')
+            return ContainerClient(account_url=account_url,
+                                   container_name=container_name,
+                                   credential=credential)
         else:
             raise ValueError(f'Client not supported: "{name}"')
 
