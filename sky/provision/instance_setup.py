@@ -57,7 +57,7 @@ RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet;'
+MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet;'
 
 
 def _auto_retry(func):
@@ -367,9 +367,9 @@ def start_skylet_on_head_node(cluster_name: str,
     log_path_abs = str(provision_logging.get_log_path())
     logger.info(
         'Running command on head node: '
-        f'{_MAYBE_SKYLET_RESTART_CMD + RAY_HEAD_WAIT_INITIALIZED_COMMAND}')
+        f'{MAYBE_SKYLET_RESTART_CMD + RAY_HEAD_WAIT_INITIALIZED_COMMAND}')
     returncode, stdout, stderr = ssh_runner.run(
-        _MAYBE_SKYLET_RESTART_CMD + RAY_HEAD_WAIT_INITIALIZED_COMMAND,
+        MAYBE_SKYLET_RESTART_CMD + RAY_HEAD_WAIT_INITIALIZED_COMMAND,
         stream_logs=False,
         require_outputs=True,
         log_path=log_path_abs)
