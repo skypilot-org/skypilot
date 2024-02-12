@@ -756,7 +756,7 @@ def write_cluster_config(
             not appear in the catalog, or an ssh_proxy_command is specified but
             not for the given region, or GPUs are requested in a Kubernetes
             cluster but the cluster does not have nodes labeled with GPU types.
-        exceptions.InvalidConfigs: if the user specifies some config for the
+        exceptions.InvalidCloudConfigs: if the user specifies some config for the
             cloud that is not valid, e.g. remote_identity: SERVICE_ACCOUNT
             for a cloud that does not support it, the caller should skip the
             cloud in this case.
