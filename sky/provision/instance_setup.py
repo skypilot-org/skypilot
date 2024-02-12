@@ -209,6 +209,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                                                  **ssh_credentials)
     assert cluster_info.head_instance_id is not None, (cluster_name,
                                                        cluster_info)
+
     # Log the head node's output to the provision.log
     log_path_abs = str(provision_logging.get_log_path())
     ray_options = (

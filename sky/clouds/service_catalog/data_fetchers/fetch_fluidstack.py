@@ -1,11 +1,11 @@
 """A script that generates the Fluidstack catalog.
 
 Usage:
-    python fetch_lambda_cloud.py [-h] [--api-key API_KEY]
+    python fetch_fluidstack_cloud.py [-h] [--api-key API_KEY]
                                  [--api-key-path API_KEY_PATH]
 
 If neither --api-key nor --api-key-path are provided, this script will parse
-`~/.lambda/lambda_keys` to look for Lambda API key.
+`~/.fluidstack/api_key` to look for Lambda API key.
 """
 import argparse
 import copy
@@ -19,10 +19,9 @@ import requests
 from sky.clouds.service_catalog import constants
 
 ENDPOINT = 'https://api.fluidstack.io/v1/plans'
-DEFAULT_FLUIDSTACK_API_KEY_PATH = os.path.expanduser(
-    '~/.fluidstack/fluidstack_api_key')
+DEFAULT_FLUIDSTACK_API_KEY_PATH = os.path.expanduser('~/.fluidstack/api_key')
 DEFAULT_FLUIDSTACK_API_TOKEN_PATH = os.path.expanduser(
-    '~/.fluidstack/fluidstack_api_token')
+    '~/.fluidstack/api_token')
 
 GPU_MAP = {
     'H100_PCIE_80GB': 'H100',
@@ -158,14 +157,7 @@ def create_catalog(output_dir: str) -> None:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('catalog_dir', required=False)
-    args = parser.parse_args()
-    _CATALOG_DIR = os.path.join(constants.LOCAL_CATALOG_DIR,
-                                constants.CATALOG_SCHEMA_VERSION)
-    if args.catalog_dir:
-        _CATALOG_DIR = args.catalog_dir
-    catalog_dir = os.path.join(_CATALOG_DIR, 'fluidstack')
-    os.makedirs(catalog_dir, exist_ok=True)
-    create_catalog(catalog_dir)
-    print('Fluidstack catalog saved to {}/vms.csv'.format(catalog_dir))
+
+    os.makedirs('fluidstack', exist_ok=True)
+    create_catalog('fluidstack/vms.csv')
+    print('Fluidstack catalog saved to {}/vms.csv'.format('fluidstack'))

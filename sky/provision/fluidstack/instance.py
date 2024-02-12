@@ -2,16 +2,40 @@
 import time
 from typing import Any, Dict, List, Optional
 
+from sky import authentication as auth
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
 from sky.skylet.providers.fluidstack import fluidstack_utils as utils
+from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
+_GET_INTERNAL_IP_CMD = ('ip -4 -br addr show | grep UP | grep -Eo '
+                        r'"(10\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)|'
+                        r'172\.(1[6-9]|2[0-9]|3[0-1]))\.(25[0-5]|'
+                        r'2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|'
+                        r'2[0-4][0-9]|[01]?[0-9][0-9]?)"')
+POLL_INTERVAL = 5
 POLL_INTERVAL = 5
 
 logger = sky_logging.init_logger(__name__)
+
+
+def get_internal_ip(node_info: Dict[str, Any]) -> None:
+    runner = command_runner.SSHCommandRunner(
+        node_info['ip_address'],
+        ssh_user=node_info['capabilities']['default_user_name'],
+        ssh_private_key=auth.PRIVATE_SSH_KEY_PATH)
+    rc, stdout, stderr = runner.run(_GET_INTERNAL_IP_CMD,
+                                    require_outputs=True,
+                                    stream_logs=False)
+    subprocess_utils.handle_returncode(rc,
+                                       _GET_INTERNAL_IP_CMD,
+                                       'Failed get obtain private IP from node',
+                                       stderr=stdout + stderr)
+    node_info['internal_ip'] = stdout.strip()
 
 
 def _filter_instances(cluster_name_on_cloud: str,
@@ -46,8 +70,16 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     """Runs instances for the given cluster."""
 
     pending_status = [
-        'create', 'requesting', 'provisioning', 'customizing', 'starting',
-        'stopping', 'start', 'stop', 'reboot', 'rebooting'
+        'create',
+        'requesting',
+        'provisioning',
+        'customizing',
+        'starting',
+        'stopping',
+        'start',
+        'stop',
+        'reboot',
+        'rebooting',
     ]
 
     while True:
@@ -145,12 +177,16 @@ def terminate_instances(
     del provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
-        logger.info(f'Terminating instance {inst_id}: {inst}')
+        logger.debug(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['hostname'].endswith('-head'):
             continue
         try:
             utils.FluidstackClient().delete(inst_id)
         except Exception as e:  # pylint: disable=broad-except
+            if (isinstance(e, utils.FluidstackAPIError) and
+                    'Machine is already terminated' in str(e)):
+                logger.debug(f'Instance {inst_id} is already terminated.')
+                continue
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '
@@ -165,13 +201,16 @@ def get_cluster_info(
     del region, provider_config  # unused
     running_instances = _filter_instances(cluster_name_on_cloud, ['running'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
+
+    subprocess_utils.run_in_parallel(get_internal_ip,
+                                     list(running_instances.values()))
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
         instance_id = instance_info['id']
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info['ip_address'],
+                internal_ip=instance_info['internal_ip'],
                 external_ip=instance_info['ip_address'],
                 ssh_port=instance_info['ssh_port'],
                 tags={},
@@ -180,10 +219,9 @@ def get_cluster_info(
         if instance_info['hostname'].endswith('-head'):
             head_instance_id = instance_id
 
-    return common.ClusterInfo(
-        instances=instances,
-        head_instance_id=head_instance_id,
-    )
+    return common.ClusterInfo(instances=instances,
+                              head_instance_id=head_instance_id,
+                              custom_ray_options={'use_external_ip': True})
 
 
 def query_instances(
@@ -194,19 +232,27 @@ def query_instances(
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
-    non_running_states = [
-        'create', 'requesting', 'provisioning', 'customizing', 'start',
-        'starting', 'rebooting', 'stopping', 'stop', 'stopped', 'reboot',
-        'terminating'
-    ]
-    status_map = {}
-    for state in non_running_states:
-        status_map[state] = status_lib.ClusterStatus.INIT
-
-    status_map['running'] = status_lib.ClusterStatus.UP
+    instances = _filter_instances(cluster_name_on_cloud, None)
+    status_map = {
+        'provisioning': status_lib.ClusterStatus.INIT,
+        'requesting': status_lib.ClusterStatus.INIT,
+        'create': status_lib.ClusterStatus.INIT,
+        'customizing': status_lib.ClusterStatus.INIT,
+        'stopping': status_lib.ClusterStatus.STOPPED,
+        'stop': status_lib.ClusterStatus.STOPPED,
+        'start': status_lib.ClusterStatus.INIT,
+        'reboot': status_lib.ClusterStatus.STOPPED,
+        'rebooting': status_lib.ClusterStatus.STOPPED,
+        'stopped': status_lib.ClusterStatus.STOPPED,
+        'starting': status_lib.ClusterStatus.INIT,
+        'running': status_lib.ClusterStatus.UP,
+        'failed to create': status_lib.ClusterStatus.INIT,
+        'timeout error': status_lib.ClusterStatus.INIT,
+        'out of stock': status_lib.ClusterStatus.INIT,
+    }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
     for inst_id, inst in instances.items():
-        status = status_map[inst['status']]
+        status = status_map.get(inst['status'], None)
         if non_terminated_only and status is None:
             continue
         statuses[inst_id] = status

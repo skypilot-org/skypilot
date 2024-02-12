@@ -10,7 +10,7 @@ from sky import clouds
 from sky import exceptions
 from sky import status_lib
 from sky.clouds import service_catalog
-from sky.skylet.providers.fluidstack import fluidstack_utils
+from sky.provision.fluidstack import fluidstack_utils
 from sky.utils.resources_utils import DiskTier
 
 _CREDENTIAL_FILES = [
@@ -45,9 +45,9 @@ class Fluidstack(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             'Spot instances are'
             f' not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            'Docker images are'
-            f' not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            'Specifying image ID '
+            f'is not supported for {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
             f' are not supported in {_REPR}.',
@@ -58,11 +58,6 @@ class Fluidstack(clouds.Cloud):
     # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
-
-    @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -198,6 +193,7 @@ class Fluidstack(clouds.Cloud):
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'fluidstack_username': self.default_username(region.name),
         }
 
     def _get_feasible_launchable_resources(
@@ -282,7 +278,7 @@ class Fluidstack(clouds.Cloud):
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
-        # TODO(ewzeng): Implement get_current_user_identity for Fluidstack
+        # TODO: Implement get_current_user_identity for Fluidstack
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
@@ -300,10 +296,6 @@ class Fluidstack(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'fluidstack')
-
-    @classmethod
-    def regions(cls) -> List['clouds.Region']:
-        return service_catalog.regions(clouds='fluidstack')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],

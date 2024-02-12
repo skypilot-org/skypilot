@@ -674,7 +674,7 @@ def test_image_no_conda():
 
 
 # ------------ Test stale job ------------
-@pytest.mark.no_fluidstack  # FluidStack does not support stopping instances for all DCs
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_stale_job(generic_cloud: str):
@@ -794,7 +794,7 @@ def test_file_mounts(generic_cloud: str):
         'using_file_mounts',
         test_commands,
         f'sky down -y {name}',
-        (generic_cloud, 20 * 60),  # 20 mins
+        _get_timeout(generic_cloud, 20 * 60),  # 20 mins
     )
     run_one_test(test)
 
@@ -1658,7 +1658,7 @@ def test_azure_start_stop():
 
 
 # ---------- Testing Autostopping ----------
-@pytest.mark.no_fluidstack  # FluidStack does not support stopping for all DCs
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -1724,7 +1724,7 @@ def test_autostop(generic_cloud: str):
 
 
 # ---------- Testing Autodowning ----------
-@pytest.mark.no_fluidstack  # FluidStack does not support stopping for all DCs
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()

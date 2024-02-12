@@ -23,8 +23,23 @@ from sky.clouds.scp import SCP
 from sky.clouds.vsphere import Vsphere
 
 __all__ = [
-    'IBM', 'AWS', 'Azure', 'Cloud', 'GCP', 'Lambda', 'Local', 'SCP', 'RunPod',
-    'OCI', 'Vsphere', 'Kubernetes', 'CloudImplementationFeatures', 'Region',
-    'Zone', 'CLOUD_REGISTRY', 'ProvisionerVersion', 'StatusVersion',
-    'Fluidstack'
+    'IBM',
+    'AWS',
+    'Azure',
+    'Cloud',
+    'GCP',
+    'Lambda',
+    'Local',
+    'SCP',
+    'RunPod',
+    'OCI',
+    'Vsphere',
+    'Kubernetes',
+    'CloudImplementationFeatures',
+    'Region',
+    'Zone',
+    'CLOUD_REGISTRY',
+    'ProvisionerVersion',
+    'StatusVersion',
+    'Fluidstack',
 ]
