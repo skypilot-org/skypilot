@@ -242,6 +242,20 @@ Does your cluster support Nginx Ingress?
 
 To verify that your cluster supports Nginx Ingress, we will create an example ingress.
 
+.. code-block:: bash
+
+        $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/cpu_test_pod.yaml
+        $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/ingress_test.yaml
+
+        $ IP=$(kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[*].ip}')
+        $ echo "Got IP: $IP"
+        $ curl http://$IP/skytest
+
+        # Once you have verified that the service is accessible, you can delete it
+        $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/cpu_test_pod.yaml
+        $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/ingress_test_svc.yaml
+
+If your IP is not acquired, check the service's status with :code:`kubectl describe svc ingress-nginx-controller -n ingress-nginx`. Your ingress's service must be of type :code:`LoadBalancer` and should have an external IP.
 
 Is SkyPilot configured to use Nginx Ingress?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
