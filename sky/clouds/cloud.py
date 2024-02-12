@@ -249,10 +249,6 @@ class Cloud:
     def is_same_cloud(self, other: 'Cloud'):
         raise NotImplementedError
 
-    def in_cloud_list(self, cloud_list: Iterable['Cloud']) -> bool:
-        """Returns whether this cloud is in the given cloud list."""
-        return any(self.is_same_cloud(cloud) for cloud in cloud_list)
-
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
@@ -769,3 +765,9 @@ class Cloud:
         state.pop('PROVISIONER_VERSION', None)
         state.pop('STATUS_VERSION', None)
         return state
+
+
+# === Helper functions ===
+def cloud_in_list(cloud: Cloud, cloud_list: Iterable[Cloud]) -> bool:
+    """Returns whether the cloud is in the given cloud list."""
+    return any(cloud.is_same_cloud(c) for c in cloud_list)

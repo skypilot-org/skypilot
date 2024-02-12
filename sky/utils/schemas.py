@@ -517,7 +517,7 @@ _INSTANCE_TAGS_SCHEMA = {
     },
 }
 
-_REMOTE_AUTH_SCHEMA = {
+_REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
         'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'],
@@ -634,7 +634,7 @@ def get_config_schema():
     }
 
     for config in cloud_configs.values():
-        config['properties'].update(_REMOTE_AUTH_SCHEMA)
+        config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',

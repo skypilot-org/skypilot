@@ -1510,16 +1510,16 @@ class RetryingVmProvisioner(object):
                 logger.info(f'{e}')
                 continue
             except exceptions.InvalidCloudConfigs as e:
-                # Failed due to invalid user input, e.g. invalid configs in
-                # ~/.sky/config.yaml.
-                logger.info(f'{common_utils.format_exception(e)}')
-                # We should block the entire cloud if the user config is invalid.
+                # Failed due to invalid user configs in ~/.sky/config.yaml.
+                logger.warning(f'{common_utils.format_exception(e)}')
+                # We should block the entire cloud if the user config is
+                # invalid.
                 _add_to_blocked_resources(
                     self._blocked_resources,
                     to_provision.copy(region=None, zone=None))
                 raise exceptions.ResourcesUnavailableError(
                     f'Failed to provision on cloud {to_provision.cloud} due to '
-                    f'invalid user input: {common_utils.format_exception(e)}')
+                    f'invalid cloud config: {common_utils.format_exception(e)}')
             if dryrun:
                 return config_dict
             cluster_config_file = config_dict['ray']
