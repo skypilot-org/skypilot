@@ -11,6 +11,7 @@ from sky.clouds.cloud_registry import CLOUD_REGISTRY
 # isort: split
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
+from sky.clouds.cudo import Cudo
 from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
@@ -26,6 +27,7 @@ __all__ = [
     'AWS',
     'Azure',
     'Cloud',
+    'Cudo',
     'GCP',
     'Lambda',
     'Local',
