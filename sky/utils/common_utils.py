@@ -185,8 +185,8 @@ class Backoff:
     def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
         self._initial = True
         self._backoff = 0.0
-        self._inital_backoff = initial_backoff
-        self._max_backoff = max_backoff_factor * self._inital_backoff
+        self._initial_backoff = initial_backoff
+        self._max_backoff = max_backoff_factor * self._initial_backoff
 
     # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
     # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc
@@ -195,7 +195,7 @@ class Backoff:
         """Backs off once and returns the current backoff in seconds."""
         if self._initial:
             self._initial = False
-            self._backoff = min(self._inital_backoff, self._max_backoff)
+            self._backoff = min(self._initial_backoff, self._max_backoff)
         else:
             self._backoff = min(self._backoff * self.MULTIPLIER,
                                 self._max_backoff)

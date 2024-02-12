@@ -135,9 +135,6 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(sky.__file__).resolve().parent / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
-# Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
-
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -2938,7 +2935,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.debug('Checking if skylet is running on the head node.')
             with rich_utils.safe_status(
                     '[bold cyan]Preparing SkyPilot runtime'):
-                self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
+                self.run_on_head(handle,
+                                 instance_setup.MAYBE_SKYLET_RESTART_CMD)
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
