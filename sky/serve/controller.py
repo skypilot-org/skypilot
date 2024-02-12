@@ -59,7 +59,7 @@ class SkyServeController:
                 # Handle preemption history first, so that later autoscaler
                 # will be affected by the preemption history.
                 if (isinstance(self._autoscaler,
-                               autoscalers.SpotRequestRateAutoscaler) and
+                               autoscalers.FallbackRequestRateAutoscaler) and
                         isinstance(self._replica_manager,
                                    replica_managers.SkyPilotReplicaManager)):
                     assert self._replica_manager.active_history

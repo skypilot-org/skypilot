@@ -101,7 +101,7 @@ class Autoscaler:
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
         if spec.use_fallback:
-            return SpotRequestRateAutoscaler(spec)
+            return FallbackRequestRateAutoscaler(spec)
         else:
             return RequestRateAutoscaler(spec)
 
@@ -111,6 +111,7 @@ class RequestRateAutoscaler(Autoscaler):
 
     Scales when the number of requests in the given interval is above or below
     the threshold.
+    The instance can be either spot or on-demand, but not both.
     """
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
@@ -344,10 +345,10 @@ class RequestRateAutoscaler(Autoscaler):
         return scaling_options
 
 
-class SpotRequestRateAutoscaler(RequestRateAutoscaler):
-    """SpotRequestRateAutoscaler: Use spot to autoscale based on request rate.
+class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
+    """FallbackRequestRateAutoscaler: Use spot with
+    on-demand as fallback to autoscale based on request rate.
 
-    This autoscaler uses spot instances to save cost.
     """
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
