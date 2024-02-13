@@ -343,7 +343,10 @@ class Kubernetes(clouds.Cloud):
                     f'check if {CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {CREDENTIAL_PATH: CREDENTIAL_PATH}
+        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+            return {CREDENTIAL_PATH: CREDENTIAL_PATH}
+        else:
+            return {}
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
