@@ -112,7 +112,8 @@ def create_dockerfile(
     dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=cmd)
 
     # Write Dockerfile
-    with open(os.path.join(build_dir, 'Dockerfile'), 'w', encoding='utf-8') as f:
+    with open(os.path.join(build_dir, 'Dockerfile'), 'w',
+              encoding='utf-8') as f:
         f.write(dockerfile_contents)
 
     img_metadata['workdir_name'] = workdir_name
