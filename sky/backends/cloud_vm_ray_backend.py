@@ -4168,14 +4168,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 pass
             except exceptions.PortDoesNotExistError:
                 logger.debug('Ports do not exist. Skipping cleanup.')
-            # Handles the case when ~/.kube/config was removed externally.
-            except ValueError as e:
-                error_msg = str(e)
-                if ('Failed to load Kubernetes configuration.'
-                        in error_msg) and purge:
-                    pass
-                else:
-                    raise
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
