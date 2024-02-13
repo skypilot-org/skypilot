@@ -609,17 +609,17 @@ def sync_down(service_name: str) -> None:
                  stream_logs=False)
 
     timestamp = backend_utils.get_run_timestamp()
-    download_code = serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
+    prepare_code = serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
         service_name, timestamp)
     backend = backend_utils.get_backend_from_handle(controller_handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
-    download_returncode, _, _ = backend.run_on_head(controller_handle,
-                                                    download_code,
-                                                    require_outputs=False,
-                                                    stream_logs=False)
+    prepare_returncode, _, _ = backend.run_on_head(controller_handle,
+                                                   prepare_code,
+                                                   require_outputs=False,
+                                                   stream_logs=False)
     subprocess_utils.handle_returncode(
-        download_returncode, download_code,
+        prepare_returncode, prepare_code,
         'Failed to prepare replica logs to sync down.')
     remote_service_dir_name = serve_utils.generate_remote_service_dir_name(
         service_name)
