@@ -831,8 +831,6 @@ def _launch_with_confirm(
     with sky.Dag() as dag:
         dag.add(task)
 
-    sky_check.check(quiet=True, cloud_to_check=clouds.Kubernetes())
-
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
