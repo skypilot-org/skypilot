@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
 
 CloudFilter = Optional[Union[List[str], str]]
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
-              'kubernetes', 'runpod', 'vsphere', 'fluidstack')
+              'kubernetes', 'runpod', 'vsphere', 'cudo','fluidstack')
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
@@ -62,6 +62,7 @@ def list_accelerators(
     clouds: CloudFilter = None,
     case_sensitive: bool = True,
     all_regions: bool = False,
+    require_price: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
     """List the names of all accelerators offered by Sky.
 
@@ -73,7 +74,7 @@ def list_accelerators(
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
                                   name_filter, region_filter, quantity_filter,
-                                  case_sensitive, all_regions)
+                                  case_sensitive, all_regions, require_price)
     if not isinstance(results, list):
         results = [results]
     ret: Dict[str,
@@ -96,9 +97,14 @@ def list_accelerator_counts(
     Returns: A dictionary of canonical accelerator names mapped to a list
     of available counts. See usage in cli.py.
     """
-    results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter, region_filter, quantity_filter,
-                                  False)
+    results = _map_clouds_catalog(clouds,
+                                  'list_accelerators',
+                                  gpus_only,
+                                  name_filter,
+                                  region_filter,
+                                  quantity_filter,
+                                  all_regions=False,
+                                  require_price=False)
     if not isinstance(results, list):
         results = [results]
     accelerator_counts: Dict[str, Set[int]] = collections.defaultdict(set)

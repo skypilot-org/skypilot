@@ -140,6 +140,7 @@ def _get_cluster_config_template(cloud):
     cloud_to_template = {
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
+        clouds.Cudo: 'cudo-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
         clouds.Lambda: 'lambda-ray.yml.j2',
         clouds.IBM: 'ibm-ray.yml.j2',
@@ -1507,6 +1508,17 @@ class RetryingVmProvisioner(object):
                 # does not have nodes labeled with GPU types.
                 logger.info(f'{e}')
                 continue
+            except exceptions.InvalidCloudConfigs as e:
+                # Failed due to invalid user configs in ~/.sky/config.yaml.
+                logger.warning(f'{common_utils.format_exception(e)}')
+                # We should block the entire cloud if the user config is
+                # invalid.
+                _add_to_blocked_resources(
+                    self._blocked_resources,
+                    to_provision.copy(region=None, zone=None))
+                raise exceptions.ResourcesUnavailableError(
+                    f'Failed to provision on cloud {to_provision.cloud} due to '
+                    f'invalid cloud config: {common_utils.format_exception(e)}')
             if dryrun:
                 return config_dict
             cluster_config_file = config_dict['ray']
@@ -2044,7 +2056,7 @@ class RetryingVmProvisioner(object):
             try:
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
-                to_provision.cloud.check_cluster_name_is_valid(cluster_name)
+                common_utils.check_cluster_name_is_valid(cluster_name)
                 if dryrun:
                     cloud_user = None
                 else:
@@ -4380,10 +4392,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
-        for resources in task.resources:
-            task_cloud = (resources.cloud
-                          if resources.cloud is not None else clouds.Cloud)
-            task_cloud.check_cluster_name_is_valid(cluster_name)
+        common_utils.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
             # The cluster is recently terminated either by autostop or manually

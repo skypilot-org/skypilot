@@ -22,7 +22,7 @@ import pytest
 # --managed-spot.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes', 'vsphere', 'fluidstack'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack'
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -40,7 +40,8 @@ cloud_to_pytest_keyword = {
     'oci': 'oci',
     'kubernetes': 'kubernetes',
     'vsphere': 'vsphere',
-    'fluidstack': 'fluidstack'
+    'fluidstack': 'fluidstack',
+    'cudo': 'cudo'
 }
 
 

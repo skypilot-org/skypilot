@@ -134,6 +134,8 @@ class GCP(clouds.Cloud):
     # lower limit.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 35
 
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
+
     _INDENT_PREFIX = '    '
     _DEPENDENCY_HINT = (
         'GCP tools are not installed. Run the following commands:\n'

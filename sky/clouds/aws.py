@@ -102,6 +102,8 @@ class AWS(clouds.Cloud):
     # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 248
 
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
+
     _regions: List[clouds.Region] = []
 
     _INDENT_PREFIX = '    '

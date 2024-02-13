@@ -1,5 +1,6 @@
 """Clouds in Sky."""
 from sky.clouds.cloud import Cloud
+from sky.clouds.cloud import cloud_in_list
 from sky.clouds.cloud import CloudImplementationFeatures
 from sky.clouds.cloud import ProvisionerVersion
 from sky.clouds.cloud import Region
@@ -12,6 +13,7 @@ from sky.clouds.cloud_registry import CLOUD_REGISTRY
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
 from sky.clouds.fluidstack import Fluidstack
+from sky.clouds.cudo import Cudo
 from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
@@ -27,6 +29,7 @@ __all__ = [
     'AWS',
     'Azure',
     'Cloud',
+    'Cudo',
     'GCP',
     'Lambda',
     'Local',
@@ -42,4 +45,6 @@ __all__ = [
     'ProvisionerVersion',
     'StatusVersion',
     'Fluidstack',
+    # Utility functions
+    'cloud_in_list',
 ]
