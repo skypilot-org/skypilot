@@ -206,8 +206,9 @@ class Fluidstack(clouds.Cloud):
             'custom_resources': custom_resources,
             'region': region.name,
             'fluidstack_username': self.default_username(region.name),
-            'cuda_installation_commands' : cuda_installation_commands if not fluidstack_utils.with_nvidia_drivers(region) else ''
-
+            'cuda_installation_commands':
+                cuda_installation_commands
+                if not fluidstack_utils.with_nvidia_drivers(region) else ''
         }
 
     def _get_feasible_launchable_resources(
@@ -292,7 +293,7 @@ class Fluidstack(clouds.Cloud):
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
-        # TODO: Implement get_current_user_identity for Fluidstack
+        # TODO(mjibril): Implement get_current_user_identity for Fluidstack
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
@@ -308,7 +309,6 @@ class Fluidstack(clouds.Cloud):
                                 disk_tier: DiskTier) -> None:
         raise exceptions.NotSupportedError(
             'FluidStack does not support disk tiers.')
-
 
     @classmethod
     def default_username(cls, region: str) -> str:
@@ -334,28 +334,4 @@ class Fluidstack(clouds.Cloud):
         zone: Optional[str],
         **kwargs,
     ) -> List[status_lib.ClusterStatus]:
-        status_map = {
-            'provisioning': status_lib.ClusterStatus.INIT,
-            'requesting': status_lib.ClusterStatus.INIT,
-            'create': status_lib.ClusterStatus.INIT,
-            'customizing': status_lib.ClusterStatus.INIT,
-            'stopping': status_lib.ClusterStatus.STOPPED,
-            'stop': status_lib.ClusterStatus.STOPPED,
-            'start': status_lib.ClusterStatus.INIT,
-            'reboot': status_lib.ClusterStatus.STOPPED,
-            'rebooting': status_lib.ClusterStatus.STOPPED,
-            'stopped': status_lib.ClusterStatus.STOPPED,
-            'starting': status_lib.ClusterStatus.INIT,
-            'running': status_lib.ClusterStatus.UP,
-            'failed to create': status_lib.ClusterStatus.INIT,
-            'timeout error': status_lib.ClusterStatus.INIT,
-            'out of stock': status_lib.ClusterStatus.INIT,
-        }
-        status_list = []
-        filtered = fluidstack_utils.FluidstackClient().list_instances(
-            tag_filters)
-        for node in filtered:
-            node_status = status_map.get(node['status'], None)
-            if node_status is not None:
-                status_list.append(node_status)
-        return status_list
+        return []

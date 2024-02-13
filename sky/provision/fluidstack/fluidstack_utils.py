@@ -47,19 +47,17 @@ def raise_fluidstack_error(response: requests.Response) -> None:
             code=status_code) from e
     raise FluidstackAPIError(f'{message}', status_code)
 
-@functools.cache
-def with_nvidia_drivers(region : str):
+
+@functools.lru_cache()
+def with_nvidia_drivers(region: str):
     client = FluidstackClient()
     plans = client.get_plans()
     for plan in plans:
         if region in [r['id'] for r in plan['regions']]:
-            if "Ubuntu 20.04 LTS (Nvidia)" in plan["os_options"]:
+            if 'Ubuntu 20.04 LTS (Nvidia)' in plan['os_options']:
                 return True
     return False
 
-
-
-    
 
 class FluidstackClient:
     """FluidStack API Client"""
@@ -140,10 +138,11 @@ class FluidstackClient:
                 f'Plan {instance_type} out of stock in region {region}')
 
         ssh_key = self.get_or_add_ssh_key(ssh_pub_key)
-        os = "Ubuntu 20.04 LTS" if not with_nvidia_drivers(region) else "Ubuntu 20.04 LTS (Nvidia)"
+        os_id = 'Ubuntu 20.04 LTS' if not with_nvidia_drivers(
+            region) else 'Ubuntu 20.04 LTS (Nvidia)'
         body = dict(plan=None if config else instance_type,
                     region=regions[region],
-                    os=os,
+                    os=os_id,
                     hostname=hostname,
                     ssh_keys=[ssh_key['id']],
                     multiplicity=count,
