@@ -1,5 +1,7 @@
 import copy
 import logging
+import os
+import re
 import time
 from typing import Dict
 from uuid import uuid4
@@ -10,10 +12,14 @@ from ray.autoscaler.tags import NODE_KIND_HEAD
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from ray.autoscaler.tags import TAG_RAY_NODE_KIND
 
+from sky import exceptions
 from sky.adaptors import kubernetes
+from sky.backends import backend_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.skylet import constants
 from sky.skylet.providers.kubernetes import config
+from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
-from sky.utils import kubernetes_utils
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +67,7 @@ SSHCommandRunner.run = run_override_timeout
 
 def head_service_selector(cluster_name: str) -> Dict[str, str]:
     """Selector for Operator-configured head service."""
-    return {RAY_COMPONENT_LABEL: f'{cluster_name}-ray-head'}
+    return {RAY_COMPONENT_LABEL: f'{cluster_name}-head'}
 
 
 def to_label_selector(tags):
@@ -71,6 +77,20 @@ def to_label_selector(tags):
             label_selector += ','
         label_selector += '{}={}'.format(k, v)
     return label_selector
+
+
+def run_command_on_pods(node_name, node_namespace, command):
+    cmd_output = kubernetes.stream()(
+        kubernetes.core_api().connect_get_namespaced_pod_exec,
+        node_name,
+        node_namespace,
+        command=command,
+        stderr=True,
+        stdin=False,
+        stdout=True,
+        tty=False,
+        _request_timeout=kubernetes.API_TIMEOUT)
+    return cmd_output
 
 
 class KubernetesNodeProvider(NodeProvider):
@@ -133,11 +153,11 @@ class KubernetesNodeProvider(NodeProvider):
 
     def external_port(self, node_id):
         # Extract the NodePort of the head node's SSH service
-        # Node id is str e.g., example-cluster-ray-head-v89lb
+        # Node id is str e.g., example-cluster-head-v89lb
 
         # TODO(romilb): Implement caching here for performance.
         # TODO(romilb): Multi-node would need more handling here.
-        cluster_name = node_id.split('-ray-head')[0]
+        cluster_name = node_id.split('-head')[0]
         return kubernetes_utils.get_head_ssh_port(cluster_name, self.namespace)
 
     def internal_ip(self, node_id):
@@ -185,6 +205,23 @@ class KubernetesNodeProvider(NodeProvider):
                     raise
         # One more try
         self._set_node_tags(node_ids, tags)
+
+    def _recover_cluster_yaml_path(self, cluster_name_with_hash: str) -> str:
+        # 'cluster_name_with_hash' combines the cluster name and hash value,
+        # separated by a hyphen. By using 'slice_length', we remove the hash
+        # (and its preceding hyphen) to retrieve the original cluster name.
+        slice_length = -(common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME + 1)
+        cluster_name = cluster_name_with_hash[:slice_length]
+        cluster_yaml_path = (os.path.join(
+            os.path.expanduser(backend_utils.SKY_USER_FILE_PATH),
+            f'{cluster_name}.yml'))
+        # Check if cluster_yaml_path exists. If not, we are running on
+        # the master node in a multi-node setup, in which case we must use the
+        # default ~/.sky/sky_ray.yml path.
+        if not os.path.exists(cluster_yaml_path):
+            cluster_yaml_path = os.path.expanduser(
+                cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH)
+        return cluster_yaml_path
 
     def _set_node_tags(self, node_id, tags):
         pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
@@ -264,7 +301,7 @@ class KubernetesNodeProvider(NodeProvider):
                                              f'Details: \'{event_message}\' ')
         raise config.KubernetesError(f'{timeout_err_msg}')
 
-    def _wait_for_pods_to_schedule(self, new_nodes):
+    def _wait_for_pods_to_schedule(self, new_nodes_with_jump_pod):
         """Wait for all pods to be scheduled.
 
         Wait for all pods including jump pod to be scheduled, and if it
@@ -275,7 +312,7 @@ class KubernetesNodeProvider(NodeProvider):
         start_time = time.time()
         while time.time() - start_time < self.timeout:
             all_pods_scheduled = True
-            for node in new_nodes:
+            for node in new_nodes_with_jump_pod:
                 # Iterate over each pod to check their status
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
@@ -292,7 +329,7 @@ class KubernetesNodeProvider(NodeProvider):
 
         # Handle pod scheduling errors
         try:
-            self._raise_pod_scheduling_errors(new_nodes)
+            self._raise_pod_scheduling_errors(new_nodes_with_jump_pod)
         except config.KubernetesError:
             raise
         except Exception as e:
@@ -301,7 +338,7 @@ class KubernetesNodeProvider(NodeProvider):
                 'for pod scheduling failure. '
                 f'Error: {common_utils.format_exception(e)}') from None
 
-    def _wait_for_pods_to_run(self, new_nodes):
+    def _wait_for_pods_to_run(self, new_nodes_with_jump_pod):
         """Wait for pods and their containers to be ready.
 
         Pods may be pulling images or may be in the process of container
@@ -310,7 +347,7 @@ class KubernetesNodeProvider(NodeProvider):
         while True:
             all_pods_running = True
             # Iterate over each pod to check their status
-            for node in new_nodes:
+            for node in new_nodes_with_jump_pod:
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
 
@@ -345,6 +382,60 @@ class KubernetesNodeProvider(NodeProvider):
                 break
             time.sleep(1)
 
+    def _check_user_privilege(self, new_nodes):
+        # Checks if the default user has sufficient privilege to set up
+        # the kubernetes instance pod.
+        check_k8s_user_sudo_cmd = [
+            '/bin/sh',
+            '-c',
+            (
+                'if [ $(id -u) -eq 0 ]; then'
+                # If user is root, create an alias for sudo used in skypilot setup
+                '  echo \'alias sudo=""\' >> ~/.bashrc; '
+                'else '
+                '  if command -v sudo >/dev/null 2>&1; then '
+                '    timeout 2 sudo -l >/dev/null 2>&1 || '
+                f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+                '  else '
+                f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+                '  fi; '
+                'fi')
+        ]
+
+        for new_node in new_nodes:
+            privilege_check = run_command_on_pods(new_node.metadata.name,
+                                                  self.namespace,
+                                                  check_k8s_user_sudo_cmd)
+            if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
+                raise config.KubernetesError(
+                    'Insufficient system privileges detected. '
+                    'Ensure the default user has root access or '
+                    '"sudo" is installed and the user is added to the sudoers '
+                    'from the image.')
+
+    def _setup_ssh_in_pods(self, new_nodes):
+        # Setting up ssh for the pod instance. This is already setup for
+        # the jump pod so it does not need to be run for it.
+        set_k8s_ssh_cmd = [
+            '/bin/sh', '-c',
+            ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+             'export DEBIAN_FRONTEND=noninteractive;'
+             '$(prefix_cmd) apt-get update;'
+             '$(prefix_cmd) apt install openssh-server rsync -y; '
+             '$(prefix_cmd) mkdir -p /var/run/sshd; '
+             '$(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config; '
+             '$(prefix_cmd) sed "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd; '
+             'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
+             '$(prefix_cmd) mkdir -p ~/.ssh; '
+             '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys; '
+             '$(prefix_cmd) service ssh restart')
+        ]
+
+        # TODO(romilb): We need logging and surface errors here.
+        for new_node in new_nodes:
+            run_command_on_pods(new_node.metadata.name, self.namespace,
+                                set_k8s_ssh_cmd)
+
     def _set_env_vars_in_pods(self, new_nodes):
         """Setting environment variables in pods.
 
@@ -363,22 +454,33 @@ class KubernetesNodeProvider(NodeProvider):
         """
         set_k8s_env_var_cmd = [
             '/bin/sh', '-c',
-            ('printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
+            ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+             'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
              'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-             'sudo mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+             '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
         ]
 
         for new_node in new_nodes:
-            kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=set_k8s_env_var_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
+            run_command_on_pods(new_node.metadata.name, self.namespace,
+                                set_k8s_env_var_cmd)
+
+    def _update_ssh_user_config(self, new_nodes, cluster_name_with_hash):
+        get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
+        for new_node in new_nodes:
+            ssh_user = run_command_on_pods(new_node.metadata.name,
+                                           self.namespace, get_k8s_ssh_user_cmd)
+
+        cluster_yaml_path = self._recover_cluster_yaml_path(
+            cluster_name_with_hash)
+        with open(cluster_yaml_path, 'r') as f:
+            content = f.read()
+
+        # Replacing the default ssh user name with the actual user name.
+        # This updates user name specified in user's custom image if it's used.
+        content = re.sub(r'ssh_user: \w+', f'ssh_user: {ssh_user}', content)
+
+        with open(cluster_yaml_path, 'w') as f:
+            f.write(content)
 
     def create_node(self, node_config, tags, count):
         conf = copy.deepcopy(node_config)
@@ -423,17 +525,33 @@ class KubernetesNodeProvider(NodeProvider):
         # Adding the jump pod to the new_nodes list as well so it can be
         # checked if it's scheduled and running along with other pod instances.
         ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
+        new_nodes_with_jump_pod = new_nodes[:]
         jump_pod = kubernetes.core_api().read_namespaced_pod(
             ssh_jump_pod_name, self.namespace)
-        new_nodes.append(jump_pod)
+        new_nodes_with_jump_pod.append(jump_pod)
+        node_names = [node.metadata.name for node in new_nodes_with_jump_pod]
 
         # Wait until the pods are scheduled and surface cause for error
         # if there is one
-        self._wait_for_pods_to_schedule(new_nodes)
+        logger.info(config.log_prefix +
+                    f'Waiting for pods to schedule. Pods: {node_names}')
+        self._wait_for_pods_to_schedule(new_nodes_with_jump_pod)
         # Wait until the pods and their containers are up and running, and
         # fail early if there is an error
-        self._wait_for_pods_to_run(new_nodes)
+        logger.info(config.log_prefix +
+                    f'Waiting for pods to run. Pods: {node_names}')
+        self._wait_for_pods_to_run(new_nodes_with_jump_pod)
+        logger.info(config.log_prefix +
+                    f'Checking if user in image has sufficient privileges.')
+        self._check_user_privilege(new_nodes)
+        logger.info(config.log_prefix + f'Setting up SSH in pod.')
+        self._setup_ssh_in_pods(new_nodes)
+        logger.info(config.log_prefix +
+                    f'Setting up environment variables in pod.')
         self._set_env_vars_in_pods(new_nodes)
+        cluster_name_with_hash = conf['metadata']['labels']['skypilot-cluster']
+        logger.info(config.log_prefix + f'Fetching and updating ssh username.')
+        self._update_ssh_user_config(new_nodes, cluster_name_with_hash)
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
@@ -480,7 +598,7 @@ class KubernetesNodeProvider(NodeProvider):
                            log_prefix,
                            node_id,
                            auth_config,
-                           cluster_name,
+                           cluster_name_with_hash,
                            process_runner,
                            use_internal_ip,
                            docker_config=None):
@@ -492,7 +610,8 @@ class KubernetesNodeProvider(NodeProvider):
         node_id(str): the node ID.
         auth_config(dict): the authentication configs from the autoscaler
             yaml file.
-        cluster_name(str): the name of the cluster.
+        cluster_name_with_hash(str): the name of the cluster and hash value,
+            separated by a hyphen.
         process_runner(module): the module to use to run the commands
             in the CommandRunner. E.g., subprocess.
         use_internal_ip(bool): whether the node_id belongs to an internal ip
@@ -500,12 +619,23 @@ class KubernetesNodeProvider(NodeProvider):
         docker_config(dict): If set, the docker information of the docker
             container that commands should be run on.
         """
+        # For custom images, the username might differ across images.
+        # The 'ssh_user' is updated inplace in the YAML at the end of the
+        # 'create_node()' process in _update_ssh_user_config.
+        # Since the node provider is initialized with stale auth information,
+        # we need to reload the updated user from YAML.
+        cluster_yaml_path = self._recover_cluster_yaml_path(
+            cluster_name_with_hash)
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            cluster_yaml_path)
+        auth_config['ssh_user'] = ssh_credentials['ssh_user']
+
         common_args = {
             'log_prefix': log_prefix,
             'node_id': node_id,
             'provider': self,
             'auth_config': auth_config,
-            'cluster_name': cluster_name,
+            'cluster_name': cluster_name_with_hash,
             'process_runner': process_runner,
             'use_internal_ip': use_internal_ip,
         }

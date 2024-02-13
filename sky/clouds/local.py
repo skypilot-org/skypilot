@@ -137,9 +137,12 @@ class Local(clouds.Cloud):
         return [Local.LOCAL_REGION]
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
         return {}
 
     def _get_feasible_launchable_resources(
@@ -158,17 +161,6 @@ class Local(clouds.Cloud):
             accelerators=None,
         )
         return [resources], []
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        # In the public cloud case, an accelerator may not be in a region/zone.
-        # in the local cloud case, however, the region/zone is defined to be the
-        # location of the local cluster. This means that the local cluster's
-        # accelerators are guaranteed to be found within the region.
-        return True
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:

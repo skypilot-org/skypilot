@@ -4,7 +4,7 @@ import math
 from typing import Any, Dict, Union
 
 from sky.adaptors import kubernetes
-from sky.utils import kubernetes_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 
 logger = logging.getLogger(__name__)
 

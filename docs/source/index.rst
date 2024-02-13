@@ -47,7 +47,7 @@ SkyPilot **cuts your cloud costs**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported providers (AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, IBM, Samsung, Cloudflare, any Kubernetes cluster):
+Current supported providers (AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, IBM, Samsung, Cloudflare, VMware vSphere, any Kubernetes cluster):
 
 .. raw:: html
 
@@ -65,13 +65,17 @@ Tutorials: `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutoria
 
 Runnable examples:
 
+.. Keep this section in sync with README.md in SkyPilot repo
 * **LLMs on SkyPilot**
 
   * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)
+  * `Code Llama <https://github.com/skypilot-org/skypilot/tree/master/llm/codellama/>`_
   * `vLLM: Serving LLM 24x Faster On the Cloud <https://github.com/skypilot-org/skypilot/tree/master/llm/vllm>`_ (from official vLLM team)
+  * `SGLang: Fast and Expressive LLM Serving On the Cloud <https://github.com/skypilot-org/skypilot/tree/master//llm/sglang/>`_ (from official SGLang team)
   * `Vicuna chatbots: Training & Serving <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_ (from official Vicuna team)
   * `Train your own Vicuna on Llama-2 <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna-llama-2>`_
   * `Self-Hosted Llama-2 Chatbot <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2>`_
+  * `LoRAX <https://github.com/skypilot-org/skypilot/tree/master/llm/lorax/>`_
   * `QLoRA <https://github.com/artidoro/qlora/pull/132>`_
   * `LLaMA-LoRA-Tuner <https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot>`_
   * `Tabby: Self-hosted AI coding assistant <https://github.com/TabbyML/tabby/blob/bed723fcedb44a6b867ce22a7b1f03d2f3531c1e/experimental/eval/skypilot.yaml>`_
@@ -122,6 +126,7 @@ Documentation
    serving/sky-serve
    serving/service-yaml-spec
    serving/autoscaling
+   serving/update
 
 .. toctree::
    :maxdepth: 1

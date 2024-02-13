@@ -80,9 +80,9 @@ class Autoscaler:
                          f'latest version: {self.latest_version}')
             return
         self.latest_version = version
-        self.min_nodes = spec.min_replicas
-        self.max_nodes = (spec.max_replicas if spec.max_replicas is not None
-                          else spec.min_replicas)
+        self.min_replicas = spec.min_replicas
+        self.max_replicas = (spec.max_replicas if spec.max_replicas is not None
+                             else spec.min_replicas)
         # Reclip self.target_num_replicas with new min and max replicas.
         self.target_num_replicas = max(
             self.min_replicas, min(self.max_replicas, self.target_num_replicas))
@@ -160,6 +160,7 @@ class RequestRateAutoscaler(Autoscaler):
         self.scale_down_consecutive_periods = int(
             downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+        self.bootstrap_done = False
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -183,6 +184,8 @@ class RequestRateAutoscaler(Autoscaler):
         # is not enabled, i.e. self.target_qps_per_replica is None.
         # In this case, self.target_num_replicas will be min_replicas.
         if self.target_qps_per_replica is None:
+            # self.bootstrap_done will not have effect.
+            self.bootstrap_done = True
             return self.target_num_replicas
 
         # Convert to requests per second.
@@ -193,7 +196,8 @@ class RequestRateAutoscaler(Autoscaler):
         target_num_replicas = max(self.min_replicas,
                                   min(self.max_replicas, target_num_replicas))
         logger.info(f'Requests per second: {num_requests_per_second}, '
-                    f'Current target number of replicas: {target_num_replicas}')
+                    'Current/proposed target number of replicas: '
+                    f'{self.target_num_replicas}/{target_num_replicas}')
 
         if not self.bootstrap_done or self.target_num_replicas == 0:
             self.bootstrap_done = True
