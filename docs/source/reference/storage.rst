@@ -3,7 +3,100 @@
 Accessing Object Stores
 =======================
 
-SkyPilot tasks can access objects in cloud object stores (e.g., S3, GCS, R2, IBM). SkyPilot can "mount" these object stores a
+SkyPilot tasks can access objects in cloud object stores (e.g., S3, GCS, R2, IBM).
+These objects are made available to the task at a local path on the remote VM, so
+the task can access these objects as if they were local files.
+
+SkyPilot provides two ways to access cloud object stores:
+
+1. **MOUNT** mode: The object store is directly "mounted" to the remote VM. I.e., files are streamed when accessed by the task and all writes are replicated to remote bucket (and any other VMs mounting the same bucket).
+2. **COPY** mode: The files are pre-fetched and cached on the local disk. Writes are not replicated on the remote store.
+
+.. TODO(romilb): Add infographic here
+
+These are specified using the :code:`file_mounts` field in a SkyPilot task.
+
+Common Use Cases
+----------------
+
+.. tab-set::
+
+    .. tab-item:: Mount an existing bucket
+        :sync: existing-bucket-tab
+
+        To mount a bucket created externally (e.g., through cloud CLI or other tools),
+        specify ``source``.
+        For example, to mount a S3 bucket, use the following syntax:
+
+        .. code-block:: yaml
+
+          # Mount an existing S3 bucket
+          file_mounts:
+            /mydata:
+                source: s3://my-bucket/ # or gs://, r2://, cos://<region>/<bucket>
+                mode: MOUNT  # Optional - either MOUNT or COPY. Default to MOUNT.
+
+
+    .. tab-item:: Create a new bucket
+        :sync: new-bucket-tab
+
+        To create a new bucket and upload local files to this bucket,
+        specify ``name`` and ``source``, where ``source`` is a local path.
+
+        .. code-block:: yaml
+
+          # Create a new S3 bucket and upload local data
+          file_mounts:
+            /mydata:
+                name: my-sky-bucket
+                source: ~/dataset   # Optional - path to local data to upload to the bucket
+                store: s3   # Optional - either of s3, gcs, r2, ibm
+
+        SkyPilot will create a S3 bucket called ``my-sky-bucket` and upload the
+        contents of ``~/dataset`` to it.
+
+        If the bucket already exists and was created by SkyPilot, SkyPilot will fetch
+        and re-use the bucket.
+
+        If ``store`` is omitted, SkyPilot will use the same cloud provider as the task's cloud.
+
+    .. tab-item:: Create an empty bucket
+        :sync: empty-bucket-tab
+
+        To create an empty bucket, specify only the ``name`` and omit the ``source``.
+
+        .. code-block:: yaml
+
+          # Create an empty gcs bucket
+          file_mounts:
+            /mydata:
+                name: my-sky-bucket
+                store: gcs   # Optional - either of s3, gcs, r2, ibm
+
+        This empty bucket can be used to write checkpoints or other data.
+        Since writes are replicated in **MOUNT** mode (set by default),
+        it can also act as a shared file system across workers running on different nodes.
+
+Considerations
+--------------
+
+
+.. note::
+    sky.Storage does not guarantee preservation of file
+    permissions - you may need to set file permissions during task execution.
+
+API Reference
+-------------
+
+.. code-block:: yaml
+
+    file_mounts:
+      /mybucket:
+        name: my-sky-bucket # Make sure it is unique or you own this bucket name
+        source: ~/dataset # Contents of the store. Can be local or an object store path.
+        store: s3 # Could be either of [s3, gcs, r2]. Defaults to None.
+        persistent: True  # Set to False to delete the bucket after the task is done. Defaults to True.
+        mode: MOUNT  # MOUNT or COPY. Defaults to MOUNT if not specified
 
 
 A SkyPilot Storage object represents an abstract data store containing large data
@@ -24,10 +117,6 @@ A storage object can used in either :code:`MOUNT` mode or :code:`COPY` mode.
 
 * In :code:`COPY` mode, the files are pre-fetched and cached on the local disk.
   Writes are not replicated on the remote store.
-
-.. note::
-    sky.Storage does not guarantee preservation of file
-    permissions - you may need to set file permissions during task execution.
 
 Using SkyPilot Storage
 ----------------------
