@@ -679,8 +679,16 @@ def prepare_replica_logs_for_download(service_name: str,
                 replica_log_file.write(
                     f'Failed to sync down job logs from replica {replica_id}.\n'
                 )
-        logger.info(f'Managed sync down logs for replica {replica_id}')
-    logger.info('Finished preparing replica logs for download')
+        logger.info(
+            f'{service_name}: Managed sync down logs for replica {replica_id}')
+    logger.info(f'{service_name}: Finished preparing replica logs for download')
+
+
+def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_to_remove = os.path.join(dir_name, timestamp)
+    shutil.rmtree(dir_to_remove)
+    logger.info(f'{service_name}: Finished removing replica logs')
 
 
 def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
@@ -927,6 +935,16 @@ class ServeCodeGen:
                                           timestamp: str) -> str:
         code = [
             'msg = service_utils.prepare_replica_logs_for_download('
+            f'{service_name!r}, {timestamp!r})',
+            'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def remove_replica_logs_for_download(cls, service_name: str,
+                                         timestamp: str) -> str:
+        code = [
+            'msg = service_utils.remove_replica_logs_for_download('
             f'{service_name!r}, {timestamp!r})',
             'print(msg, end="", flush=True)'
         ]

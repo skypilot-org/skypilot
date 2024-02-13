@@ -609,17 +609,18 @@ def sync_down(service_name: str) -> None:
                  stream_logs=False)
 
     timestamp = backend_utils.get_run_timestamp()
-    code = serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
+    download_code = serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
         service_name, timestamp)
     backend = backend_utils.get_backend_from_handle(controller_handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
-    returncode, _, _ = backend.run_on_head(controller_handle,
-                                           code,
-                                           require_outputs=False,
-                                           stream_logs=False)
+    download_returncode, _, _ = backend.run_on_head(controller_handle,
+                                                    download_code,
+                                                    require_outputs=False,
+                                                    stream_logs=False)
     subprocess_utils.handle_returncode(
-        returncode, code, 'Failed to prepare logs to sync down for replicas.')
+        download_returncode, download_code,
+        'Failed to prepare replica logs to sync down.')
     remote_service_dir_name = serve_utils.generate_remote_service_dir_name(
         service_name)
     dir_for_download = os.path.join(remote_service_dir_name, timestamp)
@@ -627,7 +628,15 @@ def sync_down(service_name: str) -> None:
                  target=target_directory,
                  up=False,
                  stream_logs=False)
-    # clean up the prepared replica log files
+    remove_code = serve_utils.ServeCodeGen.remove_replica_logs_for_download(
+        service_name, timestamp)
+    remove_returncode, _, _ = backend.run_on_head(controller_handle,
+                                                  remove_code,
+                                                  require_outputs=False,
+                                                  stream_logs=False)
+    subprocess_utils.handle_returncode(
+        remove_returncode, remove_code,
+        'Failed to remove the replica logs for download on the controller.')
 
 
 @usage_lib.entrypoint
