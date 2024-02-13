@@ -7,7 +7,6 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import requests
 
 from sky import clouds
-from sky import exceptions
 from sky import status_lib
 from sky.clouds import service_catalog
 from sky.provision.fluidstack import fluidstack_utils
@@ -37,8 +36,8 @@ class Fluidstack(clouds.Cloud):
 
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP:
-            'FluidStack cloud does not support'
-            ' stopping VMs. for all DCs',
+            'Stopping clusters in FluidStack'
+            ' is not supported in SkyPilot',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             'Migrating '
             f'disk is not supported in {_REPR}.',
@@ -50,7 +49,7 @@ class Fluidstack(clouds.Cloud):
             f'is not supported for {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
-            f' are not supported in {_REPR}.',
+            f' is not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             'Opening ports'
             f'is not supported in {_REPR}.',
@@ -200,15 +199,13 @@ class Fluidstack(clouds.Cloud):
         sudo apt-get -y install cuda-toolkit-12-3;
         sudo apt-get install -y cuda-drivers;
         sudo apt-get install -y python3-pip;
-        nvidia-smi;"""
+        nvidia-smi || sudo reboot;"""
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'fluidstack_username': self.default_username(region.name),
-            'cuda_installation_commands':
-                cuda_installation_commands
-                if not fluidstack_utils.with_nvidia_drivers(region) else ''
+            'cuda_installation_commands': cuda_installation_commands,
         }
 
     def _get_feasible_launchable_resources(
@@ -303,12 +300,6 @@ class Fluidstack(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='fluidstack')
-
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: Optional[str],
-                                disk_tier: DiskTier) -> None:
-        raise exceptions.NotSupportedError(
-            'FluidStack does not support disk tiers.')
 
     @classmethod
     def default_username(cls, region: str) -> str:

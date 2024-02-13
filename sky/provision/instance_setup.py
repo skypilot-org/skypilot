@@ -241,6 +241,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         ray_options += f' --resources=\'{custom_resource}\''
 
     if cluster_info.custom_ray_options:
+        if 'use_external_ip' in cluster_info.custom_ray_options:
+            cluster_info.custom_ray_options.pop('use_external_ip')
         for key, value in cluster_info.custom_ray_options.items():
             ray_options += f' --{key}={value}'
 
@@ -296,11 +298,19 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 
     head_instance = cluster_info.get_head_instance()
     assert head_instance is not None, cluster_info
-    head_private_ip = head_instance.internal_ip
+    use_external_ip = False
+    if cluster_info.custom_ray_options:
+        # Some cloud providers, e.g. fluidstack, cannot connect to the internal
+        # IP of the head node from the worker nodes. In this case, we need to
+        # use the external IP of the head node.
+        use_external_ip = cluster_info.custom_ray_options.pop(
+            'use_external_ip', False)
+    head_ip = (head_instance.internal_ip
+               if not use_external_ip else head_instance.external_ip)
 
-    ray_options = (
-        f'--address={head_private_ip}:{constants.SKY_REMOTE_RAY_PORT} '
-        f'--object-manager-port=8076')
+    ray_options = (f'--address={head_ip}:{constants.SKY_REMOTE_RAY_PORT} '
+                   f'--object-manager-port=8076')
+
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
@@ -321,7 +331,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         # Instead, we check whether the raylet process is running on gcs address
         # that is connected to the head with the correct port.
         cmd = (f'RAY_PORT={ray_port}; ps aux | grep "ray/raylet/raylet" | '
-               f'grep "gcs-address={head_private_ip}:${{RAY_PORT}}" || '
+               f'grep "gcs-address={head_ip}:${{RAY_PORT}}" || '
                f'{{ {cmd} }}')
     else:
         cmd = 'ray stop; ' + cmd

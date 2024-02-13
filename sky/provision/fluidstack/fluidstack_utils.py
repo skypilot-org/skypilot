@@ -21,7 +21,7 @@ FLUIDSTACK_API_TOKEN_PATH = '~/.fluidstack/api_token'
 
 
 def read_contents(path: str) -> str:
-    with open(path, mode='r') as f:
+    with open(path, mode='r', encoding='utf-8') as f:
         return f.read().strip()
 
 
@@ -50,6 +50,8 @@ def raise_fluidstack_error(response: requests.Response) -> None:
 
 @functools.lru_cache()
 def with_nvidia_drivers(region: str):
+    if region in ['norway_4_eu', 'generic_1_canada']:
+        return False
     client = FluidstackClient()
     plans = client.get_plans()
     for plan in plans:
@@ -138,8 +140,7 @@ class FluidstackClient:
                 f'Plan {instance_type} out of stock in region {region}')
 
         ssh_key = self.get_or_add_ssh_key(ssh_pub_key)
-        os_id = 'Ubuntu 20.04 LTS' if not with_nvidia_drivers(
-            region) else 'Ubuntu 20.04 LTS (Nvidia)'
+        os_id = 'Ubuntu 20.04 LTS'
         body = dict(plan=None if config else instance_type,
                     region=regions[region],
                     os=os_id,

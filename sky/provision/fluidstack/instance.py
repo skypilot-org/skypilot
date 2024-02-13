@@ -3,6 +3,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from sky import authentication as auth
+from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
@@ -31,13 +32,13 @@ def get_internal_ip(node_info: Dict[str, Any]) -> None:
     result = runner.run(_GET_INTERNAL_IP_CMD,
                         require_outputs=True,
                         stream_logs=False)
-    # rc, stdout, stderr = result
+
     if result[0] != 0:
-        logger.error('Failed get obtain private IP from node')
-    # subprocess_utils.handle_returncode(rc,
-    #                                  _GET_INTERNAL_IP_CMD,
-    #                                  'Failed get obtain private IP from node',
-    #                                   stderr=stdout + stderr)
+        # Some DCs do not have internal IPs and can fail when getting
+        # the IP. We set the `internal_ip` to the same as
+        # external IP. It should be fine as the `ray cluster`
+        # will also get and use that external IP in that case.
+        logger.debug('Failed get obtain private IP from node')
     else:
         node_info['internal_ip'] = result[1].strip()
 
@@ -223,10 +224,9 @@ def get_cluster_info(
         if instance_info['hostname'].endswith('-head'):
             head_instance_id = instance_id
 
-    return common.ClusterInfo(
-        instances=instances,
-        head_instance_id=head_instance_id,
-    )
+    return common.ClusterInfo(instances=instances,
+                              head_instance_id=head_instance_id,
+                              custom_ray_options={'use_external_ip': True})
 
 
 def query_instances(
@@ -254,9 +254,14 @@ def query_instances(
         'failed to create': status_lib.ClusterStatus.INIT,
         'timeout error': status_lib.ClusterStatus.INIT,
         'out of stock': status_lib.ClusterStatus.INIT,
+        'terminated': None,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
     for inst_id, inst in instances.items():
+        if inst['status'] not in status_map:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    f'Failed to parse status from Fluidstack: {inst["status"]}')
         status = status_map.get(inst['status'], None)
         if non_terminated_only and status is None:
             continue

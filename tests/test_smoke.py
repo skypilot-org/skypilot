@@ -1012,7 +1012,7 @@ def test_cli_logs(generic_cloud: str):
         f'sky logs {name} * --sync-down',
         f'sky logs {name} 1 | grep "{timestamp} 1"',
         f'sky logs {name} | grep "{timestamp} 4"',
-    ], f'sky down -y {name}', _get_timeout(generic_cloud))
+    ], f'sky down -y {name}')
     run_one_test(test)
 
 

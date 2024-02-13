@@ -96,7 +96,8 @@ def create_catalog(output_dir: str) -> None:
     plans = plans + [
         plan for plan in custom_plans for plan in plans_from_custom_plan(plan)
     ]
-    with open(os.path.join(output_dir, 'vms.csv'), mode='w') as f:
+    with open(os.path.join(output_dir, 'vms.csv'), mode='w',
+              encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
         writer.writerow([
             'InstanceType',
@@ -153,5 +154,5 @@ def create_catalog(output_dir: str) -> None:
 if __name__ == '__main__':
 
     os.makedirs('fluidstack', exist_ok=True)
-    create_catalog('fluidstack/vms.csv')
+    create_catalog('fluidstack')
     print('Fluidstack catalog saved to {}/vms.csv'.format('fluidstack'))

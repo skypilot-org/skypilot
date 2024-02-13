@@ -15,7 +15,7 @@ if typing.TYPE_CHECKING:
 _df = common.read_catalog('fluidstack/vms.csv')
 
 # Number of vCPUS for gpu_1x_a10
-_DEFAULT_NUM_VCPUS = 30
+_DEFAULT_NUM_VCPUS = 6
 _DEFAULT_MEMORY_CPU_RATIO = 4
 
 
@@ -119,8 +119,10 @@ def list_accelerators(
     quantity_filter: Optional[int],
     case_sensitive: bool = True,
     all_regions: bool = False,
+    require_price: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Fluidstack offering GPUs."""
+    del require_price
     return common.list_accelerators_impl('Fluidstack', _df, gpus_only,
                                          name_filter, region_filter,
                                          quantity_filter, case_sensitive,
