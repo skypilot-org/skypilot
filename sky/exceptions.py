@@ -272,7 +272,3 @@ class ServeUserTerminatedError(Exception):
 
 class PortDoesNotExistError(Exception):
     """Raised when the port does not exist."""
-
-
-class PortCleanUpError(Exception):
-    """Raised when cleaning up the ports as post teardown process."""
