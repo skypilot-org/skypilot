@@ -614,10 +614,10 @@ def sync_down(service_name: str) -> None:
     backend = backend_utils.get_backend_from_handle(controller_handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
-    prepare_returncode, _, _ = backend.run_on_head(controller_handle,
-                                                   prepare_code,
-                                                   require_outputs=False,
-                                                   stream_logs=False)
+    prepare_returncode = backend.run_on_head(controller_handle,
+                                             prepare_code,
+                                             require_outputs=False,
+                                             stream_logs=True)
     subprocess_utils.handle_returncode(
         prepare_returncode, prepare_code,
         'Failed to prepare replica logs to sync down.')

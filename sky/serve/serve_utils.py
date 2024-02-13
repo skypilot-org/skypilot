@@ -627,6 +627,7 @@ def extract_replica_id_from_launch_log_file_name(file_name: str) -> int:
 
 def prepare_replica_logs_for_download(service_name: str,
                                       timestamp: str) -> None:
+    logger.info('Preparing replica logs for download')
     dir_name = generate_remote_service_dir_name(service_name)
     dir_for_download = os.path.join(dir_name, timestamp)
     os.makedirs(dir_for_download, exist_ok=True)
@@ -934,7 +935,7 @@ class ServeCodeGen:
     def prepare_replica_logs_for_download(cls, service_name: str,
                                           timestamp: str) -> str:
         code = [
-            'msg = service_utils.prepare_replica_logs_for_download('
+            'msg = serve_utils.prepare_replica_logs_for_download('
             f'{service_name!r}, {timestamp!r})',
             'print(msg, end="", flush=True)'
         ]
@@ -944,7 +945,7 @@ class ServeCodeGen:
     def remove_replica_logs_for_download(cls, service_name: str,
                                          timestamp: str) -> str:
         code = [
-            'msg = service_utils.remove_replica_logs_for_download('
+            'msg = serve_utils.remove_replica_logs_for_download('
             f'{service_name!r}, {timestamp!r})',
             'print(msg, end="", flush=True)'
         ]
