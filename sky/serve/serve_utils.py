@@ -615,8 +615,6 @@ def stream_replica_logs(service_name: str, replica_id: int,
     return ''
 
 
-# todo: write tests
-# in tests, can include examples for different operating systems
 def extract_replica_id_from_launch_log_file_name(file_name: str) -> int:
     pattern = r'.*replica_(\d+)_launch.log'
     match = re.search(pattern, file_name)
