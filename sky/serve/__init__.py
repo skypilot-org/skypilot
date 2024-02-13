@@ -4,6 +4,7 @@ import os
 from sky.serve.constants import ENDPOINT_PROBE_INTERVAL_SECONDS
 from sky.serve.constants import INITIAL_VERSION
 from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL_SECONDS
+from sky.serve.constants import SKY_SERVE_CONTROLLER_NAME
 from sky.serve.constants import SKYSERVE_METADATA_DIR
 from sky.serve.core import down
 from sky.serve.core import status
@@ -19,7 +20,6 @@ from sky.serve.serve_utils import generate_service_name
 from sky.serve.serve_utils import get_endpoint
 from sky.serve.serve_utils import ServeCodeGen
 from sky.serve.serve_utils import ServiceComponent
-from sky.serve.serve_utils import SKY_SERVE_CONTROLLER_NAME
 from sky.serve.service_spec import SkyServiceSpec
 
 os.makedirs(os.path.expanduser(SKYSERVE_METADATA_DIR), exist_ok=True)
@@ -27,6 +27,7 @@ os.makedirs(os.path.expanduser(SKYSERVE_METADATA_DIR), exist_ok=True)
 __all__ = [
     'down',
     'ENDPOINT_PROBE_INTERVAL_SECONDS',
+    'SKY_SERVE_CONTROLLER_NAME',
     'format_service_table',
     'generate_replica_cluster_name',
     'generate_service_name',
@@ -38,9 +39,9 @@ __all__ = [
     'ServiceStatus',
     'ServeCodeGen',
     'SkyServiceSpec',
-    'SKY_SERVE_CONTROLLER_NAME',
     'SKYSERVE_METADATA_DIR',
     'status',
+    'sync_down',
     'tail_logs',
     'up',
     'update',

@@ -1,4 +1,5 @@
 """Constants used for SkyServe."""
+from sky.utils import common_utils
 
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
@@ -66,3 +67,7 @@ LOAD_BALANCER_PORT_RANGE = '30001-30100'
 
 # Initial version of service.
 INITIAL_VERSION = 1
+
+# Placed here to solve circular import
+SKY_SERVE_CONTROLLER_NAME: str = (
+    f'sky-serve-controller-{common_utils.get_user_hash()}')
