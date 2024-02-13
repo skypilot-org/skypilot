@@ -1,6 +1,7 @@
 """User interface with the SkyServe."""
 import base64
 import enum
+import glob
 import os
 import pathlib
 import pickle
@@ -22,18 +23,22 @@ import requests
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky import status_lib
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
+
+logger = sky_logging.init_logger(__name__)
 
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
@@ -613,9 +618,74 @@ def stream_replica_logs(service_name: str, replica_id: int,
     return ''
 
 
+# todo: write tests
+# in tests, can include examples for different operating systems
+def extract_replica_id_from_launch_log_file_name(file_name: str) -> int:
+    pattern = r'.*replica_(\d+)_launch.log'
+    match = re.search(pattern, file_name)
+    if match:
+        return int(match.group(1))
+    else:
+        raise ValueError(
+            f'Failed to get replica id from file name: {file_name}')
+
+
 def prepare_replica_logs_for_download(service_name: str,
                                       timestamp: str) -> None:
-    print(service_name, timestamp)
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_for_download = os.path.join(dir_name, timestamp)
+    os.makedirs(dir_for_download, exist_ok=True)
+
+    # copy over log files of replicas already terminated
+    log_file_pattern = os.path.join(dir_name, 'replica_*.log')
+    log_files = glob.glob(log_file_pattern)
+    for file_path in log_files:
+        shutil.copy(file_path, dir_for_download)
+
+    # manage log files of replicas with launch log files
+    launch_log_file_pattern = os.path.join(dir_name, 'replica_*_launch.log')
+    launch_log_files = glob.glob(launch_log_file_pattern)
+    for launch_log_file in launch_log_files:
+        replica_id = extract_replica_id_from_launch_log_file_name(
+            launch_log_file)
+        replica_info = serve_state.get_replica_info_from_id(
+            service_name, replica_id)
+        if replica_info is None:
+            raise ValueError(
+                _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
+
+        new_replica_log_file = os.path.join(dir_for_download,
+                                            f'replica_{replica_id}.log')
+        shutil.copy(launch_log_file, new_replica_log_file)
+        if replica_info.status == serve_state.ReplicaStatus.PENDING:
+            continue
+        backend = backends.CloudVmRayBackend()
+        handle = global_user_state.get_handle_from_cluster_name(
+            replica_info.cluster_name)
+        if handle is None:
+            logger.error(f'Cannot find cluster {replica_info.cluster_name} for '
+                         f'replica {replica_id} in the cluster table. '
+                         'Skipping syncing down job logs.')
+            continue
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        replica_job_logs_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
+                                            'replica_jobs')
+        job_log_file_name = controller_utils.download_and_stream_latest_job_log(
+            backend, handle, replica_job_logs_dir)
+        if job_log_file_name is not None:
+            logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
+            with open(new_replica_log_file,
+                      'a') as replica_log_file, open(job_log_file_name,
+                                                     'r') as job_file:
+                replica_log_file.write(job_file.read())
+            os.remove(job_log_file_name)
+        else:
+            with open(new_replica_log_file, 'a') as replica_log_file:
+                replica_log_file.write(
+                    f'Failed to sync down job logs from replica {replica_id}.\n'
+                )
+        logger.info(f'Managed sync down logs for replica {replica_id}')
+    logger.info('Finished preparing replica logs for download')
 
 
 def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],

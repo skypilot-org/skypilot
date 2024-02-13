@@ -623,7 +623,14 @@ def sync_down(service_name: str) -> None:
                                            stream_logs=False)
     subprocess_utils.handle_returncode(
         returncode, code, 'Failed to prepare logs to sync down for replicas.')
-    # sync down logs in timestamped directory
+    remote_service_dir_name = serve_utils.generate_remote_service_dir_name(
+        service_name)
+    dir_for_download = os.path.join(remote_service_dir_name, timestamp)
+    runner.rsync(source=dir_for_download,
+                 target=target_directory,
+                 up=False,
+                 stream_logs=False)
+    # clean up the prepared replica log files
 
 
 @usage_lib.entrypoint
