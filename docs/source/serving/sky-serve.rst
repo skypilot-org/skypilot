@@ -590,6 +590,6 @@ You can also :ref:`use docker containers as runtime environment <docker-containe
       accelerators: A100:1
       image_id: docker:docker-image-with-dependency-installed
 
-    # Here goes the setup and run commands...
+    # Followed by setup and run commands.
 
 This is easier to configure than machine images, but it may have a longer startup time than machine images since it needs to pull the docker image from the registry in addition to the usual VM setup.
