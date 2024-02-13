@@ -28,5 +28,5 @@ class Metadata:
         self.metadata.pop(cluster_name, None)
 
     def save(self) -> None:
-        with open(self.path, 'w') as f:
+        with open(self.path, 'w', encoding='utf-8') as f:
             json.dump(self.metadata, f)

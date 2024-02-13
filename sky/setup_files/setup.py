@@ -93,7 +93,7 @@ def replace_commit_hash():
                              f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
                              content,
                              flags=re.M)
-        with open(INIT_FILE_PATH, 'w') as fp:
+        with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:
             fp.write(content)
     except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
@@ -106,7 +106,7 @@ def replace_commit_hash():
 def revert_commit_hash():
     try:
         if original_init_content is not None:
-            with open(INIT_FILE_PATH, 'w') as fp:
+            with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:
                 fp.write(original_init_content)
     except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write

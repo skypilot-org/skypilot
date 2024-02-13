@@ -127,9 +127,9 @@ def read_catalog(filename: str,
                 else:
                     # Download successful, save the catalog to a local file.
                     os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-                    with open(catalog_path, 'w') as f:
+                    with open(catalog_path, 'w', encoding='utf-8') as f:
                         f.write(r.text)
-                    with open(meta_path + '.md5', 'w') as f:
+                    with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
                         f.write(hashlib.md5(r.text.encode()).hexdigest())
 
     try:

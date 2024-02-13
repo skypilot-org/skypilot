@@ -3336,7 +3336,7 @@ class TestStorageWithCredentials:
             path = os.path.join(base_path, name)
             if substructure is None:
                 # Create a file
-                open(path, 'a').close()
+                open(path, 'a', encoding='utf-8').close()
             else:
                 # Create a subdirectory
                 os.mkdir(path)

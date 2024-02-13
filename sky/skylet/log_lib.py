@@ -65,7 +65,7 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                       if args.line_processor is None else args.line_processor)
 
     out = []
-    with open(args.log_path, 'a') as fout:
+    with open(args.log_path, 'a', encoding='utf-8') as fout:
         with line_processor:
             while True:
                 line = out_io.readline()

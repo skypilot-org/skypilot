@@ -482,7 +482,7 @@ class SSHConfigHelper(object):
 
         if not os.path.exists(config_path):
             config = ['\n']
-            with open(config_path, 'w') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 f.writelines(config)
             os.chmod(config_path, 0o644)
 
@@ -504,7 +504,7 @@ class SSHConfigHelper(object):
                 break
         if not found:
             # Did not find Include string. Insert `Include` lines.
-            with open(config_path, 'w') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 config.insert(
                     0,
                     f'# Added by SkyPilot for ssh config of all clusters\n{include_str}\n'
@@ -539,7 +539,7 @@ class SSHConfigHelper(object):
         cluster_config_path = os.path.expanduser(
             cls.ssh_cluster_path.format(cluster_name))
 
-        with open(cluster_config_path, 'w') as f:
+        with open(cluster_config_path, 'w', encoding='utf-8') as f:
             f.write(codegen)
 
     @classmethod
@@ -619,7 +619,7 @@ class SSHConfigHelper(object):
             config[prev_end_line_idx:end_line_idx] = [
                 '\n'
             ] if end_line_idx is not None else []
-            with open(config_path, 'w') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 f.write(''.join(config).strip())
                 f.write('\n' * 2)
 
@@ -632,7 +632,7 @@ class SSHConfigHelper(object):
         for i, line in enumerate(config):
             config_str = line.strip()
             if f'Include {cluster_config_path}' in config_str:
-                with open(config_path, 'w') as f:
+                with open(config_path, 'w', encoding='utf-8') as f:
                     if i < len(config) - 1 and config[i + 1] == '\n':
                         del config[i + 1]
                     # Delete Include string
@@ -942,7 +942,7 @@ def write_cluster_config(
             new_yaml_content, old_yaml_content,
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
             _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
-        with open(tmp_yaml_path, 'w') as f:
+        with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
     # Read the cluster name from the tmp yaml file, to take the backward

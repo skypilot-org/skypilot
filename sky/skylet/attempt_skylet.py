@@ -22,7 +22,7 @@ def restart_skylet():
         ' >> ~/.sky/skylet.log 2>&1 &',
         shell=True,
         check=True)
-    with open(VERSION_FILE, 'w') as v_f:
+    with open(VERSION_FILE, 'w', encoding='utf-8') as v_f:
         v_f.write(constants.SKYLET_VERSION)
 
 

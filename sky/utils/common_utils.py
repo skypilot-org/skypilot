@@ -96,7 +96,7 @@ def get_user_hash() -> str:
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    with open(_USER_HASH_FILE, 'w') as f:
+    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
         f.write(user_hash)
     return user_hash
 
@@ -301,7 +301,7 @@ def read_yaml_all(path: str) -> List[Dict[str, Any]]:
 
 
 def dump_yaml(path, config) -> None:
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write(dump_yaml_str(config))
 
 
@@ -624,5 +624,5 @@ def fill_template(template_name: str, variables: Dict,
     # Write out yaml config.
     j2_template = jinja2.Template(template)
     content = j2_template.render(**variables)
-    with open(output_path, 'w') as fout:
+    with open(output_path, 'w', encoding='utf-8') as fout:
         fout.write(content)

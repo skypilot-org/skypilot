@@ -92,7 +92,7 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
     ) as f:
         f.write(private_key)
 
-    with open(public_key_path, 'w') as f:
+    with open(public_key_path, 'w', encoding='utf-8') as f:
         f.write(public_key)
 
 

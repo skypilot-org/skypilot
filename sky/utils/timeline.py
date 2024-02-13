@@ -127,7 +127,7 @@ def _save_timeline(file_path: str):
         }
     }
     os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
-    with open(file_path, 'w') as f:
+    with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(json_output, f)
 
 

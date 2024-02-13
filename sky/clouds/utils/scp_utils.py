@@ -72,7 +72,7 @@ class Metadata:
         else:
             metadata[instance_id] = value
         # Write to metadata file
-        with open(self.path, 'w') as f:
+        with open(self.path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f)
 
     def refresh(self, instance_ids: List[str]) -> None:
@@ -87,7 +87,7 @@ class Metadata:
         if len(metadata) == 0:
             os.remove(self.path)
             return
-        with open(self.path, 'w') as f:
+        with open(self.path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f)
 
     def keys(self):

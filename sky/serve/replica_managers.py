@@ -623,11 +623,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                     backend, handle, replica_job_logs_dir))
             if job_log_file_name is not None:
                 logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
-                with open(log_file_name, 'a') as replica_log_file, open(
+                with open(log_file_name, 'a', encoding='utf-8') as replica_log_file, open(
                         job_log_file_name, 'r') as job_file:
                     replica_log_file.write(job_file.read())
             else:
-                with open(log_file_name, 'a') as replica_log_file:
+                with open(log_file_name, 'a', encoding='utf-8') as replica_log_file:
                     replica_log_file.write(
                         f'Failed to sync down job logs from replica'
                         f' {replica_id}.\n')

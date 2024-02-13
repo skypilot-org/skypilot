@@ -73,7 +73,7 @@ def check_cache_hash_or_update(cluster_name: str, instance_id: str,
         raise e
     finally:
         if not errored and (not path.exists() or need_update):
-            with open(path, 'w') as f:
+            with open(path, 'w', encoding='utf-8') as f:
                 f.write(hash_str)
 
 
