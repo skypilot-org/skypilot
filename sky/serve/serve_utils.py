@@ -664,8 +664,10 @@ def prepare_replica_logs_for_download(service_name: str,
                          'Skipping syncing down job logs.')
             continue
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        replica_job_logs_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
-                                            'replica_jobs')
+        # TODO(dtran24): figure out why WE can't use
+        #  skylet_constants.SKY_SERVE_DIRECTORY here. Not defined error is
+        #  getting raised
+        replica_job_logs_dir = os.path.join('~/sky_logs', 'replica_jobs')
         job_log_file_name = controller_utils.download_and_stream_latest_job_log(
             backend, handle, replica_job_logs_dir)
         if job_log_file_name is not None:
