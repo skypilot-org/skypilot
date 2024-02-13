@@ -3881,7 +3881,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # We do not check the return code, since Ray returns
                 # non-zero return code when calling Ray stop,
                 # even when the command was executed successfully.
-                self.run_on_head(handle, 'ray stop --force')
+                ret_code = self.run_on_head(handle, 'ray stop --force')
+                if ret_code != 0:
+                    # If the cluster is already terminated, the return code
+                    # here will be non-zero. We do not raise an exception here,
+                    # since stopping the Ray autoscaler is not critical to the
+                    # teardown process, especially if using --purge.
+                    logger.warning('Failed to terminate the Ray autoscaler on '
+                                   f'the head node (return code: {ret_code}). '
+                                   'The cluster may not be reachable or may '
+                                   'have already been removed.')
             except exceptions.FetchIPError:
                 # This error is expected if the previous cluster IP is
                 # failed to be found,
@@ -4290,6 +4299,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream: Whether to post-process the stdout/stderr of the
                 command, such as replacing or skipping lines on the fly. If
                 enabled, lines are printed only when '\r' or '\n' is found.
+
+        Returns:
+            returncode
+            or
+            A tuple of (returncode, stdout, stderr).
 
         Raises:
             exceptions.FetchIPError: If the head node IP cannot be fetched.
