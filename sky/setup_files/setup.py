@@ -40,7 +40,7 @@ def find_version():
     # Extract version information from filepath
     # Adapted from:
     #  https://github.com/ray-project/ray/blob/master/python/setup.py
-    with open(INIT_FILE_PATH, 'r') as fp:
+    with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
         version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',
                                   fp.read(), re.M)
         if version_match:
@@ -49,7 +49,7 @@ def find_version():
 
 
 def get_commit_hash():
-    with open(INIT_FILE_PATH, 'r') as fp:
+    with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
         commit_match = re.search(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
                                  fp.read(), re.M)
         if commit_match:
@@ -85,7 +85,7 @@ def get_commit_hash():
 def replace_commit_hash():
     """Fill in the commit hash in the __init__.py file."""
     try:
-        with open(INIT_FILE_PATH, 'r') as fp:
+        with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
             content = fp.read()
             global original_init_content
             original_init_content = content

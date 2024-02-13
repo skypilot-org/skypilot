@@ -82,7 +82,7 @@ class RedirectOutputForProcess:
         self.mode = mode
 
     def run(self, *args, **kwargs):
-        with open(self.file, self.mode) as f:
+        with open(self.file, self.mode, encoding='utf-8') as f:
             sys.stdout = f
             sys.stderr = f
             # reconfigure logger since the logger is initialized before

@@ -91,7 +91,7 @@ def label():
         job_manifest_path = os.path.join(manifest_dir,
                                          'k8s_gpu_labeler_job.yaml')
 
-        with open(job_manifest_path, 'r') as file:
+        with open(job_manifest_path, 'r', encoding='utf-8') as file:
             job_manifest = yaml.safe_load(file)
 
         # Iterate over nodes

@@ -600,9 +600,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                 serve_utils.generate_replica_launch_log_file_name(
                     self._service_name, replica_id))
             # Write launch log to replica log file
-            with open(log_file_name,
-                      'w') as replica_log_file, open(launch_log_file_name,
-                                                     'r') as launch_file:
+            with open(log_file_name, 'w',
+                      encoding='utf-8') as replica_log_file, open(
+                          launch_log_file_name, 'r',
+                          encoding='utf-8') as launch_file:
                 replica_log_file.write(launch_file.read())
             os.remove(launch_log_file_name)
 
@@ -625,7 +626,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
                 with open(log_file_name, 'a',
                           encoding='utf-8') as replica_log_file, open(
-                              job_log_file_name, 'r') as job_file:
+                              job_log_file_name, 'r',
+                              encoding='utf-8') as job_file:
                     replica_log_file.write(job_file.read())
             else:
                 with open(log_file_name, 'a',

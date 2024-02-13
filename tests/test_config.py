@@ -31,7 +31,7 @@ def _check_empty_config() -> None:
 
 
 def _create_config_file(config_file_path: pathlib.Path) -> None:
-    config_file_path.open('w').write(
+    config_file_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
             aws:
                 vpc_name: {VPC_NAME}
@@ -91,7 +91,7 @@ def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
 def test_invalid_field_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains unknown field."""
     config_path = tmp_path / 'invalid.yaml'
-    config_path.open('w').write(
+    config_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
         aws:
             vpc_name: {VPC_NAME}
@@ -107,7 +107,7 @@ def test_invalid_field_config(monkeypatch, tmp_path) -> None:
 def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is incorrectly indented."""
     config_path = tmp_path / 'invalid.yaml'
-    config_path.open('w').write(
+    config_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
         spot:
             controller:
@@ -127,7 +127,7 @@ def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
 def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains an invalid enum value."""
     config_path = tmp_path / 'invalid.yaml'
-    config_path.open('w').write(
+    config_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
         spot:
             controller:
@@ -144,7 +144,7 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
 def test_valid_num_items_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains an invalid number of array items."""
     config_path = tmp_path / 'valid.yaml'
-    config_path.open('w').write(
+    config_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
         gcp:
             specific_reservations:

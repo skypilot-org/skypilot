@@ -263,16 +263,16 @@ class Cudo(clouds.Cloud):
         except (ImportError, subprocess.CalledProcessError) as e:
             return False, (
                 f'{cls._DEPENDENCY_HINT}\n'
-                f'{cls._INDENT_PREFIX}{common_utils.format_exception(e, use_bracket=True)}'
-            )
+                f'{cls._INDENT_PREFIX}'
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
         try:
             _run_output('cudoctl --version')
         except (ImportError, subprocess.CalledProcessError) as e:
             return False, (
                 f'{cls._CREDENTIAL_HINT}\n'
-                f'{cls._INDENT_PREFIX}{common_utils.format_exception(e, use_bracket=True)}'
-            )
+                f'{cls._INDENT_PREFIX}'
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         # pylint: disable=import-outside-toplevel,unused-import
         from cudo_compute import cudo_api
         from cudo_compute.rest import ApiException

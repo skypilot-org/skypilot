@@ -492,7 +492,8 @@ class Rclone():
          if bucket exists, else empty string"""
         bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
             bucket_name, cloud)
-        with open(Rclone._RCLONE_ABS_CONFIG_PATH) as file:
+        with open(Rclone._RCLONE_ABS_CONFIG_PATH, 'r',
+                  encoding='utf-8') as file:
             bucket_profile_found = False
             for line in file:
                 if line.lstrip().startswith('#'):  # skip user's comments.
@@ -538,7 +539,7 @@ class Rclone():
             bucket_name, cloud)
         rclone_config_path = Rclone._RCLONE_ABS_CONFIG_PATH
 
-        with open(f'{rclone_config_path}', 'r') as file:
+        with open(f'{rclone_config_path}', 'r', encoding='utf-8') as file:
             lines = file.readlines()  # returns a list of the file's lines
             # delete existing bucket profile matching:
             # '[profile_prefix+bucket_name]'

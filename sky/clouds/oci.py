@@ -268,7 +268,7 @@ class OCI(clouds.Cloud):
                     ['tenancy']).data
 
                 first_ad = ad_list[0]
-                _tenancy_prefix = str(first_ad.name).split(':')[0]
+                _tenancy_prefix = str(first_ad.name).split(':', maxsplit=1)[0]
             except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
                     oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
                 # This should only happen in testing where oci config is

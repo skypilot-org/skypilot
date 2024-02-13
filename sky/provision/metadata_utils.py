@@ -59,7 +59,7 @@ def check_cache_hash_or_update(cluster_name: str, instance_id: str,
         return
     path = get_instance_cache_dir(cluster_name, instance_id) / stage_name
     if path.exists():
-        with open(path) as f:
+        with open(path, 'r', encoding='utf-8') as f:
             need_update = f.read() != hash_str
     else:
         need_update = True

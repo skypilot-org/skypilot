@@ -49,7 +49,7 @@ class Metadata:
 
     def __getitem__(self, instance_id: str) -> Dict[str, Any]:
         assert os.path.exists(self.path), 'Metadata file not found'
-        with open(self.path, 'r') as f:
+        with open(self.path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
         return metadata.get(instance_id)
 
@@ -57,7 +57,7 @@ class Metadata:
                                                                  Any]]) -> None:
         # Read from metadata file
         if os.path.exists(self.path):
-            with open(self.path, 'r') as f:
+            with open(self.path, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
         else:
             metadata = {}
@@ -79,7 +79,7 @@ class Metadata:
         """Remove all tags for instances not in instance_ids."""
         if not os.path.exists(self.path):
             return
-        with open(self.path, 'r') as f:
+        with open(self.path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
         for instance_id in list(metadata.keys()):
             if instance_id not in instance_ids:
@@ -93,7 +93,7 @@ class Metadata:
     def keys(self):
         if not os.path.exists(self.path):
             return []
-        with open(self.path, 'r') as f:
+        with open(self.path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
             return list(metadata.keys())
 
@@ -156,7 +156,7 @@ class SCPClient:
     def __init__(self) -> None:
         self.credentials = os.path.expanduser(CREDENTIALS_PATH)
         assert os.path.exists(self.credentials), 'Credentials not found'
-        with open(self.credentials, 'r') as f:
+        with open(self.credentials, 'r', encoding='utf-8') as f:
             lines = [line.strip() for line in f.readlines() if ' = ' in line]
             self._credentials = {
                 line.split(' = ')[0]: line.split(' = ')[1] for line in lines

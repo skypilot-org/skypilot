@@ -50,7 +50,6 @@ class Event:
         })
         if self._message is not None:
             event_begin['args'] = {'message': self._message}
-        global _events
         _events.append(event_begin)
 
     def end(self):
@@ -61,7 +60,6 @@ class Event:
         })
         if self._message is not None:
             event_end['args'] = {'message': self._message}
-        global _events
         _events.append(event_end)
 
     def __enter__(self):

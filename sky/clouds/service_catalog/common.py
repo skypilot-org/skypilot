@@ -90,7 +90,7 @@ def read_catalog(filename: str,
                 file_md5 = hashlib.md5(f.read()).hexdigest()
             md5_filepath = meta_path + '.md5'
             if os.path.exists(md5_filepath):
-                with open(md5_filepath, 'r') as f:
+                with open(md5_filepath, 'r', encoding='utf-8') as f:
                     last_md5 = f.read()
                 if file_md5 != last_md5:
                     # Do not update the file if the user modified it.

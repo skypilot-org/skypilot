@@ -84,7 +84,7 @@ def get_user_hash() -> str:
 
     if os.path.exists(_USER_HASH_FILE):
         # Read from cached user hash file.
-        with open(_USER_HASH_FILE, 'r') as f:
+        with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
             user_hash = f.read().strip()
         if _is_valid_user_hash(user_hash):
@@ -285,13 +285,13 @@ def user_and_hostname_hash() -> str:
 
 
 def read_yaml(path) -> Dict[str, Any]:
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     return config
 
 
 def read_yaml_all(path: str) -> List[Dict[str, Any]]:
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load_all(f)
         configs = list(config)
         if not configs:
@@ -616,7 +616,7 @@ def fill_template(template_name: str, variables: Dict,
     template_path = os.path.join(root_dir, 'templates', template_name)
     if not os.path.exists(template_path):
         raise FileNotFoundError(f'Template "{template_name}" does not exist.')
-    with open(template_path) as fin:
+    with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     output_path = os.path.abspath(os.path.expanduser(output_path))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)

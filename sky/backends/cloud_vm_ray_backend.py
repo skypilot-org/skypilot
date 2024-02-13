@@ -164,7 +164,9 @@ def write_ray_up_script_with_patched_launch_hash_fn(
     does not include any `ssh_proxy_command` under `auth` as part of the hash
     calculation.
     """
-    with open(_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH, 'r') as f:
+    with open(_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH,
+              'r',
+              encoding='utf-8') as f:
         ray_up_no_restart_script = f.read().format(
             ray_yaml_path=repr(cluster_config_path),
             ray_up_kwargs=ray_up_kwargs)
@@ -1581,8 +1583,9 @@ class RetryingVmProvisioner(object):
                         cluster_yaml=handle.cluster_yaml,
                         prev_cluster_ever_up=prev_cluster_ever_up,
                         log_dir=self.log_dir)
-                    # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
-                    # in 'provision_utils.post_provision_runtime_setup()' in the caller.
+                    # NOTE: We will handle the logic of '_ensure_cluster_ray_started' #pylint: disable=line-too-long
+                    # in 'provision_utils.post_provision_runtime_setup()' in the
+                    # caller.
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
                             to_provision, handle.cluster_name_on_cloud, region,
@@ -1666,21 +1669,23 @@ class RetryingVmProvisioner(object):
             definitely_no_nodes_launched = False
             if status == GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
-                definitely_no_nodes_launched = FailoverCloudErrorHandlerV1.update_blocklist_on_error(
-                    self._blocked_resources, to_provision, region, zones,
-                    stdout, stderr)
+                definitely_no_nodes_launched = (
+                    FailoverCloudErrorHandlerV1.update_blocklist_on_error(
+                        self._blocked_resources, to_provision, region, zones,
+                        stdout, stderr))
             else:
                 # gang scheduling failed.
                 assert status == GangSchedulingStatus.GANG_FAILED, status
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
-                definitely_no_nodes_launched = FailoverCloudErrorHandlerV1.update_blocklist_on_error(
-                    self._blocked_resources,
-                    to_provision,
-                    region,
-                    zones=zones,
-                    stdout=None,
-                    stderr=None)
+                definitely_no_nodes_launched = (
+                    FailoverCloudErrorHandlerV1.update_blocklist_on_error(
+                        self._blocked_resources,
+                        to_provision,
+                        region,
+                        zones=zones,
+                        stdout=None,
+                        stderr=None))
                 # GANG_FAILED means head is up, workers failed.
                 assert definitely_no_nodes_launched is False, (
                     definitely_no_nodes_launched)
@@ -3976,7 +3981,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
                         'Metadata file does not exist.')
 
-                with open(provider.metadata.path, 'r') as f:
+                with open(provider.metadata.path, 'r', encoding='utf-8') as f:
                     metadata = json.load(f)
                     node_id = next(iter(metadata.values())).get(
                         'creation', {}).get('virtualServerId', None)

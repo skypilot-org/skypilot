@@ -13,7 +13,7 @@ class Metadata:
     def __init__(self) -> None:
         self.path = os.path.expanduser(METADATA_PATH)
         if os.path.exists(self.path):
-            with open(self.path, 'r') as f:
+            with open(self.path, 'r', encoding='utf-8') as f:
                 self.metadata = json.load(f)
         else:
             self.metadata = {}
