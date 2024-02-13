@@ -261,9 +261,6 @@ def _execute(
         # NOTE: in general we may not have sufficiently specified info
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.
-        if any(r.ports is not None for r in task.resources):
-            requested_features.add(
-                clouds.CloudImplementationFeatures.OPEN_PORTS)
 
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
