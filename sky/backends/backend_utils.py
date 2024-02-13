@@ -32,12 +32,12 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import provision as provision_lib
+from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.clouds import cloud_registry
-from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -494,20 +494,23 @@ class SSHConfigHelper(object):
 
         # Handle Include on top of Config file
         include_str = f'Include {cls.ssh_cluster_path.format("*")}'
+        found = False
         for i, line in enumerate(config):
             config_str = line.strip()
             if config_str == include_str:
+                found = True
                 break
-            # Did not find Include string. Insert `Include` lines.
             if 'Host' in config_str:
-                with open(config_path, 'w') as f:
-                    config.insert(
-                        0,
-                        f'# Added by SkyPilot for ssh config of all clusters\n{include_str}\n'
-                    )
-                    f.write(''.join(config).strip())
-                    f.write('\n' * 2)
                 break
+        if not found:
+            # Did not find Include string. Insert `Include` lines.
+            with open(config_path, 'w') as f:
+                config.insert(
+                    0,
+                    f'# Added by SkyPilot for ssh config of all clusters\n{include_str}\n'
+                )
+                f.write(''.join(config).strip())
+                f.write('\n' * 2)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
 
@@ -753,6 +756,10 @@ def write_cluster_config(
             not appear in the catalog, or an ssh_proxy_command is specified but
             not for the given region, or GPUs are requested in a Kubernetes
             cluster but the cluster does not have nodes labeled with GPU types.
+        exceptions.InvalidCloudConfigs: if the user specifies some config for the
+            cloud that is not valid, e.g. remote_identity: SERVICE_ACCOUNT
+            for a cloud that does not support it, the caller should skip the
+            cloud in this case.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
@@ -775,30 +782,26 @@ def write_cluster_config(
     # for the validation.
     # TODO(tian): Move more cloud agnostic vars to resources.py.
     resources_vars = to_provision.make_deploy_variables(cluster_name_on_cloud,
-                                                        region, zones)
+                                                        region, zones, dryrun)
     config_dict = {}
 
-    azure_subscription_id = None
-    if isinstance(cloud, clouds.Azure):
-        azure_subscription_id = cloud.get_project_id(dryrun=dryrun)
-
-    gcp_project_id = None
-    if isinstance(cloud, clouds.GCP):
-        gcp_project_id = cloud.get_project_id(dryrun=dryrun)
-
     specific_reservations = set(
-        skypilot_config.get_nested(('gcp', 'specific_reservations'), set()))
-
-    reservations = to_provision.get_reservations_available_resources(
-        specific_reservations)
-
-    filtered_specific_reservations = [
-        r for r, available_resources in reservations.items()
-        if r in specific_reservations and available_resources > 0
-    ]
+        skypilot_config.get_nested(
+            (str(to_provision.cloud).lower(), 'specific_reservations'), set()))
 
     assert cluster_name is not None
-    credentials = sky_check.get_cloud_credential_file_mounts()
+    excluded_clouds = []
+    remote_identity = skypilot_config.get_nested(
+        (str(cloud).lower(), 'remote_identity'), 'LOCAL_CREDENTIALS')
+    if remote_identity == 'SERVICE_ACCOUNT':
+        if not cloud.supports_service_account_on_remote():
+            raise exceptions.InvalidCloudConfigs(
+                'remote_identity: SERVICE_ACCOUNT is specified in '
+                f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
+                'is not supported by this cloud. Remove the config or set: '
+                '`remote_identity: LOCAL_CREDENTIALS`.')
+        excluded_clouds = [cloud]
+    credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
     ip_list = None
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
@@ -840,22 +843,15 @@ def write_cluster_config(
     instance_tags = {}
     instance_tags = skypilot_config.get_nested(
         (str(cloud).lower(), 'instance_tags'), {})
-    if not isinstance(instance_tags, dict):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Custom instance_tags in config.yaml should '
-                             f'be a dict, but received {type(instance_tags)}.')
+    # instance_tags is a dict, which is guaranteed by the type check in
+    # schemas.py
+    assert isinstance(instance_tags, dict), instance_tags
 
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
         f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
-
-    # For TPU nodes. TPU VMs do not need TPU_NAME.
-    tpu_node_name = resources_vars.get('tpu_name')
-    if gcp_utils.is_tpu(to_provision) and not gcp_utils.is_tpu_vm(to_provision):
-        if tpu_node_name is None:
-            tpu_node_name = cluster_name
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -884,15 +880,9 @@ def write_cluster_config(
 
                 # User-supplied instance tags.
                 'instance_tags': instance_tags,
-
-                # Azure only:
-                'azure_subscription_id': azure_subscription_id,
-                'resource_group': f'{cluster_name}-{region_name}',
-
-                # GCP only:
-                'gcp_project_id': gcp_project_id,
-                'specific_reservations': filtered_specific_reservations,
-                'tpu_node_name': tpu_node_name,
+                # The reservation pools that specified by the user. This is
+                # currently only used by GCP.
+                'specific_reservations': specific_reservations,
 
                 # Conda setup
                 'conda_installation_commands':
@@ -906,6 +896,10 @@ def write_cluster_config(
                 'dump_port_command': dump_port_command,
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
+                # Command for waiting ray cluster to be ready on head.
+                'ray_head_wait_initialized_command':
+                    instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
+
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
                 # Sky remote utils.
@@ -983,7 +977,9 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
-    if isinstance(cloud, (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere)):
+    if isinstance(
+            cloud,
+        (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere, clouds.Cudo)):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
@@ -2525,7 +2521,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     # For sky serve controller task, we set the CPU resource to a smaller
     # value to support a larger number of services.
     resources_dict = {
-        'CPU': (constants.SERVICES_TASK_CPU_DEMAND
+        'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND
                 if task.service_name is not None else DEFAULT_TASK_CPU_DEMAND)
     }
     if task.best_resources is not None:
@@ -2546,7 +2542,7 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
     The resources string is only used as a display purpose, so we only show
     the accelerator demands (if any). Otherwise, the CPU demand is shown.
     """
-    task_cpu_demand = (constants.SERVICES_TASK_CPU_DEMAND if task.service_name
+    task_cpu_demand = (serve_lib.SERVICES_TASK_CPU_DEMAND if task.service_name
                        is not None else DEFAULT_TASK_CPU_DEMAND)
     if task.best_resources is not None:
         accelerator_dict = task.best_resources.accelerators

@@ -1217,7 +1217,7 @@ def test_large_job_queue(generic_cloud: str):
             f'sky launch -y -c {name} --cpus 8 --cloud {generic_cloud}',
             f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
-            'sleep 85',
+            'sleep 90',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep PENDING | wc -l | grep 43',
@@ -1501,6 +1501,30 @@ def test_multi_hostname(generic_cloud: str):
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+def test_multi_node_failure(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'multi_node_failure',
+        [
+            # TODO(zhwu): we use multi-thread to run the commands in setup
+            # commands in parallel, which makes it impossible to fail fast
+            # when one of the nodes fails. We should fix this in the future.
+            # The --detach-setup version can fail fast, as the setup is
+            # submitted to the remote machine, which does not use multi-thread.
+            # Refer to the comment in `subprocess_utils.run_in_parallel`.
+            # f'sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/failed_worker_setup.yaml && exit 1',  # Ensure the job setup failed.
+            f'sky launch -y -c {name} --cloud {generic_cloud} --detach-setup tests/test_yamls/failed_worker_setup.yaml',
+            f'sky logs {name} 1 --status | grep FAILED_SETUP',  # Ensure the job setup failed.
+            f'sky exec {name} tests/test_yamls/failed_worker_run.yaml',
+            f'sky logs {name} 2 --status | grep FAILED',  # Ensure the job failed.
+            f'sky logs {name} 2 | grep "My hostname:" | wc -l | grep 2',  # Ensure there 2 of the hosts printed their hostname.
+        ],
+        f'sky down -y {name}',
     )
     run_one_test(test)
 

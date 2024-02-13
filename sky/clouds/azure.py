@@ -59,7 +59,7 @@ class Azure(clouds.Cloud):
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
     _BEST_DISK_TIER = resources_utils.DiskTier.MEDIUM
-    _DEFAULT_DISK_TIER = resources_utils.DiskTier.BEST
+    _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     # Azure does not support high disk tier.
     _SUPPORTED_DISK_TIERS = (set(resources_utils.DiskTier) -
                              {resources_utils.DiskTier.HIGH})
@@ -251,10 +251,12 @@ class Azure(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources', cluster_name_on_cloud: str,
+            self,
+            resources: 'resources.Resources',
+            cluster_name_on_cloud: str,
             region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud  # Unused.
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
@@ -295,6 +297,25 @@ class Azure(clouds.Cloud):
                 content: |
                   APT::Periodic::Enable "0";
             """).encode('utf-8')).decode('utf-8')
+
+        def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
+            if (r.disk_tier is not None and
+                    r.disk_tier != resources_utils.DiskTier.BEST):
+                return r.disk_tier
+            # Failover disk tier from high to low. Default disk tier
+            # (Premium_LRS, medium) only support s-series instance types,
+            # so we failover to lower tiers for non-s-series.
+            all_tiers = list(reversed(resources_utils.DiskTier))
+            start_index = all_tiers.index(
+                Azure._translate_disk_tier(r.disk_tier))
+            while start_index < len(all_tiers):
+                disk_tier = all_tiers[start_index]
+                ok, _ = Azure.check_disk_tier(r.instance_type, disk_tier)
+                if ok:
+                    return disk_tier
+                start_index += 1
+            assert False, 'Low disk tier should always be supported on Azure.'
+
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
@@ -303,75 +324,36 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
-            'disk_tier': Azure._get_disk_type(r.disk_tier),
-            'cloud_init_setup_commands': cloud_init_setup_commands
+            'disk_tier': Azure._get_disk_type(_failover_disk_tier()),
+            'cloud_init_setup_commands': cloud_init_setup_commands,
+            'azure_subscription_id': self.get_project_id(dryrun),
+            'resource_group': f'{cluster_name_on_cloud}-{region_name}',
         }
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources.Resources'
     ) -> Tuple[List['resources.Resources'], List[str]]:
-
-        def failover_disk_tier(
-            instance_type: str, disk_tier: Optional[resources_utils.DiskTier]
-        ) -> Tuple[bool, Optional[resources_utils.DiskTier]]:
-            """Figure out the actual disk tier to be used.
-
-            Check the disk_tier specified by the user with the instance type to
-            be used. If not valid, return False.
-
-            When the disk_tier is not specified, failover through the possible
-            disk tiers.
-
-            Returns:
-                A tuple of a boolean value and an optional string to represent
-                the instance_type to use. If the boolean value is False, the
-                specified configuration is not a valid combination, and should
-                not be used for launching a VM.
-            """
-            if disk_tier is None:
-                # Translate first since azure's default disk tier is BEST.
-                disk_tier = Azure._translate_disk_tier(disk_tier)
-            if disk_tier != resources_utils.DiskTier.BEST:
-                ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
-                return (True, disk_tier) if ok else (False, None)
-            # All tiers in reversed order, i.e. from best to worst.
-            # We will failover along this order.
-            all_tiers = list(reversed(resources_utils.DiskTier))
-            # Translate to real disk tier.
-            start_index = all_tiers.index(Azure._translate_disk_tier(disk_tier))
-            while start_index < len(all_tiers):
-                disk_tier = all_tiers[start_index]
-                ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
-                if ok:
-                    return (True, disk_tier)
-                start_index += 1
-            return False, None
-
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            ok, disk_tier = failover_disk_tier(resources.instance_type,
-                                               resources.disk_tier)
+            ok, _ = Azure.check_disk_tier(resources.instance_type,
+                                          resources.disk_tier)
             if not ok:
                 return ([], [])
             # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
             # Resources(Azure, Standard_NC4as_T4_v3).
-            resources = resources.copy(
-                accelerators=None,
-                disk_tier=disk_tier,
-            )
+            resources = resources.copy(accelerators=None)
             return ([resources], [])
 
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
-                ok, disk_tier = failover_disk_tier(instance_type,
-                                                   resources.disk_tier)
+                ok, _ = Azure.check_disk_tier(instance_type,
+                                              resources.disk_tier)
                 if not ok:
                     continue
                 r = resources.copy(
                     cloud=Azure(),
                     instance_type=instance_type,
-                    disk_tier=disk_tier,
                     # Setting this to None as Azure doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
@@ -459,14 +441,6 @@ class Azure(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type,
                                                     clouds='azure')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'azure')
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
@@ -674,6 +648,10 @@ class Azure(clouds.Cloud):
             original_statuses_list = [original_statuses_list]
         statuses = []
         for s in original_statuses_list:
+            if s not in status_map:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ClusterStatusFetchingError(
+                        f'Failed to parse status from Azure response: {stdout}')
             node_status = status_map[s]
             if node_status is not None:
                 statuses.append(node_status)

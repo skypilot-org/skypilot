@@ -5,6 +5,7 @@ from sky.serve.constants import ENDPOINT_PROBE_INTERVAL_SECONDS
 from sky.serve.constants import INITIAL_VERSION
 from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL_SECONDS
 from sky.serve.constants import SKY_SERVE_CONTROLLER_NAME
+from sky.serve.constants import SERVICES_TASK_CPU_DEMAND
 from sky.serve.constants import SKYSERVE_METADATA_DIR
 from sky.serve.core import down
 from sky.serve.core import status

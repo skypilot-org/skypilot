@@ -157,10 +157,13 @@ class Lambda(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud  # Unused.
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud, dryrun  # Unused.
         assert zones is None, 'Lambda does not support zones.'
 
         r = resources
@@ -264,14 +267,6 @@ class Lambda(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='lambda')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'lambda')
 
     @classmethod
     def regions(cls) -> List['clouds.Region']:

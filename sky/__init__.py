@@ -76,6 +76,7 @@ from sky.task import Task
 IBM = clouds.IBM
 AWS = clouds.AWS
 Azure = clouds.Azure
+Cudo = clouds.Cudo
 GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
@@ -90,6 +91,7 @@ __all__ = [
     '__version__',
     'AWS',
     'Azure',
+    'Cudo',
     'GCP',
     'IBM',
     'Kubernetes',

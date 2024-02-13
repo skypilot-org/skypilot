@@ -21,6 +21,7 @@ import jinja2
 import jsonschema
 import yaml
 
+from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import ux_utils
@@ -117,23 +118,56 @@ def base36_encode(hex_str: str) -> str:
     return _base36_encode(int_value)
 
 
-def make_cluster_name_on_cloud(cluster_name: str,
+def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
+    """Errors out on invalid cluster names.
+
+    Bans (including but not limited to) names that:
+    - are digits-only
+    - start with invalid character, like hyphen
+
+    Raises:
+        exceptions.InvalidClusterNameError: If the cluster name is invalid.
+    """
+    if cluster_name is None:
+        return
+    valid_regex = constants.CLUSTER_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, cluster_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidClusterNameError(
+                f'Cluster name "{cluster_name}" is invalid; '
+                'ensure it is fully matched by regex (e.g., '
+                'only contains letters, numbers and dash): '
+                f'{valid_regex}')
+
+
+def make_cluster_name_on_cloud(display_name: str,
                                max_length: Optional[int] = 15,
                                add_user_hash: bool = True) -> str:
     """Generate valid cluster name on cloud that is unique to the user.
 
-    This is to map the cluster name to a valid length for cloud providers, e.g.
-    GCP limits the length of the cluster name to 35 characters. If the cluster
-    name with user hash is longer than max_length:
+    This is to map the cluster name to a valid length and character set for
+    cloud providers,
+    - e.g. GCP limits the length of the cluster name to 35 characters. If the
+    cluster name with user hash is longer than max_length:
       1. Truncate it to max_length - cluster_hash - user_hash_length.
       2. Append the hash of the cluster name
+    - e.g. some cloud providers don't allow for uppercase letters, periods,
+    or underscores, so we convert it to lower case and replace those
+    characters with hyphens
 
     Args:
-        cluster_name: The cluster name to be truncated and hashed.
+        display_name: The cluster name to be truncated, hashed, and
+            transformed.
         max_length: The maximum length of the cluster name. If None, no
             truncation is performed.
         add_user_hash: Whether to append user hash to the cluster name.
     """
+
+    cluster_name_on_cloud = re.sub(r'[._]', '-', display_name).lower()
+    if display_name != cluster_name_on_cloud:
+        logger.debug(
+            f'The user specified cluster name {display_name} might be invalid '
+            f'on the cloud, we convert it to {cluster_name_on_cloud}.')
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
@@ -141,20 +175,20 @@ def make_cluster_name_on_cloud(cluster_name: str,
     user_hash_length = len(user_hash)
 
     if (max_length is None or
-            len(cluster_name) <= max_length - user_hash_length):
-        return f'{cluster_name}{user_hash}'
+            len(cluster_name_on_cloud) <= max_length - user_hash_length):
+        return f'{cluster_name_on_cloud}{user_hash}'
     # -1 is for the dash between cluster name and cluster name hash.
     truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH - 1 -
                                     user_hash_length)
-    truncate_cluster_name = cluster_name[:truncate_cluster_name_length]
+    truncate_cluster_name = cluster_name_on_cloud[:truncate_cluster_name_length]
     if truncate_cluster_name.endswith('-'):
         truncate_cluster_name = truncate_cluster_name.rstrip('-')
-    assert truncate_cluster_name_length > 0, (cluster_name, max_length)
-    cluster_name_hash = hashlib.md5(cluster_name.encode()).hexdigest()
+    assert truncate_cluster_name_length > 0, (cluster_name_on_cloud, max_length)
+    display_name_hash = hashlib.md5(display_name.encode()).hexdigest()
     # Use base36 to reduce the length of the hash.
-    cluster_name_hash = base36_encode(cluster_name_hash)
+    display_name_hash = base36_encode(display_name_hash)
     return (f'{truncate_cluster_name}'
-            f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
+            f'-{display_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
 
 
 def cluster_name_in_hint(cluster_name: str, cluster_name_on_cloud: str) -> str:
@@ -185,8 +219,8 @@ class Backoff:
     def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
         self._initial = True
         self._backoff = 0.0
-        self._inital_backoff = initial_backoff
-        self._max_backoff = max_backoff_factor * self._inital_backoff
+        self._initial_backoff = initial_backoff
+        self._max_backoff = max_backoff_factor * self._initial_backoff
 
     # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
     # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc
@@ -195,7 +229,7 @@ class Backoff:
         """Backs off once and returns the current backoff in seconds."""
         if self._initial:
             self._initial = False
-            self._backoff = min(self._inital_backoff, self._max_backoff)
+            self._backoff = min(self._initial_backoff, self._max_backoff)
         else:
             self._backoff = min(self._backoff * self.MULTIPLIER,
                                 self._max_backoff)
@@ -551,8 +585,9 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
 
 
 def get_cleaned_username(username: str = '') -> str:
-    """Cleans the username as some cloud provider have limitation on
-    characters usage such as dot (.) is not allowed in GCP.
+    """Cleans the username. Dots and underscores are allowed, as we will
+     handle it when mapping to the cluster_name_on_cloud in
+     common_utils.make_cluster_name_on_cloud.
 
     Clean up includes:
      1. Making all characters lowercase
@@ -567,7 +602,7 @@ def get_cleaned_username(username: str = '') -> str:
     """
     username = username or getpass.getuser()
     username = username.lower()
-    username = re.sub(r'[^a-z0-9-]', '', username)
+    username = re.sub(r'[^a-z0-9-._]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)
     username = re.sub(r'-$', '', username)
     return username
