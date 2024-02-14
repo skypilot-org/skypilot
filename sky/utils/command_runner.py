@@ -576,6 +576,11 @@ class KubernetesCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
+        port_forward = kwargs.pop('port_forward', None)
+        # Ignore ssh_mode for k8s.
+        kwargs.pop('ssh_mode', SshMode.NON_INTERACTIVE)
+        assert port_forward is None, ('port_forward is not supported for k8s, '
+                                      f'but got: {port_forward}')
         kubectl_base_command = [
             'kubectl', 'exec', '-i', '-n', self.namespace, self.pod_name, '--'
         ]

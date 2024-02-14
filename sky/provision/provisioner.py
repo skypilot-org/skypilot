@@ -23,7 +23,6 @@ from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
-from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils

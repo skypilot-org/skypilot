@@ -647,7 +647,9 @@ def get_cluster_info(
     get_k8s_ssh_user_cmd = 'echo $(whoami)'
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner((namespace, head_pod_name))
-    rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd, require_outputs=True)
+    rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
+                                    require_outputs=True,
+                                    stream_logs=False)
     logger.info(f'get_cluster_info: get_k8s_ssh_user_cmd: rc={rc}, '
                 f'stdout={stdout}, stderr={stderr}')
     if rc != 0:

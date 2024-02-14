@@ -1,6 +1,7 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import copy
 import enum
+import functools
 import getpass
 import inspect
 import json
@@ -2353,6 +2354,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             internal_external_ips[1:], key=lambda x: x[1])
         self.stable_internal_external_ips = stable_internal_external_ips
 
+    @functools.lru_cache()
     def get_command_runners(
             self,
             avoid_ssh_control: bool = False
@@ -2366,7 +2368,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             str(self.launched_resources.cloud).lower())
         logger.debug(f'Using command runner type: {command_runner_type} for '
                      f'cloud {self.launched_resources.cloud}')
-        if (clouds.ProvisionerVersion.SKYPILOT >=
+        if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR >=
                 self.launched_resources.cloud.PROVISIONER_VERSION or
                 command_runner_type == command_runner.SSHCommandRunner):
             ip_list = self.external_ips()
