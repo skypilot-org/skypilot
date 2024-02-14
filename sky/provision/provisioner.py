@@ -356,10 +356,12 @@ def _wait_ssh_connection_indirect(ip: str,
                           stdout=subprocess.DEVNULL,
                           stderr=subprocess.PIPE)
     if proc.returncode != 0:
+        stderr = proc.stderr.decode('utf-8')
         logger.debug(
             f'Waiting for SSH to {ip} with command: {_shlex_join(command)}\n'
-            f'Error: {proc.stderr.decode("utf-8")}')
-    return proc.returncode == 0, proc.stderr.decode('utf-8')
+            f'Error: {stderr}')
+        return False, stderr
+    return True, ''
 
 
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
