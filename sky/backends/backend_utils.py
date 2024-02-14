@@ -490,7 +490,6 @@ class SSHConfigHelper(object):
             config = f.readlines()
 
         ssh_dir = cls.ssh_cluster_path.format('')
-        os.makedirs(os.path.expanduser(ssh_dir), exist_ok=True, mode=0o700)
 
         # Handle Include on top of Config file
         include_str = f'Include {cls.ssh_cluster_path.format("*")}'
@@ -541,7 +540,6 @@ class SSHConfigHelper(object):
 
         with open(cluster_config_path, 'w') as f:
             f.write(codegen)
-        os.chmod(cluster_config_path, 0o644)
 
     @classmethod
     def _remove_stale_cluster_config_for_backward_compatibility(
