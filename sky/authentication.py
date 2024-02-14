@@ -43,9 +43,9 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
-from sky.utils import kubernetes_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -92,7 +92,9 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
     ) as f:
         f.write(private_key)
 
-    with open(public_key_path, 'w') as f:
+    with open(public_key_path,
+              'w',
+              opener=functools.partial(os.open, mode=0o644)) as f:
         f.write(public_key)
 
 

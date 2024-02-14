@@ -233,9 +233,10 @@ extras_require: Dict[str, List[str]] = {
     'cloudflare': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
-    'kubernetes': ['kubernetes>=20.0.0'] + local_ray,
+    'kubernetes': ['kubernetes>=20.0.0'],
     'remote': remote,
     'runpod': ['runpod>=1.5.1'],
+    'cudo': ['cudo-compute>=0.1.8'],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have

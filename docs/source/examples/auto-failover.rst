@@ -173,7 +173,7 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
       - instance_type: g5.xlarge
       - cloud: azure
         region: eastus
-        accelerator: A100
+        accelerators: A100
 
 
 
@@ -186,7 +186,7 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
         - instance_type: g5.xlarge
         - cloud: azure
           region: eastus
-          accelerator: A100
+          accelerators: A100
 
 .. tip::
 

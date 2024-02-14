@@ -100,7 +100,7 @@ change the scaling delay by specifying the :code:`upscale_delay_seconds` and
 If you want more aggressive scaling, set those values to a lower number and vice versa.
 
 Scale-to-Zero
-===============
+-------------
 
 SkyServe supports scale-to-zero.
 

@@ -1,5 +1,5 @@
 """Credential checks: check cloud credentials and enable clouds."""
-from typing import Dict
+from typing import Dict, Iterable, Optional
 
 import click
 
@@ -70,7 +70,8 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     global_user_state.set_enabled_clouds(enabled_clouds)
 
 
-def get_cloud_credential_file_mounts() -> Dict[str, str]:
+def get_cloud_credential_file_mounts(
+        excluded_clouds: Optional[Iterable[clouds.Cloud]]) -> Dict[str, str]:
     """Returns the files necessary to access all enabled clouds.
 
     Returns a dictionary that will be added to a task's file mounts
@@ -79,6 +80,9 @@ def get_cloud_credential_file_mounts() -> Dict[str, str]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     file_mounts = {}
     for cloud in enabled_clouds:
+        if (excluded_clouds is not None and
+                clouds.cloud_in_list(cloud, excluded_clouds)):
+            continue
         cloud_file_mounts = cloud.get_credential_file_mounts()
         file_mounts.update(cloud_file_mounts)
     # Currently, get_enabled_clouds() does not support r2

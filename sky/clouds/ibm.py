@@ -174,6 +174,7 @@ class IBM(clouds.Cloud):
         cluster_name_on_cloud: str,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
+        dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
@@ -186,7 +187,7 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
-        del cluster_name_on_cloud  # Unused.
+        del cluster_name_on_cloud, dryrun  # Unused.
 
         def _get_profile_resources(instance_profile):
             """returns a dict representing the
@@ -444,15 +445,6 @@ class IBM(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         """Validates the region and zone."""
         return service_catalog.validate_region_zone(region, zone, clouds='ibm')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        """Returns whether the accelerator is valid in the region or zone."""
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'ibm')
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

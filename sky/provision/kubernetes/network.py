@@ -59,9 +59,9 @@ def _open_ports_using_ingress(
 ) -> None:
     if not network_utils.ingress_controller_exists():
         raise Exception(
-            'Ingress controller not found.'
-            'Please install ingress controller first.'
-            'See https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md for more details.'  # pylint: disable=line-too-long
+            'Ingress controller not found. '
+            'Install Nginx ingress controller first: '
+            'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
         )
 
     for port in ports:

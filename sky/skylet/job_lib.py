@@ -548,6 +548,10 @@ def update_job_status(job_ids: List[int],
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
         if job_id in pending_jobs:
             if pending_jobs[job_id]['created_time'] < psutil.boot_time():
+                logger.info(
+                    f'Job {job_id} is stale, setting to FAILED: '
+                    f'created_time={pending_jobs[job_id]["created_time"]}, '
+                    f'boot_time={psutil.boot_time()}')
                 # The job is stale as it is created before the instance
                 # is booted, e.g. the instance is rebooted.
                 job_statuses[i] = JobStatus.FAILED
@@ -578,6 +582,8 @@ def update_job_status(job_ids: List[int],
                 status = original_status
                 if (original_status is not None and
                         not original_status.is_terminal()):
+                    logger.info(f'Ray job status for job {job_id} is None, '
+                                'setting it to FAILED.')
                     # The job may be stale, when the instance is restarted
                     # (the ray redis is volatile). We need to reset the
                     # status of the task to FAILED if its original status
