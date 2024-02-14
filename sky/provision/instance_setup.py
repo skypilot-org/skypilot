@@ -34,8 +34,8 @@ _RAY_PRLIMIT = (
 _DUMP_RAY_PORTS = (
     'python -c \'import json, os; '
     f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\';'
-)
+    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
+    'encoding="utf-8"))\';')
 
 _RAY_PORT_COMMAND = (
     'RAY_PORT=$(python -c "from sky.skylet import job_lib; '

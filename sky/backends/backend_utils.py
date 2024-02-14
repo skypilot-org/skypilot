@@ -484,10 +484,11 @@ class SSHConfigHelper(object):
             config = ['\n']
             with open(config_path,
                       'w',
+                      encoding='utf-8',
                       opener=functools.partial(os.open, mode=0o644)) as f:
                 f.writelines(config)
 
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = f.readlines()
 
         ssh_dir = cls.ssh_cluster_path.format('')
@@ -505,7 +506,7 @@ class SSHConfigHelper(object):
                 break
         if not found:
             # Did not find Include string. Insert `Include` lines.
-            with open(config_path, 'w') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 config.insert(
                     0,
                     f'# Added by SkyPilot for ssh config of all clusters\n{include_str}\n'
@@ -542,6 +543,7 @@ class SSHConfigHelper(object):
 
         with open(cluster_config_path,
                   'w',
+                  encoding='utf-8',
                   opener=functools.partial(os.open, mode=0o644)) as f:
             f.write(codegen)
 
@@ -570,7 +572,7 @@ class SSHConfigHelper(object):
         if not os.path.exists(config_path):
             return
 
-        with open(config_path) as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = f.readlines()
 
         start_line_idx = None
@@ -622,20 +624,20 @@ class SSHConfigHelper(object):
             config[prev_end_line_idx:end_line_idx] = [
                 '\n'
             ] if end_line_idx is not None else []
-            with open(config_path, 'w') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 f.write(''.join(config).strip())
                 f.write('\n' * 2)
 
         # Delete include statement if it exists in the config.
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
-        with open(config_path) as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = f.readlines()
 
         for i, line in enumerate(config):
             config_str = line.strip()
             if f'Include {cluster_config_path}' in config_str:
-                with open(config_path, 'w') as f:
+                with open(config_path, 'w', encoding='utf-8') as f:
                     if i < len(config) - 1 and config[i + 1] == '\n':
                         del config[i + 1]
                     # Delete Include string
@@ -849,7 +851,7 @@ def write_cluster_config(
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
         f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-        f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
+        f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
@@ -928,15 +930,15 @@ def write_cluster_config(
 
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
-        with open(yaml_path, 'r') as f:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
             old_yaml_content = f.read()
-        with open(tmp_yaml_path, 'r') as f:
+        with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
             new_yaml_content, old_yaml_content,
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
             _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
-        with open(tmp_yaml_path, 'w') as f:
+        with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
     # Read the cluster name from the tmp yaml file, to take the backward
