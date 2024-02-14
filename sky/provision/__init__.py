@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky import status_lib
+from sky.utils import command_runner
 # These provision.<cloud> modules should never fail even if underlying cloud SDK
 # dependencies are not installed. This is ensured by using sky.adaptors inside
 # these modules, for lazy loading of cloud SDKs.
@@ -39,7 +40,9 @@ def _route_to_cloud_impl(func):
         module = globals().get(module_name)
         assert module is not None, f'Unknown provider: {module_name}'
 
-        impl = getattr(module, func.__name__)
+        impl = getattr(module, func.__name__, None)
+        if impl is None:
+            return func(provider_name, *args, **kwargs)
         return impl(*args, **kwargs)
 
     return _wrapper
@@ -163,3 +166,18 @@ def get_cluster_info(
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """Get the metadata of instances in a cluster."""
     raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def get_command_runners(
+    provider_name: str,
+    cluster_info: common.ClusterInfo,
+    **crednetials: Dict[str, Any],
+) -> List[command_runner.CommandRunner]:
+    """Get a command runner for the given cluster."""
+    del provider_name  # Unused
+    ip_list = cluster_info.get_feasible_ips()
+    port_list = cluster_info.get_feasible_ports()
+    return command_runner.SSHCommandRunner.make_runner_list(node_list=zip(
+        ip_list, port_list),
+                                                            **crednetials)

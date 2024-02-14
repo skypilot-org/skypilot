@@ -6,10 +6,11 @@ import os
 import pathlib
 import shlex
 import time
-from typing import (Any, Iterable, List, Optional, ParamSpecKwargs, Tuple, Type,
+from typing import (Any, Iterable, List, Optional, Tuple, Type,
                     Union)
 
 from sky import sky_logging
+from sky.adaptors import kubernetes
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -142,7 +143,7 @@ class CommandRunner:
 
     def _get_command_to_run(self, cmd: Union[str, List[str]], log_path: str,
                             process_stream: bool, separate_stderr: bool,
-                            interactive: bool) -> str:
+                            interactive: bool) -> List[str]:
         """Returns the command to run."""
         if isinstance(cmd, list):
             cmd = ' '.join(cmd)
@@ -150,7 +151,7 @@ class CommandRunner:
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
         # We need this to correctly run the cmd, and get the output.
-        command = [
+        header = [
             'bash',
             '--login',
             '-c',
@@ -158,7 +159,7 @@ class CommandRunner:
             '-i',
         ]
 
-        command += [
+        command = [
             shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
         ]
@@ -176,7 +177,7 @@ class CommandRunner:
             ]
 
         command_str = ' '.join(command)
-        return command_str
+        return header + [command_str]
 
     def run(
             self,
@@ -268,7 +269,7 @@ class SSHCommandRunner(CommandRunner):
             runner.rsync(source, target, up=True)
 
         Args:
-            ip: The IP address of the remote machine.
+            node: (ip, port) The IP address and port of the remote machine.
             ssh_private_key: The path to the private key to use for ssh.
             ssh_user: The user to use for ssh.
             ssh_control_name: The files name of the ssh_control to use. This is
@@ -359,7 +360,6 @@ class SSHCommandRunner(CommandRunner):
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
         Args:
-            ip: The IP address of the node.
             cmd: The command to run.
             port_forward: A list of ports to forward from the localhost to the
             remote host.
@@ -387,12 +387,13 @@ class SSHCommandRunner(CommandRunner):
             command = base_ssh_command + cmd
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
-        command_str = self._get_command_to_run(
+        header_command = self._get_command_to_run(
             cmd,
             log_path,
             process_stream,
             separate_stderr,
             interactive=(ssh_mode != SshMode.NON_INTERACTIVE))
+        command_str = ' '.join(header_command)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         executable = None
@@ -520,15 +521,187 @@ class SSHCommandRunner(CommandRunner):
                                            stream_logs=stream_logs)
 
 
+
+class KubernetesCommandRunner(CommandRunner):
+    """Runner for SSH commands."""
+
+    def __init__(
+        self,
+        node: Tuple[str, str],
+    ):
+        """Initialize SSHCommandRunner.
+
+        Example Usage:
+            runner = KubernetesCommandRunner((namespace, pod_name))
+            runner.run('ls -l')
+            runner.rsync(source, target, up=True)
+
+        Args:
+            node: The namespace and pod_name of the remote machine.
+        """
+        super().__init__(node)
+        self.namespace, self.pod_name = node
+
+    def run(
+            self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: bool = False,
+            # Advanced options.
+            log_path: str = os.devnull,
+            # If False, do not redirect stdout/stderr to optimize performance.
+            process_stream: bool = True,
+            stream_logs: bool = True,
+            separate_stderr: bool = False,
+            **kwargs) -> Union[int, Tuple[int, str, str]]:
+        """Uses 'ssh' to run 'cmd' on a node with ip.
+
+        Args:
+            cmd: The command to run.
+            port_forward: A list of ports to forward from the localhost to the
+            remote host.
+
+            Advanced options:
+
+            require_outputs: Whether to return the stdout/stderr of the command.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+            check: Check the success of the command.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
+            separate_stderr: Whether to separate stderr from stdout.
+
+
+        Returns:
+            returncode
+            or
+            A tuple of (returncode, stdout, stderr).
+        """
+        header_command = self._get_command_to_run(
+            cmd,
+            log_path,
+            process_stream,
+            separate_stderr,
+            interactive=False)
+        response = kubernetes.stream()(
+            kubernetes.core_api().connect_get_namespaced_pod_exec,
+            self.pod_name,
+            self.namespace,
+            command=header_command,
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+            _request_timeout=kubernetes.API_TIMEOUT,
+            _preload_content=False)
+        stdout = response.read_stdout()
+        stderr = response.read_stderr()
+        returncode = 0 if not stderr else 1
+
+        return (returncode, stdout, stderr) if require_outputs else returncode
+
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        # Advanced options.
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+    ) -> None:
+        """Uses 'rsync' to sync 'source' to 'target'.
+
+        Args:
+            source: The source path.
+            target: The target path.
+            up: The direction of the sync, True for local to cluster, False
+              for cluster to local.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+            max_retry: The maximum number of retries for the rsync command.
+              This value should be non-negative.
+
+        Raises:
+            exceptions.CommandError: rsync command failed.
+        """
+        # Build command.
+        # TODO(zhwu): This will print a per-file progress bar (with -P),
+        # shooting a lot of messages to the output. --info=progress2 is used
+        # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
+        # OS has a default rsync==2.6.9 (16 years old).
+        rsync_command = ['rsync', RSYNC_DISPLAY_OPTION]
+
+        # --filter
+        rsync_command.append(RSYNC_FILTER_OPTION)
+
+        if up:
+            # The source is a local path, so we need to resolve it.
+            # --exclude-from
+            resolved_source = pathlib.Path(source).expanduser().resolve()
+            if (resolved_source / GIT_EXCLUDE).exists():
+                # Ensure file exists; otherwise, rsync will error out.
+                #
+                # We shlex.quote() because the path may contain spaces:
+                #   'my dir/.git/info/exclude'
+                # Without quoting rsync fails.
+                rsync_command.append(
+                    RSYNC_EXCLUDE_OPTION.format(
+                        shlex.quote(str(resolved_source / GIT_EXCLUDE))))
+
+        kubernetes_options = f'kubectl exec -i -n {self.namespace} {self.pod_name} --'
+        rsync_command.append(f'-e "{kubernetes_options}"')
+        # To support spaces in the path, we need to quote source and target.
+        # rsync doesn't support '~' in a quoted local path, but it is ok to
+        # have '~' in a quoted remote path.
+        if up:
+            full_source_str = str(resolved_source)
+            if resolved_source.is_dir():
+                full_source_str = os.path.join(full_source_str, '')
+            rsync_command.extend([
+                f'{full_source_str!r}',
+                f':{target!r}',
+            ])
+        else:
+            rsync_command.extend([
+                f':{source!r}',
+                f'{os.path.expanduser(target)!r}',
+            ])
+        command = ' '.join(rsync_command)
+
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        while max_retry >= 0:
+            returncode, _, stderr = log_lib.run_with_log(
+                command,
+                log_path=log_path,
+                stream_logs=stream_logs,
+                shell=True,
+                require_outputs=True)
+            if returncode == 0:
+                break
+            max_retry -= 1
+            time.sleep(backoff.current_backoff())
+
+        direction = 'up' if up else 'down'
+        error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
+                     'Ensure that the network is stable, then retry.')
+        subprocess_utils.handle_returncode(returncode,
+                                           command,
+                                           error_msg,
+                                           stderr=stderr,
+                                           stream_logs=stream_logs)
+
+
 class SlurmRunner(CommandRunner):
     """Runner for Slurm commands."""
 
-    def __init__(self, node: Tuple[int, str], cluster_type: str,
+    def __init__(self, node: Tuple[str, int], cluster_type: str,
                  access_command: str):
         """Initialize SlurmRunner.
 
         Args:
-            node: job_id, node_name
+            node: node_name, job_id
             cluster_type: The type of the cluster: 'local' or 'remote'. If 'local',
                 the command will be run on the local machine. If 'remote', the
                 command will be run on the remote machine with access_command.

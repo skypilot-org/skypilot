@@ -309,19 +309,14 @@ class Slurm(clouds.Cloud):
         except exceptions.ResourcesUnavailableError:
             return False
 
-    @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        k8s = kubernetes.get_kubernetes()
-        try:
-            _, current_context = k8s.config.list_kube_config_contexts()
+    # @classmethod
+    # def get_current_user_identity(cls) -> Optional[List[str]]:
+    #     k8s = kubernetes.get_kubernetes()
+    #     try:
+    #         _, current_context = k8s.config.list_kube_config_contexts()
 
-            user = current_context['context']['user']
-            cluster = current_context['context']['cluster']
-            return [f'{cluster}_{user}_{namespace}']
-        except k8s.config.config_exception.ConfigException:
-            return None
-
-    @classmethod
-    def get_ssh_command_runner(
-            cls, config: Dict[str, str]) -> command_runner.CommandRunner:
-        pass
+    #         user = current_context['context']['user']
+    #         cluster = current_context['context']['cluster']
+    #         return [f'{cluster}_{user}_{namespace}']
+    #     except k8s.config.config_exception.ConfigException:
+    #         return None

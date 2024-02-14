@@ -180,7 +180,7 @@ class SlurmCommandRunner(CommandRunner):
 
     def __init__(
         self,
-        node: Tuple[int, str],
+        node: Tuple[str, int],
         ssh_user: str,
         ssh_private_key: str,
         ssh_control_name: Optional[str] = ...,
