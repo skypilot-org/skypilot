@@ -6,5 +6,5 @@ if [ x$1 = x"precustomization" ]; then
     sudo mkdir -p /home/user_placeholder/.ssh/pre
     sudo chown -R user_placeholder:user_placeholder /home/user_placeholder/.ssh
     sudo chmod 700 /home/user_placeholder/.ssh
-    sudo chmod 600 /home/user_placeholder/.ssh/authorized_keys
+    sudo chmod 644 /home/user_placeholder/.ssh/authorized_keys
 fi"""

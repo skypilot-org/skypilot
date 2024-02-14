@@ -93,7 +93,10 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
     ) as f:
         f.write(private_key)
 
-    with open(public_key_path, 'w', encoding='utf-8') as f:
+    with open(public_key_path,
+              'w',
+              encoding='utf-8',
+              opener=functools.partial(os.open, mode=0o644)) as f:
         f.write(public_key)
 
 

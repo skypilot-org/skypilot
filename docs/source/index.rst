@@ -66,6 +66,7 @@ Tutorials: `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutoria
 Runnable examples:
 
 .. Keep this section in sync with README.md in SkyPilot repo
+
 * **LLMs on SkyPilot**
 
   * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)

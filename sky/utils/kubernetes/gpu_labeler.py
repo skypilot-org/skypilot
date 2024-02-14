@@ -10,6 +10,7 @@ from kubernetes import config
 import yaml
 
 import sky
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import rich_utils
 
 
@@ -104,6 +105,25 @@ def label():
                 gpu_nodes.append(node)
 
         print(f'Found {len(gpu_nodes)} GPU nodes in the cluster')
+
+        # Check if the 'nvidia' RuntimeClass exists
+        try:
+            nvidia_exists = kubernetes_utils.check_nvidia_runtime_class()
+        except Exception as e:  # pylint: disable=broad-except
+            print('Error occurred while checking for nvidia RuntimeClass: '
+                  f'{str(e)}')
+            print('Continuing without using nvidia RuntimeClass. '
+                  'This may fail on K3s clusters. '
+                  'For more details, refer to K3s deployment notes at: '
+                  'https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html')  # pylint: disable=line-too-long
+            nvidia_exists = False
+
+        if nvidia_exists:
+            print('Using nvidia RuntimeClass for GPU labeling.')
+            job_manifest['spec']['template']['spec'][
+                'runtimeClassName'] = 'nvidia'
+        else:
+            print('Using default RuntimeClass for GPU labeling.')
 
         for node in gpu_nodes:
             node_name = node.metadata.name
