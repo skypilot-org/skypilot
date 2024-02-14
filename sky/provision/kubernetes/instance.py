@@ -421,6 +421,22 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
 
+    # Add nvidia runtime class if it exists
+    nvidia_runtime_exists = False
+    try:
+        nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class()
+    except kubernetes.get_kubernetes().client.ApiException as e:
+        logger.warning('run_instances: Error occurred while checking for '
+                       f'nvidia RuntimeClass - '
+                       f'{common_utils.format_exception(e)}'
+                       'Continuing without using nvidia RuntimeClass.\n'
+                       'If you are on a K3s cluster, manually '
+                       'override runtimeClassName in ~/.sky/config.yaml. '
+                       'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
+
+    if nvidia_runtime_exists:
+        pod_spec['spec']['runtimeClassName'] = 'nvidia'
+
     created_pods = {}
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')

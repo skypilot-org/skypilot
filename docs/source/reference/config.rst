@@ -270,7 +270,7 @@ Available fields and semantics:
         labels:
           my-label: my-value    # Custom labels to SkyPilot pods
       spec:
-        runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods. Required on K3s.
+        runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods.
         imagePullSecrets:
           - name: my-secret     # Pull images from a private registry using a secret
         containers:
