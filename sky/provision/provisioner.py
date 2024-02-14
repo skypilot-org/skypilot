@@ -295,6 +295,16 @@ def _wait_ssh_connection_direct(ip: str,
                                 ssh_control_name: Optional[str] = None,
                                 ssh_proxy_command: Optional[str] = None,
                                 **kwargs) -> Tuple[bool, str]:
+    """Wait for SSH connection using raw sockets, and a direct connection.
+
+    Using raw socket is more efficient than using SSH command to probe the
+    connection, before the SSH connection is ready. We use a actual SSH command
+    connection to test the connection, after the raw socket connection is ready
+    to make sure the SSH connection is actually ready.
+
+    Returns:
+        A tuple of (success, stderr).
+    """
     del kwargs  # unused
     assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
@@ -331,6 +341,11 @@ def _wait_ssh_connection_indirect(ip: str,
                                   ssh_control_name: Optional[str] = None,
                                   ssh_proxy_command: Optional[str] = None,
                                   **kwargs) -> Tuple[bool, str]:
+    """Wait for SSH connection using SSH command.
+    
+    Returns:
+        A tuple of (success, stderr).
+    """
     del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
