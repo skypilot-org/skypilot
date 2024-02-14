@@ -295,7 +295,7 @@ def _wait_ssh_connection_direct(ip: str,
                                 ssh_control_name: Optional[str] = None,
                                 ssh_proxy_command: Optional[str] = None,
                                 **kwargs) -> Tuple[bool, str]:
-    """Wait for SSH connection using raw sockets, and a direct connection.
+    """Wait for SSH connection using raw sockets, and a SSH connection.
 
     Using raw socket is more efficient than using SSH command to probe the
     connection, before the SSH connection is ready. We use a actual SSH command
