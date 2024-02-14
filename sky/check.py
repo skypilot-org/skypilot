@@ -23,10 +23,9 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         ok, reason = cloud.check_credentials()
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
-        status_color = 'green' if ok else 'red'
+        styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
         if not isinstance(cloud, clouds.Local):
-            echo('  ' + click.style(
-                f'{cloud_repr}: {status_msg}', fg=status_color, bold=True) +
+            echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
                  ' ' * 30)
         if ok:
             enabled_clouds.append(cloud_repr)
