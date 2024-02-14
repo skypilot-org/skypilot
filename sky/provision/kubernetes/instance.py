@@ -720,6 +720,10 @@ def query_instances(
     return cluster_status
 
 
+def get_command_runner_type() -> command_runner.CommandRunner:
+    return command_runner.KubernetesCommandRunner
+
+
 def get_command_runners(
     cluster_info: common.ClusterInfo,
     **crednetials: Dict[str, Any],

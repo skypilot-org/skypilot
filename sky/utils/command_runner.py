@@ -647,7 +647,8 @@ class KubernetesCommandRunner(CommandRunner):
                     RSYNC_EXCLUDE_OPTION.format(
                         shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
-        kubernetes_options = (f'kubectl exec -i -n {self.namespace} {self.pod_name} --')
+        kubernetes_options = (
+            f'kubectl exec -i -n {self.namespace} {self.pod_name} --')
         rsync_command.append(f'-e "{kubernetes_options}"')
         # To support spaces in the path, we need to quote source and target.
         # rsync doesn't support '~' in a quoted local path, but it is ok to
