@@ -1070,7 +1070,7 @@ def _count_healthy_nodes_from_ray(output: str,
 
 def get_docker_user(ip: str, cluster_config_file: str) -> str:
     """Find docker container username."""
-    ssh_credentials = access_credential_from_yaml(cluster_config_file)
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
     runner = command_runner.SSHCommandRunner(node=(ip, 22), **ssh_credentials)
     container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
     whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
@@ -1117,7 +1117,7 @@ def wait_until_ray_cluster_ready(
     if num_nodes <= 1:
         return True, docker_user
 
-    ssh_credentials = access_credential_from_yaml(cluster_config_file, docker_user)
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file, docker_user)
     last_nodes_so_far = 0
     start = time.time()
     runner = command_runner.SSHCommandRunner(node=(head_ip, 22),
@@ -1190,7 +1190,7 @@ def wait_until_ray_cluster_ready(
     return True, docker_user  # success
 
 
-def access_credential_from_yaml(
+def ssh_credential_from_yaml(
     cluster_yaml: str,
     docker_user: Optional[str] = None,
     ssh_user: Optional[str] = None,
@@ -1797,7 +1797,7 @@ def _update_cluster_status_no_lock(
             head_ssh_port = external_ssh_ports[0]
 
             # Check if ray cluster status is healthy.
-            ssh_credentials = access_credential_from_yaml(handle.cluster_yaml,
+            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                        handle.docker_user,
                                                        handle.ssh_user)
 

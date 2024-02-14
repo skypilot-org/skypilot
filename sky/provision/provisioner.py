@@ -415,7 +415,7 @@ def _post_provision_setup(
     ip_list = cluster_info.get_feasible_ips()
     port_list = cluster_info.get_ssh_ports()
     # We don't set docker_user here, as we are configuring the VM itself.
-    ssh_credentials = backend_utils.access_credential_from_yaml(
+    ssh_credentials = backend_utils.ssh_credential_from_yaml(
         cluster_yaml, ssh_user=cluster_info.ssh_user)
 
     with rich_utils.safe_status(

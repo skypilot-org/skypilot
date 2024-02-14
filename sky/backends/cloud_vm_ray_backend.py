@@ -2858,12 +2858,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle.launched_resources.cloud.get_zone_shell_cmd())
                 # zone is None for Azure
                 if get_zone_cmd is not None:
-                    access_credentials = backend_utils.access_credential_from_yaml(
+                    ssh_credentials = backend_utils.ssh_credential_from_yaml(
                         handle.cluster_yaml, handle.docker_user,
                         handle.ssh_user)
                     runners = command_runner.SSHCommandRunner.make_runner_list(
                         node_list=zip(ip_list, ssh_port_list),
-                        **access_credentials)
+                        **ssh_credentials)
 
                     def _get_zone(runner):
                         retry_count = 0
@@ -3031,12 +3031,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
-        access_credentials = backend_utils.access_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            node_list=zip(ip_list, port_list), **access_credentials)
+            node_list=zip(ip_list, port_list), **ssh_credentials)
 
         def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
             runner.rsync(
@@ -3095,14 +3095,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ip_list = handle.external_ips()
             port_list = handle.external_ssh_ports()
             assert ip_list is not None, 'external_ips is not cached in handle'
-            access_credentials = backend_utils.access_credential_from_yaml(
+            ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml, handle.docker_user, handle.ssh_user)
             # Disable connection sharing for setup script to avoid old
             # connections being reused, which may cause stale ssh agent
             # forwarding.
-            access_credentials.pop('ssh_control_name')
+            ssh_credentials.pop('ssh_control_name')
             runners = command_runner.SSHCommandRunner.make_runner_list(
-                node_list=zip(ip_list, port_list), **access_credentials)
+                node_list=zip(ip_list, port_list), **ssh_credentials)
 
             # Need this `-i` option to make sure `source ~/.bashrc` work
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
@@ -3182,12 +3182,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Executes generated code on the head node."""
         style = colorama.Style
         fore = colorama.Fore
-        access_credentials = backend_utils.access_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         head_ssh_port = handle.head_ssh_port
         runner = command_runner.SSHCommandRunner(node=(handle.head_ip,
                                                        head_ssh_port),
-                                                 **access_credentials)
+                                                 **ssh_credentials)
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
             fp.flush()
@@ -3205,7 +3205,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        job_owner = access_credentials['ssh_user']
+        job_owner = ssh_credentials['ssh_user']
         if handle.docker_user is not None:
             job_owner = handle.docker_user
         ray_job_id = job_lib.make_ray_job_id(job_id, job_owner)
@@ -3316,12 +3316,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ray_job_id: str,
     ):
         """Generates and prepares job submission code for local clusters."""
-        access_credentials = backend_utils.access_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
-        ssh_user = access_credentials['ssh_user']
+        ssh_user = ssh_credentials['ssh_user']
         runner = command_runner.SSHCommandRunner(node=(handle.head_ip,
                                                        handle.head_ssh_port),
-                                                 **access_credentials)
+                                                 **ssh_credentials)
         remote_log_dir = self.log_dir
         with tempfile.NamedTemporaryFile('w', prefix='sky_local_app_') as fp:
             fp.write(ray_command)
@@ -3636,10 +3636,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ssh_port_list = handle.external_ssh_ports()
         assert ssh_port_list is not None, 'external_ssh_ports is not cached ' \
                                           'in handle'
-        access_credentials = backend_utils.access_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            node_list=zip(ip_list, ssh_port_list), **access_credentials)
+            node_list=zip(ip_list, ssh_port_list), **ssh_credentials)
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
@@ -4245,10 +4245,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             max_attempts=_FETCH_IP_MAX_ATTEMPTS)
         head_ssh_port = external_ssh_ports[0]
 
-        access_credentials = backend_utils.access_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runner = command_runner.SSHCommandRunner(node=(head_ip, head_ssh_port),
-                                                 **access_credentials)
+                                                 **ssh_credentials)
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
@@ -4420,10 +4420,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ip_list = handle.external_ips()
         port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
-        access_credentials = backend_utils.access_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            node_list=zip(ip_list, port_list), **access_credentials)
+            node_list=zip(ip_list, port_list), **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         # Check the files and warn
@@ -4575,10 +4575,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ip_list = handle.external_ips()
         port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
-        access_credentials = backend_utils.access_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml, handle.docker_user, handle.ssh_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            node_list=zip(ip_list, port_list), **access_credentials)
+            node_list=zip(ip_list, port_list), **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         for dst, storage_obj in storage_mounts.items():
