@@ -109,9 +109,9 @@ class Autoscaler:
 class RequestRateAutoscaler(Autoscaler):
     """RequestRateAutoscaler: Autoscale according to request rate.
 
-    Scales when the number of requests in the given interval is above or below
-    the threshold.
-    The instance can be either spot or on-demand, but not both.
+    Scales when the number of requests per replica in the given interval
+    is above or below the target qps per replica. The instance can be
+    either spot or on-demand, but not both.
     """
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
@@ -148,7 +148,6 @@ class RequestRateAutoscaler(Autoscaler):
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
 
     def _cal_target_num_replicas_based_on_qps(self) -> int:
-        # Update self.target_num_replicas:
         # Recalculate target_num_replicas based on QPS.
         # Reclip self.target_num_replicas with new min and max replicas.
         target_num_replicas = math.ceil(
@@ -196,8 +195,7 @@ class RequestRateAutoscaler(Autoscaler):
         self.request_timestamps = self.request_timestamps[index:]
 
     def _set_desired_num_replicas(self) -> None:
-        """Set self.target_num_replicas based on request rate.
-        """
+        """Set self.target_num_replicas based on request rate."""
         # Maintain self.target_num_replicas when autoscaling
         # is not enabled, i.e. self.target_qps_per_replica is None.
         # In this case, self.target_num_replicas will be min_replicas.
@@ -348,7 +346,6 @@ class RequestRateAutoscaler(Autoscaler):
 class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
     """FallbackRequestRateAutoscaler: Use spot with
     on-demand as fallback to autoscale based on request rate.
-
     """
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:

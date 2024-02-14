@@ -4,6 +4,7 @@ service:
   readiness_probe: /health
   replica_policy:
     min_replicas: 1
+    max_replicas: 3
     target_qps_per_replica: 1
 
 resources:

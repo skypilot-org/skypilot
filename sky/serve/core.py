@@ -33,7 +33,6 @@ logger = sky_logging.init_logger(__name__)
 
 def _validate_service_task(task: 'sky.Task'):
     """Validate the task for Sky Serve.
-    Raise ValueError if the task is invalid.
 
     Args:
         task: sky.Task to validate
@@ -63,7 +62,9 @@ def _validate_service_task(task: 'sky.Task'):
 
     if len(task.resources) == 0:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('At least one resource is required.')
+            raise ValueError(
+                'At least one resource specifying the replica ports'
+                'is required for a SkyServe service task.')
     first_resource_dict = list(task.resources)[0].to_yaml_config()
     for requested_resources in task.resources:
         requested_resources_dict = requested_resources.to_yaml_config()

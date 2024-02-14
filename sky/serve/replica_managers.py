@@ -75,8 +75,8 @@ def launch_cluster(task_yaml_path: str,
                 for any_of_config in resource_config['any_of']:
                     any_of_config.update(resources_override)
             if 'ordered' in resource_config:
-                for any_of_config in resource_config['ordered']:
-                    any_of_config.update(resources_override)
+                for ordered_config in resource_config['ordered']:
+                    ordered_config.update(resources_override)
             else:
                 resource_config.update(resources_override)
             config['resources'] = resource_config
@@ -141,10 +141,7 @@ def launch_cluster(task_yaml_path: str,
 def terminate_cluster(cluster_name: str,
                       replica_drain_delay_seconds: int = 0,
                       max_retry: int = 3) -> None:
-    """Terminate the sky serve replica cluster.
-    replica_drain_delay_seconds is useful to
-    drain the node before node termination.
-    """
+    """Terminate the sky serve replica cluster."""
     time.sleep(replica_drain_delay_seconds)
     retry_cnt = 0
     backoff = common_utils.Backoff()

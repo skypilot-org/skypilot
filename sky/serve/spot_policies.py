@@ -19,18 +19,18 @@ class Location:
     def __init__(self, cloud: str, region: str, zone: Optional[str]) -> None:
         self.cloud = cloud
         self.region = region
-        self.zone = zone
+        self.zone = zone if zone is not None else ''
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         if isinstance(other, Location):
             return (self.cloud == other.cloud and
                     self.region == other.region and self.zone == other.zone)
         return False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.cloud + self.region + self.zone)
 
-    def to_dict(self):
+    def to_dict(self) -> Dict[str, str]:
         return {'cloud': self.cloud, 'region': self.region, 'zone': self.zone}
 
 

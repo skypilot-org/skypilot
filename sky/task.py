@@ -653,13 +653,13 @@ class Task:
                     service.disable_use_spot_placer()
                     disable_spot_placer_log += (
                         'requires multiple resources '
-                        'to have the same fields except zones/regions/clouds ')
+                        'to have the same fields except zones/regions/clouds')
                     break
 
             if isinstance(self.resources, list):
                 service.disable_use_spot_placer()
                 if disable_spot_placer_log:
-                    disable_spot_placer_log += 'and '
+                    disable_spot_placer_log += ' and '
                 disable_spot_placer_log += 'does not support ordered resources'
 
             if disable_spot_placer_log:
