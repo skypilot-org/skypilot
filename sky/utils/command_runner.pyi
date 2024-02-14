@@ -178,7 +178,7 @@ class KubernetesCommandRunner(CommandRunner):
 
     def __init__(
         self,
-        node: Tuple[str, int],
+        node: Tuple[str, str],
     ) -> None:
         ...
 

@@ -8,7 +8,6 @@ import time
 from typing import Any, Iterable, List, Optional, Tuple, Type, Union
 
 from sky import sky_logging
-from sky.adaptors import kubernetes
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -140,17 +139,15 @@ class CommandRunner:
         del node, kwargs
         self.node_id = node_id
 
-    def _get_command_to_run(self, cmd: Union[str, List[str]], log_path: str,
-                            process_stream: bool, separate_stderr: bool,
-                            interactive: bool) -> List[str]:
+    def _get_command_to_run(self, cmd: Union[str,
+                                             List[str]], process_stream: bool,
+                            separate_stderr: bool, interactive: bool) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
             cmd = ' '.join(cmd)
 
-        log_dir = os.path.expanduser(os.path.dirname(log_path))
-        os.makedirs(log_dir, exist_ok=True)
         # We need this to correctly run the cmd, and get the output.
-        header = [
+        command = [
             'bash',
             '--login',
             '-c',
@@ -158,7 +155,7 @@ class CommandRunner:
             '-i',
         ]
 
-        command = [
+        command += [
             shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
         ]
@@ -176,7 +173,7 @@ class CommandRunner:
             ]
 
         command_str = ' '.join(command)
-        return header + [command_str]
+        return command_str
 
     def run(
             self,
@@ -386,14 +383,16 @@ class SSHCommandRunner(CommandRunner):
             command = base_ssh_command + cmd
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
-        header_command = self._get_command_to_run(
+
+        command_str = self._get_command_to_run(
             cmd,
-            log_path,
             process_stream,
             separate_stderr,
             interactive=(ssh_mode != SshMode.NON_INTERACTIVE))
-        command_str = ' '.join(header_command)
         command = base_ssh_command + [shlex.quote(command_str)]
+
+        log_dir = os.path.expanduser(os.path.dirname(log_path))
+        os.makedirs(log_dir, exist_ok=True)
 
         executable = None
         if not process_stream:
@@ -526,6 +525,7 @@ class KubernetesCommandRunner(CommandRunner):
     def __init__(
         self,
         node: Tuple[str, str],
+        **kwargs,
     ):
         """Initialize SSHCommandRunner.
 
@@ -537,6 +537,7 @@ class KubernetesCommandRunner(CommandRunner):
         Args:
             node: The namespace and pod_name of the remote machine.
         """
+        del kwargs
         self.namespace, self.pod_name = node
         super().__init__(self.pod_name, node)
 
@@ -575,29 +576,38 @@ class KubernetesCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
-        header_command = self._get_command_to_run(cmd,
-                                                  log_path,
-                                                  process_stream,
-                                                  separate_stderr,
-                                                  interactive=False)
-        response = kubernetes.stream()(
-            kubernetes.core_api().connect_get_namespaced_pod_exec,
-            self.pod_name,
-            self.namespace,
-            command=header_command,
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-            _request_timeout=kubernetes.API_TIMEOUT,
-            _preload_content=False)
-        stdout = response.read_stdout()
-        stderr = response.read_stderr()
-        returncode = 0 if not stderr else 1
-        # TODO(zhwu): fix stream_logs
-        del stream_logs
+        kubectl_base_command = [
+            'kubectl', 'exec', '-i', '-n', self.namespace, self.pod_name, '--'
+        ]
+        command_str = self._get_command_to_run(cmd,
+                                               process_stream,
+                                               separate_stderr,
+                                               interactive=False)
+        command = kubectl_base_command + [command_str]
 
-        return (returncode, stdout, stderr) if require_outputs else returncode
+        log_dir = os.path.expanduser(os.path.dirname(log_path))
+        os.makedirs(log_dir, exist_ok=True)
+
+        executable = None
+        if not process_stream:
+            if stream_logs:
+                command += [
+                    f'| tee {log_path}',
+                    # This also requires the executor to be '/bin/bash' instead
+                    # of the default '/bin/sh'.
+                    '; exit ${PIPESTATUS[0]}'
+                ]
+            else:
+                command += [f'> {log_path}']
+            executable = '/bin/bash'
+        return log_lib.run_with_log(' '.join(command),
+                                    log_path,
+                                    require_outputs=require_outputs,
+                                    stream_logs=stream_logs,
+                                    process_stream=process_stream,
+                                    shell=True,
+                                    executable=executable,
+                                    **kwargs)
 
     def rsync(
         self,
@@ -625,12 +635,22 @@ class KubernetesCommandRunner(CommandRunner):
         Raises:
             exceptions.CommandError: rsync command failed.
         """
+        rc, remote_home_dir, _ = self.run('pwd',
+                                          require_outputs=True,
+                                          stream_logs=False)
+        if rc != 0:
+            raise ValueError('Failed to get remote home directory.')
+        remote_home_dir = remote_home_dir.strip()
         # Build command.
         # TODO(zhwu): This will print a per-file progress bar (with -P),
         # shooting a lot of messages to the output. --info=progress2 is used
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', RSYNC_DISPLAY_OPTION]
+        helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
+                                   'kubernetes', 'rsync_helper.sh')
+        rsync_command = [
+            f'chmod +x {helper_path} &&', 'rsync', RSYNC_DISPLAY_OPTION
+        ]
 
         # --filter
         rsync_command.append(RSYNC_FILTER_OPTION)
@@ -649,26 +669,27 @@ class KubernetesCommandRunner(CommandRunner):
                     RSYNC_EXCLUDE_OPTION.format(
                         shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
-        kubernetes_options = (
-            f'kubectl exec -i -n {self.namespace} {self.pod_name} --')
-        rsync_command.append(f'-e "{kubernetes_options}"')
+        rsync_command.append(f'-e "{helper_path}"')
         # To support spaces in the path, we need to quote source and target.
         # rsync doesn't support '~' in a quoted local path, but it is ok to
         # have '~' in a quoted remote path.
         if up:
+            resolved_target = target.replace('~', remote_home_dir)
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
                 full_source_str = os.path.join(full_source_str, '')
             rsync_command.extend([
                 f'{full_source_str!r}',
-                f':{target!r}',
+                f'{self.pod_name}@{self.namespace}:{resolved_target!r}',
             ])
         else:
+            resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
-                f':{source!r}',
+                f'{self.pod_name}@{self.namespace}:{resolved_source!r}',
                 f'{os.path.expanduser(target)!r}',
             ])
         command = ' '.join(rsync_command)
+        logger.debug(f'Running rsync command: {command}')
 
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         while max_retry >= 0:

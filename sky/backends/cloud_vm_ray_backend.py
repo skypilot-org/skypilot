@@ -2362,11 +2362,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
+        command_runner_type = provision_lib.get_command_runner_type(
+            str(self.launched_resources.cloud).lower())
+        logger.debug(f'Using command runner type: {command_runner_type} for '
+                     f'cloud {self.launched_resources.cloud}')
         if (clouds.ProvisionerVersion.SKYPILOT >=
                 self.launched_resources.cloud.PROVISIONER_VERSION or
-                provision_lib.get_command_runner_type(
-                    str(self.launched_resources.cloud).lower())
-                == command_runner.SSHCommandRunner):
+                command_runner_type == command_runner.SSHCommandRunner):
             ip_list = self.external_ips()
             port_list = self.external_ssh_ports()
             runners = command_runner.SSHCommandRunner.make_runner_list(
