@@ -626,7 +626,7 @@ class KubernetesNodeProvider(NodeProvider):
         # we need to reload the updated user from YAML.
         cluster_yaml_path = self._recover_cluster_yaml_path(
             cluster_name_with_hash)
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+        ssh_credentials = backend_utils.access_credential_from_yaml(
             cluster_yaml_path)
         auth_config['ssh_user'] = ssh_credentials['ssh_user']
 

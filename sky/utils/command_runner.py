@@ -6,8 +6,7 @@ import os
 import pathlib
 import shlex
 import time
-from typing import (Any, Iterable, List, Optional, Tuple, Type,
-                    Union)
+from typing import Any, Iterable, List, Optional, Tuple, Type, Union
 
 from sky import sky_logging
 from sky.adaptors import kubernetes
@@ -521,9 +520,8 @@ class SSHCommandRunner(CommandRunner):
                                            stream_logs=stream_logs)
 
 
-
 class KubernetesCommandRunner(CommandRunner):
-    """Runner for SSH commands."""
+    """Runner for Kubernetes commands."""
 
     def __init__(
         self,
@@ -577,12 +575,11 @@ class KubernetesCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
-        header_command = self._get_command_to_run(
-            cmd,
-            log_path,
-            process_stream,
-            separate_stderr,
-            interactive=False)
+        header_command = self._get_command_to_run(cmd,
+                                                  log_path,
+                                                  process_stream,
+                                                  separate_stderr,
+                                                  interactive=False)
         response = kubernetes.stream()(
             kubernetes.core_api().connect_get_namespaced_pod_exec,
             self.pod_name,
@@ -650,7 +647,7 @@ class KubernetesCommandRunner(CommandRunner):
                     RSYNC_EXCLUDE_OPTION.format(
                         shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
-        kubernetes_options = f'kubectl exec -i -n {self.namespace} {self.pod_name} --'
+        kubernetes_options = (f'kubectl exec -i -n {self.namespace} {self.pod_name} --')
         rsync_command.append(f'-e "{kubernetes_options}"')
         # To support spaces in the path, we need to quote source and target.
         # rsync doesn't support '~' in a quoted local path, but it is ok to
@@ -666,153 +663,6 @@ class KubernetesCommandRunner(CommandRunner):
         else:
             rsync_command.extend([
                 f':{source!r}',
-                f'{os.path.expanduser(target)!r}',
-            ])
-        command = ' '.join(rsync_command)
-
-        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
-        while max_retry >= 0:
-            returncode, _, stderr = log_lib.run_with_log(
-                command,
-                log_path=log_path,
-                stream_logs=stream_logs,
-                shell=True,
-                require_outputs=True)
-            if returncode == 0:
-                break
-            max_retry -= 1
-            time.sleep(backoff.current_backoff())
-
-        direction = 'up' if up else 'down'
-        error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
-                     'Ensure that the network is stable, then retry.')
-        subprocess_utils.handle_returncode(returncode,
-                                           command,
-                                           error_msg,
-                                           stderr=stderr,
-                                           stream_logs=stream_logs)
-
-
-class SlurmRunner(CommandRunner):
-    """Runner for Slurm commands."""
-
-    def __init__(self, node: Tuple[str, int], cluster_type: str,
-                 access_command: str):
-        """Initialize SlurmRunner.
-
-        Args:
-            node: node_name, job_id
-            cluster_type: The type of the cluster: 'local' or 'remote'. If 'local',
-                the command will be run on the local machine. If 'remote', the
-                command will be run on the remote machine with access_command.
-            access_command: The command to access the cluster.
-            job_id: The job id of the cluster.
-        """
-        super().__init__(node)
-        job_id, node_name = node
-        if cluster_type not in ['local', 'remote']:
-            raise ValueError('Invalid cluster type for slurm runner: '
-                             f'{cluster_type}. Should be "local" or "remote".')
-        if cluster_type == 'local':
-            self.access_command = ''
-        else:
-            self.access_command = access_command
-
-        self.job_id = job_id
-        self.node_name = node_name
-
-    def run(
-            self,
-            cmd: Union[str, List[str]],
-            *,
-            require_outputs: bool = False,
-            # Advanced options.
-            log_path: str = os.devnull,
-            # If False, do not redirect stdout/stderr to optimize performance.
-            process_stream: bool = True,
-            stream_logs: bool = True,
-            separate_stderr: bool = False,
-            **kwargs) -> Union[int, Tuple[int, str, str]]:
-        """Runs the command on the cluster (slurm job)."""
-
-        command_str = self._get_command_to_run(cmd,
-                                               log_path,
-                                               process_stream,
-                                               separate_stderr,
-                                               interactive=True)
-        command = (f'{self.access_command} srun --jobid {self.job_id} '
-                   f'--nodelist={self.node_name}'
-                   f'--pty {shlex.quote(command_str)}')
-        return log_lib.run_with_log(command,
-                                    log_path,
-                                    require_outputs=require_outputs,
-                                    stream_logs=stream_logs,
-                                    process_stream=process_stream,
-                                    shell=True,
-                                    executable='/bin/bash',
-                                    **kwargs)
-
-    def rsync(
-        self,
-        source: str,
-        target: str,
-        *,
-        up: bool,
-        # Advanced options.
-        log_path: str = os.devnull,
-        stream_logs: bool = True,
-        max_retry: int = 1,
-    ) -> None:
-        """Uses 'rsync' to sync 'source' to 'target'.
-
-        This assumes that the source and target are both on the cluster, and
-        the slurm cluster has shared file system set up.
-        
-        Args:
-            source: The source path.
-            target: The target path.
-            up: The direction of the sync, True for local to cluster, False
-              for cluster to local.
-            log_path: Redirect stdout/stderr to the log_path.
-            stream_logs: Stream logs to the stdout/stderr.
-            max_retry: The maximum number of retries for the rsync command.
-              This value should be non-negative.
-
-        Raises:
-            exceptions.CommandError: rsync command failed.
-        """
-        # Build command.
-        # TODO(zhwu): This will print a per-file progress bar (with -P),
-        # shooting a lot of messages to the output. --info=progress2 is used
-        # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
-        # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', RSYNC_DISPLAY_OPTION]
-
-        # --filter
-        rsync_command.append(RSYNC_FILTER_OPTION)
-
-        if up:
-            # The source is a local path, so we need to resolve it.
-            # --exclude-from
-            resolved_source = pathlib.Path(source).expanduser().resolve()
-            if (resolved_source / GIT_EXCLUDE).exists():
-                # Ensure file exists; otherwise, rsync will error out.
-                #
-                # We shlex.quote() because the path may contain spaces:
-                #   'my dir/.git/info/exclude'
-                # Without quoting rsync fails.
-                rsync_command.append(
-                    RSYNC_EXCLUDE_OPTION.format(
-                        shlex.quote(str(resolved_source / GIT_EXCLUDE))))
-
-            # To support spaces in the path, we need to quote source and target.
-            # rsync doesn't support '~' in a quoted local path, but it is ok to
-            # have '~' in a quoted remote path.
-            full_source_str = str(resolved_source)
-            if resolved_source.is_dir():
-                full_source_str = os.path.join(full_source_str, '')
-            rsync_command.extend([
-                f'{full_source_str!r}',
                 f'{os.path.expanduser(target)!r}',
             ])
         command = ' '.join(rsync_command)

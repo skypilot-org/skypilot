@@ -6,6 +6,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import provision
 from sky import sky_logging
 from sky.provision import common
 from sky.provision import docker_utils
@@ -102,23 +103,20 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
                              ssh_credentials: Dict[str, Any]) -> List[Any]:
     with futures.ThreadPoolExecutor(max_workers=32) as pool:
         results = []
-        for instance_id, metadatas in cluster_info.instances.items():
-            for i, metadata in enumerate(metadatas):
-                cache_id = f'{instance_id}-{i}'
-                runner = command_runner.SSHCommandRunner(
-                    node=(metadata.get_feasible_ip(), metadata.ssh_port),
-                    **ssh_credentials)
-                wrapper = metadata_utils.cache_func(cluster_name, cache_id,
-                                                    stage_name, digest)
-                if (cluster_info.head_instance_id == instance_id and i == 0):
-                    # Log the head node's output to the provision.log
-                    log_path_abs = str(provision_logging.get_log_path())
-                else:
-                    log_dir_abs = metadata_utils.get_instance_log_dir(
-                        cluster_name, cache_id)
-                    log_path_abs = str(log_dir_abs / (stage_name + '.log'))
-                results.append(
-                    pool.submit(wrapper(func), runner, metadata, log_path_abs))
+        runners = provision.get_command_runners(cluster_info.provider_name,
+                                                cluster_info, **ssh_credentials)
+        for i, runner in enumerate(runners):
+            cache_id = str(i)
+            wrapper = metadata_utils.cache_func(cluster_name, cache_id,
+                                                stage_name, digest)
+            if i == 0:
+                # Log the head node's output to the provision.log
+                log_path_abs = str(provision_logging.get_log_path())
+            else:
+                log_dir_abs = metadata_utils.get_instance_log_dir(
+                    cluster_name, cache_id)
+                log_path_abs = str(log_dir_abs / (stage_name + '.log'))
+            results.append(pool.submit(wrapper(func), runner, log_path_abs))
 
         return [future.result() for future in results]
 
@@ -133,9 +131,7 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
     _hint_worker_log_path(cluster_name, cluster_info, 'initialize_docker')
 
     @_auto_retry
-    def _initialize_docker(runner: command_runner.SSHCommandRunner,
-                           metadata: common.InstanceInfo, log_path: str):
-        del metadata  # Unused.
+    def _initialize_docker(runner: command_runner.CommandRunner, log_path: str):
         docker_user = docker_utils.DockerInitializer(docker_config, runner,
                                                      log_path).initialize()
         logger.debug(f'Initialized docker user: {docker_user}')
@@ -172,9 +168,7 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
     digest = hasher.hexdigest()
 
     @_auto_retry
-    def _setup_node(runner: command_runner.SSHCommandRunner,
-                    metadata: common.InstanceInfo, log_path: str):
-        del metadata
+    def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         for cmd in setup_commands:
             returncode, stdout, stderr = runner.run(cmd,
                                                     stream_logs=False,
@@ -201,11 +195,9 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                            cluster_info: common.ClusterInfo,
                            ssh_credentials: Dict[str, Any]) -> None:
     """Start Ray on the head node."""
-    ip_list = cluster_info.get_feasible_ips()
-    port_list = cluster_info.get_ssh_ports()
-    ssh_runner = command_runner.SSHCommandRunner(node=(ip_list[0],
-                                                       port_list[0]),
-                                                 **ssh_credentials)
+    runners = provision.get_command_runners(cluster_info.provider_name,
+                                            cluster_info, **ssh_credentials)
+    head_runner = runners[0]
     assert cluster_info.head_instance_id is not None, (cluster_name,
                                                        cluster_info)
     # Log the head node's output to the provision.log
@@ -237,10 +229,10 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
            _DUMP_RAY_PORTS)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
-    returncode, stdout, stderr = ssh_runner.run(cmd,
-                                                stream_logs=False,
-                                                log_path=log_path_abs,
-                                                require_outputs=True)
+    returncode, stdout, stderr = head_runner.run(cmd,
+                                                 stream_logs=False,
+                                                 log_path=log_path_abs,
+                                                 require_outputs=True)
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
                            f'(exit code {returncode}). Error: '
@@ -258,11 +250,9 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     if cluster_info.num_instances <= 1:
         return
     _hint_worker_log_path(cluster_name, cluster_info, 'ray_cluster')
-    ip_list = cluster_info.get_feasible_ips()
-    ssh_runners = command_runner.SSHCommandRunner.make_runner_list(
-        node_list=zip(ip_list[1:],
-                      cluster_info.get_ssh_ports()[1:]),
-        **ssh_credentials)
+    runners = provision.get_command_runners(cluster_info.provider_name,
+                                            cluster_info, **ssh_credentials)
+    worker_runners = runners[1:]
     worker_instances = cluster_info.get_worker_instances()
     cache_ids = []
     prev_instance_id = None
@@ -308,7 +298,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 
     logger.info(f'Running command on worker nodes: {cmd}')
 
-    def _setup_ray_worker(runner_and_id: Tuple[command_runner.SSHCommandRunner,
+    def _setup_ray_worker(runner_and_id: Tuple[command_runner.CommandRunner,
                                                str]):
         # for cmd in config_from_yaml['worker_start_ray_commands']:
         #     cmd = cmd.replace('$RAY_HEAD_IP', ip_list[0][0])
@@ -322,7 +312,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                           log_path=log_path_abs)
 
     results = subprocess_utils.run_in_parallel(
-        _setup_ray_worker, list(zip(ssh_runners, cache_ids)))
+        _setup_ray_worker, list(zip(worker_runners, cache_ids)))
     for returncode, stdout, stderr in results:
         if returncode:
             with ux_utils.print_exception_no_traceback():
@@ -340,18 +330,16 @@ def start_skylet_on_head_node(cluster_name: str,
                               ssh_credentials: Dict[str, Any]) -> None:
     """Start skylet on the head node."""
     del cluster_name
-    ip_list = cluster_info.get_feasible_ips()
-    port_list = cluster_info.get_ssh_ports()
-    ssh_runner = command_runner.SSHCommandRunner(node=(ip_list[0],
-                                                       port_list[0]),
-                                                 **ssh_credentials)
+    runners = provision.get_command_runners(cluster_info.provider_name,
+                                            cluster_info, **ssh_credentials)
+    head_runner = runners[0]
     assert cluster_info.head_instance_id is not None, cluster_info
     log_path_abs = str(provision_logging.get_log_path())
     logger.info(f'Running command on head node: {_MAYBE_SKYLET_RESTART_CMD}')
-    returncode, stdout, stderr = ssh_runner.run(_MAYBE_SKYLET_RESTART_CMD,
-                                                stream_logs=False,
-                                                require_outputs=True,
-                                                log_path=log_path_abs)
+    returncode, stdout, stderr = head_runner.run(_MAYBE_SKYLET_RESTART_CMD,
+                                                 stream_logs=False,
+                                                 require_outputs=True,
+                                                 log_path=log_path_abs)
     if returncode:
         raise RuntimeError('Failed to start skylet on the head node '
                            f'(exit code {returncode}). Error: '
@@ -361,7 +349,7 @@ def start_skylet_on_head_node(cluster_name: str,
 
 @_auto_retry
 def _internal_file_mounts(file_mounts: Dict,
-                          runner: command_runner.SSHCommandRunner,
+                          runner: command_runner.CommandRunner,
                           log_path: str) -> None:
     if file_mounts is None or not file_mounts:
         return
@@ -402,9 +390,7 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict,
     """Executes file mounts - rsyncing internal local files"""
     _hint_worker_log_path(cluster_name, cluster_info, 'internal_file_mounts')
 
-    def _setup_node(runner: command_runner.SSHCommandRunner,
-                    metadata: common.InstanceInfo, log_path: str):
-        del metadata
+    def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         _internal_file_mounts(common_file_mounts, runner, log_path)
 
     _parallel_ssh_with_cache(

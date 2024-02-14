@@ -12,6 +12,7 @@ from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
@@ -667,7 +668,10 @@ def get_cluster_info(
         custom_ray_options={
             'object-store-memory': 500000000,
             'num-cpus': cpu_request,
-        })
+        },
+        provider_name='kubernetes',
+        provider_config=provider_config,
+    )
 
 
 def query_instances(
@@ -714,3 +718,16 @@ def query_instances(
             continue
         cluster_status[pod.metadata.name] = pod_status
     return cluster_status
+
+
+def get_command_runners(
+    cluster_info: common.ClusterInfo,
+    **crednetials: Dict[str, Any],
+) -> List[command_runner.CommandRunner]:
+    """Get a command runner for the given cluster."""
+    assert cluster_info.provider_config is not None, cluster_info
+    instances = cluster_info.instances
+    namespace = _get_namespace(cluster_info.provider_config)
+    node_lsit = [(namespace, pod_name) for pod_name in instances.keys()]
+    return command_runner.KubernetesCommandRunner.make_runner_list(
+        node_list=node_lsit, **crednetials)

@@ -176,7 +176,7 @@ class SSHCommandRunner(CommandRunner):
         ...
 
 
-class SlurmCommandRunner(CommandRunner):
+class KubernetesCommandRunner(CommandRunner):
 
     def __init__(
         self,
@@ -218,11 +218,9 @@ class SlurmCommandRunner(CommandRunner):
             cmd: Union[str, List[str]],
             *,
             require_outputs: bool = ...,
-            port_forward: Optional[List[int]] = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,
-            ssh_mode: SshMode = ...,
             separate_stderr: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...

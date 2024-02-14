@@ -154,7 +154,7 @@ def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
-    del region, provider_config  # unused
+    del region  # unused
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
@@ -174,6 +174,8 @@ def get_cluster_info(
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
+        provider_name='runpod',
+        provider_config=provider_config,
     )
 
 

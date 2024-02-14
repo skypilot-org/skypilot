@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky import status_lib
-from sky.utils import command_runner
 # These provision.<cloud> modules should never fail even if underlying cloud SDK
 # dependencies are not installed. This is ensured by using sky.adaptors inside
 # these modules, for lazy loading of cloud SDKs.
@@ -20,6 +19,7 @@ from sky.provision import gcp
 from sky.provision import kubernetes
 from sky.provision import runpod
 from sky.provision import vsphere
+from sky.utils import command_runner
 
 logger = sky_logging.init_logger(__name__)
 
@@ -175,9 +175,8 @@ def get_command_runners(
     **crednetials: Dict[str, Any],
 ) -> List[command_runner.CommandRunner]:
     """Get a command runner for the given cluster."""
-    del provider_name  # Unused
     ip_list = cluster_info.get_feasible_ips()
-    port_list = cluster_info.get_feasible_ports()
+    port_list = cluster_info.get_ssh_ports()
     return command_runner.SSHCommandRunner.make_runner_list(node_list=zip(
         ip_list, port_list),
                                                             **crednetials)
