@@ -15,7 +15,6 @@ from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
-from sky.clouds.local import Local
 from sky.clouds.oci import OCI
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
@@ -28,7 +27,6 @@ __all__ = [
     'Cloud',
     'GCP',
     'Lambda',
-    'Local',
     'SCP',
     'RunPod',
     'OCI',

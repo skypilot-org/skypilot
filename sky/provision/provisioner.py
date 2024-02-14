@@ -68,10 +68,7 @@ def _bulk_provision(
     else:
         zone_str = ','.join(z.name for z in zones)
 
-    if isinstance(cloud, clouds.Local):
-        logger.info(f'{style.BRIGHT}Launching on local cluster '
-                    f'{cluster_name!r}.')
-    elif isinstance(cloud, clouds.Kubernetes):
+    if isinstance(cloud, clouds.Kubernetes):
         # Omit the region name for Kubernetes.
         logger.info(f'{style.BRIGHT}Launching on {cloud}{style.RESET_ALL} '
                     f'{cluster_name!r}.')
