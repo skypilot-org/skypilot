@@ -7,13 +7,6 @@ SkyPilot tasks can access objects in cloud object stores (e.g., S3, GCS, R2, IBM
 These objects are made available to the task at a local path on the remote VM, so
 the task can access these objects as if they were local files.
 
-SkyPilot provides two ways to access cloud object stores:
-
-1. **MOUNT** mode: The object store is directly "mounted" to the remote VM. I.e., files are streamed when accessed by the task and all writes are replicated to remote bucket (and any other VMs mounting the same bucket).
-2. **COPY** mode: The files are pre-fetched and cached on the local disk. Writes are not replicated on the remote store.
-
-.. TODO(romilb): Add infographic here
-
 These are specified using the :code:`file_mounts` field in a SkyPilot task.
 
 Common Use Cases
@@ -77,8 +70,26 @@ Common Use Cases
         Since writes are replicated in **MOUNT** mode (set by default),
         it can also act as a shared file system across workers running on different nodes.
 
-Considerations
+Mounting Modes
 --------------
+
+SkyPilot provides two ways to access cloud object stores:
+
+1. **MOUNT** mode: The object store is directly "mounted" to the remote VM. I.e., files are streamed when accessed by the task and all writes are replicated to remote bucket (and any other VMs mounting the same bucket).
+2. **COPY** mode: The files are pre-fetched and cached on the local disk. Writes are not replicated on the remote store.
+
+.. TODO(romilb): Add infographic here
+
+
+
+Considerations when picking mode
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Performance
+
+Writes
+
+Size
 
 
 .. note::
