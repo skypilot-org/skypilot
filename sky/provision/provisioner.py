@@ -493,7 +493,8 @@ def _post_provision_setup(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_info, ssh_credentials)
 
-        runners = provision.get_command_runners(cluster_info, ssh_credentials)
+        runners = provision.get_command_runners(cloud_name, cluster_info,
+                                                **ssh_credentials)
         head_runner = runners[0]
 
         status.update(
