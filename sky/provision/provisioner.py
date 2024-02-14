@@ -357,9 +357,10 @@ def _wait_ssh_connection_indirect(ip: str,
                           stderr=subprocess.PIPE)
     if proc.returncode != 0:
         stderr = proc.stderr.decode('utf-8')
+        stderr = f'Error: {stderr}'
         logger.debug(
             f'Waiting for SSH to {ip} with command: {_shlex_join(command)}\n'
-            f'Error: {stderr}')
+            f'{stderr}')
         return False, stderr
     return True, ''
 
