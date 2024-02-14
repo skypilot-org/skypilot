@@ -5,7 +5,7 @@ providers supported by SkyPilot need to follow.
 """
 import functools
 import inspect
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 
 from sky import sky_logging
 from sky import status_lib
@@ -170,7 +170,8 @@ def get_cluster_info(
 
 
 @_route_to_cloud_impl
-def get_command_runner_type(provider_name: str) -> command_runner.CommandRunner:
+def get_command_runner_type(
+        provider_name: str) -> Type[command_runner.CommandRunner]:
     """Get the command runner type for the given provider."""
     return command_runner.SSHCommandRunner
 

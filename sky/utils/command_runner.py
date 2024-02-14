@@ -136,8 +136,9 @@ class SshMode(enum.Enum):
 class CommandRunner:
     """Runner for commands to be executed on the cluster."""
 
-    def __init__(self, node: Any, **kwargs):
-        pass
+    def __init__(self, node_id: str, node: Any, **kwargs):
+        del node, kwargs
+        self.node_id = node_id
 
     def _get_command_to_run(self, cmd: Union[str, List[str]], log_path: str,
                             process_stream: bool, separate_stderr: bool,
@@ -285,8 +286,8 @@ class SSHCommandRunner(CommandRunner):
                 command will utilize ControlMaster. We currently disable
                 it for k8s instance.
         """
-        super().__init__(node)
         ip, port = node
+        super().__init__(ip, node)
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
@@ -536,8 +537,8 @@ class KubernetesCommandRunner(CommandRunner):
         Args:
             node: The namespace and pod_name of the remote machine.
         """
-        super().__init__(node)
         self.namespace, self.pod_name = node
+        super().__init__(self.pod_name, node)
 
     def run(
             self,
@@ -593,6 +594,8 @@ class KubernetesCommandRunner(CommandRunner):
         stdout = response.read_stdout()
         stderr = response.read_stderr()
         returncode = 0 if not stderr else 1
+        # TODO(zhwu): fix stream_logs
+        del stream_logs
 
         return (returncode, stdout, stderr) if require_outputs else returncode
 

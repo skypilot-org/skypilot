@@ -1,7 +1,7 @@
 """Kubernetes instance provisioning."""
 import copy
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 import uuid
 
 from sky import exceptions
@@ -729,7 +729,7 @@ def query_instances(
     return cluster_status
 
 
-def get_command_runner_type() -> command_runner.CommandRunner:
+def get_command_runner_type() -> Type[command_runner.CommandRunner]:
     return command_runner.KubernetesCommandRunner
 
 

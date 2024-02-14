@@ -40,15 +40,13 @@ class SshMode(enum.Enum):
 
 
 class CommandRunner:
+    node_id: str
 
     def __init__(
         self,
+        node_id: str,
         node: Tuple[Any, ...],
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = ...,
-        docker_user: Optional[str] = ...,
-        disable_control_master: Optional[bool] = ...,
+        **kwargs,
     ) -> None:
         ...
 

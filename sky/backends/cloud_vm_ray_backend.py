@@ -2988,7 +2988,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         ip_list = handle.external_ips()
-        port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
@@ -3087,7 +3086,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if detach_setup:
                 return
             setup_log_path = os.path.join(self.log_dir,
-                                          f'setup-{runner.ip}.log')
+                                          f'setup-{runner.node_id}.log')
             returncode = runner.run(
                 setup_cmd,
                 log_path=setup_log_path,
