@@ -10,8 +10,8 @@ from kubernetes import config
 import yaml
 
 import sky
-from sky.utils import rich_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import rich_utils
 
 
 def prerequisite_check() -> Tuple[bool, str]:
