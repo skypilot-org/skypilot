@@ -342,7 +342,7 @@ def _wait_ssh_connection_indirect(ip: str,
                                   ssh_proxy_command: Optional[str] = None,
                                   **kwargs) -> Tuple[bool, str]:
     """Wait for SSH connection using SSH command.
-    
+
     Returns:
         A tuple of (success, stderr).
     """
