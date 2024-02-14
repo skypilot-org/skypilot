@@ -545,12 +545,14 @@ class KubernetesCommandRunner(CommandRunner):
             self,
             cmd: Union[str, List[str]],
             *,
+            port_forward: Optional[List[int]] = None,
             require_outputs: bool = False,
             # Advanced options.
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
             process_stream: bool = True,
             stream_logs: bool = True,
+            ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
@@ -576,18 +578,33 @@ class KubernetesCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
-        port_forward = kwargs.pop('port_forward', None)
+        assert port_forward is None, ('port_forward is not supported for k8s '
+                                      f'for now, but got: {port_forward}')
+
+        if ssh_mode == SshMode.LOGIN:
+            assert isinstance(cmd, list), 'cmd must be a list for login mode.'
+            base_cmd = [
+                'kubectl', 'exec', '-it', '-n', self.namespace, self.pod_name,
+                '--'
+            ]
+            command = base_cmd + cmd
+            proc = subprocess_utils.run(command, shell=False, check=False)
+            return proc.returncode, '', ''
+
         # Ignore ssh_mode for k8s.
-        kwargs.pop('ssh_mode', SshMode.NON_INTERACTIVE)
         assert port_forward is None, ('port_forward is not supported for k8s, '
                                       f'but got: {port_forward}')
-        kubectl_base_command = [
-            'kubectl', 'exec', '-i', '-n', self.namespace, self.pod_name, '--'
-        ]
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               interactive=False)
+        kubectl_base_command = ['kubectl', 'exec', '-i']
+
+        if ssh_mode == SshMode.INTERACTIVE:
+            kubectl_base_command.append('-t')
+        kubectl_base_command += ['-n', self.namespace, self.pod_name, '--']
+
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            interactive=ssh_mode != SshMode.NON_INTERACTIVE)
         command = kubectl_base_command + [command_str]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
