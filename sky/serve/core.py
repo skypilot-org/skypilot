@@ -617,7 +617,7 @@ def sync_down(service_name: str) -> None:
     prepare_returncode = backend.run_on_head(controller_handle,
                                              prepare_code,
                                              require_outputs=False,
-                                             stream_logs=True)
+                                             stream_logs=False)
     subprocess_utils.handle_returncode(
         prepare_returncode, prepare_code,
         'Failed to prepare replica logs to sync down.')
@@ -630,13 +630,14 @@ def sync_down(service_name: str) -> None:
                  stream_logs=False)
     remove_code = serve_utils.ServeCodeGen.remove_replica_logs_for_download(
         service_name, timestamp)
-    remove_returncode, _, _ = backend.run_on_head(controller_handle,
-                                                  remove_code,
-                                                  require_outputs=False,
-                                                  stream_logs=False)
+    remove_returncode = backend.run_on_head(controller_handle,
+                                            remove_code,
+                                            require_outputs=False,
+                                            stream_logs=False)
     subprocess_utils.handle_returncode(
         remove_returncode, remove_code,
         'Failed to remove the replica logs for download on the controller.')
+    sky_logging.print('Removed the logs for download on controller')
 
 
 @usage_lib.entrypoint

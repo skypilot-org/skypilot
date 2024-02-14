@@ -628,19 +628,24 @@ def extract_replica_id_from_launch_log_file_name(file_name: str) -> int:
 def prepare_replica_logs_for_download(service_name: str,
                                       timestamp: str) -> None:
     logger.info('Preparing replica logs for download')
-    dir_name = generate_remote_service_dir_name(service_name)
+    remote_service_dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(remote_service_dir_name)
     dir_for_download = os.path.join(dir_name, timestamp)
     os.makedirs(dir_for_download, exist_ok=True)
 
     # copy over log files of replicas already terminated
     log_file_pattern = os.path.join(dir_name, 'replica_*.log')
     log_files = glob.glob(log_file_pattern)
-    for file_path in log_files:
+    terminated_replica_log_files = [
+        file for file in log_files if not file.endswith('_launch.log')
+    ]
+    for file_path in terminated_replica_log_files:
         shutil.copy(file_path, dir_for_download)
 
     # manage log files of replicas with launch log files
-    launch_log_file_pattern = os.path.join(dir_name, 'replica_*_launch.log')
-    launch_log_files = glob.glob(launch_log_file_pattern)
+    launch_log_files = [
+        file for file in log_files if file.endswith('_launch.log')
+    ]
     for launch_log_file in launch_log_files:
         replica_id = extract_replica_id_from_launch_log_file_name(
             launch_log_file)
@@ -653,7 +658,7 @@ def prepare_replica_logs_for_download(service_name: str,
         new_replica_log_file = os.path.join(dir_for_download,
                                             f'replica_{replica_id}.log')
         shutil.copy(launch_log_file, new_replica_log_file)
-        if replica_info.status == serve_state.ReplicaStatus.PENDING:
+        if replica_info.status == serve_state.ReplicaStatus.PROVISIONING:
             continue
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(
@@ -686,7 +691,8 @@ def prepare_replica_logs_for_download(service_name: str,
 
 
 def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
-    dir_name = generate_remote_service_dir_name(service_name)
+    remote_service_dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(remote_service_dir_name)
     dir_to_remove = os.path.join(dir_name, timestamp)
     shutil.rmtree(dir_to_remove)
     logger.info(f'{service_name}: Finished removing replica logs')
