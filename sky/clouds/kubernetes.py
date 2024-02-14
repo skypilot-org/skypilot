@@ -5,7 +5,6 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
@@ -195,10 +194,13 @@ class Kubernetes(clouds.Cloud):
         return 0
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud, zones  # Unused.
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud, zones, dryrun  # Unused.
         if region is None:
             region = self._regions[0]
 
@@ -356,18 +358,6 @@ class Kubernetes(clouds.Cloud):
             raise ValueError('Kubernetes support does not support setting zone.'
                              ' Cluster used is determined by the kubeconfig.')
         return region, zone
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        try:
-            # Check if accelerator is available by checking node labels
-            _, _ = kubernetes_utils.get_gpu_label_key_value(accelerator)
-            return True
-        except exceptions.ResourcesUnavailableError:
-            return False
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

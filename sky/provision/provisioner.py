@@ -8,7 +8,7 @@ import socket
 import subprocess
 import time
 import traceback
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import colorama
 
@@ -291,29 +291,44 @@ def _wait_ssh_connection_direct(ip: str,
                                 ssh_private_key: str,
                                 ssh_control_name: Optional[str] = None,
                                 ssh_proxy_command: Optional[str] = None,
-                                **kwargs) -> bool:
+                                **kwargs) -> Tuple[bool, str]:
+    """Wait for SSH connection using raw sockets, and a SSH connection.
+
+    Using raw socket is more efficient than using SSH command to probe the
+    connection, before the SSH connection is ready. We use a actual SSH command
+    connection to test the connection, after the raw socket connection is ready
+    to make sure the SSH connection is actually ready.
+
+    Returns:
+        A tuple of (success, stderr).
+    """
     del kwargs  # unused
     assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
+        success = False
+        stderr = ''
         with socket.create_connection((ip, ssh_port), timeout=1) as s:
             if s.recv(100).startswith(b'SSH'):
                 # Wait for SSH being actually ready, otherwise we may get the
                 # following error:
                 # "System is booting up. Unprivileged users are not permitted to
                 # log in yet".
-                return _wait_ssh_connection_indirect(ip, ssh_port, ssh_user,
-                                                     ssh_private_key,
-                                                     ssh_control_name,
-                                                     ssh_proxy_command)
+                success = True
+        if success:
+            return _wait_ssh_connection_indirect(ip, ssh_port, ssh_user,
+                                                 ssh_private_key,
+                                                 ssh_control_name,
+                                                 ssh_proxy_command)
     except socket.timeout:  # this is the most expected exception
-        pass
-    except Exception:  # pylint: disable=broad-except
-        pass
+        stderr = f'Timeout: SSH connection to {ip} is not ready.'
+    except Exception as e:  # pylint: disable=broad-except
+        stderr = f'Error: {common_utils.format_exception(e)}'
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
     logger.debug(f'Waiting for SSH to {ip}. Try: '
-                 f'{_shlex_join(command)}')
-    return False
+                 f'{_shlex_join(command)}. '
+                 f'{stderr}')
+    return False, stderr
 
 
 def _wait_ssh_connection_indirect(ip: str,
@@ -322,7 +337,12 @@ def _wait_ssh_connection_indirect(ip: str,
                                   ssh_private_key: str,
                                   ssh_control_name: Optional[str] = None,
                                   ssh_proxy_command: Optional[str] = None,
-                                  **kwargs) -> bool:
+                                  **kwargs) -> Tuple[bool, str]:
+    """Wait for SSH connection using SSH command.
+
+    Returns:
+        A tuple of (success, stderr).
+    """
     del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
@@ -333,10 +353,13 @@ def _wait_ssh_connection_indirect(ip: str,
                           stdout=subprocess.DEVNULL,
                           stderr=subprocess.PIPE)
     if proc.returncode != 0:
+        stderr = proc.stderr.decode('utf-8')
+        stderr = f'Error: {stderr}'
         logger.debug(
             f'Waiting for SSH to {ip} with command: {_shlex_join(command)}\n'
-            f'Error: {proc.stderr.decode("utf-8")}')
-    return proc.returncode == 0
+            f'{stderr}')
+        return False, stderr
+    return True, ''
 
 
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
@@ -365,13 +388,15 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
     while ips:
         ip = ips.popleft()
         ssh_port = ssh_ports.popleft()
-        if not waiter(ip, ssh_port, **ssh_credentials):
+        success, stderr = waiter(ip, ssh_port, **ssh_credentials)
+        if not success:
             ips.append(ip)
             ssh_ports.append(ssh_port)
             if time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        f'Failed to SSH to {ip} after timeout {timeout}s.')
+                        f'Failed to SSH to {ip} after timeout {timeout}s, with '
+                        f'{stderr}')
             logger.debug('Retrying in 1 second...')
             time.sleep(1)
 

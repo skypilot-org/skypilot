@@ -17,7 +17,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import env_options
@@ -249,8 +248,6 @@ class Optimizer:
 
         # node -> cloud -> list of resources that satisfy user's requirements.
         node_to_candidate_map: _TaskToPerCloudCandidates = {}
-        specific_reservations = set(
-            skypilot_config.get_nested(('gcp', 'specific_reservations'), set()))
 
         # Compute the estimated cost/time for each node.
         for node_i, node in enumerate(topo_order):
@@ -311,7 +308,7 @@ class Optimizer:
                         cost_per_node = resources.get_cost(estimated_runtime)
                         num_available_reserved_nodes = sum(
                             resources.get_reservations_available_resources(
-                                specific_reservations).values())
+                            ).values())
 
                         # We consider the cost of the unused reservation
                         # resources to be 0 since we are already paying for
@@ -338,7 +335,7 @@ class Optimizer:
                 # mention "kubernetes cluster" and/instead of "catalog"
                 # in the error message.
                 enabled_clouds = global_user_state.get_enabled_clouds()
-                if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
+                if clouds.cloud_in_list(clouds.Kubernetes(), enabled_clouds):
                     if any(orig_resources.cloud is None
                            for orig_resources in node.resources):
                         source_hint = 'catalog and kubernetes cluster'
@@ -1086,10 +1083,6 @@ class DummyCloud(clouds.Cloud):
     pass
 
 
-def _cloud_in_list(cloud: clouds.Cloud, lst: Iterable[clouds.Cloud]) -> bool:
-    return any(cloud.is_same_cloud(c) for c in lst)
-
-
 def _make_launchables_for_valid_region_zones(
     launchable_resources: resources_lib.Resources
 ) -> List[resources_lib.Resources]:
@@ -1173,8 +1166,8 @@ def _fill_in_launchable_resources(
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
-        if resources.cloud is not None and not _cloud_in_list(
-                resources.cloud, enabled_clouds):
+        if (resources.cloud is not None and
+                not clouds.cloud_in_list(resources.cloud, enabled_clouds)):
             if try_fix_with_sky_check:
                 # Explicitly check again to update the enabled cloud list.
                 check.check(quiet=True)
