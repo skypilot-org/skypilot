@@ -9,7 +9,7 @@ VMS_CSV = 'cudo/vms.csv'
 def get_spec_from_instance(instance_type, data_center_id):
     path = get_catalog_path(VMS_CSV)
     spec = []
-    with open(path, mode='r') as file:
+    with open(path, mode='r', encoding='utf-8') as file:
         csv_reader = csv.reader(file)
         for row in csv_reader:
             if row and row[0] == instance_type and row[6] == data_center_id:

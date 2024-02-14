@@ -188,7 +188,7 @@ def update_prices():
             }
             rows.append(row)
     path = VMS_CSV
-    with open(path, 'w') as file:
+    with open(path, 'w', encoding='utf-8') as file:
         file.write(
             # pylint: disable=line-too-long
             'InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,Price,Region,GpuInfo,SpotPrice\n'

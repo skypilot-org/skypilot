@@ -420,7 +420,7 @@ def get_ray_port():
     port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
-    port = json.load(open(port_path))['ray_port']
+    port = json.load(open(port_path, 'r', encoding='utf-8'))['ray_port']
     return port
 
 
@@ -433,7 +433,8 @@ def get_job_submission_port():
     port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 8265
-    port = json.load(open(port_path))['ray_dashboard_port']
+    port = json.load(open(port_path, 'r',
+                          encoding='utf-8'))['ray_dashboard_port']
     return port
 
 

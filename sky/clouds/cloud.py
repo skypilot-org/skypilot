@@ -476,7 +476,7 @@ class Cloud:
                                                     clouds=self._REPR.lower())
 
     def need_cleanup_after_preemption(
-            self, resource: 'resources_lib.Resources') -> bool:
+            self, resources: 'resources_lib.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption.
 
         In most cases, spot resources do not need cleanup after preemption,
@@ -485,7 +485,7 @@ class Cloud:
         The only exception by far is GCP's Spot TPU VM. We override this method
         in gcp.py.
         """
-        del resource
+        del resources
         return False
 
     @classmethod

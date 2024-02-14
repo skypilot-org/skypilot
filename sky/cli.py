@@ -539,7 +539,7 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
 
 
 def _get_click_major_version():
-    return int(click.__version__.split('.')[0])
+    return int(click.__version__.split('.', maxsplit=1)[0])
 
 
 def _get_shell_complete_args(complete_fn):
@@ -1039,8 +1039,9 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     yaml_file_provided = (len(shell_splits) == 1 and
                           (shell_splits[0].endswith('yaml') or
                            shell_splits[0].endswith('.yml')))
+    invalid_reason = ''
     try:
-        with open(entrypoint, 'r') as f:
+        with open(entrypoint, 'r', encoding='utf-8') as f:
             try:
                 config = list(yaml.safe_load_all(f))
                 if config:
