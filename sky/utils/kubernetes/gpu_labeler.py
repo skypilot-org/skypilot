@@ -11,6 +11,7 @@ import yaml
 
 import sky
 from sky.utils import rich_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 
 
 def prerequisite_check() -> Tuple[bool, str]:
@@ -28,20 +29,6 @@ def prerequisite_check() -> Tuple[bool, str]:
         output = e.output.decode('utf-8')
         reason = 'Error running kubectl: ' + output
     return prereq_ok, reason
-
-
-def check_nvidia_runtime_class() -> bool:
-    """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
-    config.load_kube_config()
-    node_api = client.NodeV1Api()
-
-    # Fetch the list of available RuntimeClasses
-    runtime_classes = node_api.list_runtime_class()
-
-    # Check if 'nvidia' RuntimeClass exists
-    nvidia_exists = any(
-        rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
-    return nvidia_exists
 
 
 def cleanup() -> Tuple[bool, str]:
@@ -121,7 +108,7 @@ def label():
 
         # Check if the 'nvidia' RuntimeClass exists
         try:
-            nvidia_exists = check_nvidia_runtime_class()
+            nvidia_exists = kubernetes_utils.check_nvidia_runtime_class()
         except Exception as e:  # pylint: disable=broad-except
             print('Error occurred while checking for nvidia RuntimeClass: '
                   f'{str(e)}')

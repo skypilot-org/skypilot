@@ -279,17 +279,6 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
             _request_timeout=kubernetes.API_TIMEOUT)
 
 
-def _check_nvidia_runtime_class() -> bool:
-    """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
-    # Fetch the list of available RuntimeClasses
-    runtime_classes = kubernetes.node_api().list_runtime_class()
-
-    # Check if 'nvidia' RuntimeClass exists
-    nvidia_exists = any(
-        rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
-    return nvidia_exists
-
-
 def run_command_on_pods(node_name, node_namespace, command):
     cmd_output = kubernetes.stream()(
         kubernetes.core_api().connect_get_namespaced_pod_exec,
@@ -442,7 +431,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     # Add nvidia runtime class if it exists
     nvidia_runtime_exists = False
     try:
-        nvidia_runtime_exists = _check_nvidia_runtime_class()
+        nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class()
     except kubernetes.get_kubernetes().client.ApiException as e:
         logger.warning('run_instances: Error occurred while checking for '
                        f'nvidia RuntimeClass - '
