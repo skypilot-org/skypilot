@@ -158,6 +158,15 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
     raise config_lib.KubernetesError(f'{timeout_err_msg}')
 
 
+def _raise_command_running_error(message: str, command: str, pod_name: str,
+                                 rc: int, stdout: str):
+    if rc == 0:
+        return
+    raise config_lib.KubernetesError(
+        f'Failed to {message} for pod {pod_name} with return '
+        f'code {rc}: {command!r}\nOutput: {stdout}.')
+
+
 def _wait_for_pods_to_schedule(namespace, new_nodes, timeout: int):
     """Wait for all pods to be scheduled.
 
@@ -268,7 +277,11 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     for new_pod in new_pods:
         runner = command_runner.KubernetesCommandRunner(
             (namespace, new_pod.metadata.name))
-        runner.run(set_k8s_env_var_cmd)
+        rc, stdout, _ = runner.run(set_k8s_env_var_cmd,
+                                   require_outputs=True,
+                                   stream_logs=False)
+        _raise_command_running_error('set env vars', set_k8s_env_var_cmd,
+                                     new_pod.metadata.name, rc, stdout)
 
 
 def _check_user_privilege(namespace: str, new_nodes: List) -> None:
@@ -290,12 +303,12 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
     for new_node in new_nodes:
         runner = command_runner.KubernetesCommandRunner(
             (namespace, new_node.metadata.name))
-        rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
-                                        require_outputs=True)
-        if rc != 0:
-            raise config_lib.KubernetesError(
-                f'Failed to check user privileges: {rc}.'
-                f'stdout: {stdout}.\nstderr: {stderr}')
+        rc, stdout, _ = runner.run(check_k8s_user_sudo_cmd,
+                                   require_outputs=True,
+                                   stream_logs=False)
+        _raise_command_running_error('check user privilege',
+                                     check_k8s_user_sudo_cmd,
+                                     new_node.metadata.name, rc, stdout)
         if stdout == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
@@ -333,11 +346,14 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
         # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
 
-    # TODO(romilb): We need logging and surface errors here.
     for new_node in new_nodes:
         runner = command_runner.KubernetesCommandRunner(
             (namespace, new_node.metadata.name))
-        runner.run(set_k8s_ssh_cmd)
+        rc, stdout, _ = runner.run(set_k8s_ssh_cmd,
+                                   require_outputs=True,
+                                   stream_logs=False)
+        _raise_command_running_error('setup ssh', set_k8s_ssh_cmd,
+                                     new_node.metadata.name, rc, stdout)
 
 
 def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
@@ -647,14 +663,11 @@ def get_cluster_info(
     get_k8s_ssh_user_cmd = 'echo $(whoami)'
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner((namespace, head_pod_name))
-    rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
-                                    require_outputs=True,
-                                    stream_logs=False)
-    logger.info(f'get_cluster_info: get_k8s_ssh_user_cmd: rc={rc}, '
-                f'stdout={stdout}, stderr={stderr}')
-    if rc != 0:
-        raise config_lib.KubernetesError(
-            f'Error occurred while getting ssh user: {rc}')
+    rc, stdout, _ = runner.run(get_k8s_ssh_user_cmd,
+                               require_outputs=True,
+                               stream_logs=False)
+    _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
+                                 head_pod_name, rc, stdout)
     ssh_user = stdout.strip()
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
@@ -733,6 +746,11 @@ def get_command_runners(
     assert cluster_info.provider_config is not None, cluster_info
     instances = cluster_info.instances
     namespace = _get_namespace(cluster_info.provider_config)
-    node_lsit = [(namespace, pod_name) for pod_name in instances.keys()]
+    node_list = []
+    if cluster_info.head_instance_id is not None:
+        node_list = [(namespace, cluster_info.head_instance_id)]
+    node_list.extend((namespace, pod_name)
+                     for pod_name in instances.keys()
+                     if pod_name != cluster_info.head_instance_id)
     return command_runner.KubernetesCommandRunner.make_runner_list(
-        node_list=node_lsit, **crednetials)
+        node_list=node_list, **crednetials)
