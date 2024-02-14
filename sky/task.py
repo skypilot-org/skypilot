@@ -628,6 +628,7 @@ class Task:
           self: The current task, with service set.
         """
 
+        self._service = service
         if service is None:
             return self
 

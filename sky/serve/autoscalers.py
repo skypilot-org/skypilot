@@ -5,7 +5,7 @@ import enum
 import math
 import time
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -238,7 +238,8 @@ class RequestRateAutoscaler(Autoscaler):
     @classmethod
     def select_replicas_to_scale_down(
             cls, num_limit: int,
-            replica_infos: List['replica_managers.ReplicaInfo']) -> List[int]:
+            replica_infos: Iterable['replica_managers.ReplicaInfo']
+    ) -> List[int]:
 
         status_order = serve_state.ReplicaStatus.scale_down_decision_order()
         replica_infos_sorted = sorted(
@@ -257,8 +258,8 @@ class RequestRateAutoscaler(Autoscaler):
             return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
 
     def select_outdated_replicas_to_scale_down(
-            self,
-            replica_infos: List['replica_managers.ReplicaInfo']) -> List[int]:
+            self, replica_infos: Iterable['replica_managers.ReplicaInfo']
+    ) -> List[int]:
 
         ready_new_replicas: List['replica_managers.ReplicaInfo'] = []
         old_replicas: List['replica_managers.ReplicaInfo'] = []
@@ -463,9 +464,8 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             all_replica_ids_to_scale_down.extend(
                 RequestRateAutoscaler.select_replicas_to_scale_down(
                     num_spot_to_scale_down,
-                    list(
-                        filter(lambda info: info.is_spot,
-                               provisioning_and_launched_new_replicas))))
+                    filter(lambda info: info.is_spot,
+                           provisioning_and_launched_new_replicas)))
 
         # Once there is min_replicas number of
         # ready new replicas, we will direct all traffic to them,
@@ -489,9 +489,8 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             all_replica_ids_to_scale_down.extend(
                 RequestRateAutoscaler.select_replicas_to_scale_down(
                     num_launched_on_demand - num_on_demand_to_provision,
-                    list(
-                        filter(lambda info: not info.is_spot,
-                               provisioning_and_launched_new_replicas))))
+                    filter(lambda info: not info.is_spot,
+                           provisioning_and_launched_new_replicas)))
 
         for replica_id in all_replica_ids_to_scale_down:
             scaling_options.append(
