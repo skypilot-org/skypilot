@@ -880,8 +880,7 @@ class Resources:
                     pass
             if not at_least_one_cloud_supports_ports:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Cannot specify ports without enabling '
-                                     'a cloud that supports open ports.')
+                    raise ValueError('No enabled clouds support opening ports. To fix: do not specify resources.ports, or enable a cloud that does support this feature.')
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
 
