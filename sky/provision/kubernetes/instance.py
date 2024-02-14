@@ -282,8 +282,9 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     ]
 
     for new_pod in new_pods:
-        _run_command_on_pods(new_pod.metadata.name, namespace,
-                             set_k8s_env_var_cmd)
+        runner = command_runner.KubernetesCommandRunner(
+            (namespace, new_pod.metadata.name))
+        runner.run(set_k8s_env_var_cmd)
 
 
 def _check_user_privilege(namespace: str, new_nodes: List) -> None:
@@ -307,10 +308,12 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
     ]
 
     for new_node in new_nodes:
-        privilege_check = _run_command_on_pods(new_node.metadata.name,
-                                               namespace,
-                                               check_k8s_user_sudo_cmd)
-        if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
+        runner = command_runner.KubernetesCommandRunner(
+            (namespace, new_node.metadata.name))
+        rc, stdout, _ = runner.run(check_k8s_user_sudo_cmd,
+                                   require_outputs=True)
+        assert rc == 0, f'Error occurred while checking user privileges: {rc}'
+        if stdout == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
                 'Ensure the default user has root access or '

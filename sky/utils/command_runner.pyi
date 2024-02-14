@@ -179,11 +179,6 @@ class KubernetesCommandRunner(CommandRunner):
     def __init__(
         self,
         node: Tuple[str, int],
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = ...,
-        docker_user: Optional[str] = ...,
-        disable_control_master: Optional[bool] = ...,
     ) -> None:
         ...
 

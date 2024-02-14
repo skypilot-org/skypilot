@@ -2362,8 +2362,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
-        if (self.launched_resources.cloud.PROVISIONER_VERSION <
-                clouds.ProvisionerVersion.SKYPILOT or
+        if (clouds.ProvisionerVersion.SKYPILOT >=
+                self.launched_resources.cloud.PROVISIONER_VERSION or
                 provision_lib.get_command_runner_type(
                     str(self.launched_resources.cloud).lower())
                 == command_runner.SSHCommandRunner):
