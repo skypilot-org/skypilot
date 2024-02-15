@@ -128,6 +128,21 @@ For example, to launch VMs in Europe only (which can help with GDPR compliance),
 
 See more details about the ``resources.any_of`` field :ref:`here <multiple-resources>`.
 
+PyTorch 2.2.0 failed on SkyPilot clusters. What should I do?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The latest PyTorch release (2.2.0) has a version conflict with the default cuDNN version on SkyPilot clusters. To fix this, you can:
+
+1. Use older version of PyTorch (like 2.1.0) instead of 2.2.0;
+2. Remove the cuDNN from the cluster's :code:`LD_LIBRARY_PATH` by adding the following line to the task definition:
+
+.. code-block:: yaml
+
+  run: |
+    export LD_LIBRARY_PATH=$(echo $LD_LIBRARY_PATH | sed 's|:/usr/local/cuda/lib64||g; s|/usr/local/cuda/lib64:||g; s|/usr/local/cuda/lib64||g')
+    # Other commands using PyTorch 2.2.0
+    ...
+
 (Advanced) How to make SkyPilot use all global regions?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
