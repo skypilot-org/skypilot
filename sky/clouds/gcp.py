@@ -430,7 +430,8 @@ class GCP(clouds.Cloud):
                     'tpu_vm', True)
                 resources_vars['runtime_version'] = r.accelerator_args[
                     'runtime_version']
-                resources_vars['tpu_node_name'] = r.accelerator_args.get('tpu_name')
+                resources_vars['tpu_node_name'] = r.accelerator_args.get(
+                    'tpu_name')
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
