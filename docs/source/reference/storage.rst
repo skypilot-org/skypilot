@@ -8,7 +8,7 @@ SkyPilot tasks can access objects in cloud object stores such as AWS S3, Google 
 These objects are made available to the task at a local path on the remote VM, so
 the task can access these objects as if they were local files.
 
-These are specified using the :code:`file_mounts` field in a SkyPilot task.
+Object stores to be used are specified using the :code:`file_mounts` field in a SkyPilot task.
 
 Common Use Cases
 ----------------
