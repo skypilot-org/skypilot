@@ -87,8 +87,9 @@ def get_regions() -> List[str]:
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 USEFUL_COLUMNS = [
-    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation'
+    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'DeviceMemory',
+    'vCPUs', 'MemoryGiB', 'GpuInfo', 'Price', 'SpotPrice', 'Region',
+    'Generation'
 ]
 
 
@@ -279,9 +280,32 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     after_drop_len = len(df_ret)
     print(f'Dropped {before_drop_len - after_drop_len} duplicated rows')
 
+    # Information from
+    # https://learn.microsoft.com/en-us/azure/virtual-machines/sizes-gpu
+    gpu_map = {
+        'K80': 12,
+        'P100': 16,
+        'V100': 16,
+        'T4': 16,
+        'V100-32GB': 32,
+        'A100-80GB': 80,
+        'A100': 40,
+        'M60': 8,
+        'Radeon MI25': 16,
+        'P40': 24,
+        'A10': 24
+    }
+
+    df_ret['DeviceMemory'] = df_ret.apply(
+        lambda row: gpu_map[row['AcceleratorName']] * int(row['AcceleratorCount'
+                                                             ])
+        if pd.notnull(row['AcceleratorName']) else np.nan,
+        axis=1)
+
     # Filter out deprecated families
     df_ret = df_ret.loc[~df_ret['family'].isin(DEPRECATED_FAMILIES)]
     df_ret = df_ret[USEFUL_COLUMNS]
+
     return df_ret
 
 
