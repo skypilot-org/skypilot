@@ -10,7 +10,7 @@ framework and deploys it across one or more regions or clouds.
 
 Why SkyServe?
 
-* **Bring any serving framework** (vLLM, TGI, FastAPI, ...) and scale it across regions/clouds
+* **Bring any serving framework** (vLLM, TGI, LoRAX, FastAPI, ...) and scale it across regions/clouds
 * **Reduce costs and increase availability** of service replicas by leveraging multiple/cheaper locations and hardware (spot instances)
 * Out-of-the-box **load-balancing** and **autoscaling** of service replicas
 * **Privacy and Control**: Everything is launched inside your cloud accounts and VPCs
@@ -45,7 +45,7 @@ How it works:
 Quick tour: LLM serving
 -----------------------
 
-Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v0.1` on vLLM or :code:`lmsys/vicuna-13b-v1.5` on TGI):
+Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v0.1` on vLLM and LoRAX, or :code:`lmsys/vicuna-13b-v1.5` on TGI):
 
 .. tab-set::
 
@@ -95,6 +95,28 @@ Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v
               docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
                 ghcr.io/huggingface/text-generation-inference \
                 --model-id lmsys/vicuna-13b-v1.5
+    
+    .. tab-item:: LoRAX
+        :sync: lorax-tab
+
+        .. code-block:: yaml
+
+            # service.yaml
+            service:
+              readiness_probe: /health
+              initial_delay_seconds: 1200
+              replicas: 2
+
+            # Fields below describe each replica.
+            resources:
+              ports: 8080
+              accelerators: {A10G, A10, L4, A100, A100-80GB}
+              memory: 32+
+
+            run: |
+              docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
+                ghcr.io/predibase/lorax:latest \
+                --model-id mistralai/Mistral-7B-Instruct-v0.1
 
 Run :code:`sky serve up service.yaml` to deploy the service with automatic price and capacity optimization. Once it is deployed, use :code:`sky serve status` to check the status of the service:
 
@@ -115,6 +137,15 @@ Run :code:`sky serve up service.yaml` to deploy the service with automatic price
             :width: 800
             :align: center
             :alt: sky-serve-status-tgi
+    
+    .. TODO: Add LoRAX status image
+    .. .. tab-item:: LoRAX
+    ..     :sync: lorax-tab
+
+    ..     .. image:: ../images/sky-serve-status-lorax.png
+    ..         :width: 800
+    ..         :align: center
+    ..         :alt: sky-serve-status-lorax
 
 .. raw:: html
 
@@ -156,6 +187,25 @@ Simply ``curl -L`` the service endpoint, which automatically load-balances acros
 
             # Example output:
             {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
+    
+    .. tab-item:: LoRAX
+        :sync: lorax-tab
+
+        .. code-block:: console
+
+            $ curl 127.0.0.1:8080/generate \
+                -X POST \
+                -d '{
+                    "inputs": "[INST] Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May? [/INST]",
+                    "parameters": {
+                        "max_new_tokens": 64,
+                        "adapter_id": "vineetsharma/qlora-adapter-Mistral-7B-Instruct-v0.1-gsm8k"
+                    }
+                }' \
+                -H 'Content-Type: application/json'
+
+            # Example output:
+            {"generated_text":"Let's break down the problem:\n\n1. In April, Natalia sold clips to 48 of her friends.\n2. In May, she sold half as many clips as in April, which means she sold 48/2 = 24 clips in May.\n"}
 
 Tutorial: Hello, SkyServe!
 --------------------------
