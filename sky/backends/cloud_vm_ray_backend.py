@@ -871,42 +871,6 @@ class FailoverCloudErrorHandlerV1:
             _add_to_blocked_resources(blocked_resources,
                                       launchable_resources.copy(zone=zone.name))
 
-    @staticmethod
-    def _local_handler(blocked_resources: Set['resources_lib.Resources'],
-                       launchable_resources: 'resources_lib.Resources',
-                       region: 'clouds.Region',
-                       zones: Optional[List['clouds.Zone']], stdout: str,
-                       stderr: str):
-        del zones  # Unused.
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'ERR' in s.strip() or 'PANIC' in s.strip()
-        ]
-        if not errors:
-            if 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Errors occurred during launching of cluster services; '
-                    'check logs above.')
-        logger.warning('Got error(s) on local cluster:')
-        messages = '\n\t'.join(errors)
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(
-            blocked_resources,
-            launchable_resources.copy(region=region.name, zone=None))
-
     # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
     @staticmethod
     def _oci_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -2566,13 +2530,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
                         f'existing cluster first: sky down {cluster_name}')
-        if hasattr(handle, 'local_handle') and handle.local_handle is not None:
-            launched_resources = handle.local_handle['cluster_resources']
-            usage_lib.messages.usage.update_local_cluster_resources(
-                launched_resources)
-            mismatch_str = ('To fix: use accelerators/number of nodes that can '
-                            'be satisfied by the local cluster')
-
         valid_resource = None
         requested_resource_list = []
         for resource in task.resources:

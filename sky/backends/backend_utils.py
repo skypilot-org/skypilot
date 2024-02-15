@@ -1346,21 +1346,16 @@ def _query_head_ip_with_retries(cluster_yaml: str,
 
 
 @timeline.event
-def get_node_ips(
-        cluster_yaml: str,
-        expected_num_nodes: int,
-        # TODO: remove this argument once we remove the legacy on-prem
-        # support.
-        head_ip_max_attempts: int = 1,
-        worker_ip_max_attempts: int = 1,
-        get_internal_ips: bool = False) -> List[str]:
+def get_node_ips(cluster_yaml: str,
+                 expected_num_nodes: int,
+                 head_ip_max_attempts: int = 1,
+                 worker_ip_max_attempts: int = 1,
+                 get_internal_ips: bool = False) -> List[str]:
     """Returns the IPs of all nodes in the cluster, with head node at front.
 
     Args:
         cluster_yaml: Path to the cluster yaml.
         expected_num_nodes: Expected number of nodes in the cluster.
-        handle: Cloud VM Ray resource handle. It is only required for on-prem
-            clusters.
         head_ip_max_attempts: Max attempts to get head ip.
         worker_ip_max_attempts: Max attempts to get worker ips.
         get_internal_ips: Whether to get internal IPs. When False, it is still

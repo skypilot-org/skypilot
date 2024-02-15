@@ -2868,9 +2868,6 @@ def down(
     stops), and any data on the attached disks will be lost.  Accelerators
     (e.g., TPUs) that are part of the cluster will be deleted too.
 
-    For local on-prem clusters, this command does not terminate the local
-    cluster, but instead removes the cluster from the status table and
-    terminates the calling user's running jobs.
 
     Examples:
 

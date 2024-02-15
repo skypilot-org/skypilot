@@ -358,10 +358,6 @@ def down(cluster_name: str, purge: bool = False) -> None:
     stops), and any data on the attached disks will be lost.  Accelerators
     (e.g., TPUs) that are part of the cluster will be deleted too.
 
-    For local on-prem clusters, this function does not terminate the local
-    cluster, but instead removes the cluster from the status table and
-    terminates the calling user's running jobs.
-
     Args:
         cluster_name: name of the cluster to down.
         purge: whether to ignore cloud provider errors (if any).

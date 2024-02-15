@@ -20,11 +20,6 @@ SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.4.0'
 
-# TODO(mluo): Make explicit `sky launch -c <name> ''` optional.
-UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
-    'Found uninitialized local cluster {cluster}. Run this '
-    'command to initialize it locally: sky launch -c {cluster} \'\'')
-
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
 # same spot task.
