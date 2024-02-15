@@ -87,6 +87,8 @@ A cloud storage can used in either :code:`MOUNT` mode or :code:`COPY` mode.
 1. **MOUNT** mode: The object store is directly "mounted" to the remote VM. I.e., files are streamed when accessed by the task and all writes are replicated to remote bucket (and any other VMs mounting the same bucket). This is the default mode.
 2. **COPY** mode: The files are pre-fetched and cached on the local disk. Writing to object stores is not supported in this mode.
 
+.. Source for the image: https://docs.google.com/drawings/d/1MPdVd2TFgAFOYSk6R6E903v1_C0LHmVU-ChIVwdX9A8/edit?usp=sharing
+
 .. image:: ../images/sky-storage-modes.png
     :width: 800
     :align: center
