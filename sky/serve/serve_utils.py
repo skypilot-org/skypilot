@@ -675,13 +675,14 @@ def prepare_replica_logs_for_download(service_name: str,
             backend, handle, replica_job_logs_dir)
         if job_log_file_name is not None:
             logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
-            with open(new_replica_log_file,
-                      'a') as replica_log_file, open(job_log_file_name,
-                                                     'r') as job_file:
+            with open(new_replica_log_file, 'a',
+                      encoding='utf-8') as replica_log_file, open(
+                          job_log_file_name, 'r', encoding='utf-8') as job_file:
                 replica_log_file.write(job_file.read())
             os.remove(job_log_file_name)
         else:
-            with open(new_replica_log_file, 'a') as replica_log_file:
+            with open(new_replica_log_file, 'a',
+                      encoding='utf-8') as replica_log_file:
                 replica_log_file.write(
                     f'Failed to sync down job logs from replica {replica_id}.\n'
                 )
