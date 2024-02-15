@@ -17,6 +17,7 @@ setup: |
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
   {{remote_user_config_path}}: skypilot:local_skypilot_config_path
+  ~/.sky/catalogs: ~/.sky/catalogs
 
 run: |
   # Start sky serve service.
