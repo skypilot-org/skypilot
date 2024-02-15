@@ -2,6 +2,7 @@
 import enum
 import os
 import re
+import shlex
 import subprocess
 import time
 import typing
@@ -167,11 +168,6 @@ class AbstractStore:
     Storage objects are backed by AbstractStores, each representing a store
     present in a cloud.
     """
-
-    _STAT_CACHE_TTL = '5s'
-    _STAT_CACHE_CAPACITY = 4096
-    _TYPE_CACHE_TTL = '5s'
-    _RENAME_DIR_LIMIT = 10000
 
     class StoreMetadata:
         """A pickle-able representation of Store
@@ -1207,8 +1203,11 @@ class S3Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name}')
@@ -1219,8 +1218,11 @@ class S3Store(AbstractStore):
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
             excluded_list.append('.git/*')
-            excludes = ' '.join(
-                [f'--exclude "{file_name}"' for file_name in excluded_list])
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
                             f's3://{self.name}/{dest_dir_name}')
@@ -1332,14 +1334,9 @@ class S3Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
-                       'releases/download/0.24.0-romilb-upstream/goofys '
-                       '-O /usr/local/bin/goofys && '
-                       'sudo chmod +x /usr/local/bin/goofys')
-        mount_cmd = ('goofys -o allow_other '
-                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-                     f'{self.bucket.name} {mount_path}')
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
+        mount_cmd = mounting_utils.get_s3_mount_cmd(self.bucket.name,
+                                                    mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -1416,7 +1413,6 @@ class GcsStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-    GCSFUSE_VERSION = '1.0.1'
 
     def __init__(self,
                  name: str,
@@ -1658,6 +1654,7 @@ class GcsStore(AbstractStore):
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -x \'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}')
@@ -1670,6 +1667,7 @@ class GcsStore(AbstractStore):
             excluded_list.append(r'^\.git/.*$')
             excludes = '|'.join(excluded_list)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
                             f'gs://{self.name}/{dest_dir_name}')
@@ -1768,20 +1766,11 @@ class GcsStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
-                       f'/releases/download/v{self.GCSFUSE_VERSION}/'
-                       f'gcsfuse_{self.GCSFUSE_VERSION}_amd64.deb '
-                       '-O /tmp/gcsfuse.deb && '
-                       'sudo dpkg --install /tmp/gcsfuse.deb')
-        mount_cmd = ('gcsfuse -o allow_other '
-                     '--implicit-dirs '
-                     f'--stat-cache-capacity {self._STAT_CACHE_CAPACITY} '
-                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-                     f'--rename-dir-limit {self._RENAME_DIR_LIMIT} '
-                     f'{self.bucket.name} {mount_path}')
+        install_cmd = mounting_utils.get_gcs_mount_install_cmd()
+        mount_cmd = mounting_utils.get_gcs_mount_cmd(self.bucket.name,
+                                                     mount_path)
         version_check_cmd = (
-            f'gcsfuse --version | grep -q {self.GCSFUSE_VERSION}')
+            f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
@@ -2000,9 +1989,12 @@ class R2Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
             endpoint_url = cloudflare.create_endpoint()
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             'aws s3 sync --no-follow-symlinks --exclude="*" '
@@ -2017,10 +2009,12 @@ class R2Store(AbstractStore):
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
             excluded_list.append('.git/*')
-            excludes = ' '.join(
-                [f'--exclude "{file_name}"' for file_name in excluded_list])
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
             endpoint_url = cloudflare.create_endpoint()
-
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             f'aws s3 sync --no-follow-symlinks {excludes} '
@@ -2145,18 +2139,15 @@ class R2Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
-                       'releases/download/0.24.0-romilb-upstream/goofys '
-                       '-O /usr/local/bin/goofys && '
-                       'sudo chmod +x /usr/local/bin/goofys')
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
         endpoint_url = cloudflare.create_endpoint()
-        mount_cmd = (
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
-            f'AWS_PROFILE={cloudflare.R2_PROFILE_NAME} goofys -o allow_other '
-            f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-            f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-            f'--endpoint {endpoint_url} '
-            f'{self.bucket.name} {mount_path}')
+        r2_credential_path = cloudflare.R2_CREDENTIALS_PATH
+        r2_profile_name = cloudflare.R2_PROFILE_NAME
+        mount_cmd = mounting_utils.get_r2_mount_cmd(r2_credential_path,
+                                                    r2_profile_name,
+                                                    endpoint_url,
+                                                    self.bucket.name,
+                                                    mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -2426,9 +2417,10 @@ class IBMCosStore(AbstractStore):
 
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = (
                 'rclone copy --exclude ".git/*" '
-                f'"{src_dir_path}" '
+                f'{src_dir_path} '
                 f'{self.bucket_rclone_profile}:{self.name}/{dest_dir_name}')
             return sync_command
 
@@ -2450,10 +2442,13 @@ class IBMCosStore(AbstractStore):
             """
 
             # wrapping file_name with "" to support spaces
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('rclone copy '
-                            f'{includes} "{base_dir_path}" '
+                            f'{includes} {base_dir_path} '
                             f'{self.bucket_rclone_profile}:{self.name}')
             return sync_command
 
@@ -2568,22 +2563,18 @@ class IBMCosStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
+        # install rclone if not installed.
+        install_cmd = mounting_utils.get_cos_mount_install_cmd()
         rclone_config_data = Rclone.get_rclone_config(
             self.bucket.name,
             Rclone.RcloneClouds.IBM,
             self.region,  # type: ignore
         )
-        # pylint: disable=line-too-long
-        # creates a fusermount soft link on older (<22) Ubuntu systems for rclone's mount utility.
-        create_fuser3_soft_link = '[ ! -f /bin/fusermount3 ] && sudo ln -s /bin/fusermount /bin/fusermount3 || true'
-        # stores bucket profile in rclone config file at the cluster's nodes.
-        configure_rclone_profile = (
-            f'{create_fuser3_soft_link}; mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}'
-        )
-        # install rclone if not installed.
-        install_cmd = 'rclone version >/dev/null 2>&1 || (curl https://rclone.org/install.sh | sudo bash)'
-        # --daemon will keep the mounting process running in the background.
-        mount_cmd = f'{configure_rclone_profile} && rclone mount {self.bucket_rclone_profile}:{self.bucket.name} {mount_path} --daemon'
+        mount_cmd = mounting_utils.get_cos_mount_cmd(rclone_config_data,
+                                                     Rclone.RCLONE_CONFIG_PATH,
+                                                     self.bucket_rclone_profile,
+                                                     self.bucket.name,
+                                                     mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 

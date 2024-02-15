@@ -44,12 +44,11 @@ then:
 import copy
 import os
 import pprint
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 import yaml
 
 from sky import sky_logging
-from sky.clouds import cloud_registry
 from sky.utils import common_utils
 from sky.utils import schemas
 
@@ -74,6 +73,7 @@ logger = sky_logging.init_logger(__name__)
 
 # The loaded config.
 _dict = None
+_loaded_config_path = None
 
 
 def get_nested(keys: Iterable[str], default_value: Any) -> Any:
@@ -82,7 +82,6 @@ def get_nested(keys: Iterable[str], default_value: Any) -> Any:
     If any key is not found, or any intermediate key does not point to a dict
     value, returns 'default_value'.
     """
-    global _dict
     if _dict is None:
         return default_value
     curr = _dict
@@ -101,7 +100,6 @@ def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
     Like get_nested(), if any key is not found, this will not raise an error.
     """
     _check_loaded_or_die()
-    global _dict
     assert _dict is not None
     curr = copy.deepcopy(_dict)
     to_return = curr
@@ -121,33 +119,13 @@ def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
 
 def to_dict() -> Dict[str, Any]:
     """Returns a deep-copied version of the current config."""
-    global _dict
     if _dict is not None:
         return copy.deepcopy(_dict)
     return {}
 
 
-def _syntax_check_for_ssh_proxy_command(cloud: str) -> None:
-    ssh_proxy_command_config = get_nested((cloud.lower(), 'ssh_proxy_command'),
-                                          None)
-    if ssh_proxy_command_config is None or isinstance(ssh_proxy_command_config,
-                                                      str):
-        return
-
-    if isinstance(ssh_proxy_command_config, dict):
-        for region, cmd in ssh_proxy_command_config.items():
-            if cmd and not isinstance(cmd, str):
-                raise ValueError(
-                    f'Invalid ssh_proxy_command config for region {region!r} '
-                    f'(expected a str): {cmd!r}')
-        return
-    raise ValueError(
-        'Invalid ssh_proxy_command config (expected a str or a dict with '
-        f'region names as keys): {ssh_proxy_command_config!r}')
-
-
 def _try_load_config() -> None:
-    global _dict
+    global _dict, _loaded_config_path
     config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if config_path_via_env_var is not None:
         config_path = config_path_via_env_var
@@ -156,6 +134,7 @@ def _try_load_config() -> None:
     config_path = os.path.expanduser(config_path)
     if os.path.exists(config_path):
         logger.debug(f'Using config path: {config_path}')
+        _loaded_config_path = config_path
         try:
             _dict = common_utils.read_yaml(config_path)
             logger.debug(f'Config loaded:\n{pprint.pformat(_dict)}')
@@ -168,9 +147,12 @@ def _try_load_config() -> None:
                 f'Invalid config YAML ({config_path}): ',
                 skip_none=False)
 
-        for cloud in cloud_registry.CLOUD_REGISTRY:
-            _syntax_check_for_ssh_proxy_command(cloud)
         logger.debug('Config syntax check passed.')
+
+
+def loaded_config_path() -> Optional[str]:
+    """Returns the path to the loaded config file."""
+    return _loaded_config_path
 
 
 # Load on import.
@@ -179,7 +161,6 @@ _try_load_config()
 
 def _check_loaded_or_die():
     """Checks loaded() is true; otherwise raises RuntimeError."""
-    global _dict
     if _dict is None:
         raise RuntimeError(
             f'No user configs loaded. Check {CONFIG_PATH} exists and '
@@ -188,5 +169,4 @@ def _check_loaded_or_die():
 
 def loaded() -> bool:
     """Returns if the user configurations are loaded."""
-    global _dict
     return _dict is not None

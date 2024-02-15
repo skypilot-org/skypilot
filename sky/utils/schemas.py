@@ -152,9 +152,12 @@ def get_resources_schema():
                 }, {
                     'type': 'object',
                     'required': [],
-                    'maxProperties': 1,
                     'additionalProperties': {
-                        'type': 'number'
+                        'anyOf': [{
+                            'type': 'null',
+                        }, {
+                            'type': 'number',
+                        }]
                     }
                 }, {
                     'type': 'array',
@@ -328,14 +331,27 @@ def get_service_schema():
                     'max_replicas': {
                         'type': 'integer',
                     },
+                    'target_qps_per_replica': {
+                        'type': 'number',
+                    },
+                    'upscale_delay_seconds': {
+                        'type': 'number',
+                    },
+                    'downscale_delay_seconds': {
+                        'type': 'number',
+                    },
+                    # TODO(MaoZiming): Fields `qps_upper_threshold`,
+                    # `qps_lower_threshold` and `auto_restart` are deprecated.
+                    # Temporarily keep these fields for backward compatibility.
+                    # Remove after 2 minor release, i.e., 0.6.0.
+                    'auto_restart': {
+                        'type': 'boolean',
+                    },
                     'qps_upper_threshold': {
                         'type': 'number',
                     },
                     'qps_lower_threshold': {
                         'type': 'number',
-                    },
-                    'auto_restart': {
-                        'type': 'boolean',
                     },
                 }
             },
@@ -458,6 +474,57 @@ def get_cluster_schema():
     }
 
 
+_NETWORK_CONFIG_SCHEMA = {
+    'vpc_name': {
+        'oneOf': [{
+            'type': 'string',
+        }, {
+            'type': 'null',
+        }],
+    },
+    'use_internal_ips': {
+        'type': 'boolean',
+    },
+    'ssh_proxy_command': {
+        'oneOf': [{
+            'type': 'string',
+        }, {
+            'type': 'null',
+        }, {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': {
+                'anyOf': [
+                    {
+                        'type': 'string'
+                    },
+                    {
+                        'type': 'null'
+                    },
+                ]
+            }
+        }]
+    },
+}
+
+_INSTANCE_TAGS_SCHEMA = {
+    'instance_tags': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': {
+            'type': 'string',
+        },
+    },
+}
+
+_REMOTE_IDENTITY_SCHEMA = {
+    'remote_identity': {
+        'type': 'string',
+        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'],
+    }
+}
+
+
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
     from sky.utils import kubernetes_enums
@@ -484,7 +551,90 @@ def get_config_schema():
             },
         }
     }
+    cloud_configs = {
+        'aws': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'security_group_name': {
+                    'type': 'string',
+                },
+                **_INSTANCE_TAGS_SCHEMA,
+                **_NETWORK_CONFIG_SCHEMA,
+            }
+        },
+        'gcp': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'specific_reservations': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
+                **_INSTANCE_TAGS_SCHEMA,
+                **_NETWORK_CONFIG_SCHEMA,
+            }
+        },
+        'kubernetes': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'networking': {
+                    'type': 'string',
+                    'case_insensitive_enum': [
+                        type.value
+                        for type in kubernetes_enums.KubernetesNetworkingMode
+                    ]
+                },
+                'ports': {
+                    'type': 'string',
+                    'case_insensitive_enum': [
+                        type.value
+                        for type in kubernetes_enums.KubernetesPortMode
+                    ]
+                },
+                'pod_config': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating pod spec is hard
+                    'additionalProperties': True,
+                }
+            }
+        },
+        'oci': {
+            'type': 'object',
+            'required': [],
+            'properties': {},
+            # Properties are either 'default' or a region name.
+            'additionalProperties': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'compartment_ocid': {
+                        'type': 'string',
+                    },
+                    'image_tag_general': {
+                        'type': 'string',
+                    },
+                    'image_tag_gpu': {
+                        'type': 'string',
+                    },
+                    'vcn_subnet': {
+                        'type': 'string',
+                    },
+                }
+            },
+        },
+    }
 
+    for config in cloud_configs.values():
+        config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -493,109 +643,6 @@ def get_config_schema():
         'properties': {
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
-            'aws': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'instance_tags': {
-                        'type': 'object',
-                        'required': [],
-                        'additionalProperties': {
-                            'type': 'string',
-                        },
-                    },
-                    'vpc_name': {
-                        'oneOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'null',
-                        }],
-                    },
-                    'use_internal_ips': {
-                        'type': 'boolean',
-                    },
-                    'ssh_proxy_command': {
-                        'oneOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'null',
-                        }, {
-                            'type': 'object',
-                            'required': [],
-                            'additionalProperties': {
-                                'anyOf': [
-                                    {
-                                        'type': 'string'
-                                    },
-                                    {
-                                        'type': 'null'
-                                    },
-                                ]
-                            }
-                        }]
-                    },
-                }
-            },
-            'gcp': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'specific_reservations': {
-                        'type': 'array',
-                        'items': {
-                            'type': 'string',
-                        },
-                        'minItems': 1,
-                        'maxItems': 1,
-                    },
-                    'vpc_name': {
-                        'oneOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'null',
-                        }],
-                    },
-                }
-            },
-            'kubernetes': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'networking': {
-                        'type': 'string',
-                        'case_insensitive_enum': [
-                            type.value for type in
-                            kubernetes_enums.KubernetesNetworkingMode
-                        ]
-                    },
-                }
-            },
-            'oci': {
-                'type': 'object',
-                'required': [],
-                # Properties are either 'default' or a region name.
-                'additionalProperties': {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'compartment_ocid': {
-                            'type': 'string',
-                        },
-                        'image_tag_general': {
-                            'type': 'string',
-                        },
-                        'image_tag_gpu': {
-                            'type': 'string',
-                        },
-                        'vcn_subnet': {
-                            'type': 'string',
-                        },
-                    }
-                },
-            },
+            **cloud_configs,
         }
     }

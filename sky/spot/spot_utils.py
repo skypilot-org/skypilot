@@ -248,7 +248,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         # TODO(mraheja): remove pylint disabling when filelock version updated
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(str(signal_file) + '.lock'):
-            with signal_file.open('w') as f:
+            with signal_file.open('w', encoding='utf-8') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
         cancelled_job_ids.append(job_id)
@@ -655,9 +655,9 @@ def format_job_table(
         f'{count} {status}' for status, count in sorted(status_counts.items())
     ])
     if status_str:
-        status_str = f'In progress jobs: {status_str}'
+        status_str = f'In progress tasks: {status_str}'
     else:
-        status_str = 'No in progress jobs.'
+        status_str = 'No in progress tasks.'
     output = status_str
     if str(job_table):
         output += f'\n{job_table}'
@@ -750,7 +750,7 @@ class SpotCodeGen:
 def dump_job_table_cache(job_table: str):
     """Dump job table cache to file."""
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
-    with cache_file.open('w') as f:
+    with cache_file.open('w', encoding='utf-8') as f:
         json.dump((time.time(), job_table), f)
 
 
@@ -766,5 +766,5 @@ def load_job_table_cache() -> Optional[Tuple[float, str]]:
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     if not cache_file.exists():
         return None
-    with cache_file.open('r') as f:
+    with cache_file.open('r', encoding='utf-8') as f:
         return json.load(f)

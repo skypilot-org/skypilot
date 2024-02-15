@@ -41,10 +41,12 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 
 # The version of skylet. MUST bump this version whenever we need the skylet to
 # be restarted on existing clusters updated with the new version of SkyPilot,
-# e.g., when we add new events to skylet, or we fix a bug in skylet.
+# e.g., when we add new events to skylet, we fix a bug in skylet, or skylet
+# needs to load the new version of SkyPilot code to handle the autostop when the
+# cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '4'
+SKYLET_VERSION = '6'
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky spot dashboard`-related
@@ -76,10 +78,7 @@ CONDA_INSTALLATION_COMMANDS = (
     'bash Miniconda3-Linux-x86_64.sh -b && '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     'conda config --set auto_activate_base true); '
-    # Only run `conda init` if the conda is not installed under /opt/conda,
-    # which is the case for VMs created on GCP, and running `conda init` will
-    # cause error and waiting for the error to be reported: #2273.
-    'which conda | grep /opt/conda || conda init > /dev/null;')
+    'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;')
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
@@ -94,7 +93,7 @@ USER_ENV_VAR = 'SKYPILOT_USER'
 
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
-CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'
+CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for

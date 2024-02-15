@@ -31,7 +31,7 @@ def _check_empty_config() -> None:
 
 
 def _create_config_file(config_file_path: pathlib.Path) -> None:
-    config_file_path.open('w').write(
+    config_file_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
             aws:
                 vpc_name: {VPC_NAME}
@@ -40,6 +40,7 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
 
             gcp:
                 vpc_name: {VPC_NAME}
+                use_internal_ips: true
 
             kubernetes:
                 networking: {NODEPORT_MODE_NAME}
@@ -55,7 +56,7 @@ def test_no_config(monkeypatch) -> None:
 
 def test_empty_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is empty."""
-    with open(tmp_path / 'empty.yaml', 'w') as f:
+    with open(tmp_path / 'empty.yaml', 'w', encoding='utf-8') as f:
         f.write('')
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'empty.yaml')
     _reload_config()
@@ -64,7 +65,7 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
 
 def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is empty."""
-    with open(tmp_path / 'valid.yaml', 'w') as f:
+    with open(tmp_path / 'valid.yaml', 'w', encoding='utf-8') as f:
         f.write(f"""\
         aws:
             instance_tags:
@@ -90,7 +91,7 @@ def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
 def test_invalid_field_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains unknown field."""
     config_path = tmp_path / 'invalid.yaml'
-    config_path.open('w').write(
+    config_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
         aws:
             vpc_name: {VPC_NAME}
@@ -106,7 +107,7 @@ def test_invalid_field_config(monkeypatch, tmp_path) -> None:
 def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is incorrectly indented."""
     config_path = tmp_path / 'invalid.yaml'
-    config_path.open('w').write(
+    config_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
         spot:
             controller:
@@ -126,7 +127,7 @@ def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
 def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains an invalid enum value."""
     config_path = tmp_path / 'invalid.yaml'
-    config_path.open('w').write(
+    config_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
         spot:
             controller:
@@ -140,21 +141,18 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
     assert 'Invalid config YAML' in e.value.args[0]
 
 
-def test_invalid_num_items_config(monkeypatch, tmp_path) -> None:
+def test_valid_num_items_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains an invalid number of array items."""
-    config_path = tmp_path / 'invalid.yaml'
-    config_path.open('w').write(
+    config_path = tmp_path / 'valid.yaml'
+    config_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
         gcp:
             specific_reservations:
                 - projects/my-project/reservations/my-reservation
                 - projects/my-project/reservations/my-reservation2
         """))
-    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
-                        tmp_path / 'invalid.yaml')
-    with pytest.raises(ValueError) as e:
-        _reload_config()
-    assert 'Invalid config YAML' in e.value.args[0]
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'valid.yaml')
+    _reload_config()
 
 
 def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
@@ -195,6 +193,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command'), None) is None
     assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
+    assert skypilot_config.get_nested(('gcp', 'use_internal_ips'), None)
 
     # Check config with only partial keys still works
     new_config3 = copy.copy(new_config2)
@@ -230,3 +229,4 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND
     assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
+    assert skypilot_config.get_nested(('gcp', 'use_internal_ips'), None)

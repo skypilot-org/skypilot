@@ -11,7 +11,7 @@ from sky import global_user_state
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
-from sky.utils import kubernetes_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 
 _PULL_FREQUENCY_HOURS = 7
 
@@ -38,8 +38,10 @@ def list_accelerators(
         name_filter: Optional[str],
         region_filter: Optional[str],
         quantity_filter: Optional[int],
-        case_sensitive: bool = True
-) -> Dict[str, List[common.InstanceTypeInfo]]:
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
+    del all_regions, require_price  # Unused.
     k8s_cloud = Kubernetes()
     if not any(
             map(k8s_cloud.is_same_cloud, global_user_state.get_enabled_clouds())

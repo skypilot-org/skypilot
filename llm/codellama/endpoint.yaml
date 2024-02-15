@@ -1,0 +1,42 @@
+# An example yaml for serving Code Llama model from Meta with an OpenAI API.
+# Usage:
+#  1. Launch on a single instance: `sky launch -c code-llama ./endpoint.yaml`
+#  2. Scale up to multiple replicas with a single endpoint:
+#     `sky serve up -n code-llama ./endpoint.yaml`
+service:
+  readiness_probe:
+    path: /v1/completions
+    post_data:
+      model: codellama/CodeLlama-70b-Instruct-hf
+      prompt: "def hello_world():"
+      max_tokens: 1
+    initial_delay_seconds: 1800
+  replicas: 2
+
+resources:
+  accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+  disk_size: 1024
+  disk_tier: best
+  memory: 32+
+  ports: 8000
+
+setup: |
+  conda activate codellama
+  if [ $? -ne 0 ]; then
+    conda create -n codellama python=3.10 -y
+    conda activate codellama
+  fi
+
+  pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git"
+  pip install git+https://github.com/huggingface/transformers
+
+run: |
+  conda activate codellama
+  export PATH=$PATH:/sbin
+  # Reduce --max-num-seqs to avoid OOM during loading model on L4:8
+  python -u -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --model codellama/CodeLlama-70b-Instruct-hf \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-num-seqs 64 | tee ~/openai_api_server.log
+

@@ -65,7 +65,7 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                       if args.line_processor is None else args.line_processor)
 
     out = []
-    with open(args.log_path, 'a') as fout:
+    with open(args.log_path, 'a', encoding='utf-8') as fout:
         with line_processor:
             while True:
                 line = out_io.readline()
@@ -461,7 +461,7 @@ def tail_logs(job_owner: str,
     ]:
         # Not using `ray job logs` because it will put progress bar in
         # multiple lines.
-        with open(log_path, 'r', newline='') as log_file:
+        with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
             for line in _follow_job_logs(log_file,
@@ -471,7 +471,7 @@ def tail_logs(job_owner: str,
     else:
         try:
             start_stream = False
-            with open(log_path, 'r') as f:
+            with open(log_path, 'r', encoding='utf-8') as f:
                 for line in f.readlines():
                     if start_stream_at in line:
                         start_stream = True

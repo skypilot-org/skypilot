@@ -126,3 +126,94 @@ curl http://$IP:8000/v1/chat/completions \
   }
 }
 ```
+
+## Serving Llama-2 with vLLM for more traffic using SkyServe
+To scale up the model serving for more traffic, we introduced SkyServe to enable a user to easily deploy multiple replica of the model:
+1. Adding an `service` section in the above `serve-openai-api.yaml` file to make it an [`SkyServe Service YAML`](https://skypilot.readthedocs.io/en/latest/serving/service-yaml-spec.html):
+
+```yaml
+# The newly-added `service` section to the `serve-openai-api.yaml` file.
+service:
+  # Specifying the path to the endpoint to check the readiness of the service.
+  readiness_probe: /v1/models
+  # How many replicas to manage.
+  replicas: 2
+```
+
+The entire Service YAML can be found here: [service.yaml](service.yaml).
+
+2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
+```bash
+sky serve up -n vllm-llama2 service.yaml
+```
+
+3. Use `sky serve status` to check the status of the serving:
+```bash
+sky serve status vllm-llama2
+```
+
+You should get a similar output as the following:
+
+```console
+Services
+NAME           UPTIME     STATUS    REPLICAS   ENDPOINT
+vllm-llama2    7m 43s     READY     2/2        3.84.15.251:30001
+
+Service Replicas
+SERVICE_NAME   ID   IP             LAUNCHED       RESOURCES          STATUS  REGION
+vllm-llama2    1    34.66.255.4    11 mins ago    1x GCP({'L4': 1})  READY   us-central1
+vllm-llama2    2    35.221.37.64   15 mins ago    1x GCP({'L4': 1})  READY   us-east4
+```
+
+4. Check the endpoint of the service:
+```bash
+ENDPOINT=$(sky serve status --endpoint vllm-llama2)
+```
+
+4. Once it status is `READY`, you can use the endpoint to interact with the model:
+
+```bash
+curl -L $ENDPOINT/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "meta-llama/Llama-2-7b-chat-hf",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful assistant."
+      },
+      {
+        "role": "user",
+        "content": "Who are you?"
+      }
+    ]
+  }'
+```
+
+Notice that it is the same with previously curl command, except for thr `-L` argument. You should get a similar response as the following:
+
+```console
+{
+  "id": "cmpl-879a58992d704caf80771b4651ff8cb6",
+  "object": "chat.completion",
+  "created": 1692650569,
+  "model": "meta-llama/Llama-2-7b-chat-hf",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": " Hello! I'm just an AI assistant, here to help you"
+    },
+    "finish_reason": "length"
+  }],
+  "usage": {
+    "prompt_tokens": 31,
+    "total_tokens": 47,
+    "completion_tokens": 16
+  }
+}
+```
+
+## Serving Mistral.ai's Mixtral 8x7b model with vLLM
+
+Please refer to the [Mixtral 8x7b example](https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral) for more details.

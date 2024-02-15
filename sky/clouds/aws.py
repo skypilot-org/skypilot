@@ -17,6 +17,7 @@ from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -101,22 +102,34 @@ class AWS(clouds.Cloud):
     # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 248
 
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
+
     _regions: List[clouds.Region] = []
 
     _INDENT_PREFIX = '    '
     _STATIC_CREDENTIAL_HELP_STR = (
         'Run the following commands:'
-        f'\n{_INDENT_PREFIX}  $ pip install boto3'
         f'\n{_INDENT_PREFIX}  $ aws configure'
         f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
         f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
+    _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        if resources.use_spot:
+            return {
+                clouds.CloudImplementationFeatures.STOP:
+                    ('Stopping spot instances is currently not supported on'
+                     f' {cls._REPR}.'),
+            }
+        return {}
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -166,6 +179,11 @@ class AWS(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[List[clouds.Zone]]:
+        # TODO(suquark): Now we can return one zone at a time,
+        # like other clouds,
+        # because the new provisioner can failover to other zones pretty fast.
+        # This will simplify our provision logic a lot.
+
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         regions = cls.regions_with_offering(instance_type,
@@ -322,7 +340,8 @@ class AWS(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -346,10 +365,13 @@ class AWS(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='aws')
 
-    def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Any]:
+    def make_deploy_resources_variables(self,
+                                        resources: 'resources_lib.Resources',
+                                        cluster_name_on_cloud: str,
+                                        region: 'clouds.Region',
+                                        zones: Optional[List['clouds.Zone']],
+                                        dryrun: bool = False) -> Dict[str, Any]:
+        del dryrun  # unused
         assert zones is not None, (region, zones)
 
         region_name = region.name
@@ -452,6 +474,13 @@ class AWS(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
+        dependency_installation_hints = (
+            'AWS dependencies are not installed. '
+            'Run the following commands:'
+            f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
+            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
+            f'{cls._STATIC_CREDENTIAL_HELP_STR}')
+
         # Checks if the AWS CLI is installed properly
         proc = subprocess.run('aws --version',
                               shell=True,
@@ -459,12 +488,14 @@ class AWS(clouds.Cloud):
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False, (
-                'AWS CLI is not installed properly. '
-                'Run the following commands:'
-                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
-                f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
-                f'{cls._STATIC_CREDENTIAL_HELP_STR}')
+            return False, dependency_installation_hints
+        try:
+            # Checks if aws boto is installed properly
+            # pylint: disable=import-outside-toplevel, unused-import
+            import boto3
+            import botocore
+        except ImportError:
+            return False, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
@@ -710,36 +741,25 @@ class AWS(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'aws')
+    @classmethod
+    def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
+        return 'standard' if disk_tier == resources_utils.DiskTier.LOW else 'gp3'
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
-        del instance_type, disk_tier  # unused
-
-    @classmethod
-    def _get_disk_type(cls, disk_tier: str) -> str:
-        return 'standard' if disk_tier == 'low' else 'gp3'
-
-    @classmethod
-    def _get_disk_specs(cls, disk_tier: Optional[str]) -> Dict[str, Any]:
-        tier = disk_tier or cls._DEFAULT_DISK_TIER
+    def _get_disk_specs(
+            cls,
+            disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
+        tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
-            'high': 7000,
-            'medium': 3500,
-            'low': 0,  # only gp3 is required to set iops
+            resources_utils.DiskTier.HIGH: 7000,
+            resources_utils.DiskTier.MEDIUM: 3500,
+            resources_utils.DiskTier.LOW: 0,  # only gp3 is required to set iops
         }
         return {
             'disk_tier': cls._get_disk_type(tier),
             'disk_iops': tier2iops[tier],
             'disk_throughput': tier2iops[tier] // 16,
-            'custom_disk_perf': tier != 'low',
+            'custom_disk_perf': tier != resources_utils.DiskTier.LOW,
         }
 
     @classmethod
@@ -793,7 +813,7 @@ class AWS(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
         # TODO(suquark): deprecate this method
-        assert False, 'This could path should not be used.'
+        assert False, 'This code path should not be used.'
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,

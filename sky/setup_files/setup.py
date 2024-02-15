@@ -40,7 +40,7 @@ def find_version():
     # Extract version information from filepath
     # Adapted from:
     #  https://github.com/ray-project/ray/blob/master/python/setup.py
-    with open(INIT_FILE_PATH, 'r') as fp:
+    with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
         version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',
                                   fp.read(), re.M)
         if version_match:
@@ -49,7 +49,7 @@ def find_version():
 
 
 def get_commit_hash():
-    with open(INIT_FILE_PATH, 'r') as fp:
+    with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
         commit_match = re.search(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
                                  fp.read(), re.M)
         if commit_match:
@@ -85,7 +85,7 @@ def get_commit_hash():
 def replace_commit_hash():
     """Fill in the commit hash in the __init__.py file."""
     try:
-        with open(INIT_FILE_PATH, 'r') as fp:
+        with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
             content = fp.read()
             global original_init_content
             original_init_content = content
@@ -93,7 +93,7 @@ def replace_commit_hash():
                              f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
                              content,
                              flags=re.M)
-        with open(INIT_FILE_PATH, 'w') as fp:
+        with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:
             fp.write(content)
     except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
@@ -106,7 +106,7 @@ def replace_commit_hash():
 def revert_commit_hash():
     try:
         if original_init_content is not None:
-            with open(INIT_FILE_PATH, 'w') as fp:
+            with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:
                 fp.write(original_init_content)
     except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
@@ -135,9 +135,7 @@ install_requires = [
     'cachetools',
     # NOTE: ray requires click>=7.0.
     'click >= 7.0',
-    # NOTE: required by awscli. To avoid ray automatically installing
-    # the latest version.
-    'colorama < 0.4.5',
+    'colorama',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
     # the version of the underlying markupsafe package. See:
@@ -207,7 +205,11 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
+    # NOTE: required by awscli. To avoid ray automatically installing
+    # the latest version.
+    'colorama < 0.4.5',
 ]
+
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
@@ -222,26 +224,31 @@ extras_require: Dict[str, List[str]] = {
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances.
     # Reference: https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
-    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'] +
-           local_ray,
+    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
     ] + local_ray,
     'docker': ['docker'] + local_ray,
     'lambda': local_ray,
     'cloudflare': aws_dependencies,
-    'scp': [] + local_ray,
+    'scp': local_ray,
     'oci': ['oci'] + local_ray,
-    'kubernetes': ['kubernetes'] + local_ray,
+    'kubernetes': ['kubernetes>=20.0.0'],
     'remote': remote,
-    'serve': ['uvicorn', 'fastapi'],
+    'runpod': ['runpod>=1.5.1'],
+    'cudo': ['cudo-compute>=0.1.8'],
+    'vsphere': [
+        'pyvmomi==8.0.1.0.2',
+        # vsphere-automation-sdk is also required, but it does not have
+        # pypi release, which cause failure of our pypi release.
+        # https://peps.python.org/pep-0440/#direct-references
+        # We have the instruction for its installation in our
+        # docs instead.
+        # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0'
+    ],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
-
-# Install aws requirements by default, as it is the most common cloud provider,
-# and the installation is quick.
-install_requires += extras_require['aws']
 
 long_description = ''
 readme_filepath = 'README.md'

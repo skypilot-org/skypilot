@@ -2,9 +2,6 @@ name: tpuvm_mnist
 
 resources:
   accelerators: tpu-v2-8
-  accelerator_args:
-    runtime_version: tpu-vm-base
-    tpu_vm: True
 
 # The setup command.  Will be run under the working directory.
 setup: |
@@ -14,7 +11,7 @@ setup: |
   if [ $? -eq 0 ]; then
     echo 'conda env exists'
   else
-    conda create -n flax python=3.8 -y
+    conda create -n flax python=3.10 -y
     conda activate flax
     # Make sure to install TPU related packages in a conda env to avoid package conflicts.
     pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
