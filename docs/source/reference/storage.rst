@@ -79,7 +79,7 @@ You can find more detailed usage examples in `storage_demo.yaml <https://github.
 
 .. _storage-mounting-modes:
 
-Mounting Modes
+Mounting modes
 --------------
 
 A cloud storage can used in either :code:`MOUNT` mode or :code:`COPY` mode.
