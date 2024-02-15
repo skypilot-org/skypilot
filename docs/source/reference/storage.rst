@@ -116,11 +116,11 @@ its performance requirements and size of the data.
      - |:yellow_circle:| Most write operations [1]_ are supported.
      - |:x:| Read-only.
    * - Disk Size
-     - |:white_check_mark:| No disk size requirements
-     - |:yellow_circle:| VM disk size must be greater than the size of the bucket
+     - |:white_check_mark:| No disk size requirements.
+     - |:yellow_circle:| VM disk size must be greater than the size of the bucket.
    * - Best for
-     - Writing task outputs, very large data that won't fit on disk
-     - High performance read-only workloads, data that fits on disk
+     - Writing task outputs, very large data that won't fit on disk.
+     - High performance read-only workloads, data that fits on disk.
 
 .. [1] ``MOUNT`` mode does not support the full POSIX interface and some file
     operations may fail. Most notably, random writes and append operations are
