@@ -12,7 +12,7 @@ from sky.serve import constants
 from sky.serve import serve_state
 
 if typing.TYPE_CHECKING:
-    from sky.serve import replica_managers
+    from sky.serve import replica_info
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
@@ -94,7 +94,7 @@ class Autoscaler:
 
     def evaluate_scaling(
         self,
-        replica_infos: List['replica_managers.ReplicaInfo'],
+        replica_infos: List['replica_info.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
@@ -228,7 +228,7 @@ class RequestRateAutoscaler(Autoscaler):
 
     def evaluate_scaling(
         self,
-        replica_infos: List['replica_managers.ReplicaInfo'],
+        replica_infos: List['replica_info.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
         """Evaluate Autoscaling decisions based on replica information.
         If the number of launched replicas is less than the target,
@@ -240,9 +240,9 @@ class RequestRateAutoscaler(Autoscaler):
         and SCALE_DOWN.
         """
         provisioning_and_launched_new_replica: List[
-            'replica_managers.ReplicaInfo'] = []
-        ready_new_replica: List['replica_managers.ReplicaInfo'] = []
-        old_replicas: List['replica_managers.ReplicaInfo'] = []
+            'replica_info.ReplicaInfo'] = []
+        ready_new_replica: List['replica_info.ReplicaInfo'] = []
+        old_replicas: List['replica_info.ReplicaInfo'] = []
         for info in replica_infos:
             if info.version == self.latest_version:
                 if info.is_launched:
