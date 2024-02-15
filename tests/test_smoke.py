@@ -3992,11 +3992,12 @@ class TestStorageWithCredentials:
         # are allowed to be MOUNTed by specifying the URI of the bucket to
         # source field only. When it is attempted by specifying the name of
         # the bucket only, it should error out.
+        #
         # TODO(doyoung): Add test for IBM COS. Currently, this is blocked
         # as rclone used to interact with IBM COS does not support feature to
         # create a bucket, and the ibmcloud CLI is not supported in Skypilot.
         # Either of the feature is necessary to simulate an external bucket
-        # createion for IBM COS.
+        # creation for IBM COS.
         # https://github.com/skypilot-org/skypilot/pull/1966/files#r1253439837
 
         ext_bucket_name, ext_bucket_uri = request.getfixturevalue(
