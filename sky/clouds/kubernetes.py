@@ -345,6 +345,8 @@ class Kubernetes(clouds.Cloud):
                     f'check if {CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
+        # Upload kubeconfig to the default path to avoid having to set
+        # KUBECONFIG in the environment.
         return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
 
     def instance_type_exists(self, instance_type: str) -> bool:
