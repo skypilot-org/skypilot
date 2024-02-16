@@ -131,10 +131,12 @@ See more details about the ``resources.any_of`` field :ref:`here <multiple-resou
 PyTorch 2.2.0 failed on SkyPilot clusters. What should I do?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The latest PyTorch release (2.2.0) has a version conflict with the default cuDNN version on SkyPilot clusters. To fix this, you can:
+The latest PyTorch release (2.2.0) has a version conflict with the default cuDNN version on SkyPilot clusters, which may raise a segmentation fault when you run the job.
 
-1. Use older version of PyTorch (like 2.1.0) instead of 2.2.0;
-2. Remove the cuDNN from the cluster's :code:`LD_LIBRARY_PATH` by adding the following line to the task definition:
+To fix this, you can choose one of the following solutions:
+
+1. Use older version of PyTorch (like 2.1.0) instead of 2.2.0, i.e. :code:`pip install "torch<2.2"`;
+2. Remove the cuDNN from the cluster's :code:`LD_LIBRARY_PATH` by adding the following line to your task:
 
 .. code-block:: yaml
 
