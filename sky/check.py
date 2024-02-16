@@ -60,8 +60,8 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
                 '\nTo enable a cloud, follow the hints above and rerun: ',
                 dim=True) + click.style('sky check', bold=True) + '\n' +
             click.style(
-                'If any problems remain, open an issue at: '
-                'https://github.com/skypilot-org/skypilot/issues/new',
+                'If any problems remain, refer to detailed docs at: '
+                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
                 dim=True))
 
         # Pretty print for UX.
