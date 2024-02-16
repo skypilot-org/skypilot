@@ -594,26 +594,15 @@ def sync_down(service_name: str) -> None:
         port=controller_handle.head_ssh_port,
         **ssh_credentials,
     )
-    controller_log_file_name = (
-        serve_utils.generate_remote_controller_log_file_name(service_name))
-    target_directory = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
-    runner.rsync(source=controller_log_file_name,
-                 target=target_directory,
-                 up=False,
-                 stream_logs=False)
-    load_balancer_log_file_name = (
-        serve_utils.generate_remote_load_balancer_log_file_name(service_name))
-    runner.rsync(source=load_balancer_log_file_name,
-                 target=target_directory,
-                 up=False,
-                 stream_logs=False)
+    sky_logs_directory = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
+    run_timestamp = backend_utils.get_run_timestamp()
 
-    timestamp = backend_utils.get_run_timestamp()
     prepare_code = serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
-        service_name, timestamp)
+        service_name, run_timestamp)
     backend = backend_utils.get_backend_from_handle(controller_handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
+    sky_logging.print('Preparing replica logs for download on controller')
     prepare_returncode = backend.run_on_head(controller_handle,
                                              prepare_code,
                                              require_outputs=False,
@@ -623,13 +612,14 @@ def sync_down(service_name: str) -> None:
         'Failed to prepare replica logs to sync down.')
     remote_service_dir_name = serve_utils.generate_remote_service_dir_name(
         service_name)
-    dir_for_download = os.path.join(remote_service_dir_name, timestamp)
+    dir_for_download = os.path.join(remote_service_dir_name, run_timestamp)
+    sky_logging.print('Downloading the replica logs')
     runner.rsync(source=dir_for_download,
-                 target=target_directory,
+                 target=sky_logs_directory,
                  up=False,
                  stream_logs=False)
     remove_code = serve_utils.ServeCodeGen.remove_replica_logs_for_download(
-        service_name, timestamp)
+        service_name, run_timestamp)
     remove_returncode = backend.run_on_head(controller_handle,
                                             remove_code,
                                             require_outputs=False,
@@ -637,7 +627,28 @@ def sync_down(service_name: str) -> None:
     subprocess_utils.handle_returncode(
         remove_returncode, remove_code,
         'Failed to remove the replica logs for download on the controller.')
-    sky_logging.print('Removed the logs for download on controller')
+
+    # We download the replica logs first because that download creates the
+    # timestamp directory, and we can just put the controller and load balancer
+    # logs in there. Otherwise, we would create the timestamp directory with
+    # controller and load balancer logs first, and then the replica logs
+    # download would overwrite it
+    controller_log_file_name = (
+        serve_utils.generate_remote_controller_log_file_name(service_name))
+    target_directory = os.path.join(sky_logs_directory, run_timestamp)
+    sky_logging.print('Downloading the controller logs')
+    runner.rsync(source=controller_log_file_name,
+                 target=target_directory,
+                 up=False,
+                 stream_logs=False)
+    load_balancer_log_file_name = (
+        serve_utils.generate_remote_load_balancer_log_file_name(service_name))
+    sky_logging.print('Downloading the load balancer logs')
+    runner.rsync(source=load_balancer_log_file_name,
+                 target=target_directory,
+                 up=False,
+                 stream_logs=False)
+    sky_logging.print(f'Synced down logs can be found at: {target_directory}')
 
 
 @usage_lib.entrypoint

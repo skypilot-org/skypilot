@@ -660,6 +660,9 @@ def prepare_replica_logs_for_download(service_name: str,
         shutil.copy(launch_log_file, new_replica_log_file)
         if replica_info.status == serve_state.ReplicaStatus.PROVISIONING:
             continue
+        # TODO(dtran): refactor into method. Also same logic in
+        #  replica_managers.py. Cannot do right now because of circular import
+        logger.info(f'Syncing down logs for replica {replica_id}...')
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(
             replica_info.cluster_name)
@@ -686,17 +689,14 @@ def prepare_replica_logs_for_download(service_name: str,
                 replica_log_file.write(
                     f'Failed to sync down job logs from replica {replica_id}.\n'
                 )
-        logger.info(
-            f'{service_name}: Managed sync down logs for replica {replica_id}')
-    logger.info(f'{service_name}: Finished preparing replica logs for download')
 
 
 def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
+    logger.info('Removing replica logs')
     remote_service_dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(remote_service_dir_name)
     dir_to_remove = os.path.join(dir_name, timestamp)
     shutil.rmtree(dir_to_remove)
-    logger.info(f'{service_name}: Finished removing replica logs')
 
 
 def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
