@@ -3813,9 +3813,6 @@ def check(verbose: bool):
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
     """
-    import pdb
-
-    pdb.set_trace()
     sky_check.check(verbose=verbose)
 
 

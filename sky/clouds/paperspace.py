@@ -237,18 +237,18 @@ class Paperspace(clouds.Cloud):
         # TODO : need to check that user has valid API credentials and has private networks created.
         try:
             # attempt to make a CURL request for listing instances
-            client = utils.PaperspaceCloudClient().list_networks()
+            utils.PaperspaceCloudClient().list_instances()
         except (AssertionError, KeyError, utils.PaperspaceCloudError):
             return False, (
                 "Failed to access Paperspace Cloud with credentials. "
                 "To configure credentials, follow the instructions at:\n    "
-                "https://docs.digitalocean.com/reference/paperspace/api-keys/ \n"
-                "to generate API key and create a json with \n   "
-                "```\n   "
-                "{\n    "
-                "   'apiKey': [YOUR API KEY] \n   "
-                "}\n    "
-                "```\n  "
+                "https://docs.digitalocean.com/reference/paperspace/api-keys/ \n    "
+                "to generate API key and create a json with \n     "
+                "```\n     "
+                "{\n       "
+                "   'apiKey': [YOUR API KEY] \n     "
+                "}\n     "
+                "```\n     "
                 "at `~/.paperspace/config.json`"
             )
         except requests.exceptions.ConnectionError:
@@ -257,6 +257,7 @@ class Paperspace(clouds.Cloud):
                 "Check your network connection "
                 "and try again."
             )
+        
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
