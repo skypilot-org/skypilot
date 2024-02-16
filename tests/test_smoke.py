@@ -812,7 +812,7 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     test_commands = [
         *storage_setup_commands,
         (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
-         'examples/using_file_mounts_with_env_vars.yaml'
+         'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name}'),
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         # Override with --env:
