@@ -24,7 +24,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         status_msg = 'enabled' if ok else 'disabled'
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
         echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
-                 ' ' * 30)
+             ' ' * 30)
         if ok:
             enabled_clouds.append(cloud_repr)
             if verbose and cloud is not cloudflare:

@@ -1361,6 +1361,7 @@ class RetryingVmProvisioner(object):
     ) -> Dict[str, Any]:
         """The provision retry loop."""
         style = colorama.Style
+        fore = colorama.Fore
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1605,6 +1606,9 @@ class RetryingVmProvisioner(object):
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 config_dict['handle'] = handle
+                plural = '' if num_nodes == 1 else 's'
+                logger.info(f'{fore.GREEN}Successfully provisioned or found'
+                            f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or

@@ -693,6 +693,10 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
         try:
             cloud = clouds.CLOUD_REGISTRY.from_str(c)
         except ValueError:
+            # Handle the case for the clouds whose support has been removed from
+            # SkyPilot, e.g., 'local' was a cloud in the past and may be stored
+            # in the database for users before #3037. We should ignore removed
+            # clouds and continue.
             continue
         if cloud is not None:
             enabled_clouds.append(cloud)
