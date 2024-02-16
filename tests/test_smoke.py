@@ -2921,7 +2921,8 @@ def test_skyserve_llm():
             f'{_get_serve_endpoint(name)}; python tests/skyserve/llm/get_response.py'
             f' --endpoint $endpoint --prompt {prompt} | grep {expected_output}')
 
-    with open('tests/skyserve/llm/prompt_output.json', 'r') as f:
+    with open('tests/skyserve/llm/prompt_output.json', 'r',
+              encoding='utf-8') as f:
         prompt2output = json.load(f)
 
     test = Test(
@@ -3336,7 +3337,7 @@ class TestStorageWithCredentials:
             path = os.path.join(base_path, name)
             if substructure is None:
                 # Create a file
-                open(path, 'a').close()
+                open(path, 'a', encoding='utf-8').close()
             else:
                 # Create a subdirectory
                 os.mkdir(path)

@@ -84,7 +84,7 @@ def get_user_hash() -> str:
 
     if os.path.exists(_USER_HASH_FILE):
         # Read from cached user hash file.
-        with open(_USER_HASH_FILE, 'r') as f:
+        with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
             user_hash = f.read().strip()
         if _is_valid_user_hash(user_hash):
@@ -96,7 +96,7 @@ def get_user_hash() -> str:
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    with open(_USER_HASH_FILE, 'w') as f:
+    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
         f.write(user_hash)
     return user_hash
 
@@ -285,13 +285,13 @@ def user_and_hostname_hash() -> str:
 
 
 def read_yaml(path) -> Dict[str, Any]:
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     return config
 
 
 def read_yaml_all(path: str) -> List[Dict[str, Any]]:
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load_all(f)
         configs = list(config)
         if not configs:
@@ -301,7 +301,7 @@ def read_yaml_all(path: str) -> List[Dict[str, Any]]:
 
 
 def dump_yaml(path, config) -> None:
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write(dump_yaml_str(config))
 
 
@@ -616,7 +616,7 @@ def fill_template(template_name: str, variables: Dict,
     template_path = os.path.join(root_dir, 'templates', template_name)
     if not os.path.exists(template_path):
         raise FileNotFoundError(f'Template "{template_name}" does not exist.')
-    with open(template_path) as fin:
+    with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     output_path = os.path.abspath(os.path.expanduser(output_path))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -624,5 +624,5 @@ def fill_template(template_name: str, variables: Dict,
     # Write out yaml config.
     j2_template = jinja2.Template(template)
     content = j2_template.render(**variables)
-    with open(output_path, 'w') as fout:
+    with open(output_path, 'w', encoding='utf-8') as fout:
         fout.write(content)

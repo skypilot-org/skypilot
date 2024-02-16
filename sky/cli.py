@@ -539,7 +539,7 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
 
 
 def _get_click_major_version():
-    return int(click.__version__.split('.')[0])
+    return int(click.__version__.split('.', maxsplit=1)[0])
 
 
 def _get_shell_complete_args(complete_fn):
@@ -1039,8 +1039,9 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     yaml_file_provided = (len(shell_splits) == 1 and
                           (shell_splits[0].endswith('yaml') or
                            shell_splits[0].endswith('.yml')))
+    invalid_reason = ''
     try:
-        with open(entrypoint, 'r') as f:
+        with open(entrypoint, 'r', encoding='utf-8') as f:
             try:
                 config = list(yaml.safe_load_all(f))
                 if config:
@@ -3127,9 +3128,19 @@ def _down_or_stop_clusters(
                     controller_name)
                 assert controller is not None
                 hint_or_raise = _CONTROLLER_TO_HINT_OR_RAISE[controller]
-                hint_or_raise(controller_name)
+                try:
+                    hint_or_raise(controller_name)
+                except exceptions.ClusterOwnerIdentityMismatchError as e:
+                    if purge:
+                        click.echo(common_utils.format_exception(e))
+                    else:
+                        raise
                 confirm_str = 'delete'
+                input_prefix = ('Since --purge is set, errors will be ignored '
+                                'and controller will be removed from '
+                                'local state.\n') if purge else ''
                 user_input = click.prompt(
+                    f'{input_prefix}'
                     f'To proceed, please type {colorama.Style.BRIGHT}'
                     f'{confirm_str!r}{colorama.Style.RESET_ALL}',
                     type=str)

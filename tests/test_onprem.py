@@ -145,7 +145,9 @@ class TestOnprem:
         def _local_cluster_setup(ssh_user, cluster_name=local_cluster_name):
             local_sky_folder = os.path.expanduser('~/.sky/local/')
             os.makedirs(local_sky_folder, exist_ok=True)
-            with open(f'{local_sky_folder}/{cluster_name}.yml', 'w') as f:
+            with open(f'{local_sky_folder}/{cluster_name}.yml',
+                      'w',
+                      encoding='utf-8') as f:
                 # Change from normal admin to user (emulates admin sending users
                 # the private key)
                 admin_cluster_config['auth']['ssh_user'] = ssh_user
