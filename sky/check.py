@@ -1,7 +1,8 @@
 """Credential checks: check cloud credentials and enable clouds."""
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, Tuple
 
 import click
+import rich
 
 from sky import clouds
 from sky import global_user_state
@@ -14,18 +15,19 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     echo('Checking credentials to enable clouds for SkyPilot.')
 
     enabled_clouds = []
-    for cloud in clouds.CLOUD_REGISTRY.values():
-        echo(f'  Checking {cloud}...', nl=False)
+
+    def check_one_cloud(cloud_tuple: Tuple[str, clouds.Cloud]) -> None:
+        cloud_repr, cloud = cloud_tuple
+        echo(f'  Checking {cloud_repr}...', nl=False)
         ok, reason = cloud.check_credentials()
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
-        status_color = 'green' if ok else 'red'
-        echo('  ' +
-             click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-             ' ' * 30)
+        styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
+        echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
+                 ' ' * 30)
         if ok:
-            enabled_clouds.append(str(cloud))
-            if verbose:
+            enabled_clouds.append(cloud_repr)
+            if verbose and cloud is not cloudflare:
                 activated_account = cloud.get_current_user_identity_str()
                 if activated_account is not None:
                     echo(f'    Activated account: {activated_account}')
@@ -34,23 +36,15 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         else:
             echo(f'    Reason: {reason}')
 
-    # Currently, clouds.CLOUD_REGISTRY.values() does not
-    # support r2 as only clouds with computing instances
-    # are added as 'cloud'. This will be removed when
-    # cloudflare/r2 is added as a 'cloud'.
-    cloud = 'Cloudflare (for R2 object store)'
-    echo(f'  Checking {cloud}...', nl=False)
-    r2_is_enabled, reason = cloudflare.check_credentials()
-    echo('\r', nl=False)
-    status_msg = 'enabled' if r2_is_enabled else 'disabled'
-    status_color = 'green' if r2_is_enabled else 'red'
-    echo('  ' +
-         click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-         ' ' * 30)
-    if not r2_is_enabled:
-        echo(f'    Reason: {reason}')
+    clouds_to_check = [
+        (repr(cloud), cloud) for cloud in clouds.CLOUD_REGISTRY.values()
+    ]
+    clouds_to_check.append(('Cloudflare, for R2 object store', cloudflare))
 
-    if len(enabled_clouds) == 0 and not r2_is_enabled:
+    for cloud_tuple in sorted(clouds_to_check):
+        check_one_cloud(cloud_tuple)
+
+    if len(enabled_clouds) == 0:
         click.echo(
             click.style(
                 'No cloud is enabled. SkyPilot will not be able to run any '
@@ -59,14 +53,28 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
                 bold=True))
         raise SystemExit()
     else:
-        echo('\nSkyPilot will use only the enabled clouds to run tasks. '
-             'To change this, configure cloud credentials, '
-             'and run ' + click.style('sky check', bold=True) + '.'
-             '\n' + click.style(
-                 'If any problems remain, please file an issue at '
-                 'https://github.com/skypilot-org/skypilot/issues/new',
-                 dim=True))
+        echo(
+            click.style(
+                '\nTo enable a cloud, follow the hints above and rerun: ',
+                dim=True) + click.style('sky check', bold=True) + '\n' +
+            click.style(
+                'If any problems remain, refer to detailed docs at: '
+                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
+                dim=True))
 
+        # Pretty print for UX.
+        if not quiet:
+            enabled_clouds_str = '\n  :heavy_check_mark: '.join(
+                [''] + sorted(enabled_clouds))
+            rich.print('\n[green]:tada: Enabled clouds :tada:'
+                       f'{enabled_clouds_str}[/green]')
+
+    # Cloudflare is not a real cloud in clouds.CLOUD_REGISTRY, and should not be
+    # inserted into the DB (otherwise `sky launch` and other code would error
+    # out when it's trying to look it up in the registry).
+    enabled_clouds = [
+        cloud for cloud in enabled_clouds if not cloud.startswith('Cloudflare')
+    ]
     global_user_state.set_enabled_clouds(enabled_clouds)
 
 

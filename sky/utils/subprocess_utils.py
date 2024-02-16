@@ -53,9 +53,11 @@ def get_parallel_threads() -> int:
 def run_in_parallel(func: Callable, args: Iterable[Any]) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
-    The function should raise a CommandError if the command fails.
-    Returns a list of the return values of the function func, in the same order
-    as the arguments.
+    The function 'func' should raise a CommandError if the command fails.
+
+    Returns:
+      A list of the return values of the function func, in the same order as the
+      arguments.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     with pool.ThreadPool(processes=get_parallel_threads()) as p:
