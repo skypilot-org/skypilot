@@ -808,14 +808,17 @@ def test_scp_file_mounts():
 
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = _get_cluster_name()
+    storage_name = TestStorageWithCredentials.generate_bucket_name()
     test_commands = [
         *storage_setup_commands,
         (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml'),
+         f'--env MY_BUCKET={storage_name} '
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         # Override with --env:
         (f'sky launch -y -c {name}-2 --cpus 2+ --cloud {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
+         f'--env MY_BUCKET={storage_name} '
          '--env MY_LOCAL_PATH=tmpfile'),
         f'sky logs {name}-2 1 --status',  # Ensure the job succeeded.
     ]
@@ -3428,13 +3431,17 @@ class TestStorageWithCredentials:
         circle_link.symlink_to(tmp_dir, target_is_directory=True)
         yield str(tmp_dir)
 
-    @pytest.fixture
-    def tmp_bucket_name(self):
+    @staticmethod
+    def generate_bucket_name():
         # Creates a temporary bucket name
         # time.time() returns varying precision on different systems, so we
         # replace the decimal point and use whatever precision we can get.
         timestamp = str(time.time()).replace('.', '')
-        yield f'sky-test-{timestamp}'
+        return f'sky-test-{timestamp}'
+
+    @pytest.fixture
+    def tmp_bucket_name(self):
+        yield self.generate_bucket_name()
 
     @staticmethod
     def yield_storage_object(
