@@ -506,7 +506,7 @@ def queue(cluster_name: str,
           not the same as the user who created the cluster.
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
-        RuntimeError: if failed to get the job queue with ssh.
+        exceptions.CommandError: if failed to get the job queue with ssh.
     """
     all_jobs = not skip_finished
     username: Optional[str] = getpass.getuser()
@@ -524,10 +524,13 @@ def queue(cluster_name: str,
                                                            code,
                                                            require_outputs=True,
                                                            separate_stderr=True)
-    if returncode != 0:
-        raise RuntimeError(f'{jobs_payload + stderr}\n{colorama.Fore.RED}'
-                           f'Failed to get job queue on cluster {cluster_name}.'
-                           f'{colorama.Style.RESET_ALL}')
+    subprocess_utils.handle_returncode(
+        returncode,
+        code,
+        error_msg=f'Failed to get job queue on cluster {cluster_name}.',
+        stderr=f'{jobs_payload + stderr}',
+        stream_logs=True,
+        cluster_name=cluster_name)
     jobs = job_lib.load_job_queue(jobs_payload)
     return jobs
 
