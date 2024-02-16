@@ -2237,8 +2237,9 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     for cluster in clusters:
         try:
             job_table = core.queue(cluster, skip_finished, all_users)
-        except (exceptions.CommandError, ValueError, exceptions.NotSupportedError,
-                exceptions.ClusterNotUpError, exceptions.CloudUserIdentityError,
+        except (exceptions.CommandError, ValueError,
+                exceptions.NotSupportedError, exceptions.ClusterNotUpError,
+                exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             if isinstance(e, exceptions.NotSupportedError):
                 unsupported_clusters.append(cluster)
