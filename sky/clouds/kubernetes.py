@@ -19,7 +19,9 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-CREDENTIAL_PATH = '~/.kube/config'
+# Check if KUBECONFIG is set, and use it if it is.
+DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
+CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -344,7 +346,9 @@ class Kubernetes(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
-            return {CREDENTIAL_PATH: CREDENTIAL_PATH}
+            # Upload kubeconfig to the default path to avoid having to set
+            # KUBECONFIG in the environment.
+            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
         else:
             return {}
 

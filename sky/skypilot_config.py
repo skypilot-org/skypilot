@@ -82,7 +82,6 @@ def get_nested(keys: Iterable[str], default_value: Any) -> Any:
     If any key is not found, or any intermediate key does not point to a dict
     value, returns 'default_value'.
     """
-    global _dict
     if _dict is None:
         return default_value
     curr = _dict
@@ -101,7 +100,6 @@ def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
     Like get_nested(), if any key is not found, this will not raise an error.
     """
     _check_loaded_or_die()
-    global _dict
     assert _dict is not None
     curr = copy.deepcopy(_dict)
     to_return = curr
@@ -121,7 +119,6 @@ def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
 
 def to_dict() -> Dict[str, Any]:
     """Returns a deep-copied version of the current config."""
-    global _dict
     if _dict is not None:
         return copy.deepcopy(_dict)
     return {}
@@ -164,7 +161,6 @@ _try_load_config()
 
 def _check_loaded_or_die():
     """Checks loaded() is true; otherwise raises RuntimeError."""
-    global _dict
     if _dict is None:
         raise RuntimeError(
             f'No user configs loaded. Check {CONFIG_PATH} exists and '
@@ -173,5 +169,4 @@ def _check_loaded_or_die():
 
 def loaded() -> bool:
     """Returns if the user configurations are loaded."""
-    global _dict
     return _dict is not None

@@ -70,7 +70,7 @@ def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
     name_to_path_dict: Dict[str, str] = {}
 
     for path in local_cluster_paths:
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             yaml_config = yaml.safe_load(f)
             if not suppress_error:
                 common_utils.validate_schema(yaml_config,

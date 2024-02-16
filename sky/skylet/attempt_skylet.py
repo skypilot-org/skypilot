@@ -22,7 +22,7 @@ def restart_skylet():
         ' >> ~/.sky/skylet.log 2>&1 &',
         shell=True,
         check=True)
-    with open(VERSION_FILE, 'w') as v_f:
+    with open(VERSION_FILE, 'w', encoding='utf-8') as v_f:
         v_f.write(constants.SKYLET_VERSION)
 
 
@@ -36,7 +36,7 @@ running = (proc.returncode == 0)
 version_match = False
 found_version = None
 if os.path.exists(VERSION_FILE):
-    with open(VERSION_FILE) as f:
+    with open(VERSION_FILE, 'r', encoding='utf-8') as f:
         found_version = f.read().strip()
         if found_version == constants.SKYLET_VERSION:
             version_match = True

@@ -784,7 +784,7 @@ class Optimizer:
 
             chosen_str = ''
             if chosen:
-                chosen_str = (colorama.Fore.GREEN + '   ' + u'\u2714' +
+                chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
             row = Row(cloud, resources.instance_type + spot, vcpus, mem,
                       str(accelerators), str(region_or_zone), cost_str,
