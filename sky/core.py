@@ -526,10 +526,10 @@ def queue(cluster_name: str,
                                                            separate_stderr=True)
     subprocess_utils.handle_returncode(
         returncode,
-        '',
+        command=code,
         error_msg=f'Failed to get job queue on cluster {cluster_name}.',
         stderr=f'{jobs_payload + stderr}',
-        stream_logs=False,
+        stream_logs=True,
         cluster_name=cluster_name)
     jobs = job_lib.load_job_queue(jobs_payload)
     return jobs
