@@ -812,8 +812,8 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     test_commands = [
         *storage_setup_commands,
         (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
-         'examples/using_file_mounts_with_env_vars.yaml'),
-         f'--env MY_BUCKET={storage_name} '
+         'examples/using_file_mounts_with_env_vars.yaml'
+         f'--env MY_BUCKET={storage_name}'),
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         # Override with --env:
         (f'sky launch -y -c {name}-2 --cpus 2+ --cloud {generic_cloud} '
@@ -825,7 +825,8 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     test = Test(
         'using_file_mounts_with_env_vars',
         test_commands,
-        f'sky down -y {name} {name}-2',
+        (f'sky down -y {name} {name}-2',
+         f'sky storage delete -y {storage_name} {storage_name}-2'),
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
