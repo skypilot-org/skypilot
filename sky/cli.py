@@ -3062,9 +3062,19 @@ def _down_or_stop_clusters(
                     controller_name)
                 assert controller is not None
                 hint_or_raise = _CONTROLLER_TO_HINT_OR_RAISE[controller]
-                hint_or_raise(controller_name)
+                try:
+                    hint_or_raise(controller_name)
+                except exceptions.ClusterOwnerIdentityMismatchError as e:
+                    if purge:
+                        click.echo(common_utils.format_exception(e))
+                    else:
+                        raise
                 confirm_str = 'delete'
+                input_prefix = ('Since --purge is set, errors will be ignored '
+                                'and controller will be removed from '
+                                'local state.\n') if purge else ''
                 user_input = click.prompt(
+                    f'{input_prefix}'
                     f'To proceed, please type {colorama.Style.BRIGHT}'
                     f'{confirm_str!r}{colorama.Style.RESET_ALL}',
                     type=str)
