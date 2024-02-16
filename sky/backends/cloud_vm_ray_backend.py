@@ -3228,8 +3228,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           separate_stderr=True)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to fetch job id.', stderr)
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch job id.',
+                                           stderr,
+                                           cluster_name=handle.cluster_name)
         try:
             job_id_match = _JOB_ID_PATTERN.search(job_id_str)
             if job_id_match is not None:
@@ -3404,8 +3407,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       stream_logs=stream_logs,
                                                       require_outputs=True,
                                                       separate_stderr=True)
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to get job status.', stderr)
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to get job status.',
+                                           stderr,
+                                           cluster_name=handle.cluster_name)
         statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
@@ -3438,8 +3444,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         backend_utils.check_stale_runtime_on_remote(returncode, stdout + stderr,
                                                     handle.cluster_name)
         subprocess_utils.handle_returncode(
-            returncode, code,
-            f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
+            returncode,
+            code,
+            f'Failed to cancel jobs on cluster {handle.cluster_name}.',
+            stdout,
+            cluster_name=handle.cluster_name)
 
         cancelled_ids = common_utils.decode_payload(stdout)
         if cancelled_ids:
@@ -3466,8 +3475,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stream_logs=False,
             require_outputs=True,
             separate_stderr=True)
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to sync logs.', stderr)
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to sync logs.',
+                                           stderr,
+                                           cluster_name=handle.cluster_name)
         run_timestamps = common_utils.decode_payload(run_timestamps)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
@@ -4020,7 +4032,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                code,
                                                'Failed to set autostop',
                                                stderr=stderr,
-                                               stream_logs=stream_logs)
+                                               stream_logs=stream_logs,
+                                               cluster_name=handle.cluster_name)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
 
