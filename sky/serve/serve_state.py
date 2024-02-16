@@ -14,7 +14,7 @@ from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
     import sky
-    from sky.serve import replica_info as replica
+    from sky.serve import replica_managers
     from sky.serve import service_spec
 
 _DB_PATH = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'
@@ -348,7 +348,7 @@ def get_glob_service_names(
 
 # === Replica functions ===
 def add_or_update_replica(service_name: str, replica_id: int,
-                          replica_info: 'replica.ReplicaInfo') -> None:
+                          replica_info: 'replica_managers.ReplicaInfo') -> None:
     """Adds a replica to the database."""
     _DB.cursor.execute(
         """\
@@ -370,7 +370,8 @@ def remove_replica(service_name: str, replica_id: int) -> None:
 
 
 def get_replica_info_from_id(
-        service_name: str, replica_id: int) -> Optional['replica.ReplicaInfo']:
+        service_name: str,
+        replica_id: int) -> Optional['replica_managers.ReplicaInfo']:
     """Gets a replica info from the database."""
     rows = _DB.cursor.execute(
         """\
@@ -382,7 +383,8 @@ def get_replica_info_from_id(
     return None
 
 
-def get_replica_infos(service_name: str) -> List['replica.ReplicaInfo']:
+def get_replica_infos(
+        service_name: str) -> List['replica_managers.ReplicaInfo']:
     """Gets all replica infos of a service."""
     rows = _DB.cursor.execute(
         """\
@@ -396,7 +398,7 @@ def total_number_provisioning_replicas() -> int:
     rows = _DB.cursor.execute('SELECT replica_info FROM replicas').fetchall()
     provisioning_count = 0
     for row in rows:
-        replica_info: 'replica.ReplicaInfo' = pickle.loads(row[0])
+        replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
         if replica_info.status == ReplicaStatus.PROVISIONING:
             provisioning_count += 1
     return provisioning_count

@@ -22,7 +22,6 @@ from sky.backends import cloud_vm_ray_backend
 from sky.serve import constants
 from sky.serve import controller
 from sky.serve import load_balancer
-from sky.serve import replica_info
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -88,7 +87,8 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
-    info2proc: Dict[replica_info.ReplicaInfo, multiprocessing.Process] = dict()
+    info2proc: Dict[replica_managers.ReplicaInfo,
+                    multiprocessing.Process] = dict()
     for info in replica_infos:
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
@@ -96,9 +96,9 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
         info2proc[info] = p
         # Set replica status to `SHUTTING_DOWN`
         info.status_property.sky_launch_status = (
-            replica_info.ProcessStatus.SUCCEEDED)
+            replica_managers.ProcessStatus.SUCCEEDED)
         info.status_property.sky_down_status = (
-            replica_info.ProcessStatus.RUNNING)
+            replica_managers.ProcessStatus.RUNNING)
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
         logger.info(f'Terminating replica {info.replica_id} ...')
     versions = set()
@@ -111,7 +111,7 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
         else:
             # Set replica status to `FAILED_CLEANUP`
             info.status_property.sky_down_status = (
-                replica_info.ProcessStatus.FAILED)
+                replica_managers.ProcessStatus.FAILED)
             serve_state.add_or_update_replica(service_name, info.replica_id,
                                               info)
             failed = True
