@@ -9,7 +9,7 @@ from sky.serve.constants import SKY_SERVE_CONTROLLER_NAME
 from sky.serve.constants import SKYSERVE_METADATA_DIR
 from sky.serve.core import down
 from sky.serve.core import status
-from sky.serve.core import sync_down
+from sky.serve.core import sync_down_logs
 from sky.serve.core import tail_logs
 from sky.serve.core import up
 from sky.serve.core import update
@@ -42,7 +42,7 @@ __all__ = [
     'SkyServiceSpec',
     'SKYSERVE_METADATA_DIR',
     'status',
-    'sync_down',
+    'sync_down_logs',
     'tail_logs',
     'up',
     'update',

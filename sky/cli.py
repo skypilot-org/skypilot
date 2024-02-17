@@ -4904,7 +4904,7 @@ def serve_logs(
         target_component = None
 
     if sync_down:
-        serve_lib.sync_down(service_name, target_component, replica_id)
+        serve_lib.sync_down_logs(service_name, target_component, replica_id)
         return
     try:
         assert target_component is not None

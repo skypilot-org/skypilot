@@ -30,6 +30,8 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import clouds
 
+logger = sky_logging.init_logger(__name__)
+
 
 @usage_lib.entrypoint
 def up(
@@ -575,10 +577,10 @@ def status(
 
 
 @usage_lib.entrypoint
-def sync_down(service_name: str,
-              service_component: Optional[serve_utils.ServiceComponent],
-              replica_id: Optional[int]) -> None:
-    sky_logging.print(f'Syncing down logs for {service_name}')
+def sync_down_logs(service_name: str,
+                   service_component: Optional[serve_utils.ServiceComponent],
+                   replica_id: Optional[int]) -> None:
+    logger.info(f'Syncing down logs for {service_name}')
     sync_down_all_components = service_component is None
     controller_status, controller_handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -610,7 +612,7 @@ def sync_down(service_name: str,
         backend = backend_utils.get_backend_from_handle(controller_handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
         assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
-        sky_logging.print('Preparing replica logs for download on controller')
+        logger.info('Preparing replica logs for download on controller')
         prepare_returncode = backend.run_on_head(controller_handle,
                                                  prepare_code,
                                                  require_outputs=False,
@@ -621,7 +623,7 @@ def sync_down(service_name: str,
         remote_service_dir_name = serve_utils.generate_remote_service_dir_name(
             service_name)
         dir_for_download = os.path.join(remote_service_dir_name, run_timestamp)
-        sky_logging.print('Downloading the replica logs')
+        logger.info('Downloading the replica logs...')
         runner.rsync(source=dir_for_download,
                      target=sky_logs_directory,
                      up=False,
@@ -647,7 +649,7 @@ def sync_down(service_name: str,
             service_component == serve_utils.ServiceComponent.CONTROLLER):
         controller_log_file_name = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
-        sky_logging.print('Downloading the controller logs')
+        logger.info('Downloading the controller logs...')
         runner.rsync(source=controller_log_file_name,
                      target=os.path.join(target_directory,
                                          serve_constants.CONTROLLER_FILE_NAME),
@@ -658,14 +660,14 @@ def sync_down(service_name: str,
         load_balancer_log_file_name = (
             serve_utils.generate_remote_load_balancer_log_file_name(
                 service_name))
-        sky_logging.print('Downloading the load balancer logs')
+        logger.info('Downloading the load balancer logs...')
         runner.rsync(source=load_balancer_log_file_name,
                      target=os.path.join(
                          target_directory,
                          serve_constants.LOAD_BALANCER_FILE_NAME),
                      up=False,
                      stream_logs=False)
-    sky_logging.print(f'Synced down logs can be found at: {target_directory}')
+    logger.info(f'Synced down logs can be found at: {target_directory}')
 
 
 @usage_lib.entrypoint
