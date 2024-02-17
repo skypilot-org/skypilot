@@ -478,7 +478,7 @@ def wait_service_initialization(service_name: str, job_id: int) -> str:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Failed to register service {service_name!r} '
                                  'on the SkyServe controller. Reason:\n'
-                                 f'{log_content}Please try again later.')
+                                 f'{log_content}')
         time.sleep(1)
 
 
