@@ -80,8 +80,6 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
                        f'{enabled_clouds_str}[/green]')
 
 
-
-
 def get_cloud_credential_file_mounts(
         excluded_clouds: Optional[Iterable[clouds.Cloud]]) -> Dict[str, str]:
     """Returns the files necessary to access all enabled clouds.
