@@ -1,0 +1,14 @@
+resources:
+  accelerators: T4:1
+  disk_size: 128
+
+workdir: /Users/hriday/sky-unsloth/skypilot/examples/unsloth
+
+setup: |
+  set -ex
+  pip install --upgrade --force-reinstall --no-cache-dir torch==2.2.0 triton --index-url https://download.pytorch.org/whl/cu118
+  pip install ipython
+  pip install "unsloth[cu118_torch220] @ git+https://github.com/unslothai/unsloth.git"
+
+run: |
+  python train.py
