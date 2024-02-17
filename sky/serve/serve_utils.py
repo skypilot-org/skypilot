@@ -620,9 +620,7 @@ def extract_replica_id_from_launch_log_file_name(file_name: str) -> int:
     match = re.search(pattern, file_name)
     if match:
         return int(match.group(1))
-    else:
-        raise ValueError(
-            f'Failed to get replica id from file name: {file_name}')
+    raise ValueError(f'Failed to get replica id from file name: {file_name}')
 
 
 def has_valid_replica_id(file_name: str, target_replica_id: int) -> bool:
