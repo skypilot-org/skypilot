@@ -204,13 +204,13 @@ def generate_remote_config_yaml_file_name(service_name: str) -> str:
 def generate_remote_controller_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, 'controller.log')
+    return os.path.join(dir_name, constants.CONTROLLER_FILE_NAME)
 
 
 def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, 'load_balancer.log')
+    return os.path.join(dir_name, constants.LOAD_BALANCER_FILE_NAME)
 
 
 def generate_replica_launch_log_file_name(service_name: str,
@@ -625,8 +625,15 @@ def extract_replica_id_from_launch_log_file_name(file_name: str) -> int:
             f'Failed to get replica id from file name: {file_name}')
 
 
-def prepare_replica_logs_for_download(service_name: str,
-                                      timestamp: str) -> None:
+def has_valid_replica_id(file_name: str, target_replica_id: int) -> bool:
+    if target_replica_id == constants.NO_REPLICA_ID_SPECIFIED:
+        return True
+    replica_id = extract_replica_id_from_launch_log_file_name(file_name)
+    return replica_id == target_replica_id
+
+
+def prepare_replica_logs_for_download(service_name: str, timestamp: str,
+                                      target_replica_id: int) -> None:
     logger.info('Preparing replica logs for download')
     remote_service_dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(remote_service_dir_name)
@@ -637,38 +644,41 @@ def prepare_replica_logs_for_download(service_name: str,
     log_file_pattern = os.path.join(dir_name, 'replica_*.log')
     log_files = glob.glob(log_file_pattern)
     terminated_replica_log_files = [
-        file for file in log_files if not file.endswith('_launch.log')
+        file for file in log_files if not file.endswith('_launch.log') and
+        has_valid_replica_id(file, target_replica_id)
     ]
     for file_path in terminated_replica_log_files:
         shutil.copy(file_path, dir_for_download)
 
     # manage log files of replicas with launch log files
     launch_log_files = [
-        file for file in log_files if file.endswith('_launch.log')
+        file for file in log_files if file.endswith('_launch.log') and
+        has_valid_replica_id(file, target_replica_id)
     ]
     for launch_log_file in launch_log_files:
-        replica_id = extract_replica_id_from_launch_log_file_name(
+        target_replica_id = extract_replica_id_from_launch_log_file_name(
             launch_log_file)
         replica_info = serve_state.get_replica_info_from_id(
-            service_name, replica_id)
+            service_name, target_replica_id)
         if replica_info is None:
             raise ValueError(
-                _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
+                _FAILED_TO_FIND_REPLICA_MSG.format(
+                    replica_id=target_replica_id))
 
         new_replica_log_file = os.path.join(dir_for_download,
-                                            f'replica_{replica_id}.log')
+                                            f'replica_{target_replica_id}.log')
         shutil.copy(launch_log_file, new_replica_log_file)
         if replica_info.status == serve_state.ReplicaStatus.PROVISIONING:
             continue
         # TODO(dtran): refactor into method. Also same logic in
         #  replica_managers.py. Cannot do right now because of circular import
-        logger.info(f'Syncing down logs for replica {replica_id}...')
+        logger.info(f'Syncing down logs for replica {target_replica_id}...')
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(
             replica_info.cluster_name)
         if handle is None:
             logger.error(f'Cannot find cluster {replica_info.cluster_name} for '
-                         f'replica {replica_id} in the cluster table. '
+                         f'replica {target_replica_id} in the cluster table. '
                          'Skipping syncing down job logs.')
             continue
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -677,7 +687,7 @@ def prepare_replica_logs_for_download(service_name: str,
         job_log_file_name = controller_utils.download_and_stream_latest_job_log(
             backend, handle, replica_job_logs_dir)
         if job_log_file_name is not None:
-            logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
+            logger.info(f'\n== End of logs (Replica: {target_replica_id}) ==')
             with open(new_replica_log_file, 'a',
                       encoding='utf-8') as replica_log_file, open(
                           job_log_file_name, 'r', encoding='utf-8') as job_file:
@@ -687,8 +697,8 @@ def prepare_replica_logs_for_download(service_name: str,
             with open(new_replica_log_file, 'a',
                       encoding='utf-8') as replica_log_file:
                 replica_log_file.write(
-                    f'Failed to sync down job logs from replica {replica_id}.\n'
-                )
+                    f'Failed to sync down job logs from replica '
+                    f'{target_replica_id}.\n')
 
 
 def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
@@ -940,10 +950,11 @@ class ServeCodeGen:
 
     @classmethod
     def prepare_replica_logs_for_download(cls, service_name: str,
-                                          timestamp: str) -> str:
+                                          timestamp: str,
+                                          replica_id: int) -> str:
         code = [
             'msg = serve_utils.prepare_replica_logs_for_download('
-            f'{service_name!r}, {timestamp!r})',
+            f'{service_name!r}, {timestamp!r}, {replica_id})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)

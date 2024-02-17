@@ -4877,30 +4877,37 @@ def serve_logs(
         # Sync down logs for controller, load balancer, and all
         # replicas for a service
         sky serve logs [SERVICE_NAME] --sync-down
+        # Sync down logs for only controller. Same pattern
+        applies for load balancer
+        sky serve logs [SERVICE_NAME] --controller --sync-down
+        # Sync down logs only for a single replica
+        sky serve logs [SERVICE_NAME] 3 --sync-down
     """
     have_replica_id = replica_id is not None
-    num_flags = (controller + load_balancer + have_replica_id + sync_down)
+    num_flags = (controller + load_balancer + have_replica_id)
     if num_flags > 1:
         raise click.UsageError('At most one of --controller, --load-balancer, '
                                '[REPLICA_ID], -s / --sync-down can be '
                                'specified.')
-    if num_flags == 0:
+    if num_flags == 0 and not sync_down:
         raise click.UsageError('One of --controller, --load-balancer, '
-                               '[REPLICA_ID], -s / --sync-down must be'
-                               ' specified.')
+                               '[REPLICA_ID] must be specified if not '
+                               'using --sync-down.')
 
-    if sync_down:
-        serve_lib.sync_down(service_name)
-        return
     if controller:
         target_component = serve_lib.ServiceComponent.CONTROLLER
     elif load_balancer:
         target_component = serve_lib.ServiceComponent.LOAD_BALANCER
-    else:
-        # Already checked that num_flags == 1.
-        assert replica_id is not None
+    elif replica_id:
         target_component = serve_lib.ServiceComponent.REPLICA
+    else:
+        target_component = None
+
+    if sync_down:
+        serve_lib.sync_down(service_name, target_component, replica_id)
+        return
     try:
+        assert target_component is not None
         serve_lib.tail_logs(service_name,
                             target=target_component,
                             replica_id=replica_id,

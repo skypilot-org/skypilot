@@ -4,6 +4,8 @@ from sky.utils import common_utils
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
+CONTROLLER_FILE_NAME = 'controller.log'
+LOAD_BALANCER_FILE_NAME = 'load_balancer.log'
 
 # The filelock for selecting service ports on controller VM when starting a
 # service. We need to have a filelock to avoid port collision when starting
@@ -75,3 +77,6 @@ INITIAL_VERSION = 1
 # Placed here to solve circular import
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
+
+# Placeholder for when no replica ID is specified
+NO_REPLICA_ID_SPECIFIED = -1
