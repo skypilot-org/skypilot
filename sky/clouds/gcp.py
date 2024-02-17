@@ -647,7 +647,7 @@ class GCP(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
         
-        identity_type = cls.get_current_user_identity_type()
+        identity_type = cls._get_identity_type()
         if identity_type == GCPIdentityType.SHARED_CREDENTIALS_FILE:
             # This files are only required when using the shared credentials
             # to access GCP. They are not required when using service account.
