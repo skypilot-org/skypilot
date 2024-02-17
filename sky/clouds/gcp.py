@@ -1,4 +1,5 @@
 """Google Cloud Platform."""
+import enum
 import functools
 import json
 import os
@@ -44,11 +45,7 @@ DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = (
 # NOTE: do not expanduser() on this path. It's used as a destination path on the
 # remote cluster.
 GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
-# Do not place the backup under the gcloud config directory, as ray
-# autoscaler can overwrite that directory on the remote nodes.
-# NOTE: do not expanduser() on this path. It's used as a destination path on the
-# remote cluster.
-GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
+
 
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
@@ -76,7 +73,6 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     ~/google-cloud-sdk/install.sh -q >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \
     echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc && \
     source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }}; }} && \
-    {{ cp {GCP_CONFIG_SKY_BACKUP_PATH} {GCP_CONFIG_PATH} > /dev/null 2>&1 || true; }} && \
     popd &>/dev/null'
 
 # TODO(zhwu): Move the default AMI size to the catalog instead.
@@ -116,6 +112,24 @@ def is_api_disabled(endpoint: str, project_id: str) -> bool:
                           stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
     return proc.returncode != 0
+
+class GCPIdentityType(enum.Enum):
+    """GCP identity type.
+
+    The account type is determined by the current user identity, based on
+    `gcloud auth list`. We will check the existence of the value in the output
+    of `aws configure list` to determine the account type.
+    """
+    SERVICE_ACCOUNT = 'iam.gserviceaccount.com'
+
+    #       Name                    Value             Type    Location
+    #       ----                    -----             ----    --------
+    #    profile                <not set>             None    None
+    # access_key     ****************abcd shared-credentials-file
+    # secret_key     ****************abcd shared-credentials-file
+    #     region                us-east-1      config-file    ~/.aws/config
+    SHARED_CREDENTIALS_FILE = ''
+
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -632,32 +646,36 @@ class GCP(clouds.Cloud):
                 f'{cls._CREDENTIAL_HINT}\n'
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
+        
+        identity_type = cls.get_current_user_identity_type()
+        if identity_type == GCPIdentityType.SHARED_CREDENTIALS_FILE:
+            # This files are only required when using the shared credentials
+            # to access GCP. They are not required when using service account.
+            try:
+                # These files are required because they will be synced to remote
+                # VMs for `gsutil` to access private storage buckets.
+                # `auth.default()` does not guarantee these files exist.
+                for file in [
+                        '~/.config/gcloud/access_tokens.db',
+                        '~/.config/gcloud/credentials.db',
+                ]:
+                    if not os.path.isfile(os.path.expanduser(file)):
+                        raise FileNotFoundError(file)
+            except FileNotFoundError as e:
+                return False, (
+                    f'Credentails are not set. '
+                    f'{cls._CREDENTIAL_HINT}\n'
+                    f'{cls._INDENT_PREFIX}Details: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        try:
-            # These files are required because they will be synced to remote
-            # VMs for `gsutil` to access private storage buckets.
-            # `auth.default()` does not guarantee these files exist.
-            for file in [
-                    '~/.config/gcloud/access_tokens.db',
-                    '~/.config/gcloud/credentials.db',
-            ]:
-                if not os.path.isfile(os.path.expanduser(file)):
-                    raise FileNotFoundError(file)
-        except FileNotFoundError as e:
-            return False, (
-                f'Credentails are not set. '
-                f'{cls._CREDENTIAL_HINT}\n'
-                f'{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
-
-        try:
-            cls._find_application_key_path()
-        except FileNotFoundError as e:
-            return False, (
-                f'Application credentials are not set. '
-                f'{cls._APPLICATION_CREDENTIAL_HINT}\n'
-                f'{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+            try:
+                cls._find_application_key_path()
+            except FileNotFoundError as e:
+                return False, (
+                    f'Application credentials are not set. '
+                    f'{cls._APPLICATION_CREDENTIAL_HINT}\n'
+                    f'{cls._INDENT_PREFIX}Details: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
 
         try:
             # Check if application default credentials are set.
@@ -749,21 +767,6 @@ class GCP(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        # Create a backup of the config_default file, as the original file can
-        # be modified on the remote cluster by ray causing authentication
-        # problems. The backup file will be updated to the remote cluster
-        # whenever the original file is not empty and will be applied
-        # appropriately on the remote cluster when necessary.
-        if (os.path.exists(os.path.expanduser(GCP_CONFIG_PATH)) and
-                os.path.getsize(os.path.expanduser(GCP_CONFIG_PATH)) > 0):
-            subprocess.run(f'cp {GCP_CONFIG_PATH} {GCP_CONFIG_SKY_BACKUP_PATH}',
-                           shell=True,
-                           check=True)
-        elif not os.path.exists(os.path.expanduser(GCP_CONFIG_SKY_BACKUP_PATH)):
-            raise RuntimeError(
-                'GCP credential file is empty. Please make sure you '
-                'have run: gcloud init')
-
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
@@ -780,8 +783,17 @@ class GCP(clouds.Cloud):
         # autostop and GCS can be accessed on the remote cluster.
         credentials[DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH] = (
             self._find_application_key_path())
-        credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
+
+    @classmethod
+    def _get_identity_type(cls) -> Optional[GCPIdentityType]:
+        try:
+            account = cls.get_current_user_identity_str()[0]
+        except exceptions.CloudUserIdentityError:
+            return None
+        if GCPIdentityType.SERVICE_ACCOUNT.value in account:
+            return GCPIdentityType.SERVICE_ACCOUNT
+        return GCPIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.

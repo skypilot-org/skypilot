@@ -221,13 +221,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             # within their google workspace after the os-login credentials
             # were established.
             config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
-            sky_backup_config_path = os.path.expanduser(
-                clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
-            assert os.path.exists(sky_backup_config_path), (
-                'GCP credential backup file '
-                f'{sky_backup_config_path!r} does not exist.')
-
-            with open(sky_backup_config_path, 'r', encoding='utf-8') as infile:
+            with open(config_path, 'r', encoding='utf-8') as infile:
                 for line in infile:
                     if line.startswith('account'):
                         account = line.split('=')[1].strip()
