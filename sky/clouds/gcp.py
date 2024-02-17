@@ -122,12 +122,6 @@ class GCPIdentityType(enum.Enum):
     """
     SERVICE_ACCOUNT = 'iam.gserviceaccount.com'
 
-    #       Name                    Value             Type    Location
-    #       ----                    -----             ----    --------
-    #    profile                <not set>             None    None
-    # access_key     ****************abcd shared-credentials-file
-    # secret_key     ****************abcd shared-credentials-file
-    #     region                us-east-1      config-file    ~/.aws/config
     SHARED_CREDENTIALS_FILE = ''
 
 
@@ -779,16 +773,18 @@ class GCP(clouds.Cloud):
             if os.path.exists(os.path.expanduser(
                 f'~/.config/gcloud/{filename}'))
         }
-        # Upload the application key path to the default path, so that
-        # autostop and GCS can be accessed on the remote cluster.
-        credentials[DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH] = (
-            self._find_application_key_path())
+        application_key_path = self._find_application_key_path()
+        if os.path.exists(os.path.expanduser(application_key_path)):
+            # Upload the application key path to the default path, so that
+            # autostop and GCS can be accessed on the remote cluster.
+            credentials[DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH] = (
+                application_key_path)
         return credentials
 
     @classmethod
     def _get_identity_type(cls) -> Optional[GCPIdentityType]:
         try:
-            account = cls.get_current_user_identity_str()[0]
+            account = cls.get_current_user_identity()[0]
         except exceptions.CloudUserIdentityError:
             return None
         if GCPIdentityType.SERVICE_ACCOUNT.value in account:
