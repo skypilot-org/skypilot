@@ -3,8 +3,8 @@
 # The example app starts by obtaining the LAION dataset,
 # loads the Mistral model with 4-bit precision, performs model
 # patching with fast LoRA weights, and finally initializes and
-# trains the model using the SFTTrainer with specified hyperparameters
-# and the LAION dataset.
+# trains the model using the SFTTrainer with specified
+# hyperparameters and the LAION dataset.
 #
 # Usage:
 #   sky launch -c myclus unsloth.yaml
@@ -17,7 +17,8 @@ workdir: .
 
 setup: |
   set -ex
-  pip install --upgrade --force-reinstall --no-cache-dir torch==2.2.0 triton --index-url https://download.pytorch.org/whl/cu118
+  pip install --upgrade --force-reinstall --no-cache-dir torch==2.2.0 triton \
+    --index-url https://download.pytorch.org/whl/cu118
   pip install ipython
   pip install "unsloth[cu118_torch220] @ git+https://github.com/unslothai/unsloth.git"
 

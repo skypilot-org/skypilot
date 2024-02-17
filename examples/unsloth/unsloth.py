@@ -1,10 +1,11 @@
 # Use the unsloth library to fine-tune a Mistral model
 
-from unsloth import FastLanguageModel
-import torch
-from trl import SFTTrainer
-from transformers import TrainingArguments
 from datasets import load_dataset
+import torch
+from transformers import TrainingArguments
+from trl import SFTTrainer
+from unsloth import FastLanguageModel
+
 max_seq_length = 2048
 
 # [1] Get LAION dataset
