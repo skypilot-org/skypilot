@@ -46,7 +46,6 @@ DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = (
 # remote cluster.
 GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
 
-
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
     'credentials.db',
@@ -113,6 +112,7 @@ def is_api_disabled(endpoint: str, project_id: str) -> bool:
                           stdout=subprocess.PIPE)
     return proc.returncode != 0
 
+
 class GCPIdentityType(enum.Enum):
     """GCP identity type.
 
@@ -123,7 +123,6 @@ class GCPIdentityType(enum.Enum):
     SERVICE_ACCOUNT = 'iam.gserviceaccount.com'
 
     SHARED_CREDENTIALS_FILE = ''
-
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -640,7 +639,7 @@ class GCP(clouds.Cloud):
                 f'{cls._CREDENTIAL_HINT}\n'
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
-        
+
         identity_type = cls._get_identity_type()
         if identity_type == GCPIdentityType.SHARED_CREDENTIALS_FILE:
             # This files are only required when using the shared credentials
@@ -793,7 +792,7 @@ class GCP(clouds.Cloud):
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_current_user_identity(cls) -> List[str]:
         """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
