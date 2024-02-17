@@ -465,10 +465,15 @@ def wait_service_initialization(service_name: str, job_id: int) -> str:
                 raise RuntimeError('Max number of services reached. '
                                    'To spin up more services, please '
                                    'tear down some existing services.')
-        if time.time() - start_time > constants.INITIALIZATION_TIMEOUT_SECONDS:
+        elapsed = time.time() - start_time
+        if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
             controller_log_path = (
                 generate_remote_controller_log_file_name(service_name))
-            with open(os.path.expanduser(controller_log_path), 'r') as f:
+            with open(
+                    os.path.expanduser(controller_log_path),
+                    'r',
+                    encoding='utf-8',
+            ) as f:
                 log_content = f.read()
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Failed to register service {service_name!r} '
