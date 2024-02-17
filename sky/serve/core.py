@@ -181,7 +181,7 @@ def up(
             # This function will check the controller job id in the database
             # and return the endpoint if the job id matches. Otherwise it will
             # return None.
-            code = serve_utils.ServeCodeGen.wait_service_initialization(
+            code = serve_utils.ServeCodeGen.wait_service_registration(
                 service_name, controller_job_id)
             backend = backend_utils.get_backend_from_handle(controller_handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
