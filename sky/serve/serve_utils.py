@@ -867,6 +867,7 @@ class ServeCodeGen:
         ]
         return cls._build(code)
 
+    @classmethod
     def wait_service_registration(cls, service_name: str, job_id: int) -> str:
         code = [
             'msg = serve_utils.wait_service_registration('
