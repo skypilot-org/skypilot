@@ -46,6 +46,14 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     for cloud_tuple in sorted(clouds_to_check):
         check_one_cloud(cloud_tuple)
 
+    # Cloudflare is not a real cloud in clouds.CLOUD_REGISTRY, and should not be
+    # inserted into the DB (otherwise `sky launch` and other code would error
+    # out when it's trying to look it up in the registry).
+    enabled_clouds = [
+        cloud for cloud in enabled_clouds if not cloud.startswith('Cloudflare')
+    ]
+    global_user_state.set_enabled_clouds(enabled_clouds)
+
     if len(enabled_clouds) == 0:
         click.echo(
             click.style(
@@ -70,14 +78,6 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
                 [''] + sorted(enabled_clouds))
             rich.print('\n[green]:tada: Enabled clouds :tada:'
                        f'{enabled_clouds_str}[/green]')
-
-    # Cloudflare is not a real cloud in clouds.CLOUD_REGISTRY, and should not be
-    # inserted into the DB (otherwise `sky launch` and other code would error
-    # out when it's trying to look it up in the registry).
-    enabled_clouds = [
-        cloud for cloud in enabled_clouds if not cloud.startswith('Cloudflare')
-    ]
-    global_user_state.set_enabled_clouds(enabled_clouds)
 
 
 def get_cloud_credential_file_mounts(
