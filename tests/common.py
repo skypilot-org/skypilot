@@ -24,7 +24,7 @@ def enable_all_clouds_in_monkeypatch(
         enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
     monkeypatch.setattr(
         'sky.check.get_enabled_clouds',
-        lambda: enabled_clouds,
+        lambda *_args, **_kwargs: enabled_clouds,
     )
     monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
     config_file_backup = tempfile.NamedTemporaryFile(

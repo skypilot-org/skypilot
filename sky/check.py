@@ -97,19 +97,20 @@ def get_enabled_clouds(
     This function will perform a refresh if no public cloud is enabled.
 
     Args:
-        raise_if_no_cloud_access: if True, raise an exception if no public cloud
-            is enabled.
-    """
-    if not _no_public_cloud_enabled_locally():
-        return global_user_state.get_locally_enabled_clouds()
+        raise_if_no_cloud_access: if True, raise an exception if no public
+            cloud is enabled.
 
-    check(quiet=True)
+    Raises:
+        exceptions.NoCloudAccessError: if no public cloud is enabled and
+            raise_if_no_cloud_access is set to True.
+    """
+    if _no_public_cloud_enabled_locally():
+        check(quiet=True)
     if raise_if_no_cloud_access and _no_public_cloud_enabled_locally():
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
-
     return global_user_state.get_locally_enabled_clouds()
 
 
