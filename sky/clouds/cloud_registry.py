@@ -18,7 +18,7 @@ class _CloudRegistry(dict):
         if name.lower() == 'local':
             # Backward compatibility. global_user_state's DB may have recorded
             # Local cloud, and we've just removed it from the registry, and
-            # global_user_state.get_locally_enabled_clouds() would call into
+            # global_user_state.get_cached_enabled_clouds() would call into
             # this func and fail.
             #
             # TODO(skypilot): have a better way to handle clouds removed from

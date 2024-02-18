@@ -83,11 +83,11 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     global_user_state.set_enabled_clouds(enabled_clouds)
 
 
-def _no_public_cloud_enabled_locally() -> bool:
-    locally_enabled_clouds = global_user_state.get_locally_enabled_clouds()
-    return (len(locally_enabled_clouds) == 0 or
-            (len(locally_enabled_clouds) == 1 and
-             isinstance(locally_enabled_clouds[0], clouds.Local)))
+def _no_public_cloud_enabled_in_cache() -> bool:
+    cached_enabled_clouds = global_user_state.get_cached_enabled_clouds()
+    return (len(cached_enabled_clouds) == 0 or
+            (len(cached_enabled_clouds) == 1 and
+             isinstance(cached_enabled_clouds[0], clouds.Local)))
 
 
 def get_enabled_clouds(
@@ -104,7 +104,7 @@ def get_enabled_clouds(
         exceptions.NoCloudAccessError: if no public cloud is enabled and
             raise_if_no_cloud_access is set to True.
     """
-    if _no_public_cloud_enabled_locally():
+    if _no_public_cloud_enabled_in_cache():
         try:
             check(quiet=True)
         except SystemExit:
@@ -112,12 +112,12 @@ def get_enabled_clouds(
             # Here we catch it and raise the exception later only if
             # raise_if_no_cloud_access is set to True.
             pass
-    if raise_if_no_cloud_access and _no_public_cloud_enabled_locally():
+    if raise_if_no_cloud_access and _no_public_cloud_enabled_in_cache():
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
-    return global_user_state.get_locally_enabled_clouds()
+    return global_user_state.get_cached_enabled_clouds()
 
 
 def get_cloud_credential_file_mounts(
