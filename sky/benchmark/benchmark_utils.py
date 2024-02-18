@@ -20,6 +20,7 @@ from rich import progress as rich_progress
 
 import sky
 from sky import backends
+from sky import check as sky_check
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
@@ -167,7 +168,7 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     bucket_name = f'sky-bench-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
     # Select the bucket type.
-    enabled_clouds = global_user_state.get_enabled_clouds()
+    enabled_clouds = sky_check.get_enabled_clouds()
     enabled_clouds = [str(cloud) for cloud in enabled_clouds]
     if 'AWS' in enabled_clouds:
         bucket_type = data.StoreType.S3.value
