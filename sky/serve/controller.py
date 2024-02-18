@@ -126,6 +126,20 @@ class SkyServeController:
                              f'{common_utils.format_exception(e)}')
                 return {'message': 'Error'}
 
+        @self._app.post('/controller/terminate_replica')
+        async def terminate_replica(request: fastapi.Request):
+            request_data = await request.json()
+            try:
+                replica_id = request_data.get('replica_id')
+                if replica_id is None:
+                    return {'message': 'Error: Replica ID is not specified.'}
+                self._replica_manager.scale_down(replica_id)
+                return {'message': 'Success'}
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error in terminate_replica: '
+                             f'{common_utils.format_exception(e)}')
+                return {'message': 'Error'}
+
         @self._app.on_event('startup')
         def configure_logger():
             uvicorn_access_logger = logging.getLogger('uvicorn.access')
