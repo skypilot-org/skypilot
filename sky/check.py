@@ -50,7 +50,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         check_one_cloud(cloud_tuple)
 
     if len(enabled_clouds) == 0:
-        click.echo(
+        echo(
             click.style(
                 'No cloud is enabled. SkyPilot will not be able to run any '
                 'task. Run `sky check` for more info.',
