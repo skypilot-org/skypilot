@@ -4654,8 +4654,10 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--replica-id', '-r', default=None, type=int, help='')
 # pylint: disable=redefined-builtin
-def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
+def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
+               replica_id: Optional[int]):
     """Teardown service(s).
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
@@ -4690,6 +4692,9 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
         raise click.UsageError(
             'Can only specify one of SERVICE_NAMES or --all. '
             f'Provided {argument_str!r}.')
+    if replica_id is not None and len(service_names) != 1:
+        raise click.UsageError(
+            'Must specify only one service when replica ID is specified')
 
     _, handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
