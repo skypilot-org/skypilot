@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
-from sky import global_user_state
+from sky import check as sky_check
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
@@ -43,9 +43,8 @@ def list_accelerators(
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     del all_regions, require_price  # Unused.
     k8s_cloud = Kubernetes()
-    if not any(
-            map(k8s_cloud.is_same_cloud, global_user_state.get_enabled_clouds())
-    ) or not kubernetes_utils.check_credentials()[0]:
+    if not any(map(k8s_cloud.is_same_cloud, sky_check.get_enabled_clouds())
+              ) or not kubernetes_utils.check_credentials()[0]:
         return {}
 
     has_gpu = kubernetes_utils.detect_gpu_resource()

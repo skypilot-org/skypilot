@@ -5,9 +5,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 
+from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
-from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
@@ -560,7 +560,7 @@ class Resources:
             # Try to infer the cloud from region/zone, if unique. If 0 or >1
             # cloud corresponds to region/zone, errors out.
             valid_clouds = []
-            enabled_clouds = global_user_state.get_enabled_clouds()
+            enabled_clouds = sky_check.get_enabled_clouds()
             cloud_to_errors = {}
             for cloud in enabled_clouds:
                 try:
@@ -671,7 +671,7 @@ class Resources:
         else:
             # If cloud not specified
             valid_clouds = []
-            enabled_clouds = global_user_state.get_enabled_clouds()
+            enabled_clouds = sky_check.get_enabled_clouds()
             for cloud in enabled_clouds:
                 if cloud.instance_type_exists(self._instance_type):
                     valid_clouds.append(cloud)

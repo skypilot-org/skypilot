@@ -1,12 +1,15 @@
 """Credential checks: check cloud credentials and enable clouds."""
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import click
+import colorama
 import rich
 
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky.adaptors import cloudflare
+from sky.utils import ux_utils
 
 
 # TODO(zhwu): add check for a single cloud to improve performance
@@ -80,6 +83,36 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     global_user_state.set_enabled_clouds(enabled_clouds)
 
 
+def _no_public_cloud_enabled_locally() -> bool:
+    locally_enabled_clouds = global_user_state.get_locally_enabled_clouds()
+    return (len(locally_enabled_clouds) == 0 or
+            (len(locally_enabled_clouds) == 1 and
+             isinstance(locally_enabled_clouds[0], clouds.Local)))
+
+
+def get_enabled_clouds(
+        raise_if_no_cloud_access: bool = False) -> List[clouds.Cloud]:
+    """Returns a list of enabled clouds.
+
+    This function will perform a refresh if no public cloud is enabled.
+
+    Args:
+        raise_if_no_cloud_access: if True, raise an exception if no public cloud
+            is enabled.
+    """
+    if not _no_public_cloud_enabled_locally():
+        return global_user_state.get_locally_enabled_clouds()
+
+    check(quiet=True)
+    if raise_if_no_cloud_access and _no_public_cloud_enabled_locally():
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NoCloudAccessError(
+                'Cloud access is not set up. Run: '
+                f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
+
+    return global_user_state.get_locally_enabled_clouds()
+
+
 def get_cloud_credential_file_mounts(
         excluded_clouds: Optional[Iterable[clouds.Cloud]]) -> Dict[str, str]:
     """Returns the files necessary to access all enabled clouds.
@@ -87,7 +120,7 @@ def get_cloud_credential_file_mounts(
     Returns a dictionary that will be added to a task's file mounts
     and a list of patterns that will be excluded (used as rsync_exclude).
     """
-    enabled_clouds = global_user_state.get_enabled_clouds()
+    enabled_clouds = get_enabled_clouds()
     file_mounts = {}
     for cloud in enabled_clouds:
         if (excluded_clouds is not None and
