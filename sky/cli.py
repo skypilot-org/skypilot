@@ -4682,8 +4682,14 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         # Hint messages already printed by the call above.
         sys.exit(1)
 
-    if not yes:
-        if not replica_id_is_defined:
+    def handle_terminate_replica_flow():
+        if not yes:
+            click.confirm(f'Terminating replica ID {replica_id} in '
+                          f'{service_names[0]!r}. Proceed?')
+        serve_lib.terminate_replica(service_names[0], replica_id)
+
+    def handle_terminate_services_flow():
+        if not yes:
             quoted_service_names = [f'{name!r}' for name in service_names]
             service_identity_str = (f'service(s) '
                                     f'{", ".join(quoted_service_names)}')
@@ -4693,14 +4699,12 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
                           default=True,
                           abort=True,
                           show_default=True)
-        else:
-            click.confirm(f'Terminating replica ID {replica_id} in '
-                          f'{service_names[0]!r}. Proceed?')
-
-    if not replica_id_is_defined:
         serve_lib.down(service_names=service_names, all=all, purge=purge)
+
+    if replica_id_is_defined:
+        handle_terminate_replica_flow()
     else:
-        serve_lib.terminate_replica(service_names[0], replica_id)
+        handle_terminate_services_flow()
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
