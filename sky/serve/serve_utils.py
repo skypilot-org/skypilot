@@ -282,6 +282,22 @@ def update_service_encoded(service_name: str, version: int) -> str:
     return common_utils.encode_payload(service_msg)
 
 
+def terminate_replica(service_name: str, replica_id: int) -> None:
+    service_status = _get_service_status(service_name)
+    if service_status is None:
+        raise ValueError(f'Service {service_name!r} does not exist')
+    controller_port = service_status['controller_port']
+    resp = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/terminate_replica',
+        json={
+            'replica_id': replica_id,
+        })
+    if resp.status_code != 200:
+        raise ValueError(f'Failed to terminate replica {replica_id} '
+                         f'in {service_name}')
+
+
 def _get_service_status(
         service_name: str,
         with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
@@ -833,6 +849,13 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
+    def terminate_replica(cls, service_name: str, replica_id: int) -> str:
+        code = [
+            f'serve_utils.terminate_replica({service_name!r}, {replica_id})'
+        ]
+        return cls._build(code)
+
+    @classmethod
     def wait_service_initialization(cls, service_name: str, job_id: int) -> str:
         code = [
             'msg = serve_utils.wait_service_initialization('
@@ -860,15 +883,15 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def _build(cls, code: List[str]) -> str:
-        code = cls._PREFIX + code
-        generated_code = '; '.join(code)
-        return f'python3 -u -c {shlex.quote(generated_code)}'
-
-    @classmethod
     def update_service(cls, service_name: str, version: int) -> str:
         code = [
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
             f'{version})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
+
+    @classmethod
+    def _build(cls, code: List[str]) -> str:
+        code = cls._PREFIX + code
+        generated_code = '; '.join(code)
+        return f'python3 -u -c {shlex.quote(generated_code)}'

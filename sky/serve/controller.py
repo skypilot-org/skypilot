@@ -133,6 +133,7 @@ class SkyServeController:
                 replica_id = request_data.get('replica_id')
                 if replica_id is None:
                     return {'message': 'Error: Replica ID is not specified.'}
+                logger.info(f'Terminating replica {replica_id}')
                 self._replica_manager.scale_down(replica_id)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except

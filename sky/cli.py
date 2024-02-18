@@ -4692,7 +4692,8 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         raise click.UsageError(
             'Can only specify one of SERVICE_NAMES or --all. '
             f'Provided {argument_str!r}.')
-    if replica_id is not None and len(service_names) != 1:
+    replica_id_is_defined = replica_id is not None
+    if replica_id_is_defined and len(service_names) != 1:
         raise click.UsageError(
             'Must specify only one service when replica ID is specified')
 
@@ -4704,16 +4705,24 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         sys.exit(1)
 
     if not yes:
-        quoted_service_names = [f'{name!r}' for name in service_names]
-        service_identity_str = f'service(s) {", ".join(quoted_service_names)}'
-        if all:
-            service_identity_str = 'all services'
-        click.confirm(f'Terminating {service_identity_str}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
+        if not replica_id_is_defined:
+            quoted_service_names = [f'{name!r}' for name in service_names]
+            service_identity_str = (f'service(s) '
+                                    f'{", ".join(quoted_service_names)}')
+            if all:
+                service_identity_str = 'all services'
+            click.confirm(f'Terminating {service_identity_str}. Proceed?',
+                          default=True,
+                          abort=True,
+                          show_default=True)
+        else:
+            click.confirm(f'Terminating replica ID {replica_id} in '
+                          f'{service_names[0]!r}. Proceed?')
 
-    serve_lib.down(service_names=service_names, all=all, purge=purge)
+    if not replica_id_is_defined:
+        serve_lib.down(service_names=service_names, all=all, purge=purge)
+    else:
+        serve_lib.terminate_replica(service_names[0], replica_id)
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
