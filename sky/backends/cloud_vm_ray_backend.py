@@ -45,6 +45,8 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
+from sky.serve import constants as serve_constants
+from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -3717,6 +3719,94 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          for runner in runners]
         subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         return dict(zip(job_ids, local_log_dirs))
+
+    def sync_down_serve_logs(self, controller_handle: CloudVmRayResourceHandle,
+                             service_name: str, service_component: Optional[
+                                 serve_lib.ServiceComponent],
+                             replica_id: Optional[int]) -> None:
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            controller_handle.cluster_yaml, controller_handle.docker_user)
+        runner = command_runner.SSHCommandRunner(
+            controller_handle.head_ip,
+            port=controller_handle.head_ssh_port,
+            **ssh_credentials,
+        )
+        sky_logs_directory = os.path.expanduser(constants.SKY_LOGS_DIRECTORY)
+        run_timestamp = backend_utils.get_run_timestamp()
+        sync_down_all_components = service_component is None
+
+        if (sync_down_all_components or
+                service_component == serve_utils.ServiceComponent.REPLICA):
+            replica_id_arg = replica_id if replica_id is not None \
+                else serve_constants.NO_REPLICA_ID_SPECIFIED
+            prepare_code = (
+                serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
+                    service_name, run_timestamp, replica_id_arg))
+            backend = backend_utils.get_backend_from_handle(controller_handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+            assert isinstance(controller_handle,
+                              backends.CloudVmRayResourceHandle)
+            logger.info('Preparing replica logs for download on controller')
+            prepare_returncode = self.run_on_head(controller_handle,
+                                                  prepare_code,
+                                                  require_outputs=False,
+                                                  stream_logs=False)
+            subprocess_utils.handle_returncode(
+                prepare_returncode, prepare_code,
+                'Failed to prepare replica logs to sync down.')
+            remote_service_dir_name = (
+                serve_utils.generate_remote_service_dir_name(service_name))
+            dir_for_download = os.path.join(remote_service_dir_name,
+                                            run_timestamp)
+            logger.info('Downloading the replica logs...')
+            runner.rsync(source=dir_for_download,
+                         target=sky_logs_directory,
+                         up=False,
+                         stream_logs=False)
+            remove_code = (
+                serve_utils.ServeCodeGen.remove_replica_logs_for_download(
+                    service_name, run_timestamp))
+            remove_returncode = self.run_on_head(controller_handle,
+                                                 remove_code,
+                                                 require_outputs=False,
+                                                 stream_logs=False)
+            subprocess_utils.handle_returncode(
+                remove_returncode, remove_code,
+                'Failed to remove the replica logs for '
+                'download on the controller.')
+
+        # We download the replica logs first because that download creates
+        # the timestamp directory, and we can just put the controller and
+        # load balancer logs in there. Otherwise, we would create the
+        # timestamp directory with controller and load balancer logs first,
+        # and then the replica logs download would overwrite it
+        target_directory = os.path.join(sky_logs_directory, run_timestamp)
+        os.makedirs(target_directory, exist_ok=True)
+        if (sync_down_all_components or
+                service_component == serve_utils.ServiceComponent.CONTROLLER):
+            controller_log_file_name = (
+                serve_utils.generate_remote_controller_log_file_name(
+                    service_name))
+            logger.info('Downloading the controller logs...')
+            runner.rsync(source=controller_log_file_name,
+                         target=os.path.join(
+                             target_directory,
+                             serve_constants.CONTROLLER_FILE_NAME),
+                         up=False,
+                         stream_logs=False)
+        if (sync_down_all_components or service_component
+                == serve_utils.ServiceComponent.LOAD_BALANCER):
+            load_balancer_log_file_name = (
+                serve_utils.generate_remote_load_balancer_log_file_name(
+                    service_name))
+            logger.info('Downloading the load balancer logs...')
+            runner.rsync(source=load_balancer_log_file_name,
+                         target=os.path.join(
+                             target_directory,
+                             serve_constants.LOAD_BALANCER_FILE_NAME),
+                         up=False,
+                         stream_logs=False)
+        logger.info(f'Synced down logs can be found at: {target_directory}')
 
     def tail_logs(self,
                   handle: CloudVmRayResourceHandle,
