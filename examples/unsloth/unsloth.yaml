@@ -8,6 +8,7 @@
 #
 # Usage:
 #   sky launch -c myclus unsloth.yaml
+#   sky down myclus
 
 resources:
   accelerators: T4:1
