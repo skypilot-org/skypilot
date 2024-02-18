@@ -18,15 +18,13 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
 
     def check_one_cloud(cloud_tuple: Tuple[str, clouds.Cloud]) -> None:
         cloud_repr, cloud = cloud_tuple
-        if not isinstance(cloud, clouds.Local):
-            echo(f'  Checking {cloud_repr}...', nl=False)
+        echo(f'  Checking {cloud_repr}...', nl=False)
         ok, reason = cloud.check_credentials()
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
-        if not isinstance(cloud, clouds.Local):
-            echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
-                 ' ' * 30)
+        echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
+             ' ' * 30)
         if ok:
             enabled_clouds.append(cloud_repr)
             if verbose and cloud is not cloudflare:
