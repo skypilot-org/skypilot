@@ -105,7 +105,13 @@ def get_enabled_clouds(
             raise_if_no_cloud_access is set to True.
     """
     if _no_public_cloud_enabled_locally():
-        check(quiet=True)
+        try:
+            check(quiet=True)
+        except SystemExit:
+            # If no cloud is enabled, check() will raise SystemExit.
+            # Here we catch it and raise the exception later only if
+            # raise_if_no_cloud_access is set to True.
+            pass
     if raise_if_no_cloud_access and _no_public_cloud_enabled_locally():
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
