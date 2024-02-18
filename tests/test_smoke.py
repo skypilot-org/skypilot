@@ -1505,6 +1505,30 @@ def test_multi_hostname(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+def test_multi_node_failure(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'multi_node_failure',
+        [
+            # TODO(zhwu): we use multi-thread to run the commands in setup
+            # commands in parallel, which makes it impossible to fail fast
+            # when one of the nodes fails. We should fix this in the future.
+            # The --detach-setup version can fail fast, as the setup is
+            # submitted to the remote machine, which does not use multi-thread.
+            # Refer to the comment in `subprocess_utils.run_in_parallel`.
+            # f'sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/failed_worker_setup.yaml && exit 1',  # Ensure the job setup failed.
+            f'sky launch -y -c {name} --cloud {generic_cloud} --detach-setup tests/test_yamls/failed_worker_setup.yaml',
+            f'sky logs {name} 1 --status | grep FAILED_SETUP',  # Ensure the job setup failed.
+            f'sky exec {name} tests/test_yamls/failed_worker_run.yaml',
+            f'sky logs {name} 2 --status | grep FAILED',  # Ensure the job failed.
+            f'sky logs {name} 2 | grep "My hostname:" | wc -l | grep 2',  # Ensure there 2 of the hosts printed their hostname.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Web apps with custom ports on GCP. ----------
 @pytest.mark.gcp
 def test_gcp_http_server_with_custom_ports():
@@ -2897,7 +2921,8 @@ def test_skyserve_llm():
             f'{_get_serve_endpoint(name)}; python tests/skyserve/llm/get_response.py'
             f' --endpoint $endpoint --prompt {prompt} | grep {expected_output}')
 
-    with open('tests/skyserve/llm/prompt_output.json', 'r') as f:
+    with open('tests/skyserve/llm/prompt_output.json', 'r',
+              encoding='utf-8') as f:
         prompt2output = json.load(f)
 
     test = Test(
@@ -3312,7 +3337,7 @@ class TestStorageWithCredentials:
             path = os.path.join(base_path, name)
             if substructure is None:
                 # Create a file
-                open(path, 'a').close()
+                open(path, 'a', encoding='utf-8').close()
             else:
                 # Create a subdirectory
                 os.mkdir(path)

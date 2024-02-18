@@ -88,11 +88,15 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
     with open(
             private_key_path,
             'w',
+            encoding='utf-8',
             opener=functools.partial(os.open, mode=0o600),
     ) as f:
         f.write(private_key)
 
-    with open(public_key_path, 'w') as f:
+    with open(public_key_path,
+              'w',
+              encoding='utf-8',
+              opener=functools.partial(os.open, mode=0o644)) as f:
         f.write(public_key)
 
 
@@ -116,7 +120,7 @@ def get_or_generate_keys() -> Tuple[str, str]:
 
 def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
+    with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
     config_str = common_utils.dump_yaml_str(config)
     config_str = config_str.replace('skypilot:ssh_user',
@@ -223,7 +227,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 'GCP credential backup file '
                 f'{sky_backup_config_path!r} does not exist.')
 
-            with open(sky_backup_config_path, 'r') as infile:
+            with open(sky_backup_config_path, 'r', encoding='utf-8') as infile:
                 for line in infile:
                     if line.startswith('account'):
                         account = line.split('=')[1].strip()
@@ -270,7 +274,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 # and public key content, then encode it back.
 def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
+    with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
     for node_type in config['available_node_types']:
         node_config = config['available_node_types'][node_type]['node_config']
@@ -301,7 +305,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Ensure ssh key is registered with Lambda Cloud
     lambda_client = lambda_utils.LambdaCloudClient()
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-    with open(public_key_path, 'r') as f:
+    with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
     prefix = f'sky-key-{common_utils.get_user_hash()}'
     name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)

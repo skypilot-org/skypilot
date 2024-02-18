@@ -62,7 +62,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
     response = requests.get(ENDPOINT, headers=headers)
     info = response.json()['data']
 
-    with open(output_path, mode='w') as f:
+    with open(output_path, mode='w', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=',', quotechar='"')
         writer.writerow([
             'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
@@ -99,11 +99,13 @@ def get_api_key(cmdline_args: argparse.Namespace) -> str:
     api_key = cmdline_args.api_key
     if api_key is None:
         if cmdline_args.api_key_path is not None:
-            with open(cmdline_args.api_key_path, mode='r') as f:
+            with open(cmdline_args.api_key_path, mode='r',
+                      encoding='utf-8') as f:
                 api_key = f.read().strip()
         else:
             # Read from ~/.lambda_cloud/lambda_keys
-            with open(DEFAULT_LAMBDA_KEYS_PATH, mode='r') as f:
+            with open(DEFAULT_LAMBDA_KEYS_PATH, mode='r',
+                      encoding='utf-8') as f:
                 lines = [
                     line.strip() for line in f.readlines() if ' = ' in line
                 ]

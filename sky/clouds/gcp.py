@@ -134,6 +134,8 @@ class GCP(clouds.Cloud):
     # lower limit.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 35
 
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
+
     _INDENT_PREFIX = '    '
     _DEPENDENCY_HINT = (
         'GCP tools are not installed. Run the following commands:\n'
@@ -428,7 +430,8 @@ class GCP(clouds.Cloud):
                     'tpu_vm', True)
                 resources_vars['runtime_version'] = r.accelerator_args[
                     'runtime_version']
-                resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
+                resources_vars['tpu_node_name'] = r.accelerator_args.get(
+                    'tpu_name')
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
@@ -476,12 +479,12 @@ class GCP(clouds.Cloud):
         resources_vars['firewall_rule'] = firewall_rule
 
         # For TPU nodes. TPU VMs do not need TPU_NAME.
-        tpu_node_name = resources_vars.get('tpu_name')
+        tpu_node_name = resources_vars.get('tpu_node_name')
         if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
             if tpu_node_name is None:
                 tpu_node_name = cluster_name_on_cloud
 
-        resources_vars['tpu_name'] = tpu_node_name
+        resources_vars['tpu_node_name'] = tpu_node_name
 
         return resources_vars
 

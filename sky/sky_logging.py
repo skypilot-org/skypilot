@@ -103,7 +103,6 @@ def silent():
     still printed.
     """
     global print
-    global _logging_config
     previous_level = _root_logger.level
     previous_is_silent = is_silent()
     previous_print = print

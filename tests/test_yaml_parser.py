@@ -8,7 +8,7 @@ from sky.task import Task
 
 def _create_config_file(config: str, tmp_path: pathlib.Path) -> str:
     config_path = tmp_path / 'config.yaml'
-    config_path.open('w').write(config)
+    config_path.open('w', encoding='utf-8').write(config)
     return config_path
 
 
