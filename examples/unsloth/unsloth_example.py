@@ -1,5 +1,6 @@
 # Use the unsloth library to fine-tune a Mistral model
 
+import argparse
 from datasets import load_dataset
 import torch
 from transformers import TrainingArguments
@@ -42,7 +43,12 @@ model = FastLanguageModel.get_peft_model(
     max_seq_length = max_seq_length,
 )
 
-# [4] Initialize and train the model using the SFTTrainer
+# [4] Parse output directory of checkpoints
+parser = argparse.ArgumentParser()
+parser.add_argument("--output-dir", type=str, default="/outputs")
+args = parser.parse_args()
+
+# [5] Initialize and train the model using the SFTTrainer
 trainer = SFTTrainer(
     model = model,
     train_dataset = dataset,
@@ -57,9 +63,10 @@ trainer = SFTTrainer(
         fp16 = not torch.cuda.is_bf16_supported(),
         bf16 = torch.cuda.is_bf16_supported(),
         logging_steps = 1,
-        output_dir = "outputs",
+        output_dir = args.output_dir[1:],
         optim = "adamw_8bit",
         seed = 3407,
+        save_steps = 10,
     ),
 )
 trainer.train()

@@ -14,6 +14,10 @@ resources:
   accelerators: T4:1
   disk_size: 128
 
+file_mounts:
+  /outputs:
+    name: my-unsloth-checkpoints
+
 workdir: .
 
 setup: |
@@ -24,4 +28,4 @@ setup: |
   pip install "unsloth[cu118_torch220] @ git+https://github.com/unslothai/unsloth.git"
 
 run: |
-  python unsloth.py
+  python unsloth_example.py --output-dir /outputs
