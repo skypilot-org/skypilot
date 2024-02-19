@@ -133,13 +133,14 @@ class SkyServeController:
                 replica_id = request_data.get('replica_id')
                 if replica_id is None:
                     return {'message': 'Error: Replica ID is not specified.'}
-                logger.info(f'Terminating replica {replica_id}')
+                logger.info(f'Terminating replica {replica_id}...')
                 self._replica_manager.scale_down(replica_id)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error in terminate_replica: '
-                             f'{common_utils.format_exception(e)}')
-                return {'message': 'Error'}
+                error_message = (f'Error in terminate_replica: '
+                                 f'{common_utils.format_exception(e)}')
+                logger.error(error_message)
+                return {'message': error_message}
 
         @self._app.on_event('startup')
         def configure_logger():
