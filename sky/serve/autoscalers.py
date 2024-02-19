@@ -487,7 +487,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         num_on_demand_to_provision = self.base_ondemand_fallback_replicas
         if self.dynamic_ondemand_fallback:
             num_on_demand_to_provision += (num_spot_to_provision -
-                                           num_launched_spot)
+                                           num_ready_spot)
 
         if num_on_demand_to_provision > num_launched_on_demand:
             for _ in range(num_on_demand_to_provision - num_launched_on_demand):
