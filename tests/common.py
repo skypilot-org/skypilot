@@ -27,12 +27,12 @@ def enable_all_clouds_in_monkeypatch(
         lambda: enabled_clouds,
     )
     monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
-    config_file_backup = tempfile.NamedTemporaryFile(
-        prefix='tmp_backup_config_default', delete=False)
+    config_file = tempfile.NamedTemporaryFile(
+        prefix='tmp_config_default', delete=False)
     monkeypatch.setattr(
         'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
-        config_file_backup.name)
-    monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
+        config_file.name)
+    monkeypatch.setenv('OCI_CONFIG', config_file.name)
 
     az_mappings = pd.read_csv('tests/default_aws_az_mappings.csv')
 
