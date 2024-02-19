@@ -30,7 +30,6 @@ from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -668,8 +667,6 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
         shutil.copy(launch_log_file, new_replica_log_file)
         if replica_info.status == serve_state.ReplicaStatus.PROVISIONING:
             continue
-        # TODO(dtran): refactor into method. Also same logic in
-        #  replica_managers.py. Cannot do right now because of circular import
         logger.info(f'Syncing down logs for replica {target_replica_id}...')
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(
@@ -682,8 +679,28 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         replica_job_logs_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
                                             'replica_jobs')
-        job_log_file_name = controller_utils.download_and_stream_latest_job_log(
-            backend, handle, replica_job_logs_dir)
+
+        os.makedirs(replica_job_logs_dir)
+        job_log_file_name = None
+        try:
+            log_dirs = backend.sync_down_logs(handle,
+                                              job_ids=None,
+                                              local_dir=replica_job_logs_dir)
+        except exceptions.CommandError as e:
+            logger.info(f'Failed to download the logs: '
+                        f'{common_utils.format_exception(e)}')
+        else:
+            if not log_dirs:
+                logger.error(
+                    f'Failed to find the logs for replica {target_replica_id}.')
+            else:
+                log_dir = list(log_dirs.values())[0]
+                candidate_log_file_name = os.path.join(log_dir, 'run.log')
+                if not os.path.exists(candidate_log_file_name):
+                    logger.error(f'Failed to the the replica logs at '
+                                 f'{candidate_log_file_name}')
+                job_log_file_name = candidate_log_file_name
+
         if job_log_file_name is not None:
             logger.info(f'\n== End of logs (Replica: {target_replica_id}) ==')
             with open(new_replica_log_file, 'a',
