@@ -27,8 +27,8 @@ def enable_all_clouds_in_monkeypatch(
         lambda: enabled_clouds,
     )
     monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
-    config_file = tempfile.NamedTemporaryFile(
-        prefix='tmp_config_default', delete=False)
+    config_file = tempfile.NamedTemporaryFile(prefix='tmp_config_default',
+                                              delete=False)
     monkeypatch.setattr(
         'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
         config_file.name)
