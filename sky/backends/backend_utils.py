@@ -2557,7 +2557,7 @@ def check_public_cloud_enabled():
         return
 
     sky_check.check(quiet=True)
-    if enabled_clouds:
+    if not enabled_clouds:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '
