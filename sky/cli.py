@@ -1756,7 +1756,7 @@ def _get_services(service_names: Optional[List[str]],
                                if len(service_records) > 0 else 'No')
                 raise click.UsageError(
                     f'{service_num} service{plural} found. Please specify '
-                    'an existing service to show its endpoint. Usage: '
+                    'only one existing service to show its endpoint. Usage: '
                     'sky serve status --endpoint <service-name>')
             msg = serve_lib.get_endpoint(service_records[0])
         else:
