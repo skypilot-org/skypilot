@@ -30,6 +30,10 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+CONTROLLER_NON_EXISTENT_MESSAGE = (f'Service does not exist. To spin '
+                                   f'up a new service, use {backend_utils.BOLD}'
+                                   f'sky serve up{backend_utils.RESET_BOLD}')
+
 
 @usage_lib.entrypoint
 def up(
@@ -274,9 +278,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
         'Service controller is stopped. There is no service to update. '
         f'To spin up a new service, use {backend_utils.BOLD}'
         f'sky serve up{backend_utils.RESET_BOLD}',
-        non_existent_message='Service does not exist. '
-        'To spin up a new service, '
-        f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
+        non_existent_message=CONTROLLER_NON_EXISTENT_MESSAGE,
     )
 
     if handle is None or handle.head_ip is None:
@@ -470,9 +472,22 @@ def down(
 
 @usage_lib.entrypoint
 def terminate_replica(service_name: str, replica_id: int) -> None:
+    """Tear down a specific replica
+
+    Args:
+        service_name: Name of the service
+        replica_id: ID of replica to terminate
+
+    Raises:
+        sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
+        RuntimeError: if failed to terminate the replica.
+    """
     cluster_status, handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='All services should have terminated.')
+        stopped_message=
+        'No service is running now. Please spin up a service first.',
+        non_existent_message=CONTROLLER_NON_EXISTENT_MESSAGE,
+    )
     if handle is None or handle.head_ip is None:
         # The error message is already printed in
         # backend_utils.is_controller_up
@@ -489,8 +504,11 @@ def terminate_replica(service_name: str, replica_id: int) -> None:
                                      code,
                                      require_outputs=False,
                                      stream_logs=False)
-    subprocess_utils.handle_returncode(
-        returncode, code, f'Failed to terminate replica {replica_id}')
+    try:
+        subprocess_utils.handle_returncode(
+            returncode, code, f'Failed to terminate replica {replica_id}')
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
     logger.info(
         f'{colorama.Fore.GREEN}Termination of replica {replica_id} for '
         f'{service_name!r} has been scheduled.{colorama.Style.RESET_ALL}\n'
