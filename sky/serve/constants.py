@@ -54,13 +54,11 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 
 # Due to the CPU/memory usage of the controller process launched with sky job (
-# use ray job under the hood), we need to reserve some CPU/memory for each spot/
-# serve controller process.
-# Spot: A default controller with 8 vCPU can manage up to 32 spot jobs.
+# use ray job under the hood), we need to reserve some CPU/memory for each serve
+# controller process.
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
 CONTROLLER_MEMORY_USAGE_GB = 1.0
-CONTROLLER_PROCESS_CPU_DEMAND = 0.25
 
 # A period of time to initialize your service. Any readiness probe failures
 # during this period will be ignored.
