@@ -647,8 +647,6 @@ def _test_optimize_speed(resources: sky.Resources):
 def test_optimize_speed(enable_all_clouds, monkeypatch):
     _test_optimize_speed(sky.Resources(cpus=4))
     for cloud in clouds.CLOUD_REGISTRY.values():
-        if cloud.is_same_cloud(sky.Local()):
-            continue
         _test_optimize_speed(sky.Resources(cloud, cpus='4+'))
     _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
     _test_optimize_speed(
@@ -690,7 +688,7 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
 
     # Detailed hints.
     # ValueError: Invalid (region None, zone 'us-west-2-a') for any cloud among
-    # [AWS, Azure, GCP, IBM, Lambda, Local, OCI, SCP]. Details:
+    # [AWS, Azure, GCP, IBM, Lambda, OCI, SCP]. Details:
     # Cloud   Hint
     # -----   ----
     # AWS     Invalid zone 'us-west-2-a' Did you mean one of these: 'us-west-2a'?
@@ -698,7 +696,6 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
     # GCP     Invalid zone 'us-west-2-a' Did you mean one of these: 'us-west2-a'?
     # IBM     Invalid zone 'us-west-2-a'
     # Lambda  Lambda Cloud does not support zones.
-    # Local   Local cloud does not support zones.
     # OCI     Invalid zone 'us-west-2-a'
     # SCP     SCP Cloud does not support zones.
     with pytest.raises(ValueError) as e:

@@ -200,7 +200,6 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
-        self._try_validate_local()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_spot()
@@ -252,9 +251,6 @@ class Resources:
         memory = ''
         if self.memory is not None:
             memory = f', mem={self.memory}'
-
-        if isinstance(self.cloud, clouds.Local):
-            return f'{self.cloud}({self.accelerators})'
 
         use_spot = ''
         if self.use_spot:
@@ -503,12 +499,6 @@ class Resources:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
 
-            # Ignore check for the local cloud case.
-            # It is possible the accelerators dict can contain multiple
-            # types of accelerators for some on-prem clusters.
-            if not isinstance(self._cloud, clouds.Local):
-                assert len(accelerators) == 1, accelerators
-
             # Canonicalize the accelerator names.
             accelerators = {
                 accelerator_registry.canonicalize_accelerator_name(
@@ -749,25 +739,6 @@ class Resources:
                     f'Spot recovery strategy {self._spot_recovery} '
                     'is not supported. The strategy should be among '
                     f'{list(spot.SPOT_STRATEGIES.keys())}')
-
-    def _try_validate_local(self) -> None:
-        if isinstance(self._cloud, clouds.Local):
-            if self._use_spot:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Local/On-prem mode does not support spot '
-                                     'instances.')
-            local_instance = clouds.Local.get_default_instance_type()
-            if (self._instance_type is not None and
-                    self._instance_type != local_instance):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Local/On-prem mode does not support instance type:'
-                        f' {self._instance_type}.')
-            if self._image_id is not None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Local/On-prem mode does not support custom '
-                        'images.')
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:

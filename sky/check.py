@@ -21,15 +21,13 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
 
     def check_one_cloud(cloud_tuple: Tuple[str, clouds.Cloud]) -> None:
         cloud_repr, cloud = cloud_tuple
-        if not isinstance(cloud, clouds.Local):
-            echo(f'  Checking {cloud_repr}...', nl=False)
+        echo(f'  Checking {cloud_repr}...', nl=False)
         ok, reason = cloud.check_credentials()
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
-        if not isinstance(cloud, clouds.Local):
-            echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
-                 ' ' * 30)
+        echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
+             ' ' * 30)
         if ok:
             enabled_clouds.append(cloud_repr)
             if verbose and cloud is not cloudflare:
@@ -83,13 +81,6 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
                        f'{enabled_clouds_str}[/green]')
 
 
-def _no_public_cloud_enabled_in_cache() -> bool:
-    cached_enabled_clouds = global_user_state.get_cached_enabled_clouds()
-    return (len(cached_enabled_clouds) == 0 or
-            (len(cached_enabled_clouds) == 1 and
-             isinstance(cached_enabled_clouds[0], clouds.Local)))
-
-
 def get_enabled_clouds(
         raise_if_no_cloud_access: bool = False) -> List[clouds.Cloud]:
     """Returns a list of enabled clouds.
@@ -104,7 +95,7 @@ def get_enabled_clouds(
         exceptions.NoCloudAccessError: if no public cloud is enabled and
             raise_if_no_cloud_access is set to True.
     """
-    if _no_public_cloud_enabled_in_cache():
+    if not global_user_state.get_cached_enabled_clouds():
         try:
             check(quiet=True)
         except SystemExit:
@@ -112,12 +103,13 @@ def get_enabled_clouds(
             # Here we catch it and raise the exception later only if
             # raise_if_no_cloud_access is set to True.
             pass
-    if raise_if_no_cloud_access and _no_public_cloud_enabled_in_cache():
+    cached_enabled_clouds = global_user_state.get_cached_enabled_clouds()
+    if raise_if_no_cloud_access and not cached_enabled_clouds:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
-    return global_user_state.get_cached_enabled_clouds()
+    return cached_enabled_clouds
 
 
 def get_cloud_credential_file_mounts(
