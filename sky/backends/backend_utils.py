@@ -2552,13 +2552,11 @@ def check_public_cloud_enabled():
     Exceptions:
         exceptions.NoCloudAccessError: if no public cloud is enabled.
     """
-
-    enabled_clouds = global_user_state.get_enabled_clouds()
-    if enabled_clouds:
+    if global_user_state.get_enabled_clouds():
         return
 
     sky_check.check(quiet=True)
-    if enabled_clouds:
+    if not global_user_state.get_enabled_clouds():
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '
