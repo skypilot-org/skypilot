@@ -182,11 +182,17 @@ def get_ingress_external_ip_and_ports(
 
     ingress_service = ingress_services[0]
     if ingress_service.status.load_balancer.ingress is None:
+        # Try to use assigned external IP if it exists,
+        # otherwise return 'localhost'
+        if ingress_service.spec.external_i_ps is not None:
+            ip = ingress_service.spec.external_i_ps[0]
+        else:
+            ip = 'localhost'
         ports = ingress_service.spec.ports
         http_port = [port for port in ports if port.name == 'http'][0].node_port
         https_port = [port for port in ports if port.name == 'https'
                      ][0].node_port
-        return 'localhost', (int(http_port), int(https_port))
+        return ip, (int(http_port), int(https_port))
 
     external_ip = ingress_service.status.load_balancer.ingress[
         0].ip or ingress_service.status.load_balancer.ingress[0].hostname
