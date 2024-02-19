@@ -4662,6 +4662,8 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         \b
         # Forcefully tear down a service in failed status.
         sky serve down failed-service --purge
+        # Tear down a specific replica
+        sky serve down my-service --replica-id 1
     """
     if sum([len(service_names) > 0, all]) != 1:
         argument_str = f'SERVICE_NAMES={",".join(service_names)}' if len(
@@ -4673,7 +4675,8 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
     replica_id_is_defined = replica_id is not None
     if replica_id_is_defined and len(service_names) != 1:
         raise click.UsageError(
-            'Must specify only one service when replica ID is specified')
+            'Must specify one and only one service when replica ID is '
+            'specified.')
 
     _, handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -4682,13 +4685,12 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         # Hint messages already printed by the call above.
         sys.exit(1)
 
-    def handle_terminate_replica_flow():
+    if replica_id_is_defined:
         if not yes:
             click.confirm(f'Terminating replica ID {replica_id} in '
                           f'{service_names[0]!r}. Proceed?')
         serve_lib.terminate_replica(service_names[0], replica_id)
-
-    def handle_terminate_services_flow():
+    else:
         if not yes:
             quoted_service_names = [f'{name!r}' for name in service_names]
             service_identity_str = (f'service(s) '
@@ -4700,11 +4702,6 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
                           abort=True,
                           show_default=True)
         serve_lib.down(service_names=service_names, all=all, purge=purge)
-
-    if replica_id_is_defined:
-        handle_terminate_replica_flow()
-    else:
-        handle_terminate_services_flow()
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
