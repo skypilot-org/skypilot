@@ -645,9 +645,6 @@ class Task:
         self._service = service
         return self
 
-    def is_controller_process(self) -> bool:
-        """Returns whether this task is a spot/serve controller process."""
-        return self.spot_dag is not None or self.service_name is not None
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
@@ -986,6 +983,10 @@ class Task:
                     k) and not data_utils.is_cloud_store_url(v):
                 d[k] = v
         return d
+    
+    def is_controller_task(self) -> bool:
+        """Returns whether this task is a spot/serve controller process."""
+        return self.spot_dag is not None or self.service_name is not None
 
     def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=cloud URL).

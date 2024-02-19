@@ -2469,7 +2469,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     # value to support a larger number of services.
     resources_dict = {
         'CPU': (serve_lib.CONTROLLER_PROCESS_CPU_DEMAND
-                if task.is_controller_process() else DEFAULT_TASK_CPU_DEMAND)
+                if task.is_controller_task() else DEFAULT_TASK_CPU_DEMAND)
     }
     if task.best_resources is not None:
         resources = task.best_resources
