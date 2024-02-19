@@ -39,6 +39,8 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+SKY_SERVE_CONTROLLER_NAME: str = (
+    f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
@@ -680,7 +682,7 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
         replica_job_logs_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
                                             'replica_jobs')
 
-        os.makedirs(replica_job_logs_dir)
+        os.makedirs(replica_job_logs_dir, exist_ok=True)
         job_log_file_name = None
         try:
             log_dirs = backend.sync_down_logs(handle,
@@ -781,7 +783,7 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 def get_endpoint(service_record: Dict[str, Any]) -> str:
     # Don't use backend_utils.is_controller_up since it is too slow.
     handle = global_user_state.get_handle_from_cluster_name(
-        constants.SKY_SERVE_CONTROLLER_NAME)
+        SKY_SERVE_CONTROLLER_NAME)
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     if handle is None or handle.head_ip is None:
         return '-'

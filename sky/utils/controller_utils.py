@@ -19,7 +19,7 @@ from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.serve import constants as serve_constants
+from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.spot import spot_utils
 from sky.utils import common_utils
@@ -89,7 +89,7 @@ class Controllers(enum.Enum):
         default_hint_if_non_existent='No managed spot jobs are found.')
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         name='sky serve controller',
-        cluster_name=serve_constants.SKY_SERVE_CONTROLLER_NAME,
+        cluster_name=serve_utils.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status -a{colorama.Style.RESET_ALL}'),
@@ -102,7 +102,7 @@ class Controllers(enum.Enum):
             'cannot guarantee that all the services are terminated. Please '
             'wait until the sky serve controller is UP or fix it with '
             f'{colorama.Style.BRIGHT}sky start '
-            f'{serve_constants.SKY_SERVE_CONTROLLER_NAME}'
+            f'{serve_utils.SKY_SERVE_CONTROLLER_NAME}'
             f'{colorama.Style.RESET_ALL}.'),
         decline_down_for_dirty_controller_hint=(
             f'{colorama.Fore.RED}Tearing down the sky serve controller is not '
@@ -110,9 +110,9 @@ class Controllers(enum.Enum):
             '{service_names}. Please terminate the services first with '
             f'{colorama.Style.BRIGHT}sky serve down -a'
             f'{colorama.Style.RESET_ALL}.'),
-        check_cluster_name_hint=
-        (f'Cluster {serve_constants.SKY_SERVE_CONTROLLER_NAME} is reserved for '
-         'sky serve controller. '),
+        check_cluster_name_hint=(
+            f'Cluster {serve_utils.SKY_SERVE_CONTROLLER_NAME} is reserved for '
+            'sky serve controller. '),
         default_hint_if_non_existent='No service is found.')
 
     @classmethod

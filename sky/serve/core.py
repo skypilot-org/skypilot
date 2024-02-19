@@ -101,7 +101,7 @@ def up(
             prefix=f'controller-task-{service_name}-',
             mode='w',
     ) as controller_file:
-        controller_name = serve_constants.SKY_SERVE_CONTROLLER_NAME
+        controller_name = serve_utils.SKY_SERVE_CONTROLLER_NAME
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(service_file.name, task_config)
         remote_tmp_task_yaml_path = (
@@ -455,7 +455,7 @@ def down(
     except exceptions.FetchIPError as e:
         raise RuntimeError(
             'Failed to fetch controller IP. Please refresh controller status '
-            f'by `sky status -r {serve_constants.SKY_SERVE_CONTROLLER_NAME}` '
+            f'by `sky status -r {serve_utils.SKY_SERVE_CONTROLLER_NAME}` '
             'and try again.') from e
 
     try:
