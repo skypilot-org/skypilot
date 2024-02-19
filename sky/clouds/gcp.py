@@ -117,9 +117,10 @@ class GCPIdentityType(enum.Enum):
     """GCP identity type.
 
     The account type is determined by the current user identity, based on
-    `gcloud auth list`. We will check the existence of the value in the output
-    of `aws configure list` to determine the account type.
+    the identity email.
     """
+    # Example of a service account email:
+    #   skypilot-v1@xxxx.iam.gserviceaccount.com
     SERVICE_ACCOUNT = 'iam.gserviceaccount.com'
 
     SHARED_CREDENTIALS_FILE = ''
