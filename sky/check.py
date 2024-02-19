@@ -18,15 +18,13 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
 
     def check_one_cloud(cloud_tuple: Tuple[str, clouds.Cloud]) -> None:
         cloud_repr, cloud = cloud_tuple
-        if not isinstance(cloud, clouds.Local):
-            echo(f'  Checking {cloud_repr}...', nl=False)
+        echo(f'  Checking {cloud_repr}...', nl=False)
         ok, reason = cloud.check_credentials()
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
-        if not isinstance(cloud, clouds.Local):
-            echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
-                 ' ' * 30)
+        echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
+             ' ' * 30)
         if ok:
             enabled_clouds.append(cloud_repr)
             if verbose and cloud is not cloudflare:
@@ -45,6 +43,14 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
 
     for cloud_tuple in sorted(clouds_to_check):
         check_one_cloud(cloud_tuple)
+
+    # Cloudflare is not a real cloud in clouds.CLOUD_REGISTRY, and should not be
+    # inserted into the DB (otherwise `sky launch` and other code would error
+    # out when it's trying to look it up in the registry).
+    enabled_clouds = [
+        cloud for cloud in enabled_clouds if not cloud.startswith('Cloudflare')
+    ]
+    global_user_state.set_enabled_clouds(enabled_clouds)
 
     if len(enabled_clouds) == 0:
         click.echo(
@@ -70,14 +76,6 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
                 [''] + sorted(enabled_clouds))
             rich.print('\n[green]:tada: Enabled clouds :tada:'
                        f'{enabled_clouds_str}[/green]')
-
-    # Cloudflare is not a real cloud in clouds.CLOUD_REGISTRY, and should not be
-    # inserted into the DB (otherwise `sky launch` and other code would error
-    # out when it's trying to look it up in the registry).
-    enabled_clouds = [
-        cloud for cloud in enabled_clouds if not cloud.startswith('Cloudflare')
-    ]
-    global_user_state.set_enabled_clouds(enabled_clouds)
 
 
 def get_cloud_credential_file_mounts(

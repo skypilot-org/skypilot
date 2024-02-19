@@ -99,8 +99,11 @@ class CommandError(Exception):
         self.command = command
         self.error_msg = error_msg
         self.detailed_reason = detailed_reason
-        message = (f'Command {command} failed with return code {returncode}.'
-                   f'\n{error_msg}')
+        if not command:
+            message = error_msg
+        else:
+            message = (f'Command {command} failed with return code '
+                       f'{returncode}.\n{error_msg}')
         super().__init__(message)
 
 
