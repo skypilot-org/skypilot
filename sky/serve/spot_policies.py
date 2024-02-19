@@ -54,23 +54,17 @@ class SpotPlacer:
         """Select next location to place spot instance."""
         raise NotImplementedError
 
-    def move_location_to_active(self, location: Location) -> None:
+    def set_active(self, location: Location) -> None:
         assert location in self.location2type
         self.location2type[location] = LocationStatus.ACTIVE
 
-    def move_location_to_preempted(self, location: Location) -> None:
+    def set_preemption(self, location: Location) -> None:
         assert location in self.location2type
         self.location2type[location] = LocationStatus.PREEMPTED
 
-    def handle_active(self, location: Location) -> None:
-        self.move_location_to_active(location)
-
-    def handle_preemption(self, location: Location) -> None:
-        self.move_location_to_preempted(location)
-
     def clear_preemptive_locations(self) -> None:
         for location in self.location2type:
-            self.move_location_to_active(location)
+            self.set_active(location)
 
     def active_locations(self) -> List[Location]:
         return [
@@ -101,15 +95,11 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
                 self.preemptive_locations()) > 0:
             self.clear_preemptive_locations()
 
-        existing_locations = [
-            info.location
-            for info in existing_replicas
-            if info.is_spot and info.location is not None
-        ]
-        existing_locations_to_count = collections.defaultdict(int)
-        for location in existing_locations:
-            existing_locations_to_count[location] = existing_locations.count(
-                location)
+        existing_locations_to_count: Dict[Location,
+                                          int] = collections.defaultdict(int)
+        for replica in existing_replicas:
+            if replica.is_spot and replica.location is not None:
+                existing_locations_to_count[replica.location] += 1
 
         selected_locations = []
         for _ in range(num_replicas):

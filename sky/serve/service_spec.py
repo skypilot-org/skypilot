@@ -76,6 +76,12 @@ class SkyServiceSpec:
                     'Currently, SkyServe will cleanup failed replicas'
                     'and auto restart it to keep the service running.')
 
+        if (base_ondemand_fallback_replicas is not None and
+                base_ondemand_fallback_replicas < 0):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('base_ondemand_fallback_replicas must be '
+                                 'greater or equal to 0.')
+
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
         self._min_replicas: int = min_replicas

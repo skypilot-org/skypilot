@@ -5,6 +5,8 @@ service:
   readiness_probe: /health
   replica_policy:
     min_replicas: 2
+    max_replicas: 3
+    target_qps_per_replica: 1
     dynamic_ondemand_fallback: true
 
 resources:

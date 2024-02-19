@@ -323,9 +323,11 @@ class ReplicaStatusProperty:
             # Pending to launch
             return serve_state.ReplicaStatus.PENDING
         if self.sky_launch_status == ProcessStatus.RUNNING:
-            if self.sky_down_status is not None:
+            if self.sky_down_status == ProcessStatus.RUNNING:
                 # sky.down is running since a scale down interrupted sky.launch
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
+            if self.sky_down_status == ProcessStatus.FAILED:
+                return serve_state.ReplicaStatus.FAILED_CLEANUP
             # Still launching
             return serve_state.ReplicaStatus.PROVISIONING
         if self.sky_down_status is not None:

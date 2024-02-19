@@ -37,11 +37,12 @@ def _validate_service_task(task: 'sky.Task'):
     Args:
         task: sky.Task to validate
     """
-    spot_use_resources: List['sky.Resources'] = [
-        resource for resource in task.resources
-        if resource.use_spot_specified and resource.use_spot
+    spot_resources: List['sky.Resources'] = [
+        resource for resource in task.resources if resource.use_spot
     ]
-    if len(spot_use_resources) not in [0, len(task.resources)]:
+    # TODO(MaoZiming): Allow mixed on-demand and spot specification in resources
+    # On-demand fallback should go to the resources specified as on-demand.
+    if len(spot_resources) not in [0, len(task.resources)]:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 'Resources must either all use spot or none use spot. '
@@ -60,11 +61,6 @@ def _validate_service_task(task: 'sky.Task'):
                     'spot_recovery is disabled for SkyServe.'
                     'Please specify `dynamic_ondemand_fallback` instead.')
 
-    if len(task.resources) == 0:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'At least one resource specifying the replica ports'
-                'is required for a SkyServe service task.')
     first_resource_dict = list(task.resources)[0].to_yaml_config()
     for requested_resources in task.resources:
         requested_resources_dict = requested_resources.to_yaml_config()

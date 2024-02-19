@@ -175,6 +175,9 @@ class RequestRateAutoscaler(Autoscaler):
             downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
 
+        # We directly set the target_num_replicas here instead of
+        # calling `_set_target_num_replica_with_hysteresis` to have the replicas
+        # quickly scale after each update.
         self.target_num_replicas = self._cal_target_num_replicas_based_on_qps()
 
     def collect_request_information(
@@ -194,8 +197,8 @@ class RequestRateAutoscaler(Autoscaler):
                                    current_time - self.qps_window_size)
         self.request_timestamps = self.request_timestamps[index:]
 
-    def _set_desired_num_replicas(self) -> None:
-        """Set self.target_num_replicas based on request rate."""
+    def _set_target_num_replica_with_hysteresis(self) -> None:
+        """Set target_num_replicas based on request rate with hysteresis."""
         # Maintain self.target_num_replicas when autoscaling
         # is not enabled, i.e. self.target_qps_per_replica is None.
         # In this case, self.target_num_replicas will be min_replicas.
@@ -245,7 +248,8 @@ class RequestRateAutoscaler(Autoscaler):
         replica_infos_sorted = sorted(
             replica_infos,
             key=lambda info: status_order.index(info.status)
-            if info.status in status_order else len(status_order))
+            # Terminate undefined status.
+            if info.status in status_order else -1)
 
         return [info.replica_id for info in replica_infos_sorted][:num_limit]
 
@@ -261,17 +265,17 @@ class RequestRateAutoscaler(Autoscaler):
             self, replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
 
-        ready_new_replicas: List['replica_managers.ReplicaInfo'] = []
+        latest_ready_replicas: List['replica_managers.ReplicaInfo'] = []
         old_replicas: List['replica_managers.ReplicaInfo'] = []
         for info in replica_infos:
             if info.version == self.latest_version:
                 if info.is_ready:
-                    ready_new_replicas.append(info)
+                    latest_ready_replicas.append(info)
             else:
                 old_replicas.append(info)
 
         all_replica_ids_to_scale_down: List[int] = []
-        if len(ready_new_replicas) >= self.min_replicas:
+        if len(latest_ready_replicas) >= self.min_replicas:
             for info in old_replicas:
                 all_replica_ids_to_scale_down.append(info.replica_id)
 
@@ -290,15 +294,15 @@ class RequestRateAutoscaler(Autoscaler):
         override dict. Active migration could require returning both SCALE_UP
         and SCALE_DOWN.
         """
-        provisioning_and_launched_new_replicas: List[
+        latest_provisioning_and_launched_replicas: List[
             'replica_managers.ReplicaInfo'] = []
 
         for info in replica_infos:
             if info.version == self.latest_version:
                 if info.is_launched:
-                    provisioning_and_launched_new_replicas.append(info)
+                    latest_provisioning_and_launched_replicas.append(info)
 
-        self._set_desired_num_replicas()
+        self._set_target_num_replica_with_hysteresis()
 
         scaling_options: List[AutoscalerDecision] = []
         all_replica_ids_to_scale_down: List[int] = []
@@ -309,30 +313,30 @@ class RequestRateAutoscaler(Autoscaler):
         all_replica_ids_to_scale_down.extend(
             self.select_outdated_replicas_to_scale_down(replica_infos))
 
-        # Case 2. when provisioning_and_launched_new_replicas is less
+        # Case 2. when latest_provisioning_and_launched_replicas is less
         # than num_to_provision, we always scale up new replicas.
-        if len(provisioning_and_launched_new_replicas
+        if len(latest_provisioning_and_launched_replicas
               ) < self.target_num_replicas:
             num_replicas_to_scale_up = (
                 self.target_num_replicas -
-                len(provisioning_and_launched_new_replicas))
+                len(latest_provisioning_and_launched_replicas))
 
             for _ in range(num_replicas_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=None))
 
-        # Case 3: when provisioning_and_launched_new_replicas is more
+        # Case 3: when latest_provisioning_and_launched_replicas is more
         # than self.target_num_replicas, we scale down new replicas.
-        if len(provisioning_and_launched_new_replicas
+        if len(latest_provisioning_and_launched_replicas
               ) > self.target_num_replicas:
             num_replicas_to_scale_down = (
-                len(provisioning_and_launched_new_replicas) -
+                len(latest_provisioning_and_launched_replicas) -
                 self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
                 RequestRateAutoscaler.select_replicas_to_scale_down(
                     num_limit=num_replicas_to_scale_down,
-                    replica_infos=provisioning_and_launched_new_replicas))
+                    replica_infos=latest_provisioning_and_launched_replicas))
 
         for replica_id in all_replica_ids_to_scale_down:
             scaling_options.append(
@@ -373,19 +377,18 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                                           if spec.dynamic_ondemand_fallback
                                           is not None else False)
 
-    def handle_active_history(self,
-                              history: List[spot_policies.Location]) -> None:
+    def set_active_history(self, history: List[spot_policies.Location]) -> None:
         if self.spot_placer is None:
             return
         for location in history:
-            self.spot_placer.handle_active(location)
+            self.spot_placer.set_active(location)
 
     def handle_preemption_history(
             self, history: List[spot_policies.Location]) -> None:
         if self.spot_placer is None:
             return
         for location in history:
-            self.spot_placer.handle_preemption(location)
+            self.spot_placer.set_preemption(location)
 
     def _get_spot_resources_override_dict(
             self,
@@ -403,16 +406,16 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
-        provisioning_and_launched_new_replicas = list(
+        latest_provisioning_and_launched_replicas = list(
             filter(
                 lambda info: info.is_launched and info.version == self.
                 latest_version, replica_infos))
 
-        self._set_desired_num_replicas()
+        self._set_target_num_replica_with_hysteresis()
         num_launched_spot, num_ready_spot = 0, 0
         num_launched_on_demand, num_ready_on_demand = 0, 0
 
-        for info in provisioning_and_launched_new_replicas:
+        for info in latest_provisioning_and_launched_replicas:
             if info.is_spot:
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_spot += 1
@@ -440,7 +443,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             num_spot_to_scale_up = num_spot_to_provision - num_launched_spot
             if self.spot_placer is not None:
                 locations = self.spot_placer.select(
-                    provisioning_and_launched_new_replicas,
+                    latest_provisioning_and_launched_replicas,
                     num_spot_to_scale_up)
                 assert len(locations) == num_spot_to_scale_up
                 for location in locations:
@@ -465,7 +468,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                 RequestRateAutoscaler.select_replicas_to_scale_down(
                     num_spot_to_scale_down,
                     filter(lambda info: info.is_spot,
-                           provisioning_and_launched_new_replicas)))
+                           latest_provisioning_and_launched_replicas)))
 
         # Once there is min_replicas number of
         # ready new replicas, we will direct all traffic to them,
@@ -490,7 +493,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                 RequestRateAutoscaler.select_replicas_to_scale_down(
                     num_launched_on_demand - num_on_demand_to_provision,
                     filter(lambda info: not info.is_spot,
-                           provisioning_and_launched_new_replicas)))
+                           latest_provisioning_and_launched_replicas)))
 
         for replica_id in all_replica_ids_to_scale_down:
             scaling_options.append(

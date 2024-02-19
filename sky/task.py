@@ -634,7 +634,7 @@ class Task:
 
         use_spot = False
         for resource in list(self.resources):
-            if resource.use_spot_specified and resource.use_spot:
+            if resource.use_spot:
                 use_spot = True
                 break
 
@@ -686,7 +686,8 @@ class Task:
                         for region in regions:
                             if region is None:
                                 continue
-                            # Azure does not support zones.
+                            # Some clouds, such as Azure,
+                            # does not support zones.
                             if region.zones is None:
                                 feasible_locations.append(
                                     spot_policies.Location(
