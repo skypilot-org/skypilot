@@ -47,8 +47,8 @@ class SkyServeController:
             replica_managers.SkyPilotReplicaManager(service_name=service_name,
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
-        self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.Autoscaler.from_spec(service_spec))
+        self._autoscaler: autoscalers.RequestRateAutoscaler = (
+            autoscalers.RequestRateAutoscaler.from_spec(service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -150,13 +150,12 @@ class SkyServeController:
                 # autoscaler, we only check with service.use_spot_placer
                 if not (isinstance(
                         self._autoscaler,
-                        type(autoscalers.Autoscaler.from_spec(service)))):
+                        type(
+                            autoscalers.RequestRateAutoscaler.from_spec(
+                                service)))):
                     old_autoscaler = self._autoscaler
-                    self._autoscaler = autoscalers.Autoscaler.from_spec(service)
-                    assert isinstance(old_autoscaler,
-                                      autoscalers.RequestRateAutoscaler)
-                    assert isinstance(self._autoscaler,
-                                      autoscalers.RequestRateAutoscaler)
+                    self._autoscaler = (
+                        autoscalers.RequestRateAutoscaler.from_spec(service))
                     self._autoscaler.request_timestamps = (
                         old_autoscaler.request_timestamps)
                     self._autoscaler.latest_version = version

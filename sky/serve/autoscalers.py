@@ -99,11 +99,8 @@ class Autoscaler:
 
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
-        # TODO(MaoZiming): use NAME to get the class.
-        if spec.use_fallback:
-            return FallbackRequestRateAutoscaler(spec)
-        else:
-            return RequestRateAutoscaler(spec)
+        """Instantiate autoscaler based on service spec."""
+        raise NotImplementedError
 
 
 class RequestRateAutoscaler(Autoscaler):
@@ -346,6 +343,16 @@ class RequestRateAutoscaler(Autoscaler):
         if not scaling_options:
             logger.info('No scaling needed.')
         return scaling_options
+
+    @classmethod
+    def from_spec(
+            cls,
+            spec: 'service_spec.SkyServiceSpec') -> 'RequestRateAutoscaler':
+        # TODO(MaoZiming): use NAME to get the class.
+        if spec.use_fallback:
+            return FallbackRequestRateAutoscaler(spec)
+        else:
+            return RequestRateAutoscaler(spec)
 
 
 class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
