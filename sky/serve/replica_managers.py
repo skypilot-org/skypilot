@@ -425,8 +425,10 @@ class ReplicaInfo:
         return handle
 
     @property
-    def is_launched(self) -> bool:
-        return self.status in serve_state.ReplicaStatus.launched_statuses()
+    def is_provisioning_or_launched(self) -> bool:
+        return (
+            self.status
+            in serve_state.ReplicaStatus.provisioning_or_launched_statuses())
 
     @property
     def is_ready(self) -> bool:

@@ -299,7 +299,7 @@ class RequestRateAutoscaler(Autoscaler):
 
         for info in replica_infos:
             if info.version == self.latest_version:
-                if info.is_launched:
+                if info.is_provisioning_or_launched:
                     latest_provisioning_and_launched_replicas.append(info)
 
         self._set_target_num_replica_with_hysteresis()
@@ -408,8 +408,8 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
 
         latest_provisioning_and_launched_replicas = list(
             filter(
-                lambda info: info.is_launched and info.version == self.
-                latest_version, replica_infos))
+                lambda info: info.is_provisioning_or_launched and info.version
+                == self.latest_version, replica_infos))
 
         self._set_target_num_replica_with_hysteresis()
         num_launched_spot, num_ready_spot = 0, 0
