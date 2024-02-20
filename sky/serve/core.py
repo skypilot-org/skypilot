@@ -30,10 +30,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-CONTROLLER_NON_EXISTENT_MESSAGE = (f'Service does not exist. To spin '
-                                   f'up a new service, use {backend_utils.BOLD}'
-                                   f'sky serve up{backend_utils.RESET_BOLD}')
-
 
 @usage_lib.entrypoint
 def up(
@@ -278,7 +274,8 @@ def update(task: 'sky.Task', service_name: str) -> None:
         'Service controller is stopped. There is no service to update. '
         f'To spin up a new service, use {backend_utils.BOLD}'
         f'sky serve up{backend_utils.RESET_BOLD}',
-        non_existent_message=CONTROLLER_NON_EXISTENT_MESSAGE,
+        non_existent_message='To spin up a new service, '
+        f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
 
     if handle is None or handle.head_ip is None:
@@ -486,7 +483,8 @@ def terminate_replica(service_name: str, replica_id: int) -> None:
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'No service is running now. Please spin up a service first.',
-        non_existent_message=CONTROLLER_NON_EXISTENT_MESSAGE,
+        non_existent_message='To spin up a new service, '
+        f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
     if handle is None or handle.head_ip is None:
         # The error message is already printed in
