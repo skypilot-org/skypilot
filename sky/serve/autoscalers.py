@@ -244,7 +244,7 @@ class RequestRateAutoscaler(Autoscaler):
         replica_infos_sorted = sorted(
             replica_infos,
             key=lambda info: status_order.index(info.status)
-            # Terminate undefined status.
+            # Use -1 for undefined status to terminate them first.
             if info.status in status_order else -1)
 
         return [info.replica_id for info in replica_infos_sorted][:num_limit]
