@@ -124,8 +124,8 @@ Task artifacts, such as **logs and checkpoints**, can either be
 transparently uploaded to a cloud object store, or directly copied from the
 remote cluster.
 
-Writing artifacts to cloud buckets
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Writing artifacts to cloud object storage
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In addition to handling datasets and other task inputs,
 :ref:`SkyPilot bucket mounting <sky-storage>` can also be used to directly upload artifacts
