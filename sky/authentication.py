@@ -483,8 +483,7 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 def setup_paperspace_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     """Sets up SSH authentication for Paperspace.
     - Generates a new SSH key pair if one does not exist.
-    - Checks for startup script for adding pubkey matching pubkey
-      otherwise creates a new one.
+    - Sets startup script to add SSH pubkey
     """
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:

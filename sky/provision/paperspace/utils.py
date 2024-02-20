@@ -143,16 +143,6 @@ class PaperspaceCloudClient:
                     "isRunOnce" : True,
                 })
             ).json()
-        
-
-    def _delete_startup_scripts(self) -> None:
-        startup_scripts = self.list_startup_scripts()
-        for script in startup_scripts:
-            _try_request_with_backoff(
-                "delete",
-                f"{API_ENDPOINT}/startup-scripts/{script['id']}",
-                headers=self.headers,
-            ).json()
     
     def get_network(self, network_name: str) -> Dict[str, Any]:
         return self.list_endpoint(
