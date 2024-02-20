@@ -220,7 +220,7 @@ def download_and_stream_latest_job_log(
 
             # Print the logs to the console.
             try:
-                with open(log_file) as f:
+                with open(log_file, 'r', encoding='utf-8') as f:
                     print(f.read())
             except FileNotFoundError:
                 logger.error('Failed to find the logs for the user '

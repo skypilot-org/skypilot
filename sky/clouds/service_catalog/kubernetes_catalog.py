@@ -34,15 +34,15 @@ def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
 
 
 def list_accelerators(
-    gpus_only: bool,
-    name_filter: Optional[str],
-    region_filter: Optional[str],
-    quantity_filter: Optional[int],
-    case_sensitive: bool = True,
-    all_regions: bool = False,
-) -> Dict[str, List[common.InstanceTypeInfo]]:
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        quantity_filter: Optional[int],
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
+    del all_regions, require_price  # Unused.
     k8s_cloud = Kubernetes()
-    del all_regions  # unused
     if not any(
             map(k8s_cloud.is_same_cloud, global_user_state.get_enabled_clouds())
     ) or not kubernetes_utils.check_credentials()[0]:

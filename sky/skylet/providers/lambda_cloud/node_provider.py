@@ -86,7 +86,7 @@ class LambdaNodeProvider(NodeProvider):
                 # not possible for ~/.ssh/sky-key.pub to already be regenerated
                 # by the user.
                 self.ssh_key_name = _get_ssh_key_name('')
-                with open(ssh_key_name_path, 'w') as f:
+                with open(ssh_key_name_path, 'w', encoding='utf-8') as f:
                     f.write(self.ssh_key_name)
         else:
             # On local

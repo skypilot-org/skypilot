@@ -1004,7 +1004,7 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
     if not os.path.exists(template_path):
         raise FileNotFoundError(
             'Template "kubernetes-ssh-jump.j2" does not exist.')
-    with open(template_path) as fin:
+    with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     j2_template = jinja2.Template(template)
     cont = j2_template.render(name=ssh_jump_name,
@@ -1038,25 +1038,6 @@ def check_port_forward_mode_dependencies() -> None:
                     f'  $ sudo apt install {install_cmd}\n'
                     f'On MacOS, install it with: \n'
                     f'  $ brew install {install_cmd}') from None
-
-
-def check_secret_exists(secret_name: str, namespace: str) -> bool:
-    """Checks if a secret exists in a namespace
-
-    Args:
-        secret_name: Name of secret to check
-        namespace: Namespace to check
-    """
-
-    try:
-        kubernetes.core_api().read_namespaced_secret(
-            secret_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.api_exception() as e:
-        if e.status == 404:
-            return False
-        raise
-    else:
-        return True
 
 
 def get_endpoint_debug_message() -> str:
@@ -1145,7 +1126,7 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
             else:
                 destination[key] = value
 
-    with open(config_yaml_path, 'r') as f:
+    with open(config_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
     kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
@@ -1158,6 +1139,17 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
 
     # Write the updated YAML back to the file
     common_utils.dump_yaml(config_yaml_path, yaml_obj)
+
+
+def check_nvidia_runtime_class() -> bool:
+    """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
+    # Fetch the list of available RuntimeClasses
+    runtime_classes = kubernetes.node_api().list_runtime_class()
+
+    # Check if 'nvidia' RuntimeClass exists
+    nvidia_exists = any(
+        rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
+    return nvidia_exists
 
 
 def check_secret_exists(secret_name: str, namespace: str) -> bool:

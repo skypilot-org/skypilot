@@ -46,6 +46,11 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class InvalidCloudConfigs(Exception):
+    """Raised when invalid configurations are provided for a given cloud."""
+    pass
+
+
 class ProvisionPrechecksError(Exception):
     """Raised when a spot job fails prechecks before provision.
     Developer note: For now this should only be used by managed
@@ -94,8 +99,11 @@ class CommandError(Exception):
         self.command = command
         self.error_msg = error_msg
         self.detailed_reason = detailed_reason
-        message = (f'Command {command} failed with return code {returncode}.'
-                   f'\n{error_msg}')
+        if not command:
+            message = error_msg
+        else:
+            message = (f'Command {command} failed with return code '
+                       f'{returncode}.\n{error_msg}')
         super().__init__(message)
 
 

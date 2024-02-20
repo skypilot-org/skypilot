@@ -78,6 +78,7 @@ _SIGNAL_TO_ERROR = {
     UserSignal.TERMINATE: exceptions.ServeUserTerminatedError,
 }
 
+# pylint: disable=invalid-name
 KeyType = TypeVar('KeyType')
 ValueType = TypeVar('ValueType')
 
@@ -416,7 +417,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
             # Filelock is needed to prevent race condition between signal
             # check/removal and signal writing.
             with filelock.FileLock(str(signal_file) + '.lock'):
-                with signal_file.open(mode='w') as f:
+                with signal_file.open(mode='w', encoding='utf-8') as f:
                     f.write(UserSignal.TERMINATE.value)
                     f.flush()
         terminated_service_names.append(f'{service_name!r}')
@@ -431,7 +432,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     return '\n'.join(messages)
 
 
-def wait_service_initialization(service_name: str, job_id: int) -> str:
+def wait_service_registration(service_name: str, job_id: int) -> str:
     """Util function to call at the end of `sky.serve.up()`.
 
     This function will:
@@ -464,10 +465,19 @@ def wait_service_initialization(service_name: str, job_id: int) -> str:
                 raise RuntimeError('Max number of services reached. '
                                    'To spin up more services, please '
                                    'tear down some existing services.')
-        if time.time() - start_time > constants.INITIALIZATION_TIMEOUT_SECONDS:
+        elapsed = time.time() - start_time
+        if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
+            # Print the controller log to help user debug.
+            controller_log_path = (
+                generate_remote_controller_log_file_name(service_name))
+            with open(os.path.expanduser(controller_log_path),
+                      'r',
+                      encoding='utf-8') as f:
+                log_content = f.read()
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Initialization of service {service_name!r} timeout.')
+                raise ValueError(f'Failed to register service {service_name!r} '
+                                 'on the SkyServe controller. '
+                                 f'Reason:\n{log_content}')
         time.sleep(1)
 
 
@@ -525,7 +535,8 @@ def _follow_replica_logs(
                     # starting. For our launching logs, it's always:
                     # Launching on <cloud> <region> (<zone>)
                     if log_file is not None:
-                        with open(log_file, 'r', newline='') as f:
+                        with open(log_file, 'r', newline='',
+                                  encoding='utf-8') as f:
                             # We still exit if more than 10 seconds without new
                             # content to avoid any internal bug that causes
                             # the launch failed and cluster status remains INIT.
@@ -558,7 +569,7 @@ def stream_replica_logs(service_name: str, replica_id: int,
 
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
-        with open(log_file_name, 'r') as f:
+        with open(log_file_name, 'r', encoding='utf-8') as f:
             print(f.read(), flush=True)
         return ''
 
@@ -581,7 +592,7 @@ def stream_replica_logs(service_name: str, replica_id: int,
 
     finish_stream = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
-    with open(launch_log_file_name, 'r', newline='') as f:
+    with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
         for line in _follow_replica_logs(f,
                                          replica_cluster_name,
                                          finish_stream=finish_stream,
@@ -643,7 +654,8 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
             return True
         return record['status'] in serve_state.ServiceStatus.failed_statuses()
 
-    with open(os.path.expanduser(log_file), 'r', newline='') as f:
+    with open(os.path.expanduser(log_file), 'r', newline='',
+              encoding='utf-8') as f:
         for line in _follow_logs(f,
                                  finish_stream=_service_is_terminal,
                                  exit_if_stream_end=not follow):
@@ -833,9 +845,9 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def wait_service_initialization(cls, service_name: str, job_id: int) -> str:
+    def wait_service_registration(cls, service_name: str, job_id: int) -> str:
         code = [
-            'msg = serve_utils.wait_service_initialization('
+            'msg = serve_utils.wait_service_registration('
             f'{service_name!r}, {job_id})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
