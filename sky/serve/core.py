@@ -63,18 +63,17 @@ def _validate_service_task(task: 'sky.Task'):
 
     first_resource_dict = list(task.resources)[0].to_yaml_config()
     for requested_resources in task.resources:
-        requested_resources_dict = requested_resources.to_yaml_config()
-        for key in ['region', 'zone', 'cloud']:
-            if key in first_resource_dict:
-                first_resource_dict.pop(key)
-            if key in requested_resources_dict:
-                requested_resources_dict.pop(key)
         if requested_resources.ports is None or len(
                 requested_resources.ports) != 1:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Must only specify one port in resources. Each replica '
                     'will use the port specified as application ingress port.')
+        if task.service.use_fallback and not requested_resources.use_spot:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Specify use_spot in resources to use '
+                                 '`dynamic_ondemand_fallback` or '
+                                 'base_ondemand_fallback_replicas.')
         service_port_str = requested_resources.ports[0]
         if not service_port_str.isdigit():
             # For the case when the user specified a port range like 10000-10010

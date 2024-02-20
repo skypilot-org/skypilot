@@ -56,28 +56,6 @@ class SkyServeController:
         logger.info('Starting autoscaler.')
         while True:
             try:
-                # Updating the active/preemption locations in autoscaler with
-                # the latest information from the replica manager, so that the
-                # autoscaling decision made later will take the information into
-                # consideration.
-                if (isinstance(self._autoscaler,
-                               autoscalers.FallbackRequestRateAutoscaler) and
-                        isinstance(self._replica_manager,
-                                   replica_managers.SkyPilotReplicaManager)):
-                    if self._replica_manager.active_history:
-                        logger.info('Handle active history: '
-                                    f'{self._replica_manager.active_history}')
-                        self._autoscaler.set_active_history(
-                            self._replica_manager.active_history)
-                        self._replica_manager.active_history.clear()
-                    if self._replica_manager.preemption_history:
-                        logger.info(
-                            'Handle preemption history: '
-                            f'{self._replica_manager.preemption_history}')
-                        self._autoscaler.handle_preemption_history(
-                            self._replica_manager.preemption_history)
-                        self._replica_manager.preemption_history.clear()
-
                 replica_info = serve_state.get_replica_infos(self._service_name)
                 replica_info_dicts = [
                     info.to_info_dict(

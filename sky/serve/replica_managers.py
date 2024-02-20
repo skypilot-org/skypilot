@@ -94,12 +94,11 @@ def launch_cluster(task_yaml_path: str,
         retry_cnt += 1
         try:
             usage_lib.messages.usage.set_internal()
-            # remove retry until up to avoid infinite retry on
-            # zone without capacity.
             sky.launch(task,
                        cluster_name,
                        detach_setup=True,
                        detach_run=True,
+                       retry_until_up=True,
                        _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,

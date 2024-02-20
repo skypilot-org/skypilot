@@ -397,23 +397,25 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                 == self.latest_version, replica_infos))
 
         self._set_target_num_replica_with_hysteresis()
-        num_launched_spot, num_ready_spot = 0, 0
-        num_launched_on_demand, num_ready_on_demand = 0, 0
+        num_provisioning_and_launched_spot, num_ready_spot = 0, 0
+        num_provisioning_and_launched_on_demand, num_ready_on_demand = 0, 0
 
         for info in latest_provisioning_and_launched_replicas:
             if info.is_spot:
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_spot += 1
-                num_launched_spot += 1
+                num_provisioning_and_launched_spot += 1
             else:
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_on_demand += 1
-                num_launched_on_demand += 1
+                num_provisioning_and_launched_on_demand += 1
 
         logger.info(
-            f'Number of alive spot instances: {num_launched_spot}, '
+            'Number of alive spot instances: '
+            f'{num_provisioning_and_launched_spot}, '
             f'Number of ready spot instances: {num_ready_spot}, '
-            f'Number of alive on-demand instances: {num_launched_on_demand}, '
+            'Number of alive on-demand instances: '
+            f' {num_provisioning_and_launched_on_demand}, '
             f'Number of ready on-demand instances: {num_ready_on_demand}')
 
         scaling_options: List[AutoscalerDecision] = []
@@ -422,18 +424,20 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         # Decide how many spot instances to launch.
         num_spot_to_provision = (self.target_num_replicas -
                                  self.base_ondemand_fallback_replicas)
-        if num_launched_spot < num_spot_to_provision:
+        if num_provisioning_and_launched_spot < num_spot_to_provision:
             # Not enough spot instances, scale up.
-            num_spot_to_scale_up = num_spot_to_provision - num_launched_spot
+            num_spot_to_scale_up = (num_spot_to_provision -
+                                    num_provisioning_and_launched_spot)
             for _ in range(num_spot_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(
                         AutoscalerDecisionOperator.SCALE_UP,
                         target=self._get_spot_resources_override_dict()))
-        elif num_launched_spot > num_spot_to_provision:
+        elif num_provisioning_and_launched_spot > num_spot_to_provision:
             # Too many spot instances, scale down.
             # Get the replica to scale down with select_replicas_to_scale_down
-            num_spot_to_scale_down = num_launched_spot - num_spot_to_provision
+            num_spot_to_scale_down = (num_provisioning_and_launched_spot -
+                                      num_spot_to_provision)
             all_replica_ids_to_scale_down.extend(
                 RequestRateAutoscaler.select_replicas_to_scale_down(
                     num_spot_to_scale_down,
@@ -452,16 +456,19 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             num_on_demand_to_provision += (num_spot_to_provision -
                                            num_ready_spot)
 
-        if num_on_demand_to_provision > num_launched_on_demand:
-            for _ in range(num_on_demand_to_provision - num_launched_on_demand):
+        if num_on_demand_to_provision > num_provisioning_and_launched_on_demand:
+            for _ in range(num_on_demand_to_provision -
+                           num_provisioning_and_launched_on_demand):
                 scaling_options.append(
                     AutoscalerDecision(
                         AutoscalerDecisionOperator.SCALE_UP,
                         target=self._get_on_demand_resources_override_dict()))
-        elif num_launched_on_demand > num_on_demand_to_provision:
+        elif (num_provisioning_and_launched_on_demand >
+              num_on_demand_to_provision):
             all_replica_ids_to_scale_down.extend(
                 RequestRateAutoscaler.select_replicas_to_scale_down(
-                    num_launched_on_demand - num_on_demand_to_provision,
+                    num_provisioning_and_launched_on_demand -
+                    num_on_demand_to_provision,
                     filter(lambda info: not info.is_spot,
                            latest_provisioning_and_launched_replicas)))
 
