@@ -57,22 +57,21 @@ def _validate_service_task(task: 'sky.Task'):
     for resource in list(task.resources):
         if resource.spot_recovery is not None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'spot_recovery is disabled for SkyServe.'
-                    'Please specify `dynamic_ondemand_fallback` instead.')
+                raise ValueError('spot_recovery is disabled for SkyServe. '
+                                 'SkyServe will replenish preempted spot.')
 
     first_resource_dict = list(task.resources)[0].to_yaml_config()
     for requested_resources in task.resources:
+        if task.service.use_fallback and not requested_resources.use_spot:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Specify use_spot in resources for '
+                                 'on-demand fallback.')
         if requested_resources.ports is None or len(
                 requested_resources.ports) != 1:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Must only specify one port in resources. Each replica '
                     'will use the port specified as application ingress port.')
-        if task.service.use_fallback and not requested_resources.use_spot:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Specify use_spot in resources for '
-                                 'on-demand fallback.')
         service_port_str = requested_resources.ports[0]
         if not service_port_str.isdigit():
             # For the case when the user specified a port range like 10000-10010
