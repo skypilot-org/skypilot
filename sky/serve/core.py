@@ -71,9 +71,8 @@ def _validate_service_task(task: 'sky.Task'):
                     'will use the port specified as application ingress port.')
         if task.service.use_fallback and not requested_resources.use_spot:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Specify use_spot in resources to use '
-                                 '`dynamic_ondemand_fallback` or '
-                                 'base_ondemand_fallback_replicas.')
+                raise ValueError('Specify use_spot in resources for '
+                                 'on-demand fallback.')
         service_port_str = requested_resources.ports[0]
         if not service_port_str.isdigit():
             # For the case when the user specified a port range like 10000-10010
