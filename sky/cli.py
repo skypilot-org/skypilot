@@ -1979,7 +1979,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
                 if endpoint is not None:
                     # If cluster had no ports to be exposed
-                    if str(endpoint) not in handle.launched_resources.ports:
+                    ports_set = resources_utils.port_ranges_to_set(
+                        handle.launched_resources.ports)
+                    if endpoint not in ports_set:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(f'Port {endpoint} is not exposed '
                                              'on cluster '
