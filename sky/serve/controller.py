@@ -7,10 +7,13 @@ import logging
 import threading
 import time
 import traceback
+from typing import Dict
 
+import colorama
 import fastapi
 import uvicorn
 
+from sky import global_user_state
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
@@ -89,6 +92,37 @@ class SkyServeController:
                     logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(self._autoscaler.get_decision_interval())
 
+    def _purge_replica(self, replica_id: int) -> Dict[str, str]:
+        logger.info(f'Purging replica {replica_id}...')
+        replica_info = serve_state.get_replica_info_from_id(
+            self._service_name, replica_id)
+        assert replica_info is not None
+        replica_cluster_is_remaining = False
+        if replica_info.status in serve_state.ReplicaStatus.failed_statuses():
+            if global_user_state.get_cluster_from_name(
+                    replica_info.cluster_name) is not None:
+                replica_cluster_is_remaining = True
+            serve_state.remove_replica(self._service_name, replica_id)
+            if replica_cluster_is_remaining:
+                return {
+                    'message':
+                        f'{colorama.Fore.YELLOW}Purged replica {replica_id} '
+                        f'with failed status ({replica_info.status}). This may'
+                        f' indicate a resource leak. Please check the following'
+                        f' SkyPilot cluster on the controller: '
+                        f'{replica_info.cluster_name}{colorama.Style.RESET_ALL}'
+                }
+            else:
+                return {
+                    'message': f'Successfully purged replica '
+                               f'{replica_id}'
+                }
+        else:
+            return {
+                'message': f'No purging for replica {replica_id} since '
+                           f'the replica does not have a failed status.'
+            }
+
     def run(self) -> None:
 
         @self._app.post('/controller/load_balancer_sync')
@@ -130,12 +164,16 @@ class SkyServeController:
         async def terminate_replica(request: fastapi.Request):
             request_data = await request.json()
             try:
-                replica_id = request_data.get('replica_id')
-                if replica_id is None:
-                    return {'message': 'Error: Replica ID is not specified.'}
-                logger.info(f'Terminating replica {replica_id}...')
-                self._replica_manager.scale_down(replica_id)
-                return {'message': 'Success'}
+                replica_id = request_data['replica_id']
+                purge = request_data['purge']
+                if purge:
+                    return self._purge_replica(replica_id)
+                else:
+                    logger.info(f'Terminating replica {replica_id}...')
+                    self._replica_manager.scale_down(replica_id)
+                    return {
+                        'message': f'Success terminating replica {replica_id}.'
+                    }
             except Exception as e:  # pylint: disable=broad-except
                 error_message = (f'Error in terminate_replica: '
                                  f'{common_utils.format_exception(e)}')

@@ -468,12 +468,14 @@ def down(
 
 
 @usage_lib.entrypoint
-def terminate_replica(service_name: str, replica_id: int) -> None:
+def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
     """Tear down a specific replica
 
     Args:
-        service_name: Name of the service
-        replica_id: ID of replica to terminate
+        service_name: Name of the service.
+        replica_id: ID of replica to terminate.
+        purge: Whether to terminate replicas in a failed status. These replicas
+          may lead to resource leaks.
 
     Raises:
         sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
@@ -497,7 +499,8 @@ def terminate_replica(service_name: str, replica_id: int) -> None:
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_utils.ServeCodeGen.terminate_replica(service_name, replica_id)
+    code = serve_utils.ServeCodeGen.terminate_replica(service_name, replica_id,
+                                                      purge)
     returncode = backend.run_on_head(handle,
                                      code,
                                      require_outputs=False,

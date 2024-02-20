@@ -4632,11 +4632,15 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@click.option('--replica-id', '-r', default=None, type=int, help='')
+@click.option('--replica-id',
+              '-r',
+              default=None,
+              type=int,
+              help='Tear down a given replica')
 # pylint: disable=redefined-builtin
 def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
                replica_id: Optional[int]):
-    """Teardown service(s).
+    """Teardown service(s) or a replica.
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
     both SERVICE_NAMES and ``--all`` are supplied, the latter takes precedence.
@@ -4662,6 +4666,7 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         \b
         # Forcefully tear down a service in failed status.
         sky serve down failed-service --purge
+        \b
         # Tear down a specific replica
         sky serve down my-service --replica-id 1
     """
@@ -4689,7 +4694,7 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         if not yes:
             click.confirm(f'Terminating replica ID {replica_id} in '
                           f'{service_names[0]!r}. Proceed?')
-        serve_lib.terminate_replica(service_names[0], replica_id)
+        serve_lib.terminate_replica(service_names[0], replica_id, purge)
     else:
         if not yes:
             quoted_service_names = [f'{name!r}' for name in service_names]
