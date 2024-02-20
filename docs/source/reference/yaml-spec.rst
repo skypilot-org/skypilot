@@ -257,9 +257,9 @@ Available fields:
       /remote/dir1/file: /local/dir1/file
       /remote/dir2: /local/dir2
 
-      # Uses SkyPilot Storage to create a S3 bucket named sky-dataset, uploads the
-      # contents of /local/path/datasets to the bucket, and marks the bucket
-      # as persistent (it will not be deleted after the completion of this task).
+      # Create a S3 bucket named sky-dataset, uploads the contents of
+      # /local/path/datasets to the bucket, and marks the bucket as persistent
+      # (it will not be deleted after the completion of this task).
       # Symlinks and their contents are NOT copied.
       #
       # Mounts the bucket at /datasets-storage on every node of the cluster.

@@ -193,8 +193,8 @@ And under the same directory, we have an :code:`index.html`:
 
 .. note::
 
-  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to
-  :ref:`SkyPilot Storage <sky-storage>`. Cloud bucket will be created, and cleaned up after the service is terminated.
+  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to a
+  :ref:`cloud bucket <sky-storage>`. The bucket will be created, and cleaned up after the service is terminated.
 
 Notice that task YAML already has a running HTTP endpoint at 8080, and exposed
 through the :code:`ports` section under :code:`resources`. Suppose we want to
