@@ -192,10 +192,10 @@ def terminate_instances(
                     f"Failed to terminate instance {inst_id}: "
                     f"{common_utils.format_exception(e, use_bracket=False)}"
                 ) from e
-    instances = _filter_instances(cluster_name_on_cloud, None)
-    if not worker_only and network_id:
-        time.sleep(POLL_INTERVAL)
-        client.delete_network(network_id=network_id)
+    
+    time.sleep(POLL_INTERVAL)
+    network = client.get_network(network_name=cluster_name_on_cloud)
+    client.delete_network(network_id=network['id'])
 
 
 def get_cluster_info(
