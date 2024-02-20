@@ -124,7 +124,7 @@ Task artifacts, such as **logs and checkpoints**, can either be
 transparently uploaded to a cloud object store, or directly copied from the
 remote cluster.
 
-Writing artifacts to object stores
+Writing artifacts to cloud buckets
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In addition to handling datasets and other task inputs,

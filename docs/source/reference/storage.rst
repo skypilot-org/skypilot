@@ -1,7 +1,7 @@
 .. _sky-storage:
 
-Cloud Buckets
-=============
+Cloud Object Storage
+====================
 
 SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2 or IBM COS.
 
@@ -13,14 +13,14 @@ the task can access bucket objects as if they were local files.
 Usage
 -----
 
-Cloud buckets are specified using the :code:`file_mounts` field in a SkyPilot task.
+Object storages are specified using the :code:`file_mounts` field in a SkyPilot task.
 
 .. tab-set::
 
     .. tab-item:: Use an existing bucket
         :sync: existing-bucket-tab
 
-        To access a bucket created externally (e.g., through cloud CLI or other tools),
+        To access an existing bucket (e.g., created through cloud CLI or other tools),
         specify ``source``.
 
         .. code-block:: yaml
@@ -176,8 +176,8 @@ remote VM.
     If your dataset can fit on the VM's disk, you can use :code:`mode: COPY` to
     improve the I/O performance of your task. See :ref:`storage-mounting-modes` for more details.
 
-Storing task output
-~~~~~~~~~~~~~~~~~~~
+Storing task outputs
+~~~~~~~~~~~~~~~~~~~~
 
 You can directly write the outputs of your tasks to a cloud bucket by creating
 a new bucket and using it in :code:`MOUNT` mode.
