@@ -2,8 +2,7 @@
 import json
 import os
 import textwrap
-import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -11,9 +10,6 @@ from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    from sky.serve import spot_policies
 
 
 class SkyServiceSpec:
@@ -93,13 +89,9 @@ class SkyServiceSpec:
         self._base_ondemand_fallback_replicas: Optional[
             int] = base_ondemand_fallback_replicas
         # _spot_locations will be set by set_spot_locations.
-        self._spot_locations: Optional[List['spot_policies.Location']] = None
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
 
-        # _use_spot_placer will be set by
-        # enable_use_spot_placer or disable_use_spot_placer.
-        self._use_spot_placer: bool = False
         self._use_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
             self.dynamic_ondemand_fallback) or (
@@ -270,17 +262,6 @@ class SkyServiceSpec:
             Spot Policy:                      {self.spot_policy_str()}\
         """)
 
-    # TODO(MaoZiming): Add this function to spot_placer might be better.
-    def set_spot_locations(self,
-                           locations: List['spot_policies.Location']) -> None:
-        self._spot_locations = locations
-
-    def enable_use_spot_placer(self) -> None:
-        self._use_spot_placer = True
-
-    def disable_use_spot_placer(self) -> None:
-        self._use_spot_placer = False
-
     @property
     def readiness_path(self) -> str:
         return self._readiness_path
@@ -307,10 +288,6 @@ class SkyServiceSpec:
         return self._post_data
 
     @property
-    def spot_locations(self) -> Optional[List['spot_policies.Location']]:
-        return self._spot_locations
-
-    @property
     def base_ondemand_fallback_replicas(self) -> Optional[int]:
         return self._base_ondemand_fallback_replicas
 
@@ -325,10 +302,6 @@ class SkyServiceSpec:
     @property
     def downscale_delay_seconds(self) -> Optional[int]:
         return self._downscale_delay_seconds
-
-    @property
-    def use_spot_placer(self) -> bool:
-        return self._use_spot_placer
 
     @property
     def use_fallback(self) -> bool:

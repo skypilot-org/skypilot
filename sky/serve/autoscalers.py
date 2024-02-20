@@ -10,7 +10,6 @@ from typing import Any, Dict, Iterable, List, Optional, Union
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
-from sky.serve import spot_policies
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
@@ -362,9 +361,6 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         super().__init__(spec)
-        self.spot_placer: Optional['spot_policies.SpotPlacer'] = (
-            spot_policies.SpotPlacer.from_spec(spec)
-        ) if spec.use_spot_placer else None
         self.base_ondemand_fallback_replicas: int = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
@@ -375,8 +371,6 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
         super().update_version(version, spec)
-        self.spot_placer = (spot_policies.SpotPlacer.from_spec(spec)
-                            if spec.use_spot_placer else None)
         self.base_ondemand_fallback_replicas = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
@@ -384,26 +378,10 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                                           if spec.dynamic_ondemand_fallback
                                           is not None else False)
 
-    def set_active_history(self, history: List[spot_policies.Location]) -> None:
-        if self.spot_placer is None:
-            return
-        for location in history:
-            self.spot_placer.set_active(location)
-
-    def handle_preemption_history(
-            self, history: List[spot_policies.Location]) -> None:
-        if self.spot_placer is None:
-            return
-        for location in history:
-            self.spot_placer.set_preemption(location)
-
-    def _get_spot_resources_override_dict(
-            self,
-            location: Optional[spot_policies.Location] = None
-    ) -> Dict[str, Any]:
+    def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
         # We have checked before any_of can only be used to
         # specify multiple zones, regions and clouds.
-        return {'use_spot': True, **(location.to_dict() if location else {})}
+        return {'use_spot': True}
 
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False}
@@ -446,27 +424,12 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                                  self.base_ondemand_fallback_replicas)
         if num_launched_spot < num_spot_to_provision:
             # Not enough spot instances, scale up.
-            # Consult spot_placer for the zone to launch spot instance.
             num_spot_to_scale_up = num_spot_to_provision - num_launched_spot
-            if self.spot_placer is not None:
-                locations = self.spot_placer.select(
-                    latest_provisioning_and_launched_replicas,
-                    num_spot_to_scale_up)
-                assert len(locations) == num_spot_to_scale_up
-                for location in locations:
-                    spot_override = (
-                        self._get_spot_resources_override_dict(location))
-                    logger.info(
-                        f'Chosen location {location} with {self.spot_placer}')
-                    scaling_options.append(
-                        AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                           target=spot_override))
-            else:
-                for _ in range(num_spot_to_scale_up):
-                    scaling_options.append(
-                        AutoscalerDecision(
-                            AutoscalerDecisionOperator.SCALE_UP,
-                            target=self._get_spot_resources_override_dict()))
+            for _ in range(num_spot_to_scale_up):
+                scaling_options.append(
+                    AutoscalerDecision(
+                        AutoscalerDecisionOperator.SCALE_UP,
+                        target=self._get_spot_resources_override_dict()))
         elif num_launched_spot > num_spot_to_provision:
             # Too many spot instances, scale down.
             # Get the replica to scale down with select_replicas_to_scale_down

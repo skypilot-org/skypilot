@@ -21,7 +21,6 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
 from sky.serve import service_spec
-from sky.serve import spot_policies
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -627,83 +626,6 @@ class Task:
         Returns:
           self: The current task, with service set.
         """
-
-        self._service = service
-        if service is None:
-            return self
-
-        use_spot = False
-        for resource in list(self.resources):
-            if resource.use_spot:
-                use_spot = True
-                break
-
-        if use_spot:
-            # If use_spot is specified, default use spot_policy.
-            service.enable_use_spot_placer()
-            disable_spot_placer_log = ''
-            first_resource_dict = list(self.resources)[0].to_yaml_config()
-            for requested_resources in self.resources:
-                requested_resources_dict = requested_resources.to_yaml_config()
-                for key in ['region', 'zone', 'cloud']:
-                    if key in first_resource_dict:
-                        first_resource_dict.pop(key)
-                    if key in requested_resources_dict:
-                        requested_resources_dict.pop(key)
-                if first_resource_dict != requested_resources_dict:
-                    service.disable_use_spot_placer()
-                    disable_spot_placer_log += (
-                        'requires multiple resources '
-                        'to have the same fields except zones/regions/clouds')
-                    break
-
-            if isinstance(self.resources, list):
-                service.disable_use_spot_placer()
-                if disable_spot_placer_log:
-                    disable_spot_placer_log += ' and '
-                disable_spot_placer_log += 'does not support ordered resources'
-
-            if disable_spot_placer_log:
-                logger.info('Disable spot placer, which '
-                            f'{disable_spot_placer_log}.')
-
-        if service.use_spot_placer:
-
-            enabled_clouds = global_user_state.get_enabled_clouds()
-            feasible_locations: List[spot_policies.Location] = []
-
-            for resources in self.resources:
-                clouds_list = ([resources.cloud] if resources.cloud is not None
-                               else enabled_clouds)
-                for cloud in clouds_list:
-                    feasible_resources, _ = (
-                        cloud.get_feasible_launchable_resources(
-                            resources, num_nodes=self.num_nodes))
-
-                    for feasible_resource in feasible_resources:
-                        regions = (feasible_resource.
-                                   get_valid_regions_for_launchable())
-                        for region in regions:
-                            if region is None:
-                                continue
-                            # Some clouds, such as Azure,
-                            # does not support zones.
-                            if region.zones is None:
-                                feasible_locations.append(
-                                    spot_policies.Location(
-                                        str(cloud), region.name, None))
-                            else:
-                                for zone in region.zones:
-                                    feasible_locations.append(
-                                        spot_policies.Location(
-                                            str(cloud), region.name, zone.name))
-
-            location_print_list = [(location.cloud, location.region,
-                                    location.zone)
-                                   for location in feasible_locations]
-            logger.debug(f'launchable_locations: {location_print_list}')
-            service.set_spot_locations(feasible_locations)
-
         self._service = service
         return self
 
