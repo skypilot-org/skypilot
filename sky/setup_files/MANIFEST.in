@@ -10,6 +10,7 @@ include sky/skylet/providers/kubernetes/*
 include sky/skylet/providers/lambda_cloud/*
 include sky/skylet/providers/oci/*
 include sky/skylet/providers/scp/*
+include sky/skylet/providers/paperspace/*
 include sky/skylet/providers/*.py
 include sky/skylet/ray_patches/*.patch
 include sky/spot/dashboard/*

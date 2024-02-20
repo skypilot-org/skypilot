@@ -82,6 +82,7 @@ Lambda = clouds.Lambda
 SCP = clouds.SCP
 Kubernetes = clouds.Kubernetes
 OCI = clouds.OCI
+Paperspace = clouds.Paperspace
 RunPod = clouds.RunPod
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
@@ -97,6 +98,7 @@ __all__ = [
     'Kubernetes',
     'Lambda',
     'OCI',
+    'Paperspace',
     'RunPod',
     'SCP',
     'Vsphere',

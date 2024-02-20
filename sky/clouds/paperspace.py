@@ -7,7 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
-from sky.provision.paperspace import utils
+from sky.provision.paperspace.utils import PaperspaceCloudClient, PaperspaceCloudError
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -24,13 +24,8 @@ class Paperspace(clouds.Cloud):
 
     _REPR = "Paperspace"
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP: "Stopping not supported.",
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: (
             "Spot is not supported, as Paperspace API does not implement spot ."
-        ),
-        clouds.CloudImplementationFeatures.MULTI_NODE: (
-            "Multi-node not supported yet, as the interconnection among nodes "
-            "are non-trivial on Paperspace."
         ),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
@@ -41,9 +36,19 @@ class Paperspace(clouds.Cloud):
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
-    def _cloud_unsupported_features(
-        cls,
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        """The features not supported based on the resources provided.
+
+        This method is used by check_features_are_supported() to check if the
+        cloud implementation supports all the requested features.
+
+        Returns:
+            A dict of {feature: reason} for the features not supported by the
+            cloud implementation.
+        """
+        del resources  # unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -65,7 +70,7 @@ class Paperspace(clouds.Cloud):
             return []
         else:
             regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, "Paperspace"
+                instance_type, use_spot, "paperspace"
             )
 
         if region is not None:
@@ -78,7 +83,7 @@ class Paperspace(clouds.Cloud):
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
         return service_catalog.get_vcpus_mem_from_instance_type(
-            instance_type, clouds="Paperspace"
+            instance_type, clouds="paperspace"
         )
 
     @classmethod
@@ -111,7 +116,7 @@ class Paperspace(clouds.Cloud):
             use_spot=use_spot,
             region=region,
             zone=zone,
-            clouds="Paperspace",
+            clouds="paperspace",
         )
 
     def accelerators_to_hourly_cost(
@@ -144,7 +149,7 @@ class Paperspace(clouds.Cloud):
     ) -> Optional[str]:
         """Returns the default instance type for Paperspace."""
         return service_catalog.get_default_instance_type(
-            cpus=cpus, memory=memory, disk_tier=disk_tier, clouds="Paperspace"
+            cpus=cpus, memory=memory, disk_tier=disk_tier, clouds="paperspace"
         )
 
     @classmethod
@@ -152,7 +157,7 @@ class Paperspace(clouds.Cloud):
         cls, instance_type: str
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds="Paperspace"
+            instance_type, clouds="paperspace"
         )
 
     @classmethod
@@ -224,7 +229,7 @@ class Paperspace(clouds.Cloud):
                 cpus=resources.cpus,
                 region=resources.region,
                 zone=resources.zone,
-                clouds="Paperspace",
+                clouds="paperspace",
             )
         )
         if instance_list is None:
@@ -237,8 +242,8 @@ class Paperspace(clouds.Cloud):
         # TODO : need to check that user has valid API credentials and has private networks created.
         try:
             # attempt to make a CURL request for listing instances
-            utils.PaperspaceCloudClient().list_instances()
-        except (AssertionError, KeyError, utils.PaperspaceCloudError):
+            PaperspaceCloudClient().list_instances()
+        except (AssertionError, KeyError, PaperspaceCloudError):
             return False, (
                 "Failed to access Paperspace Cloud with credentials. "
                 "To configure credentials, follow the instructions at:\n    "
@@ -273,10 +278,10 @@ class Paperspace(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, "Paperspace")
+        return service_catalog.instance_type_exists(instance_type, "paperspace")
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region, zone, clouds="Paperspace")
+        return service_catalog.validate_region_zone(region, zone, clouds="paperspace")
 
     def accelerator_in_region_or_zone(
         self,
@@ -286,5 +291,5 @@ class Paperspace(clouds.Cloud):
         zone: Optional[str] = None,
     ) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, "Paperspace"
+            accelerator, acc_count, region, zone, "paperspace"
         )
