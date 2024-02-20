@@ -26,6 +26,13 @@ K8S_PORT_FWD_PID=$!
 # Wait until kubectl port-forward is ready
 while ! grep -q "Forwarding from 127.0.0.1" "${KUBECTL_OUTPUT}"; do
     sleep 0.1
+    # Handle the case where kubectl port-forward fails
+    # It may fail if the kubeconfig is missing or invalid, or if the cluster is not reachable.
+    if ! kill -0 "$K8S_PORT_FWD_PID" 2> /dev/null; then
+        echo "kubectl port-forward failed. Error: $(cat "$KUBECTL_OUTPUT")" >&2
+        rm -f "${KUBECTL_OUTPUT}"
+        exit 1
+    fi
 done
 
 # Extract the local port number assigned by kubectl.

@@ -4110,6 +4110,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 command, such as replacing or skipping lines on the fly. If
                 enabled, lines are printed only when '\r' or '\n' is found.
 
+        Returns:
+            returncode
+            or
+            A tuple of (returncode, stdout, stderr).
+
         Raises:
             exceptions.FetchIPError: If the head node IP cannot be fetched.
         """
