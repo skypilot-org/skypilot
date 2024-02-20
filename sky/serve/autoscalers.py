@@ -235,7 +235,7 @@ class RequestRateAutoscaler(Autoscaler):
             f'{self.scale_down_consecutive_periods}')
 
     @classmethod
-    def select_replicas_to_scale_down(
+    def _select_replicas_to_scale_down(
             cls, num_limit: int,
             replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
@@ -330,7 +330,7 @@ class RequestRateAutoscaler(Autoscaler):
                 len(latest_provisioning_and_launched_replicas) -
                 self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
-                RequestRateAutoscaler.select_replicas_to_scale_down(
+                RequestRateAutoscaler._select_replicas_to_scale_down(
                     num_limit=num_replicas_to_scale_down,
                     replica_infos=latest_provisioning_and_launched_replicas))
 
@@ -348,15 +348,26 @@ class RequestRateAutoscaler(Autoscaler):
             cls,
             spec: 'service_spec.SkyServiceSpec') -> 'RequestRateAutoscaler':
         # TODO(MaoZiming): use NAME to get the class.
-        if spec.use_fallback:
+        if spec.use_ondemand_fallback:
             return FallbackRequestRateAutoscaler(spec)
         else:
             return RequestRateAutoscaler(spec)
 
 
 class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
-    """FallbackRequestRateAutoscaler: Use spot with
-    on-demand as fallback to autoscale based on request rate.
+    """FallbackRequestRateAutoscaler
+
+    Autoscale based on request rate. It adds additional
+    ability to RequestRateAutoscaler for having
+    spot instances with on-demand fallback.
+
+    When spec.base_ondemand_fallback_replicas is set, we make sure
+    there are at least spec.base_ondemand_fallback_replicas on-demands
+    to be always there to provide basic gurantee for the availability.
+
+    When spec.dynamic_ondemand_fallback is set, on-demand instances
+    will be scheduled to provision for any preempted spot instance, i.e.,
+    on-demand instance are used as dynamic fallback of spot.
     """
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
@@ -421,6 +432,12 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         scaling_options: List[AutoscalerDecision] = []
         all_replica_ids_to_scale_down: List[int] = []
 
+        # Once there is min_replicas number of
+        # ready new replicas, we will direct all traffic to them,
+        # we can scale down all old replicas.
+        all_replica_ids_to_scale_down.extend(
+            self.select_outdated_replicas_to_scale_down(replica_infos))
+
         # Decide how many spot instances to launch.
         num_spot_to_provision = (self.target_num_replicas -
                                  self.base_ondemand_fallback_replicas)
@@ -435,24 +452,24 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                         target=self._get_spot_resources_override_dict()))
         elif num_provisioning_and_launched_spot > num_spot_to_provision:
             # Too many spot instances, scale down.
-            # Get the replica to scale down with select_replicas_to_scale_down
+            # Get the replica to scale down with _select_replicas_to_scale_down
             num_spot_to_scale_down = (num_provisioning_and_launched_spot -
                                       num_spot_to_provision)
             all_replica_ids_to_scale_down.extend(
-                RequestRateAutoscaler.select_replicas_to_scale_down(
+                RequestRateAutoscaler._select_replicas_to_scale_down(
                     num_spot_to_scale_down,
                     filter(lambda info: info.is_spot,
                            latest_provisioning_and_launched_replicas)))
 
-        # Once there is min_replicas number of
-        # ready new replicas, we will direct all traffic to them,
-        # we can scale down all old replicas.
-        all_replica_ids_to_scale_down.extend(
-            self.select_outdated_replicas_to_scale_down(replica_infos))
-
         # Decide how many on-demand instances to launch.
         num_on_demand_to_provision = self.base_ondemand_fallback_replicas
         if self.dynamic_ondemand_fallback:
+            # We use `num_ready_spot` here instead of
+            # `num_provisioning_and_launched_spot`
+            # because the provisioning spot can fail to UP
+            # due to the capacity issue, and on-demand
+            # should fill the gap between the required
+            # number of spot and ready spot.
             num_on_demand_to_provision += (num_spot_to_provision -
                                            num_ready_spot)
 
@@ -466,7 +483,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         elif (num_provisioning_and_launched_on_demand >
               num_on_demand_to_provision):
             all_replica_ids_to_scale_down.extend(
-                RequestRateAutoscaler.select_replicas_to_scale_down(
+                RequestRateAutoscaler._select_replicas_to_scale_down(
                     num_provisioning_and_launched_on_demand -
                     num_on_demand_to_provision,
                     filter(lambda info: not info.is_spot,

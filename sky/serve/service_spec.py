@@ -92,7 +92,7 @@ class SkyServiceSpec:
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
 
-        self._use_fallback: bool = (
+        self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
             self.dynamic_ondemand_fallback) or (
                 self.base_ondemand_fallback_replicas is not None and
@@ -244,7 +244,7 @@ class SkyServiceSpec:
                            f'base on-demand replica{plural}')
         return policy if policy else 'No spot policy'
 
-    def policy_str(self):
+    def autoscaling_policy_str(self):
         # TODO(MaoZiming): Update policy_str
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
@@ -258,7 +258,7 @@ class SkyServiceSpec:
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
-            Replica autoscaling policy:       {self.policy_str()}
+            Replica autoscaling policy:       {self.autoscaling_policy_str()}
             Spot Policy:                      {self.spot_policy_str()}\
         """)
 
@@ -304,5 +304,5 @@ class SkyServiceSpec:
         return self._downscale_delay_seconds
 
     @property
-    def use_fallback(self) -> bool:
-        return self._use_fallback
+    def use_ondemand_fallback(self) -> bool:
+        return self._use_ondemand_fallback

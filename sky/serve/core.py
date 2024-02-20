@@ -62,7 +62,8 @@ def _validate_service_task(task: 'sky.Task'):
 
     first_resource_dict = list(task.resources)[0].to_yaml_config()
     for requested_resources in task.resources:
-        if task.service.use_fallback and not requested_resources.use_spot:
+        if (task.service.use_ondemand_fallback and
+                not requested_resources.use_spot):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Specify use_spot in resources for '
                                  'on-demand fallback.')
