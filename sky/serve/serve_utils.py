@@ -283,10 +283,10 @@ def update_service_encoded(service_name: str, version: int) -> str:
     return common_utils.encode_payload(service_msg)
 
 
-def terminate_replica(service_name: str, replica_id: int) -> None:
+def terminate_replica(service_name: str, replica_id: int) -> str:
     service_status = _get_service_status(service_name)
     if service_status is None:
-        raise ValueError(f'Service {service_name!r} does not exist')
+        raise ValueError(f'Service {service_name!r} does not exist.')
     controller_port = service_status['controller_port']
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
@@ -297,6 +297,8 @@ def terminate_replica(service_name: str, replica_id: int) -> None:
     if resp.status_code != 200:
         raise ValueError(f'Failed to terminate replica {replica_id} '
                          f'in {service_name}')
+    service_msg = resp.json()['message']
+    return common_utils.encode_payload(service_msg)
 
 
 def _get_service_status(
@@ -863,7 +865,8 @@ class ServeCodeGen:
     @classmethod
     def terminate_replica(cls, service_name: str, replica_id: int) -> str:
         code = [
-            f'serve_utils.terminate_replica({service_name!r}, {replica_id})'
+            f'msg = serve_utils.terminate_replica({service_name!r}, '
+            f'{replica_id})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
