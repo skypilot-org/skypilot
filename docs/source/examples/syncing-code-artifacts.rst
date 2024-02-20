@@ -15,7 +15,7 @@ from cloud clusters:
 - To :ref:`download files and artifacts from a cluster <downloading-files-and-artifacts>` - use :ref:`SkyPilot bucket mounting <sky-storage>` or :code:`rsync`
 
 Here, "upload" means uploading files from your local machine (or a cloud object
-store) to a SkyPilot cluster, while "download" means the reverse direction.  The same
+storage) to a SkyPilot cluster, while "download" means the reverse direction.  The same
 mechanisms work for both files and directories.
 
 .. _upload-code-and-project-files:
@@ -74,7 +74,7 @@ Uploading files outside of workdir
 Use the :code:`file_mounts` field in a :ref:`task YAML <yaml-spec>` to upload to a cluster
 
 - local files outside of the working directory (e.g., dotfiles)
-- cloud object store URIs (currently, SkyPilot supports AWS S3 and GCP GCS)
+- cloud object storage URIs (currently, SkyPilot supports AWS S3, GCP GCS, Cloudflare R2 and IBM COS)
 
 Every :code:`sky launch` invocation reruns the sync up of these files.
 
@@ -121,7 +121,7 @@ Downloading files and artifacts
 --------------------------------------
 
 Task artifacts, such as **logs and checkpoints**, can either be
-transparently uploaded to a cloud object store, or directly copied from the
+transparently uploaded to a cloud object storage, or directly copied from the
 remote cluster.
 
 Writing artifacts to cloud object storage
