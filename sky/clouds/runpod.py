@@ -6,6 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -32,6 +33,10 @@ class RunPod(clouds.Cloud):
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is not '
              'supported yet on RunPod.'),
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            ('Specifying image ID is not supported on RunPod.'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            (f'Docker image is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on RunPod.')
     }
@@ -138,7 +143,8 @@ class RunPod(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         """Returns the default instance type for RunPod."""
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
@@ -235,8 +241,8 @@ class RunPod(clouds.Cloud):
                     f'{error} \n'  # First line is indented by 4 spaces
                     '    Credentials can be set up by running: \n'
                     f'        $ pip install runpod \n'
-                    f'        $ runpod store_api_key <YOUR_RUNPOD_API_KEY> \n'
-                    '    For more information, see https://docs.runpod.io/docs/skypilot'  # pylint: disable=line-too-long
+                    f'        $ runpod config\n'
+                    '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
                 )
 
             return True, None

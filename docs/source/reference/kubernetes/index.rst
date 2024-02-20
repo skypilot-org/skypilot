@@ -4,10 +4,9 @@ Running on Kubernetes
 =============================
 
 .. note::
-    Kubernetes support is in alpha preview and under active development.
-    There may be rough edges and features may change without notice.
-    Please report any `bugs <https://github.com/skypilot-org/skypilot/issues>`_ and
-    `reach out to us <http://slack.skypilot.co>`_ for feature requests.
+    Kubernetes support is under active development. `Please share your feedback <https://forms.gle/KmAtyNhEysiw2ZCR7>`_
+    or `directly reach out to the development team <http://slack.skypilot.co>`_
+    for feature requests and more.
 
 SkyPilot tasks can be run on your private on-prem or cloud Kubernetes clusters.
 The Kubernetes cluster gets added to the list of "clouds" in SkyPilot and SkyPilot
@@ -23,7 +22,7 @@ tasks can be submitted to your Kubernetes cluster just like any other cloud prov
 **Supported Kubernetes deployments:**
 
 * Hosted Kubernetes services (EKS, GKE)
-* On-prem clusters (Kubeadm, K3s, Rancher)
+* On-prem clusters (Kubeadm, Rancher)
 * Local development clusters (KinD, minikube)
 
 
@@ -124,16 +123,51 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
     $ # Set a specific namespace to be used in the current-context
     $ kubectl config set-context --current --namespace=mynamespace
 
+
+Using Custom Images
+-------------------
+By default, we use and maintain a SkyPilot container image that has conda and a few other basic tools installed.
+
+To use your own image, add :code:`image_id: docker:<your image tag>` to the :code:`resources` section of your task YAML.
+
+.. code-block:: yaml
+
+    resources:
+      image_id: docker:myrepo/myimage:latest
+    ...
+
+Your image must satisfy the following requirements:
+
+* Image must be **debian-based** and must have the apt package manager installed.
+* The default user in the image must have root privileges or passwordless sudo access.
+
+.. note::
+
+    If your cluster runs on non-x86_64 architecture (e.g., Apple Silicon), your image must be built natively for that architecture. Otherwise, your job may get stuck at :code:`Start streaming logs ...`. See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/3035>`_ for more.
+
+Using Images from Private Repositories
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config` to specify the secret like so:
+
+.. code-block:: yaml
+
+    kubernetes:
+      pod_config:
+        spec:
+          imagePullSecrets:
+            - name: your-secret-here
+
+.. tip::
+
+    If you use Amazon ECR, your secret credentials may expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
+
+
 FAQs
 ----
 
 * **Are autoscaling Kubernetes clusters supported?**
 
   To run on an autoscaling cluster, you may need to adjust the resource provisioning timeout (:code:`Kubernetes.TIMEOUT` in `clouds/kubernetes.py`) to a large value to give enough time for the cluster to autoscale. We are working on a better interface to adjust this timeout - stay tuned!
-
-* **What container image is used for tasks? Can I specify my own image?**
-
-  We use and maintain a SkyPilot container image that has conda and a few other basic tools installed. You can specify a custom image to use in `clouds/kubernetes.py`, but it must have rsync, conda and OpenSSH server installed. We are working on a interface to allow specifying custom images through the :code:`image_id` field in the task YAML - stay tuned!
 
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
@@ -152,8 +186,8 @@ Kubernetes support is under active development. Some features are in progress an
 * Auto-down - ✅ Available
 * Storage mounting - ✅ Available on x86_64 clusters
 * Multi-node tasks - ✅ Available
+* Custom images - ✅ Available
 * Opening ports and exposing services - 🚧 In progress
-* Custom images - 🚧 In progress
 * Multiple Kubernetes Clusters - 🚧 In progress
 
 

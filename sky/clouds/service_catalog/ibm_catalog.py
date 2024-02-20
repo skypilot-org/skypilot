@@ -10,6 +10,7 @@ from sky import sky_logging
 from sky.adaptors import ibm
 from sky.clouds import cloud
 from sky.clouds.service_catalog import common
+from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -98,9 +99,10 @@ def list_accelerators(
                                          case_sensitive, all_regions)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'

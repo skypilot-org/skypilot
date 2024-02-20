@@ -17,6 +17,7 @@ from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -112,6 +113,7 @@ class AWS(clouds.Cloud):
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
+    _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
@@ -175,6 +177,11 @@ class AWS(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[List[clouds.Zone]]:
+        # TODO(suquark): Now we can return one zone at a time,
+        # like other clouds,
+        # because the new provisioner can failover to other zones pretty fast.
+        # This will simplify our provision logic a lot.
+
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         regions = cls.regions_with_offering(instance_type,
@@ -331,7 +338,8 @@ class AWS(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -737,27 +745,24 @@ class AWS(clouds.Cloud):
             accelerator, acc_count, region, zone, 'aws')
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
-        del instance_type, disk_tier  # unused
+    def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
+        return 'standard' if disk_tier == resources_utils.DiskTier.LOW else 'gp3'
 
     @classmethod
-    def _get_disk_type(cls, disk_tier: str) -> str:
-        return 'standard' if disk_tier == 'low' else 'gp3'
-
-    @classmethod
-    def _get_disk_specs(cls, disk_tier: Optional[str]) -> Dict[str, Any]:
-        tier = disk_tier or cls._DEFAULT_DISK_TIER
+    def _get_disk_specs(
+            cls,
+            disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
+        tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
-            'high': 7000,
-            'medium': 3500,
-            'low': 0,  # only gp3 is required to set iops
+            resources_utils.DiskTier.HIGH: 7000,
+            resources_utils.DiskTier.MEDIUM: 3500,
+            resources_utils.DiskTier.LOW: 0,  # only gp3 is required to set iops
         }
         return {
             'disk_tier': cls._get_disk_type(tier),
             'disk_iops': tier2iops[tier],
             'disk_throughput': tier2iops[tier] // 16,
-            'custom_disk_perf': tier != 'low',
+            'custom_disk_perf': tier != resources_utils.DiskTier.LOW,
         }
 
     @classmethod

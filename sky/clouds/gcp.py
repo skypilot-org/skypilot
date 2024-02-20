@@ -17,6 +17,7 @@ from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -160,6 +161,7 @@ class GCP(clouds.Cloud):
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
+    _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
@@ -371,7 +373,8 @@ class GCP(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -749,9 +752,14 @@ class GCP(clouds.Cloud):
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
+        # We only add the existing credential files. It should be safe to ignore
+        # the missing files, as we successfully created the VM at this point,
+        # meaning the authentication is successful.
         credentials = {
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
+            if os.path.exists(os.path.expanduser(
+                f'~/.config/gcloud/{filename}'))
         }
         # Upload the application key path to the default path, so that
         # autostop and GCS can be accessed on the remote cluster.
@@ -846,17 +854,13 @@ class GCP(clouds.Cloud):
             'gcp')
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
-        del instance_type, disk_tier  # unused
-
-    @classmethod
-    def _get_disk_type(cls, disk_tier: Optional[str]) -> str:
-        tier = disk_tier or cls._DEFAULT_DISK_TIER
+    def _get_disk_type(cls,
+                       disk_tier: Optional[resources_utils.DiskTier]) -> str:
+        tier = cls._translate_disk_tier(disk_tier)
         tier2name = {
-            'high': 'pd-ssd',
-            'medium': 'pd-balanced',
-            'low': 'pd-standard',
+            resources_utils.DiskTier.HIGH: 'pd-ssd',
+            resources_utils.DiskTier.MEDIUM: 'pd-balanced',
+            resources_utils.DiskTier.LOW: 'pd-standard',
         }
         return tier2name[tier]
 

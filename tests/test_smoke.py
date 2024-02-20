@@ -57,6 +57,7 @@ from sky.data import storage as storage_lib
 from sky.data.data_utils import Rclone
 from sky.skylet import events
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
@@ -911,7 +912,8 @@ def test_kubernetes_storage_mounts():
             *storage_setup_commands,
             f'sky launch -y -c {name} --cloud kubernetes {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls {storage_name}/hello.txt',
+            f'aws s3 ls {storage_name}/hello.txt || '
+            f'gsutil ls gs://{storage_name}/hello.txt',
         ]
         test = Test(
             'kubernetes_storage_mounts',
@@ -1215,7 +1217,7 @@ def test_large_job_queue(generic_cloud: str):
             f'sky launch -y -c {name} --cpus 8 --cloud {generic_cloud}',
             f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
-            'sleep 75',
+            'sleep 90',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep PENDING | wc -l | grep 43',
@@ -2565,14 +2567,38 @@ def test_inline_env_file(generic_cloud: str):
 
 # ---------- Testing custom image ----------
 @pytest.mark.aws
-def test_custom_image():
-    """Test custom image"""
+def test_aws_custom_image():
+    """Test AWS custom image"""
     name = _get_cluster_name()
     test = Test(
-        'test-custom-image',
+        'test-aws-custom-image',
         [
-            f'sky launch -c {name} --retry-until-up -y examples/custom_image.yaml',
+            f'sky launch -c {name} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --cloud aws --region us-east-2 --image-id ami-062ddd90fb6f8267a',  # Nvidia image
             f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.parametrize("image_id", [
+    "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
+    "docker:ubuntu:18.04",
+])
+def test_kubernetes_custom_image(image_id):
+    """Test Kubernetes custom image"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-kubernetes-custom-image',
+        [
+            f'sky launch -c {name} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --cloud kubernetes --image-id {image_id} --region None --gpus T4:1',
+            f'sky logs {name} 1 --status',
+            # Try exec to run again and check if the logs are printed
+            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --cloud kubernetes --image-id {image_id} --region None --gpus T4:1 | grep "Hello 100"',
+            # Make sure ssh is working with custom username
+            f'ssh {name} echo hi | grep hi',
         ],
         f'sky down -y {name}',
         timeout=30 * 60,
@@ -2609,23 +2635,23 @@ def test_aws_disk_tier():
                 f'--filters Name=attachment.instance-id,Values={instance_id} '
                 f'--query Volumes[*].{field} | grep {expected} ; ')
 
-    for disk_tier in ['low', 'medium', 'high']:
+    for disk_tier in list(resources_utils.DiskTier):
         specs = AWS._get_disk_specs(disk_tier)
-        name = _get_cluster_name() + '-' + disk_tier
+        name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.AWS.max_cluster_name_length())
         region = 'us-east-2'
         test = Test(
-            'aws-disk-tier',
+            'aws-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud aws --region {region} '
-                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'--disk-tier {disk_tier.value} echo "hello sky"',
                 f'id=`aws ec2 describe-instances --region {region} --filters '
                 f'Name=tag:ray-cluster-name,Values={name_on_cloud} --query '
                 f'Reservations[].Instances[].InstanceId --output text`; ' +
                 _get_aws_query_command(region, '$id', 'VolumeType',
                                        specs['disk_tier']) +
-                ('' if disk_tier == 'low' else
+                ('' if disk_tier == resources_utils.DiskTier.LOW else
                  (_get_aws_query_command(region, '$id', 'Iops',
                                          specs['disk_iops']) +
                   _get_aws_query_command(region, '$id', 'Throughput',
@@ -2639,17 +2665,17 @@ def test_aws_disk_tier():
 
 @pytest.mark.gcp
 def test_gcp_disk_tier():
-    for disk_tier in ['low', 'medium', 'high']:
+    for disk_tier in list(resources_utils.DiskTier):
         type = GCP._get_disk_type(disk_tier)
-        name = _get_cluster_name() + '-' + disk_tier
+        name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
         region = 'us-west2'
         test = Test(
-            'gcp-disk-tier',
+            'gcp-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud gcp --region {region} '
-                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'--disk-tier {disk_tier.value} echo "hello sky"',
                 f'name=`gcloud compute instances list --filter='
                 f'"labels.ray-cluster-name:{name_on_cloud}" '
                 '--format="value(name)"`; '
@@ -2664,17 +2690,20 @@ def test_gcp_disk_tier():
 
 @pytest.mark.azure
 def test_azure_disk_tier():
-    for disk_tier in ['low', 'medium']:
+    for disk_tier in list(resources_utils.DiskTier):
+        if disk_tier == resources_utils.DiskTier.HIGH:
+            # Azure does not support high disk tier.
+            continue
         type = Azure._get_disk_type(disk_tier)
-        name = _get_cluster_name() + '-' + disk_tier
+        name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.Azure.max_cluster_name_length())
         region = 'westus2'
         test = Test(
-            'azure-disk-tier',
+            'azure-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud azure --region {region} '
-                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'--disk-tier {disk_tier.value} echo "hello sky"',
                 f'az resource list --tag ray-cluster-name={name_on_cloud} --query '
                 f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
                 f'--output tsv | grep {type}'
@@ -2683,6 +2712,28 @@ def test_azure_disk_tier():
             timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
         )
         run_one_test(test)
+
+
+@pytest.mark.azure
+def test_azure_best_tier_failover():
+    type = Azure._get_disk_type(resources_utils.DiskTier.LOW)
+    name = _get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Azure.max_cluster_name_length())
+    region = 'westus2'
+    test = Test(
+        'azure-best-tier-failover',
+        [
+            f'sky launch -y -c {name} --cloud azure --region {region} '
+            f'--disk-tier best --instance-type Standard_D8_v5 echo "hello sky"',
+            f'az resource list --tag ray-cluster-name={name_on_cloud} --query '
+            f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
+            f'--output tsv | grep {type}',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
+    )
+    run_one_test(test)
 
 
 # ------ Testing Zero Quota Failover ------
@@ -3007,6 +3058,53 @@ def test_skyserve_cancel():
             'tests/skyserve/cancel/send_cancel_request.py '
             '--endpoint $endpoint | grep "Request was cancelled"',
             f'sky serve logs {name} 1 --no-follow | grep "Client disconnected, stopping computation"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_update():
+    """Test skyserve with update"""
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-update',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/update/old.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} -y tests/skyserve/update/new.yaml',
+            # sleep before update is registered.
+            'sleep 20',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, new SkyPilot here!"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_update_autoscale():
+    """Test skyserve update with autoscale"""
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-update-autoscale',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/update/num_min_two.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} -y tests/skyserve/update/num_min_one.yaml',
+            # sleep before update is registered.
+            'sleep 20',
+            # Timeout will be triggered when update fails.
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here!"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3983,6 +4081,7 @@ def test_multiple_resources():
 
 
 # ---------- Sky Benchmark ----------
+@pytest.mark.no_kubernetes
 def test_sky_bench(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(

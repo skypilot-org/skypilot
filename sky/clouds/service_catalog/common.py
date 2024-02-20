@@ -487,6 +487,7 @@ def list_accelerators_impl(
         'SpotPrice',
         'Region',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
+
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter,
                                                    case=case_sensitive,
@@ -501,20 +502,18 @@ def list_accelerators_impl(
     grouped = df.groupby('AcceleratorName')
 
     def make_list_from_df(rows):
+
+        sort_key = ['Price', 'SpotPrice']
+        subset = [
+            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
+            'MemoryGiB'
+        ]
         if all_regions:
-            # Keep all regions.
-            rows = rows.groupby([
-                'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-                'MemoryGiB', 'Region'
-            ],
-                                dropna=False).aggregate('min').reset_index()
-        else:
-            # Only keep the lowest prices across regions.
-            rows = rows.groupby([
-                'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-                'MemoryGiB'
-            ],
-                                dropna=False).aggregate('min').reset_index()
+            sort_key.append('Region')
+            subset.append('Region')
+
+        rows = rows.sort_values(by=sort_key).drop_duplicates(subset=subset,
+                                                             keep='first')
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
                 cloud,
@@ -530,8 +529,11 @@ def list_accelerators_impl(
             ),
             axis='columns',
         ).tolist()
-        ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
-                                   if info.cpu_count is not None else 0))
+        # Sort by price and region as well.
+        ret.sort(
+            key=lambda info: (info.accelerator_count, info.instance_type, info.
+                              cpu_count if not pd.isna(info.cpu_count) else 0,
+                              info.price, info.spot_price, info.region))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}

@@ -41,6 +41,10 @@ class SkyServiceSpec:
                 raise ValueError(
                     'max_replicas must be greater than or equal to min_replicas'
                 )
+        if target_qps_per_replica is not None and target_qps_per_replica <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'target_qps_per_replica must be greater than 0')
         if not readiness_path.startswith('/'):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '

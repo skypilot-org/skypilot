@@ -137,10 +137,9 @@ def terminate_instances(
     del provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
-        logger.info(f'Terminating instance {inst_id}: {inst}')
+        logger.debug(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('-head'):
             continue
-        logger.info(f'Start {inst_id}: {inst}')
         try:
             utils.remove(inst_id)
         except Exception as e:  # pylint: disable=broad-except

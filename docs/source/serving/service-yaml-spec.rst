@@ -1,9 +1,9 @@
 .. _service-yaml-spec:
 
 Service YAML
-==========================
+============
 
-SkyServe provides an intuitive YAML interface to specify a service. It is highly similar to the :ref:`SkyPilot task YAML <yaml-spec>`: with an additional service section in your original task YAML, you could change it to a service YAML.
+SkyServe provides an intuitive YAML interface to specify a service. It is an extension to the :ref:`SkyPilot task YAML <yaml-spec>`: with an additional ``service`` section in your original task YAML, you could change it to a service YAML.
 
 Available fields:
 
