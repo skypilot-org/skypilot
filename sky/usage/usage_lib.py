@@ -361,7 +361,7 @@ def prepare_json_from_yaml_config(
         yaml_info = [yaml_config_or_path]
         comment_lines = []
     else:
-        with open(yaml_config_or_path, 'r') as f:
+        with open(yaml_config_or_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             comment_lines = [line for line in lines if line.startswith('#')]
         yaml_info = common_utils.read_yaml_all(yaml_config_or_path)
@@ -404,7 +404,7 @@ def entrypoint_context(name: str, fallback: bool = False):
     if not env_options.Options.DISABLE_LOGGING.get():
         os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
         try:
-            with open(privacy_policy_indicator, 'x'):
+            with open(privacy_policy_indicator, 'x', encoding='utf-8'):
                 click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
         except FileExistsError:
             pass

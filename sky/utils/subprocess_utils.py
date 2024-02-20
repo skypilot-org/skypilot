@@ -1,9 +1,10 @@
 """Utility functions for subprocesses."""
 from multiprocessing import pool
+import os
 import random
 import subprocess
 import time
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 import colorama
 import psutil
@@ -41,15 +42,25 @@ def run_no_outputs(cmd, **kwargs):
                **kwargs)
 
 
-def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
+def get_parallel_threads() -> int:
+    """Returns the number of idle CPUs."""
+    cpu_count = os.cpu_count()
+    if cpu_count is None:
+        cpu_count = 1
+    return max(4, cpu_count - 1)
+
+
+def run_in_parallel(func: Callable, args: Iterable[Any]) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
-    The function should raise a CommandError if the command fails.
-    Returns a list of the return values of the function func, in the same order
-    as the arguments.
+    The function 'func' should raise a CommandError if the command fails.
+
+    Returns:
+      A list of the return values of the function func, in the same order as the
+      arguments.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    with pool.ThreadPool() as p:
+    with pool.ThreadPool(processes=get_parallel_threads()) as p:
         # Run the function in parallel on the arguments, keeping the order.
         return list(p.imap(func, args))
 
@@ -58,7 +69,8 @@ def handle_returncode(returncode: int,
                       command: str,
                       error_msg: Union[str, Callable[[], str]],
                       stderr: Optional[str] = None,
-                      stream_logs: bool = True) -> None:
+                      stream_logs: bool = True,
+                      cluster_name: Optional[str] = None) -> None:
     """Handle the returncode of a command.
 
     Args:
@@ -69,6 +81,13 @@ def handle_returncode(returncode: int,
     """
     echo = logger.error if stream_logs else lambda _: None
     if returncode != 0:
+        if (stderr is not None and
+                'The SkyPilot runtime on remote cluster is outdated.'
+                in stderr):
+            error_msg = (
+                f'The SkyPilot runtime on remote cluster {cluster_name!r} is '
+                'outdated. Please update the runtime with: '
+                f'sky start -f {cluster_name}')
         if stderr is not None:
             echo(stderr)
 

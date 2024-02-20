@@ -16,6 +16,7 @@ _core_api = None
 _auth_api = None
 _networking_api = None
 _custom_objects_api = None
+_node_api = None
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
@@ -83,6 +84,7 @@ def _load_config():
                 err_str = (
                     'Failed to load Kubernetes configuration. '
                     f'Please check if your kubeconfig file is valid.{suffix}')
+            err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
     _configured = True
@@ -126,6 +128,16 @@ def custom_objects_api():
         _custom_objects_api = kubernetes.client.CustomObjectsApi()
 
     return _custom_objects_api
+
+
+@import_package
+def node_api():
+    global _node_api
+    if _node_api is None:
+        _load_config()
+        _node_api = kubernetes.client.NodeV1Api()
+
+    return _node_api
 
 
 @import_package

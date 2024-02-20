@@ -9,14 +9,12 @@ reused across cloud object creation.
 """
 import collections
 import enum
-import re
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
-from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -38,6 +36,7 @@ class CloudImplementationFeatures(enum.Enum):
     STOP = 'stop'  # Includes both stop and autostop.
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
+    IMAGE_ID = 'image_id'
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
@@ -98,6 +97,7 @@ class Cloud:
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
     # The version of provisioner and status query. This is used to determine
     # the code path to use for each cloud in the backend.
@@ -115,6 +115,21 @@ class Cloud:
         None means no limit.
         """
         return None
+
+    @classmethod
+    def supports_service_account_on_remote(cls) -> bool:
+        """Returns whether the cloud supports service account on remote cluster.
+
+        This method is used by backend_utils.write_cluster_config() to decide
+        whether to upload user's local cloud credential files to the remote
+        cluster.
+
+        If a cloud supports service account on remote cluster, the user's local
+        cloud credential files are not needed to be uploaded to the remote
+        instance, as the remote instance can be assigned with a service account
+        that has the necessary permissions to access the cloud resources.
+        """
+        return cls._SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE
 
     #### Regions/Zones ####
 
@@ -229,7 +244,7 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def is_same_cloud(self, other):
+    def is_same_cloud(self, other: 'Cloud'):
         raise NotImplementedError
 
     def make_deploy_resources_variables(
@@ -238,6 +253,7 @@ class Cloud:
         cluster_name_on_cloud: str,
         region: 'Region',
         zones: Optional[List['Zone']],
+        dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
@@ -459,16 +475,8 @@ class Cloud:
                                                     zone,
                                                     clouds=self._REPR.lower())
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        """Returns whether the accelerator is valid in the region or zone."""
-        raise NotImplementedError
-
     def need_cleanup_after_preemption(
-            self, resource: 'resources_lib.Resources') -> bool:
+            self, resources: 'resources_lib.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption.
 
         In most cases, spot resources do not need cleanup after preemption,
@@ -477,7 +485,7 @@ class Cloud:
         The only exception by far is GCP's Spot TPU VM. We override this method
         in gcp.py.
         """
-        del resource
+        del resources
         return False
 
     @classmethod
@@ -541,28 +549,6 @@ class Cloud:
         """
         del resources
         raise NotImplementedError
-
-    @classmethod
-    def check_cluster_name_is_valid(cls, cluster_name: str) -> None:
-        """Errors out on invalid cluster names not supported by cloud providers.
-
-        Bans (including but not limited to) names that:
-        - are digits-only
-        - contain underscore (_)
-
-        Raises:
-            exceptions.InvalidClusterNameError: If the cluster name is invalid.
-        """
-        if cluster_name is None:
-            return
-        valid_regex = constants.CLUSTER_NAME_VALID_REGEX
-        if re.fullmatch(valid_regex, cluster_name) is None:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name "{cluster_name}" is invalid; '
-                    'ensure it is fully matched by regex (e.g., '
-                    'only contains lower letters, numbers and dash): '
-                    f'{valid_regex}')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
@@ -755,3 +741,9 @@ class Cloud:
         state.pop('PROVISIONER_VERSION', None)
         state.pop('STATUS_VERSION', None)
         return state
+
+
+# === Helper functions ===
+def cloud_in_list(cloud: Cloud, cloud_list: Iterable[Cloud]) -> bool:
+    """Returns whether the cloud is in the given cloud list."""
+    return any(cloud.is_same_cloud(c) for c in cloud_list)

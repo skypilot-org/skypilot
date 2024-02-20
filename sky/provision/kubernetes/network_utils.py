@@ -43,7 +43,7 @@ def fill_loadbalancer_template(namespace: str, service_name: str,
         raise FileNotFoundError(
             f'Template "{_LOADBALANCER_TEMPLATE_NAME}" does not exist.')
 
-    with open(template_path) as fin:
+    with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
@@ -65,7 +65,7 @@ def fill_ingress_template(namespace: str, path_prefix: str, service_name: str,
     if not os.path.exists(template_path):
         raise FileNotFoundError(
             f'Template "{_INGRESS_TEMPLATE_NAME}" does not exist.')
-    with open(template_path) as fin:
+    with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     j2_template = jinja2.Template(template)
     cont = j2_template.render(

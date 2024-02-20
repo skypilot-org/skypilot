@@ -240,6 +240,20 @@ def _wait_for_pods_to_run(namespace, new_nodes):
         time.sleep(1)
 
 
+def _run_command_on_pods(node_name, node_namespace, command):
+    cmd_output = kubernetes.stream()(
+        kubernetes.core_api().connect_get_namespaced_pod_exec,
+        node_name,
+        node_namespace,
+        command=command,
+        stderr=True,
+        stdin=False,
+        stdout=True,
+        tty=False,
+        _request_timeout=kubernetes.API_TIMEOUT)
+    return cmd_output
+
+
 def _set_env_vars_in_pods(namespace: str, new_pods: List):
     """Setting environment variables in pods.
 
@@ -267,30 +281,8 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     ]
 
     for new_pod in new_pods:
-        kubernetes.stream()(
-            kubernetes.core_api().connect_get_namespaced_pod_exec,
-            new_pod.metadata.name,
-            namespace,
-            command=set_k8s_env_var_cmd,
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-            _request_timeout=kubernetes.API_TIMEOUT)
-
-
-def run_command_on_pods(node_name, node_namespace, command):
-    cmd_output = kubernetes.stream()(
-        kubernetes.core_api().connect_get_namespaced_pod_exec,
-        node_name,
-        node_namespace,
-        command=command,
-        stderr=True,
-        stdin=False,
-        stdout=True,
-        tty=False,
-        _request_timeout=kubernetes.API_TIMEOUT)
-    return cmd_output
+        _run_command_on_pods(new_pod.metadata.name, namespace,
+                             set_k8s_env_var_cmd)
 
 
 def _check_user_privilege(namespace: str, new_nodes: List) -> None:
@@ -314,8 +306,9 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
     ]
 
     for new_node in new_nodes:
-        privilege_check = run_command_on_pods(new_node.metadata.name, namespace,
-                                              check_k8s_user_sudo_cmd)
+        privilege_check = _run_command_on_pods(new_node.metadata.name,
+                                               namespace,
+                                               check_k8s_user_sudo_cmd)
         if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
@@ -349,7 +342,7 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             '~/.ssh/authorized_keys; '
             '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
             '$(prefix_cmd) chmod 700 ~/.ssh; '
-            '$(prefix_cmd) chmod 600 ~/.ssh/authorized_keys; '
+            '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
             '$(prefix_cmd) service ssh restart; '
             # Eliminate the error
             # `mesg: ttyname failed: inappropriate ioctl for device`.
@@ -358,7 +351,7 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
     ]
     # TODO(romilb): We need logging and surface errors here.
     for new_node in new_nodes:
-        run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd)
+        _run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd)
 
 
 def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
@@ -427,6 +420,22 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             f'requested by the user ({config.count}). '
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
+
+    # Add nvidia runtime class if it exists
+    nvidia_runtime_exists = False
+    try:
+        nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class()
+    except kubernetes.get_kubernetes().client.ApiException as e:
+        logger.warning('run_instances: Error occurred while checking for '
+                       f'nvidia RuntimeClass - '
+                       f'{common_utils.format_exception(e)}'
+                       'Continuing without using nvidia RuntimeClass.\n'
+                       'If you are on a K3s cluster, manually '
+                       'override runtimeClassName in ~/.sky/config.yaml. '
+                       'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
+
+    if nvidia_runtime_exists:
+        pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
     created_pods = {}
     logger.debug(f'run_instances: calling create_namespaced_pod '
@@ -651,8 +660,8 @@ def get_cluster_info(
     ssh_user = 'sky'
     get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
     assert head_pod_name is not None
-    ssh_user = run_command_on_pods(head_pod_name, namespace,
-                                   get_k8s_ssh_user_cmd)
+    ssh_user = _run_command_on_pods(head_pod_name, namespace,
+                                    get_k8s_ssh_user_cmd)
     ssh_user = ssh_user.strip()
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')

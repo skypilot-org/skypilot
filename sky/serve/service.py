@@ -43,7 +43,7 @@ def _handle_signal(service_name: str) -> None:
         # Filelock is needed to prevent race condition with concurrent
         # signal writing.
         with filelock.FileLock(str(signal_file) + '.lock'):
-            with signal_file.open(mode='r') as f:
+            with signal_file.open(mode='r', encoding='utf-8') as f:
                 user_signal_text = f.read().strip()
                 try:
                     user_signal = serve_utils.UserSignal(user_signal_text)

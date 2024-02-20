@@ -46,6 +46,8 @@ class SCP(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE,
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            (f'Specifying image ID is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             (f'Docker image is currently not supported on {_REPR}. '
              'You can try running docker command inside the '
@@ -179,10 +181,13 @@ class SCP(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud  # Unused.
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud, dryrun  # Unused.
         assert zones is None, 'SCP does not support zones.'
 
         r = resources
@@ -340,14 +345,6 @@ class SCP(clouds.Cloud):
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         return service_catalog.validate_region_zone(region, zone, clouds='scp')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'scp')
 
     @staticmethod
     def _is_disk_size_allowed(resources):

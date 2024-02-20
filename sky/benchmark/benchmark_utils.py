@@ -278,7 +278,7 @@ def _delete_remote_dir(remote_dir: str, bucket_type: data.StoreType) -> None:
 
 
 def _read_timestamp(path: str) -> float:
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         timestamp = f.readlines()
     assert len(timestamp) == 1
     return float(timestamp[0].strip())
@@ -396,7 +396,7 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
     message = None
     if summary_path is not None and os.path.exists(summary_path):
         # (1) SkyCallback has saved the summary.
-        with open(summary_path, 'r') as f:
+        with open(summary_path, 'r', encoding='utf-8') as f:
             summary = json.load(f)
         if end_time is None:
             last_time = summary['last_step_time']

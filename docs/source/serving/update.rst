@@ -48,7 +48,7 @@ new-versioned replicas.  :code:`sky serve status` shows the latest service
 version and each replica's version.
 
 Example
-===========
+~~~~~~~
 
 We first launch a `simple HTTP service <https://github.com/skypilot-org/skypilot/blob/master/examples/serve/http_server/task.yaml>`_:
 

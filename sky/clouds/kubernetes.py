@@ -5,7 +5,6 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
@@ -20,7 +19,9 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-CREDENTIAL_PATH = '~/.kube/config'
+# Check if KUBECONFIG is set, and use it if it is.
+DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
+CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -195,10 +196,13 @@ class Kubernetes(clouds.Cloud):
         return 0
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud, zones  # Unused.
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud, zones, dryrun  # Unused.
         if region is None:
             region = self._regions[0]
 
@@ -341,12 +345,17 @@ class Kubernetes(clouds.Cloud):
                     f'check if {CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {
-            # TODO(romilb): Fix before merging.
-            '~/.ssh/sky-key': '~/.ssh/sky-key',
-            '~/.ssh/sky-key.pub': '~/.ssh/sky-key.pub',
-            CREDENTIAL_PATH: CREDENTIAL_PATH
-        }
+        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+            # Upload kubeconfig to the default path to avoid having to set
+            # KUBECONFIG in the environment.
+            return {
+                # TODO(romilb): Fix before merging.
+                '~/.ssh/sky-key': '~/.ssh/sky-key',
+                '~/.ssh/sky-key.pub': '~/.ssh/sky-key.pub',
+                DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH
+            }
+        else:
+            return {}
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
@@ -361,18 +370,6 @@ class Kubernetes(clouds.Cloud):
             raise ValueError('Kubernetes support does not support setting zone.'
                              ' Cluster used is determined by the kubeconfig.')
         return region, zone
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        try:
-            # Check if accelerator is available by checking node labels
-            _, _ = kubernetes_utils.get_gpu_label_key_value(accelerator)
-            return True
-        except exceptions.ResourcesUnavailableError:
-            return False
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

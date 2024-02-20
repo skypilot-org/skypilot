@@ -39,10 +39,6 @@ def up(
         task: sky.Task to serve up.
         service_name: Name of the service.
     """
-    # This is to avoid circular import.
-    # pylint: disable=import-outside-toplevel
-    from sky import execution
-
     if service_name is None:
         service_name = serve_utils.generate_service_name()
 
@@ -164,13 +160,14 @@ def up(
             controller_cloud and
             controller_cloud.is_same_cloud(clouds.Kubernetes())
         ) else constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
-        controller_job_id, controller_handle = execution.execute(
-            entrypoint=controller_task,
+        controller_job_id, controller_handle = sky.launch(
+            task=controller_task,
             stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
             retry_until_up=True,
+            _disable_controller_check=True,
         )
 
         style = colorama.Style
@@ -180,11 +177,11 @@ def up(
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
         # change after the first time, so there is no consistency issue.
         with rich_utils.safe_status(
-                '[cyan]Waiting for the service to initialize[/]'):
+                '[cyan]Waiting for the service to register[/]'):
             # This function will check the controller job id in the database
             # and return the endpoint if the job id matches. Otherwise it will
             # return None.
-            code = serve_utils.ServeCodeGen.wait_service_initialization(
+            code = serve_utils.ServeCodeGen.wait_service_registration(
                 service_name, controller_job_id)
             backend = backend_utils.get_backend_from_handle(controller_handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
@@ -393,7 +390,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
         except exceptions.CommandError as e:
             raise RuntimeError(e.error_msg) from e
 
-    print(f'{colorama.Fore.GREEN}Service {service_name!r} update succeeded.'
+    print(f'{colorama.Fore.GREEN}Service {service_name!r} update scheduled.'
           f'{colorama.Style.RESET_ALL}\n'
           f'Please use {backend_utils.BOLD}sky serve status {service_name} '
           f'{backend_utils.RESET_BOLD}to check the latest status.')
