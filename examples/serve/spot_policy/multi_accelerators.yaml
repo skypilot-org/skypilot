@@ -1,6 +1,5 @@
 # SkyServe YAML to launch a service with mixed spot and on-demand instances and an ordered preference for accelerators.
 # The policy will maintain `base_ondemand_fallback_replicas` number of on-demand instances, in addition to spot instances.
-# The policy will disable spot placer as multiple accelerators and ordered resources are specified.  
 
 service:
   readiness_probe: /health
