@@ -72,7 +72,6 @@ class Autoscaler:
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
-        self.request_timestamps: List[float] = []
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
@@ -112,13 +111,11 @@ class Autoscaler:
 
     def get_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
-        return {
-            'request_timestamps': self.request_timestamps,
-        }
+        raise NotImplementedError
 
     def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         """Load dynamic states to autoscaler."""
-        self.request_timestamps = dynamic_states.get('request_timestamps', [])
+        raise NotImplementedError
 
 
 class RequestRateAutoscaler(Autoscaler):
@@ -145,6 +142,7 @@ class RequestRateAutoscaler(Autoscaler):
         self.target_qps_per_replica: Optional[
             float] = spec.target_qps_per_replica
         self.qps_window_size: int = constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
+        self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
         upscale_delay_seconds = (
@@ -367,6 +365,18 @@ class RequestRateAutoscaler(Autoscaler):
         if not scaling_options:
             logger.info('No scaling needed.')
         return scaling_options
+
+    def get_dynamic_states(self) -> Dict[str, Any]:
+        return {
+            'request_timestamps': self.request_timestamps,
+        }
+
+    def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
+        if 'request_timestamps' in dynamic_states:
+            self.request_timestamps = dynamic_states['request_timestamps']
+            dynamic_states.pop('request_timestamps')
+        if dynamic_states:
+            logger.info(f'Remaining dynamic states: {dynamic_states}')
 
 
 class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
