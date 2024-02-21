@@ -102,6 +102,7 @@ _SPOT_CANCEL_WAIT = (
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
+
 class Test(NamedTuple):
     name: str
     # Each command is executed serially.  If any failed, the remaining commands
