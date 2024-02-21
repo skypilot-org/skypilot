@@ -3794,7 +3794,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             runner.rsync(source=controller_log_file_name,
                          target=os.path.join(
                              target_directory,
-                             serve_constants.CONTROLLER_FILE_NAME),
+                             serve_constants.CONTROLLER_LOG_FILE_NAME),
                          up=False,
                          stream_logs=False)
         if (sync_down_all_components or service_component
@@ -3806,7 +3806,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             runner.rsync(source=load_balancer_log_file_name,
                          target=os.path.join(
                              target_directory,
-                             serve_constants.LOAD_BALANCER_FILE_NAME),
+                             serve_constants.LOAD_BALANCER_LOG_FILE_NAME),
                          up=False,
                          stream_logs=False)
         logger.info(f'Synced down logs can be found at: {target_directory}')

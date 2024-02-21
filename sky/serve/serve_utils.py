@@ -205,13 +205,13 @@ def generate_remote_config_yaml_file_name(service_name: str) -> str:
 def generate_remote_controller_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, constants.CONTROLLER_FILE_NAME)
+    return os.path.join(dir_name, constants.CONTROLLER_LOG_FILE_NAME)
 
 
 def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, constants.LOAD_BALANCER_FILE_NAME)
+    return os.path.join(dir_name, constants.LOAD_BALANCER_LOG_FILE_NAME)
 
 
 def generate_replica_launch_log_file_name(service_name: str,

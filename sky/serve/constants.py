@@ -3,8 +3,8 @@
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
-CONTROLLER_FILE_NAME = 'controller.log'
-LOAD_BALANCER_FILE_NAME = 'load_balancer.log'
+CONTROLLER_LOG_FILE_NAME = 'controller.log'
+LOAD_BALANCER_LOG_FILE_NAME = 'load_balancer.log'
 
 # The filelock for selecting service ports on controller VM when starting a
 # service. We need to have a filelock to avoid port collision when starting
