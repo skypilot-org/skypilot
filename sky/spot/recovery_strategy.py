@@ -21,6 +21,7 @@ from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -30,10 +31,6 @@ logger = sky_logging.init_logger(__name__)
 
 SPOT_STRATEGIES = {}
 SPOT_DEFAULT_STRATEGY = None
-
-# Waiting time for job from INIT/PENDING to RUNNING
-# 10 * JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 10 * 5 = 50 seconds
-MAX_JOB_CHECKING_RETRY = 10
 
 
 def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
@@ -179,7 +176,7 @@ class StrategyExecutor:
             terminate_cluster(self.cluster_name)
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
-        """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
+        """Wait until job starts on the cluster with retry
 
         Returns:
             The timestamp of when the job is submitted, or None if failed to
@@ -187,7 +184,8 @@ class StrategyExecutor:
         """
         status = None
         job_checking_retry_cnt = 0
-        while job_checking_retry_cnt < MAX_JOB_CHECKING_RETRY:
+        while (job_checking_retry_cnt <
+               controller_utils.MAX_STATUS_CHECKING_RETRY):
             # Avoid the infinite loop, if any bug happens.
             job_checking_retry_cnt += 1
             try:
@@ -240,7 +238,7 @@ class StrategyExecutor:
                                 'the job start timestamp. Retrying.')
                     continue
             # Wait for the job to be started
-            time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
+            time.sleep(controller_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
         return None
 
     def _launch(self,

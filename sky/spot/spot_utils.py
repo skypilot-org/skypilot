@@ -42,9 +42,6 @@ SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
 
-# Controller checks if its job has started every this many seconds.
-JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
-
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5

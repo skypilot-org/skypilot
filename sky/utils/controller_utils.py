@@ -43,6 +43,13 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
 # The placeholder for the local skypilot config path in file mounts.
 LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 
+# Controller checks if its job has started every this many seconds.
+JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
+
+# Waiting time for job from INIT/PENDING to RUNNING
+# 10 * JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 10 * 5 = 50 seconds
+MAX_STATUS_CHECKING_RETRY = 10
+
 
 @dataclasses.dataclass
 class _ControllerSpec:
