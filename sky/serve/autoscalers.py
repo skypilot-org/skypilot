@@ -110,6 +110,16 @@ class Autoscaler:
         else:
             return RequestRateAutoscaler(spec)
 
+    def get_dynamic_states(self) -> Dict[str, Any]:
+        """Dump dynamic states from autoscaler."""
+        return {
+            'request_timestamps': self.request_timestamps,
+        }
+
+    def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
+        """Load dynamic states to autoscaler."""
+        self.request_timestamps = dynamic_states.get('request_timestamps', [])
+
 
 class RequestRateAutoscaler(Autoscaler):
     """RequestRateAutoscaler: Autoscale according to request rate.

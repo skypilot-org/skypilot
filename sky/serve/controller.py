@@ -123,10 +123,6 @@ class SkyServeController:
 
                 self._replica_manager.update_version(version, service)
 
-                # TODO(MaoZiming): add getter and setter for autoscalers
-                # Getter: return all states of the autoscaler.
-                # Setter: inherit all states from the previous autoscaler
-                # and drop unnecessary fields or print warnings.
                 if not (isinstance(
                         self._autoscaler,
                         type(
@@ -135,8 +131,8 @@ class SkyServeController:
                     old_autoscaler = self._autoscaler
                     self._autoscaler = (
                         autoscalers.RequestRateAutoscaler.from_spec(service))
-                    self._autoscaler.request_timestamps = (
-                        old_autoscaler.request_timestamps)
+                    self._autoscaler.load_dynamic_states(
+                        old_autoscaler.get_dynamic_states())
                     self._autoscaler.latest_version = version
                 else:
                     self._autoscaler.update_version(version, service)
