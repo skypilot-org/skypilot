@@ -338,11 +338,11 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
             'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
             '$(prefix_cmd) mkdir -p ~/.ssh; '
-            '$(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > '
-            '~/.ssh/authorized_keys; '
             '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
             '$(prefix_cmd) chmod 700 ~/.ssh; '
             '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
+            '$(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > '
+            '~/.ssh/authorized_keys; '
             '$(prefix_cmd) service ssh restart; '
             # Eliminate the error
             # `mesg: ttyname failed: inappropriate ioctl for device`.
@@ -522,6 +522,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        })
 
     assert head_pod_name is not None, 'head_instance_id should not be None'
+    logger.debug(f'run_instances: Done. head pod name: {head_pod_name}')
     return common.ProvisionRecord(
         provider_name='kubernetes',
         region=region,
