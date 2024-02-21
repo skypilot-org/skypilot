@@ -241,6 +241,7 @@ class RequestRateAutoscaler(Autoscaler):
     ) -> List[int]:
 
         status_order = serve_state.ReplicaStatus.scale_down_decision_order()
+        # TODO(MaoZiming): also sort by provisioned time.
         replica_infos_sorted = sorted(
             replica_infos,
             key=lambda info: status_order.index(info.status)
