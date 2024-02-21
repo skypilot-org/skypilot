@@ -26,11 +26,8 @@ setup: |
     conda create -n mixtral -y python=3.10
     conda activate mixtral
   fi
-  # We have to manually install Torch otherwise apex & xformers won't build
-  pip list | grep torch || pip install "torch>=2.0.0"
-
-  pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git"
-  pip install git+https://github.com/huggingface/transformers
+  pip install transformers==4.38.0
+  pip install vllm==0.3.2
   pip list | grep megablocks || pip install megablocks
 
 run: |
