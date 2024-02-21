@@ -73,7 +73,7 @@ def launch_cluster(task_yaml_path: str,
             if 'any_of' in resource_config:
                 for any_of_config in resource_config['any_of']:
                     any_of_config.update(resources_override)
-            if 'ordered' in resource_config:
+            elif 'ordered' in resource_config:
                 for ordered_config in resource_config['ordered']:
                     ordered_config.update(resources_override)
             else:
@@ -281,6 +281,7 @@ class ReplicaStatusProperty:
             return True
         if not self.service_ready_now:
             return False
+        assert isinstance(self.first_ready_time, int)
         return self.first_ready_time != -1
 
     def should_track_service_status(self) -> bool:
@@ -311,6 +312,10 @@ class ReplicaStatusProperty:
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
             if self.sky_down_status == ProcessStatus.FAILED:
                 return serve_state.ReplicaStatus.FAILED_CLEANUP
+            if self.sky_down_status == ProcessStatus.SUCCEEDED:
+                # This indicate it is a scale_down with correct teardown.
+                # Should have been cleaned from the replica table.
+                return serve_state.ReplicaStatus.UNKNOWN
             # Still launching
             return serve_state.ReplicaStatus.PROVISIONING
         if self.sky_down_status is not None:

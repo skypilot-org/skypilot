@@ -1,5 +1,6 @@
 # SkyServe YAML to launch a service with mixed spot and on-demand instances.
 # The policy will maintain `base_ondemand_fallback_replicas` number of on-demand instances, in addition to spot instances.
+# On-demand instances are counted in autoscaling decisions (i.e., between `min_replicas` and `max_replicas`).
 
 service:
   readiness_probe: /health
@@ -10,9 +11,6 @@ service:
     base_ondemand_fallback_replicas: 1
 
 resources:
-  any_of:
-  - zone: us-central1-a
-  - region: us-east1
   ports: 8081
   cpus: 2+
   # use_spot is needed for ondemand fallback

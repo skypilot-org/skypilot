@@ -72,6 +72,7 @@ class Autoscaler:
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
+        self.request_timestamps: List[float] = []
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
@@ -97,9 +98,14 @@ class Autoscaler:
         raise NotImplementedError
 
     @classmethod
-    def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
-        """Instantiate autoscaler based on service spec."""
-        raise NotImplementedError
+    def from_spec(
+            cls,
+            spec: 'service_spec.SkyServiceSpec') -> 'RequestRateAutoscaler':
+        # TODO(MaoZiming): use NAME to get the class.
+        if spec.use_ondemand_fallback:
+            return FallbackRequestRateAutoscaler(spec)
+        else:
+            return RequestRateAutoscaler(spec)
 
 
 class RequestRateAutoscaler(Autoscaler):
@@ -126,7 +132,6 @@ class RequestRateAutoscaler(Autoscaler):
         self.target_qps_per_replica: Optional[
             float] = spec.target_qps_per_replica
         self.qps_window_size: int = constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
-        self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
         upscale_delay_seconds = (
@@ -175,6 +180,9 @@ class RequestRateAutoscaler(Autoscaler):
         # calling `_set_target_num_replica_with_hysteresis` to have the replicas
         # quickly scale after each update.
         self.target_num_replicas = self._cal_target_num_replicas_based_on_qps()
+        # Cleanup hysteretic counters.
+        self.upscale_counter = 0
+        self.downscale_counter = 0
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -241,7 +249,8 @@ class RequestRateAutoscaler(Autoscaler):
     ) -> List[int]:
 
         status_order = serve_state.ReplicaStatus.scale_down_decision_order()
-        # TODO(MaoZiming): also sort by provisioned time.
+        # TODO(MaoZiming): also sort by provisioned time to make sure
+        # we terminate the replicas that starts provisioning later first
         replica_infos_sorted = sorted(
             replica_infos,
             key=lambda info: status_order.index(info.status)
@@ -344,16 +353,6 @@ class RequestRateAutoscaler(Autoscaler):
             logger.info('No scaling needed.')
         return scaling_options
 
-    @classmethod
-    def from_spec(
-            cls,
-            spec: 'service_spec.SkyServiceSpec') -> 'RequestRateAutoscaler':
-        # TODO(MaoZiming): use NAME to get the class.
-        if spec.use_ondemand_fallback:
-            return FallbackRequestRateAutoscaler(spec)
-        else:
-            return RequestRateAutoscaler(spec)
-
 
 class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
     """FallbackRequestRateAutoscaler
@@ -376,6 +375,9 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         self.base_ondemand_fallback_replicas: int = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
+        # Assert: Either dynamic_ondemand_fallback is set
+        # or base_ondemand_fallback_replicas is greater than 0.
+        assert spec._use_ondemand_fallback
         self.dynamic_ondemand_fallback: bool = (
             spec.dynamic_ondemand_fallback
             if spec.dynamic_ondemand_fallback is not None else False)
@@ -386,13 +388,14 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         self.base_ondemand_fallback_replicas = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
+        # Assert: Either dynamic_ondemand_fallback is set
+        # or base_ondemand_fallback_replicas is greater than 0.
+        assert spec.use_ondemand_fallback
         self.dynamic_ondemand_fallback = (spec.dynamic_ondemand_fallback
                                           if spec.dynamic_ondemand_fallback
                                           is not None else False)
 
     def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
-        # We have checked before any_of can only be used to
-        # specify multiple zones, regions and clouds.
         return {'use_spot': True}
 
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:

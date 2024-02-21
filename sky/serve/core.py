@@ -31,11 +31,15 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
-def _validate_service_task(task: 'sky.Task'):
+def _validate_service_task(task: 'sky.Task') -> None:
     """Validate the task for Sky Serve.
 
     Args:
         task: sky.Task to validate
+
+    Raises:
+        ValueError: if the arguments are invalid.
+        RuntimeError: if the task.serve is not found.
     """
     spot_resources: List['sky.Resources'] = [
         resource for resource in task.resources if resource.use_spot
@@ -54,19 +58,22 @@ def _validate_service_task(task: 'sky.Task'):
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
+    policy_description = ('on-demand'
+                          if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
         if resource.spot_recovery is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('spot_recovery is disabled for SkyServe. '
-                                 'SkyServe will replenish preempted spot.')
+                                 'SkyServe will replenish preempted spot '
+                                 f'with {policy_description} instances.')
 
-    first_resource_dict = list(task.resources)[0].to_yaml_config()
+    replica_ingress_port: Optional[str] = None
     for requested_resources in task.resources:
         if (task.service.use_ondemand_fallback and
                 not requested_resources.use_spot):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Specify use_spot in resources for '
-                                 'on-demand fallback.')
+                raise ValueError('Please explicitly specify `use_spot: true` '
+                                 'in resources for on-demand fallback.')
         if requested_resources.ports is None or len(
                 requested_resources.ports) != 1:
             with ux_utils.print_exception_no_traceback():
@@ -82,11 +89,13 @@ def _validate_service_task(task: 'sky.Task'):
                     'number. Please specify a single port instead. '
                     f'Got: {service_port_str!r}')
 
-        if service_port_str != list(task.resources)[0].ports[0]:
+        if replica_ingress_port is None:
+            service_port_str = replica_ingress_port
+        elif service_port_str != replica_ingress_port:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Got multiple ports: {service_port_str} and '
-                    f'{first_resource_dict["port"]} in different resources. '
+                    f'{replica_ingress_port} in different resources. '
                     'Please specify the same port instead.')
 
 

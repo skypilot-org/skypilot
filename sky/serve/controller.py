@@ -47,8 +47,8 @@ class SkyServeController:
             replica_managers.SkyPilotReplicaManager(service_name=service_name,
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
-        self._autoscaler: autoscalers.RequestRateAutoscaler = (
-            autoscalers.RequestRateAutoscaler.from_spec(service_spec))
+        self._autoscaler: autoscalers.Autoscaler = (
+            autoscalers.Autoscaler.from_spec(service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -123,7 +123,10 @@ class SkyServeController:
 
                 self._replica_manager.update_version(version, service)
 
-                # TODO(MaoZiming): use NAME for autoscaler.
+                # TODO(MaoZiming): add getter and setter for autoscalers
+                # Getter: return all states of the autoscaler.
+                # Setter: inherit all states from the previous autoscaler
+                # and drop unnecessary fields or print warnings.
                 if not (isinstance(
                         self._autoscaler,
                         type(
