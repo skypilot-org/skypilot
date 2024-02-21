@@ -263,8 +263,10 @@ Lambda Cloud
 Paperspace
 ~~~~~~~~~~~~~~~~~~
 
-`Paperspace <https://www.paperspace.com/>`_ is a cloud provider that provides access to GPU accelerated VMs. To configure Paperspace access, go to follow `these instructions to generate an **API key** <https://docs.digitalocean.com/reference/paperspace/api-keys/>`_. Add the API key with:
+`Paperspace <https://www.paperspace.com/>`_ is a cloud provider that provides access to GPU accelerated VMs. To configure Paperspace access, go to follow `these instructions to generate an API key <https://docs.digitalocean.com/reference/paperspace/api-keys/>`_. Add the API key with:
+
 .. code-block:: shell
+
   mkdir -p ~/.paperspace
   echo "{'api_key' : <your_api_key_here>}" > ~/.paperspace/config.json
 
