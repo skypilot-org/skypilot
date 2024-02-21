@@ -37,6 +37,8 @@ setup: |
 run: |
   conda activate gemma
   export PATH=$PATH:/sbin
+  # --max-model-len is set to 1024 to avoid taking too much GPU memory on L4 and
+  # A10g with small memory.
   python -u -m vllm.entrypoints.openai.api_server \
                 --host 0.0.0.0 \
                 --model $MODEL_NAME \
