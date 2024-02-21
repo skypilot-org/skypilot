@@ -3782,7 +3782,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # the timestamp directory, and we can just put the controller and
         # load balancer logs in there. Otherwise, we would create the
         # timestamp directory with controller and load balancer logs first,
-        # and then the replica logs download would overwrite it
+        # and then the replica logs download would overwrite it.
         target_directory = os.path.join(sky_logs_directory, run_timestamp)
         os.makedirs(target_directory, exist_ok=True)
         if (sync_down_all_components or

@@ -4878,7 +4878,7 @@ def serve_logs(
         # replicas for a service
         sky serve logs [SERVICE_NAME] --sync-down
         # Sync down logs for only controller. Same pattern
-        applies for load balancer
+        # applies for load balancer
         sky serve logs [SERVICE_NAME] --controller --sync-down
         # Sync down logs only for a single replica
         sky serve logs [SERVICE_NAME] 3 --sync-down
@@ -4898,7 +4898,7 @@ def serve_logs(
         target_component = serve_lib.ServiceComponent.CONTROLLER
     elif load_balancer:
         target_component = serve_lib.ServiceComponent.LOAD_BALANCER
-    elif replica_id:
+    elif replica_id is not None:
         target_component = serve_lib.ServiceComponent.REPLICA
     else:
         target_component = None

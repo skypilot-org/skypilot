@@ -578,7 +578,7 @@ def status(
 def sync_down_logs(service_name: str,
                    service_component: Optional[serve_utils.ServiceComponent],
                    replica_id: Optional[int]) -> None:
-    logger.info(f'Syncing down logs for {service_name}')
+    logger.info(f'Syncing down logs for {service_name}...')
     controller_status, controller_handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
