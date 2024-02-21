@@ -94,6 +94,7 @@ def _fill_in_env_vars(
               messages:
                 - role: user
                   content: How to print hello world?
+              max_tokens: 1
 
     We simply dump yaml_field into a json string, and replace env vars using
     regex. This should be safe as yaml config has been schema-validated.

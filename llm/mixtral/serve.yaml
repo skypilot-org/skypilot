@@ -11,6 +11,7 @@ service:
       messages:
         - role: user
           content: Hello! What is your name?
+      max_tokens: 1
     initial_delay_seconds: 1200
   replica_policy:
     min_replicas: 2
