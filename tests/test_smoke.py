@@ -2949,6 +2949,25 @@ def test_skyserve_spot_recovery():
 
 @pytest.mark.gcp
 @pytest.mark.sky_serve
+def test_skyserve_base_ondemand_fallback():
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-base-ondemand-fallback',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/spot/base_ondemand_fallback.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'output=$(sky serve status {name});'
+            'echo "$output" | grep "GCP(\[Spot\]vCPU=2)" && '
+            'echo "$output" | grep "GCP(vCPU=2)";'
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
 def test_skyserve_spot_user_bug():
     """Tests that spot recovery doesn't occur for non-preemption failures"""
     name = _get_service_name()
