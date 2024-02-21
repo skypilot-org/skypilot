@@ -266,7 +266,9 @@ class RequestRateAutoscaler(Autoscaler):
             replica_infos,
             key=lambda info: (
                 status_order.index(info.status)
-                # Use -1 for undefined status to terminate them first.
+                # Use -1 for other status that will be terminated first.
+                # Including: NOT_READY, SHUTTING_DOWN, FAILED,
+                # FAILED_CLEANUP, PREEMPTED, UNKNOWN.
                 if info.status in status_order else -1,
                 -info.replica_id))
 
