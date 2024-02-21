@@ -11,12 +11,13 @@ service:
       messages:
         - role: user
           content: Hello! What is your name?
+      max_tokens: 1
     initial_delay_seconds: 1200
   replica_policy:
     min_replicas: 2
 
 envs:
-  MODEL_NAME: google/gemma-7b
+  MODEL_NAME: google/gemma-7b-it
   HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
 
 resources: 
@@ -42,6 +43,5 @@ run: |
   python -u -m vllm.entrypoints.openai.api_server \
                 --host 0.0.0.0 \
                 --model $MODEL_NAME \
-                --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
-                --max-model-len 1024 | tee ~/openai_api_server.log
+                --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE | tee ~/openai_api_server.log
 
