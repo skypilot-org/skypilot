@@ -77,6 +77,7 @@ def create_table(cursor, conn):
     #  Actual launched resources fetched from handle for cluster.
 
     # num_nodes: Optional[int] number of nodes launched.
+    # hourly_cost: Optional[float] hourly cost of the cluster.
 
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS cluster_history (
@@ -85,7 +86,8 @@ def create_table(cursor, conn):
         num_nodes int,
         requested_resources BLOB,
         launched_resources BLOB,
-        usage_intervals BLOB)""")
+        usage_intervals BLOB, 
+        hourly_cost REAL)""")
     # Table for configs (e.g. enabled clouds)
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS config (
@@ -138,6 +140,42 @@ def create_table(cursor, conn):
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
 
 
+def _cluster_history_backward_compatibility():
+    """For backward compatibility.
+    This ensures that the cluster_history table has hourly_cost column.
+    """
+    cursor = _DB.cursor
+    conn = _DB.conn
+    # check if hourly_cost column exists in cluster_history table
+    cursor.execute('SELECT * FROM cluster_history LIMIT 1')
+    columns = [description[0] for description in cursor.description]
+    if 'hourly_cost' not in columns:
+        # add hourly_cost column to cluster_history table
+        db_utils.add_column_to_table(cursor, conn, 'cluster_history',
+                                     'hourly_cost', 'REAL DEFAULT 0')
+
+        # get all rows from cluster_history table
+        rows = cursor.execute(
+            'SELECT cluster_hash, launched_resources FROM cluster_history'
+        ).fetchall()
+
+        # update hourly_cost column in cluster_history table to the cost
+        # calculated from launched_resources
+        for row in rows:
+            # Explicitly specify the number of fields to unpack, so that
+            # we can add new fields to the database in the future without
+            # breaking the previous code.
+            cluster_hash, launched_resources = row
+            launched_resources = pickle.loads(launched_resources)
+            launched_instance_hourly_cost = launched_resources.get_cost(
+                seconds=3600)
+            _DB.cursor.execute(
+                'UPDATE cluster_history SET hourly_cost=(?) '
+                'WHERE cluster_hash=(?)',
+                (launched_instance_hourly_cost, cluster_hash))
+        _DB.conn.commit()
+
+
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
@@ -155,6 +193,7 @@ def add_or_update_cluster(cluster_name: str,
             and last_use will be updated. Otherwise, use the old value.
     """
     # FIXME: launched_at will be changed when `sky launch -c` is called.
+    _cluster_history_backward_compatibility()
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
     last_use = common_utils.get_pretty_entry_point() if is_launch else None
@@ -266,37 +305,58 @@ def add_or_update_cluster(cluster_name: str,
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
     launched_resources = getattr(cluster_handle, 'launched_resources', None)
-    _DB.cursor.execute(
-        'INSERT or REPLACE INTO cluster_history'
-        '(cluster_hash, name, num_nodes, requested_resources, '
-        'launched_resources, usage_intervals) '
-        'VALUES ('
-        # hash
-        '?, '
-        # name
-        '?, '
-        # requested resources
-        '?, '
-        # launched resources
-        '?, '
-        # number of nodes
-        '?, '
-        # usage intervals
-        '?)',
-        (
+    # if cluster_hash is already present in cluster_history table
+    if _get_cluster_usage_intervals(cluster_hash):
+        _DB.cursor.execute(
+            'UPDATE cluster_history SET num_nodes=(?), '
+            'launched_resources=(?), usage_intervals=(?), '
+            'requested_resources, WHERE cluster_hash=(?)', (
+                launched_nodes,
+                pickle.dumps(launched_resources),
+                pickle.dumps(usage_intervals),
+                requested_resources,
+                cluster_hash,
+            ))
+    else:
+        # This will never be none as we are getting it from the handler.
+        assert launched_resources is not None
+        launched_instance_hourly_cost = launched_resources.get_cost(
+            seconds=3600)
+        _DB.cursor.execute(
+            'INSERT INTO cluster_history'
+            '(cluster_hash, name, hourly_cost, num_nodes, '
+            'requested_resources, launched_resources, usage_intervals) '
+            'VALUES ('
             # hash
-            cluster_hash,
+            '?, '
             # name
-            cluster_name,
+            '?, '
             # number of nodes
-            launched_nodes,
+            '?, '
             # requested resources
-            pickle.dumps(requested_resources),
+            '?, '
             # launched resources
-            pickle.dumps(launched_resources),
+            '?, '
             # usage intervals
-            pickle.dumps(usage_intervals),
-        ))
+            '?, '
+            # hourly_cost
+            '?)',
+            (
+                # hash
+                cluster_hash,
+                # name
+                cluster_name,
+                # number of nodes
+                launched_nodes,
+                # requested resources
+                pickle.dumps(requested_resources),
+                # launched resources
+                pickle.dumps(launched_resources),
+                # usage intervals
+                pickle.dumps(usage_intervals),
+                # hourly cost
+                launched_instance_hourly_cost,
+            ))
 
     _DB.conn.commit()
 
@@ -631,8 +691,9 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
+    _cluster_history_backward_compatibility()
     rows = _DB.cursor.execute(
-        'SELECT ch.cluster_hash, ch.name, ch.num_nodes, '
+        'SELECT ch.cluster_hash, ch.name, ch.num_nodes, ch.hourly_cost, '
         'ch.launched_resources, ch.usage_intervals, clusters.status  '
         'FROM cluster_history ch '
         'LEFT OUTER JOIN clusters '
@@ -641,7 +702,6 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
     # '(cluster_hash, name, num_nodes, requested_resources, '
     #         'launched_resources, usage_intervals) '
     records = []
-
     for row in rows:
         # TODO: use namedtuple instead of dict
 
@@ -649,10 +709,11 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             cluster_hash,
             name,
             num_nodes,
+            hourly_cost,
             launched_resources,
             usage_intervals,
             status,
-        ) = row[:6]
+        ) = row[:7]
 
         if status is not None:
             status = status_lib.ClusterStatus[status]
@@ -662,6 +723,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'launched_at': _get_cluster_launch_time(cluster_hash),
             'duration': _get_cluster_duration(cluster_hash),
             'num_nodes': num_nodes,
+            'hourly_cost': hourly_cost,
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),

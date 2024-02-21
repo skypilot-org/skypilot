@@ -149,10 +149,10 @@ def cost_report() -> List[Dict[str, Any]]:
 
     def get_total_cost(cluster_report: dict) -> float:
         duration = cluster_report['duration']
+        hourly_cost = cluster_report['hourly_cost']
         launched_nodes = cluster_report['num_nodes']
-        launched_resources = cluster_report['resources']
 
-        cost = (launched_resources.get_cost(duration) * launched_nodes)
+        cost = duration * (hourly_cost / 3600) * launched_nodes
         return cost
 
     for cluster_report in cluster_reports:
