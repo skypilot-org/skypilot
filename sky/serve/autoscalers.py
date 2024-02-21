@@ -84,6 +84,9 @@ class Autoscaler:
         self.min_replicas = spec.min_replicas
         self.max_replicas = (spec.max_replicas if spec.max_replicas is not None
                              else spec.min_replicas)
+        # Reclip self.target_num_replicas with new min and max replicas.
+        self.target_num_replicas = max(
+            self.min_replicas, min(self.max_replicas, self.target_num_replicas))
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -253,9 +256,11 @@ class RequestRateAutoscaler(Autoscaler):
         # we terminate the replicas that starts provisioning later first
         replica_infos_sorted = sorted(
             replica_infos,
-            key=lambda info: (status_order.index(info.status), -info.replica_id)
-            # Use -1 for undefined status to terminate them first.
-            if info.status in status_order else -1)
+            key=lambda info: (
+                status_order.index(info.status)
+                # Use -1 for undefined status to terminate them first.
+                if info.status in status_order else -1,
+                -info.replica_id))
 
         return [info.replica_id for info in replica_infos_sorted][:num_limit]
 
