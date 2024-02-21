@@ -21,10 +21,10 @@ class SkyServiceSpec:
         initial_delay_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
-        base_ondemand_fallback_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         dynamic_ondemand_fallback: Optional[bool] = None,
+        base_ondemand_fallback_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         # The following arguments are deprecated.
@@ -250,7 +250,7 @@ class SkyServiceSpec:
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
-            Spot Policy:                      {self.spot_policy_str()}\
+            Spot Policy:                      {self.spot_policy_str()}
         """)
 
     @property

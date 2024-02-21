@@ -68,20 +68,15 @@ def launch_cluster(task_yaml_path: str,
     """
     try:
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
-        resource_config = config.get('resources', {})
-        if resources_override is not None:
-            if 'any_of' in resource_config:
-                for any_of_config in resource_config['any_of']:
-                    any_of_config.update(resources_override)
-            elif 'ordered' in resource_config:
-                for ordered_config in resource_config['ordered']:
-                    ordered_config.update(resources_override)
-            else:
-                resource_config.update(resources_override)
-            config['resources'] = resource_config
-        logger.info(f'Launching replica cluster {cluster_name} with '
-                    f'resource_config: {resource_config}')
         task = sky.Task.from_yaml_config(config)
+        resources = task.resources
+        if resources_override is not None:
+            overrided_resources = [
+                r.copy(**resources_override) for r in resources
+            ]
+        task.set_resources(type(resources)(overrided_resources))
+        logger.info(f'Launching replica cluster {cluster_name} with '
+                    f'resources: {task.resources}')
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to construct task object from yaml file with '
                      f'error {common_utils.format_exception(e)}')
@@ -178,9 +173,11 @@ def _get_resources_ports(task_yaml: str) -> str:
     return task_resources.ports[0]
 
 
-def _get_use_spot_override(task_yaml: str,
-                           resource_override: Optional[Dict[str, Any]]) -> bool:
-    """Get whether the task uses spot from either overeride or task_yaml."""
+def _should_use_spot(task_yaml: str,
+                     resource_override: Optional[Dict[str, Any]]) -> bool:
+    """Get whether the task should use spot based on the overeride
+    and task_yaml.
+    """
     if resource_override is not None:
         use_spot_override = resource_override.get('use_spot')
         if use_spot_override is not None:
@@ -624,8 +621,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             args=(self._task_yaml_path, cluster_name, resources_override),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
-        use_spot = _get_use_spot_override(self._task_yaml_path,
-                                          resources_override)
+        use_spot = _should_use_spot(self._task_yaml_path, resources_override)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
                            self.latest_version)
@@ -764,10 +760,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
-        self._terminate_replica(
-            info.replica_id,
-            sync_down_logs=False,
-            replica_drain_delay_seconds=_DEFAULT_DRAIN_SECONDS)
+        self._terminate_replica(info.replica_id,
+                                sync_down_logs=False,
+                                replica_drain_delay_seconds=0)
         return True
 
     #################################
@@ -805,8 +800,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                     logger.info(
                         f'Launch process for replica {replica_id} finished.')
                     del self._launch_process_pool[replica_id]
-                    info.status_property.sky_launch_status = (
-                        ProcessStatus.SUCCEEDED)
                     if p.exitcode != 0:
                         logger.warning(
                             f'Launch process for replica {replica_id} '
@@ -815,13 +808,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                         info.status_property.sky_launch_status = (
                             ProcessStatus.FAILED)
                         error_in_sky_launch = True
+                    else:
+                        info.status_property.sky_launch_status = (
+                            ProcessStatus.SUCCEEDED)
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if error_in_sky_launch:
                     # Teardown after update replica info since
                     # _terminate_replica will update the replica info too.
                     self._terminate_replica(replica_id,
-                                            sync_down_logs=False,
+                                            sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
         for replica_id, p in list(self._down_process_pool.items()):
             if not p.is_alive():

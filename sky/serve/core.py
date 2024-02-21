@@ -21,6 +21,7 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -90,7 +91,7 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     f'Got: {service_port_str!r}')
 
         if replica_ingress_port is None:
-            service_port_str = replica_ingress_port
+            replica_ingress_port = service_port_str
         elif service_port_str != replica_ingress_port:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -134,19 +135,14 @@ def up(
     requested_cloud: Optional['clouds.Cloud'] = None
     service_port: Optional[int] = None
     for requested_resources in task.resources:
-        if requested_resources.ports is None or len(
-                requested_resources.ports) != 1:
+        requested_ports = list(
+            resources_utils.port_ranges_to_set(requested_resources.ports))
+        if len(requested_ports) != 1:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Must only specify one port in resources. Each replica '
                     'will use the port specified as application ingress port.')
-        service_port_str = requested_resources.ports[0]
-        if not service_port_str.isdigit():
-            # For the case when the user specified a port range like 10000-10010
-            raise ValueError(f'Port {service_port_str!r} is not a valid port '
-                             'number. Please specify a single port instead. '
-                             f'Got: {service_port_str!r}')
-        resource_port = int(service_port_str)
+        resource_port = requested_ports[0]
         if service_port is None:
             service_port = resource_port
         if service_port != resource_port:
