@@ -887,7 +887,7 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
     if not os.path.exists(template_path):
         raise FileNotFoundError(
             'Template "kubernetes-ssh-jump.j2" does not exist.')
-    with open(template_path) as fin:
+    with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     j2_template = jinja2.Template(template)
     cont = j2_template.render(name=ssh_jump_name,
@@ -1009,7 +1009,7 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
             else:
                 destination[key] = value
 
-    with open(config_yaml_path, 'r') as f:
+    with open(config_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
     kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),

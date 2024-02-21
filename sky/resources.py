@@ -62,6 +62,7 @@ class Resources:
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         # Internal use only.
+        # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
     ):
@@ -840,21 +841,6 @@ class Resources:
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
                 self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
-        else:
-            at_least_one_cloud_supports_ports = False
-            for cloud in global_user_state.get_enabled_clouds():
-                try:
-                    cloud.check_features_are_supported(
-                        self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
-                    at_least_one_cloud_supports_ports = True
-                except exceptions.NotSupportedError:
-                    pass
-            if not at_least_one_cloud_supports_ports:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'No enabled clouds support opening ports. To fix: '
-                        'do not specify resources.ports, or enable a cloud '
-                        'that does support this feature.')
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
 

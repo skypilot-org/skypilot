@@ -27,13 +27,11 @@ CLOUD_CHECKS = {
 
 table = {}
 
-for cloud in CLOUD_CHECKS:
+for cloud, current_check_tuple in CLOUD_CHECKS.items():
     result = {}
     print(f'=> Checking {cloud}')
     original_catalog_df = common.read_catalog(f'{cloud}.csv')
     new_catalog_df = pd.read_csv(f'{cloud}.csv')
-
-    current_check_tuple = CLOUD_CHECKS[cloud]
 
     resource_diff_df = resource_diff(original_catalog_df, new_catalog_df,
                                      current_check_tuple)

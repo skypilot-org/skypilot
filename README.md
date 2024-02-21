@@ -39,7 +39,8 @@
 
 <details>
   <summary>Archived</summary>
-
+  
+- [July, 2023] Self-Hosted **Llama-2 Chatbot** on Any Cloud: [**example**](./llm/llama-2/)
 - [April, 2023] [SkyPilot YAMLs](./llm/vicuna/) for finetuning & serving the [Vicuna LLM](https://lmsys.org/blog/2023-03-30-vicuna/) with a single command!
 
 </details>

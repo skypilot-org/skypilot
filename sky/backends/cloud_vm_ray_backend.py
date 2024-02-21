@@ -148,6 +148,7 @@ def _get_cluster_config_template(cloud):
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
+        clouds.Fluidstack: 'fluidstack-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 
@@ -162,7 +163,9 @@ def write_ray_up_script_with_patched_launch_hash_fn(
     does not include any `ssh_proxy_command` under `auth` as part of the hash
     calculation.
     """
-    with open(_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH, 'r') as f:
+    with open(_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH,
+              'r',
+              encoding='utf-8') as f:
         ray_up_no_restart_script = f.read().format(
             ray_yaml_path=repr(cluster_config_path),
             ray_up_kwargs=ray_up_kwargs)
@@ -870,42 +873,6 @@ class FailoverCloudErrorHandlerV1:
             _add_to_blocked_resources(blocked_resources,
                                       launchable_resources.copy(zone=zone.name))
 
-    @staticmethod
-    def _local_handler(blocked_resources: Set['resources_lib.Resources'],
-                       launchable_resources: 'resources_lib.Resources',
-                       region: 'clouds.Region',
-                       zones: Optional[List['clouds.Zone']], stdout: str,
-                       stderr: str):
-        del zones  # Unused.
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'ERR' in s.strip() or 'PANIC' in s.strip()
-        ]
-        if not errors:
-            if 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Errors occurred during launching of cluster services; '
-                    'check logs above.')
-        logger.warning('Got error(s) on local cluster:')
-        messages = '\n\t'.join(errors)
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(
-            blocked_resources,
-            launchable_resources.copy(region=region.name, zone=None))
-
     # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
     @staticmethod
     def _oci_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -1396,6 +1363,7 @@ class RetryingVmProvisioner(object):
     ) -> Dict[str, Any]:
         """The provision retry loop."""
         style = colorama.Style
+        fore = colorama.Fore
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1568,8 +1536,9 @@ class RetryingVmProvisioner(object):
                         cluster_yaml=handle.cluster_yaml,
                         prev_cluster_ever_up=prev_cluster_ever_up,
                         log_dir=self.log_dir)
-                    # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
-                    # in 'provision_utils.post_provision_runtime_setup()' in the caller.
+                    # NOTE: We will handle the logic of '_ensure_cluster_ray_started' #pylint: disable=line-too-long
+                    # in 'provision_utils.post_provision_runtime_setup()' in the
+                    # caller.
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
                             to_provision, handle.cluster_name_on_cloud, region,
@@ -1639,6 +1608,9 @@ class RetryingVmProvisioner(object):
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 config_dict['handle'] = handle
+                plural = '' if num_nodes == 1 else 's'
+                logger.info(f'{fore.GREEN}Successfully provisioned or found'
+                            f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
@@ -1649,21 +1621,23 @@ class RetryingVmProvisioner(object):
             definitely_no_nodes_launched = False
             if status == GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
-                definitely_no_nodes_launched = FailoverCloudErrorHandlerV1.update_blocklist_on_error(
-                    self._blocked_resources, to_provision, region, zones,
-                    stdout, stderr)
+                definitely_no_nodes_launched = (
+                    FailoverCloudErrorHandlerV1.update_blocklist_on_error(
+                        self._blocked_resources, to_provision, region, zones,
+                        stdout, stderr))
             else:
                 # gang scheduling failed.
                 assert status == GangSchedulingStatus.GANG_FAILED, status
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
-                definitely_no_nodes_launched = FailoverCloudErrorHandlerV1.update_blocklist_on_error(
-                    self._blocked_resources,
-                    to_provision,
-                    region,
-                    zones=zones,
-                    stdout=None,
-                    stderr=None)
+                definitely_no_nodes_launched = (
+                    FailoverCloudErrorHandlerV1.update_blocklist_on_error(
+                        self._blocked_resources,
+                        to_provision,
+                        region,
+                        zones=zones,
+                        stdout=None,
+                        stderr=None))
                 # GANG_FAILED means head is up, workers failed.
                 assert definitely_no_nodes_launched is False, (
                     definitely_no_nodes_launched)
@@ -2595,13 +2569,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
                         f'existing cluster first: sky down {cluster_name}')
-        if hasattr(handle, 'local_handle') and handle.local_handle is not None:
-            launched_resources = handle.local_handle['cluster_resources']
-            usage_lib.messages.usage.update_local_cluster_resources(
-                launched_resources)
-            mismatch_str = ('To fix: use accelerators/number of nodes that can '
-                            'be satisfied by the local cluster')
-
         valid_resource = None
         requested_resource_list = []
         for resource in task.resources:
@@ -3276,8 +3243,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           separate_stderr=True)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to fetch job id.', stderr)
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch job id.',
+                                           stderr,
+                                           cluster_name=handle.cluster_name)
         try:
             job_id_match = _JOB_ID_PATTERN.search(job_id_str)
             if job_id_match is not None:
@@ -3452,8 +3422,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       stream_logs=stream_logs,
                                                       require_outputs=True,
                                                       separate_stderr=True)
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to get job status.', stderr)
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to get job status.',
+                                           stderr,
+                                           cluster_name=handle.cluster_name)
         statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
@@ -3486,8 +3459,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         backend_utils.check_stale_runtime_on_remote(returncode, stdout + stderr,
                                                     handle.cluster_name)
         subprocess_utils.handle_returncode(
-            returncode, code,
-            f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
+            returncode,
+            code,
+            f'Failed to cancel jobs on cluster {handle.cluster_name}.',
+            stdout,
+            cluster_name=handle.cluster_name)
 
         cancelled_ids = common_utils.decode_payload(stdout)
         if cancelled_ids:
@@ -3514,8 +3490,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stream_logs=False,
             require_outputs=True,
             separate_stderr=True)
-        subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to sync logs.', stderr)
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to sync logs.',
+                                           stderr,
+                                           cluster_name=handle.cluster_name)
         run_timestamps = common_utils.decode_payload(run_timestamps)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
@@ -3825,7 +3804,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
                         'Metadata file does not exist.')
 
-                with open(provider.metadata.path, 'r') as f:
+                with open(provider.metadata.path, 'r', encoding='utf-8') as f:
                     metadata = json.load(f)
                     node_id = next(iter(metadata.values())).get(
                         'creation', {}).get('virtualServerId', None)
@@ -4060,7 +4039,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                code,
                                                'Failed to set autostop',
                                                stderr=stderr,
-                                               stream_logs=stream_logs)
+                                               stream_logs=stream_logs,
+                                               cluster_name=handle.cluster_name)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
 
@@ -4131,6 +4111,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream: Whether to post-process the stdout/stderr of the
                 command, such as replacing or skipping lines on the fly. If
                 enabled, lines are printed only when '\r' or '\n' is found.
+
+        Returns:
+            returncode
+            or
+            A tuple of (returncode, stdout, stderr).
 
         Raises:
             exceptions.FetchIPError: If the head node IP cannot be fetched.

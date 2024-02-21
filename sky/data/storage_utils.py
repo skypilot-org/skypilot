@@ -123,10 +123,10 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                                                 stderr=subprocess.PIPE,
                                                 check=True,
                                                 text=True)
-                    except subprocess.CalledProcessError as e:
+                    except subprocess.CalledProcessError as init_e:
                         logger.warning(
                             _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG.format(
-                                path=src_dir_path, error_msg=e.stderr))
+                                path=src_dir_path, error_msg=init_e.stderr))
                         return excluded_list
                     if git_exclude_exists:
                         # removes all the files/dirs created with 'git init'

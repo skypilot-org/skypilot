@@ -257,18 +257,18 @@ Available fields:
       /remote/dir1/file: /local/dir1/file
       /remote/dir2: /local/dir2
 
-      # Uses SkyPilot Storage to create a S3 bucket named sky-dataset, uploads the
-      # contents of /local/path/datasets to the bucket, and marks the bucket
-      # as persistent (it will not be deleted after the completion of this task).
+      # Create a S3 bucket named sky-dataset, uploads the contents of
+      # /local/path/datasets to the bucket, and marks the bucket as persistent
+      # (it will not be deleted after the completion of this task).
       # Symlinks and their contents are NOT copied.
       #
       # Mounts the bucket at /datasets-storage on every node of the cluster.
       /datasets-storage:
         name: sky-dataset  # Name of storage, optional when source is bucket URI
         source: /local/path/datasets  # Source path, can be local or s3/gcs URL. Optional, do not specify to create an empty bucket.
-        store: s3  # Could be either 's3' or 'gcs'; default: None. Optional.
-        persistent: True  # Defaults to True; can be set to false. Optional.
-        mode: MOUNT  # Either MOUNT or COPY. Optional.
+        store: s3  # Could be either 's3', 'gcs' or 'r2'; default: None. Optional.
+        persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
+        mode: MOUNT  # Either MOUNT or COPY. Defaults to MOUNT. Optional.
 
       # Copies a cloud object store URI to the cluster. Can be private buckets.
       /datasets-s3: s3://my-awesome-dataset

@@ -419,7 +419,7 @@ def get_ray_port():
     port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
-    port = json.load(open(port_path))['ray_port']
+    port = json.load(open(port_path, 'r', encoding='utf-8'))['ray_port']
     return port
 
 
@@ -432,7 +432,8 @@ def get_job_submission_port():
     port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 8265
-    port = json.load(open(port_path))['ray_dashboard_port']
+    port = json.load(open(port_path, 'r',
+                          encoding='utf-8'))['ray_dashboard_port']
     return port
 
 
@@ -809,7 +810,12 @@ class JobLibCodeGen:
     """
 
     _PREFIX = [
-        'import os', 'import getpass', 'from sky.skylet import job_lib, log_lib'
+        'import os', 'import getpass',
+        'from sky.skylet import job_lib, log_lib, constants',
+        'assert (getattr(constants, "SKYLET_LIB_VERSION", 0) '
+        f'>= {constants.SKYLET_LIB_VERSION}),'
+        '("The SkyPilot runtime on remote cluster is outdated.'
+        ' Please update the runtime with: sky start -f <cluster-name>")'
     ]
 
     @classmethod
@@ -876,7 +882,8 @@ class JobLibCodeGen:
             f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',
             'run_timestamp = job_lib.get_run_timestamp(job_id)',
             f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
-            f'log_lib.tail_logs(job_id, log_dir, {spot_job_id!r}, follow={follow})',
+            f'log_lib.tail_logs(job_id=job_id, log_dir=log_dir,'
+            f' spot_job_id={spot_job_id!r}, follow={follow})',
         ]
         return cls._build(code)
 

@@ -142,7 +142,7 @@ class SkyServiceSpec:
 
     @staticmethod
     def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
-        with open(os.path.expanduser(yaml_path), 'r') as f:
+        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
 
         if isinstance(config, str):

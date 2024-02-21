@@ -24,7 +24,7 @@ Here is an example of a BERT training job failing over different regions across 
 To use managed spot jobs, there are two requirements:
 
 #. **Task YAML**: Managed Spot requires a YAML to describe the job, tested with :code:`sky launch`.
-#. **Checkpointing** (optional): For job recovery due to preemptions, the user application code can checkpoint its progress periodically to a :ref:`SkyPilot Storage <sky-storage>`-mounted cloud bucket. The program can reload the latest checkpoint when restarted.
+#. **Checkpointing** (optional): For job recovery due to preemptions, the user application code can checkpoint its progress periodically to a :ref:`mounted cloud bucket <sky-storage>`. The program can reload the latest checkpoint when restarted.
 
 
 Task YAML
@@ -82,8 +82,8 @@ We can launch it with the following:
 
 .. note::
 
-  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to
-  :ref:`SkyPilot Storage <sky-storage>`. Cloud bucket will be created during the job running time, and cleaned up after the job
+  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to a
+  :ref:`cloud bucket <sky-storage>`. The bucket will be created during the job running time, and cleaned up after the job
   finishes.
 
 SkyPilot will launch and start monitoring the spot job. When a preemption happens, SkyPilot will automatically
@@ -106,7 +106,7 @@ Below is an example of mounting a bucket to :code:`/checkpoint`.
       name: # NOTE: Fill in your bucket name
       mode: MOUNT
 
-The :code:`MOUNT` mode in :ref:`SkyPilot Storage <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
+The :code:`MOUNT` mode in :ref:`SkyPilot bucket mounting <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
 Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
 

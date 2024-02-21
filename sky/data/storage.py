@@ -317,6 +317,31 @@ class AbstractStore:
         # original Store object is returned
         return self
 
+    def _validate_existing_bucket(self):
+        """Validates the storage fields for existing buckets."""
+        # Check if 'source' is None, this is only allowed when Storage is in
+        # either MOUNT mode or COPY mode with sky-managed storage.
+        # Note: In COPY mode, a 'source' being None with non-sky-managed
+        # storage is already handled as an error in _validate_storage_spec.
+        if self.source is None:
+            # Retrieve a handle associated with the storage name.
+            # This handle links to sky managed storage if it exists.
+            handle = global_user_state.get_handle_from_storage_name(self.name)
+            # If handle is None, it implies the bucket is created
+            # externally and not managed by Skypilot. For mounting such
+            # externally created buckets, users must provide the
+            # bucket's URL as 'source'.
+            if handle is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSpecError(
+                        'Attempted to mount a non-sky managed bucket '
+                        f'{self.name!r} without specifying the storage source.'
+                        ' To mount an externally created bucket (e.g., '
+                        'created through cloud console or cloud cli), '
+                        'specify the bucket URL in the source field '
+                        'instead of its name. E.g., replace `name: external-'
+                        'bucket` with `source: gs://external-bucket`.')
+
 
 class Storage(object):
     """Storage objects handle persistent and large volume storage in the sky.
@@ -815,6 +840,10 @@ class Storage(object):
             logger.error(f'Could not initialize {store_type} store with '
                          f'name {self.name}. General initialization error.')
             raise
+        except exceptions.StorageSpecError:
+            logger.error(f'Could not mount externally created {store_type}'
+                         f'store with name {self.name!r}.')
+            raise
 
         # Add store to storage
         self._add_store(store)
@@ -1235,6 +1264,8 @@ class S3Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -1250,6 +1281,7 @@ class S3Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
+            self._validate_existing_bucket()
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -1676,6 +1708,8 @@ class GcsStore(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -1684,6 +1718,7 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(self.name)
+            self._validate_existing_bucket()
             return bucket, False
         except gcp.not_found_exception() as e:
             if isinstance(self.source, str) and self.source.startswith('gs://'):
@@ -2025,6 +2060,8 @@ class R2Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -2040,6 +2077,7 @@ class R2Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
+            self._validate_existing_bucket()
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -2441,6 +2479,8 @@ class IBMCosStore(AbstractStore):
           bool: indicates whether a new bucket was created.
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If bucket creation fails.
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -2500,7 +2540,9 @@ class IBMCosStore(AbstractStore):
                 f'{self.name}')
         else:
             # bucket exists
-            return self.s3_resource.Bucket(self.name), False
+            bucket = self.s3_resource.Bucket(self.name)
+            self._validate_existing_bucket()
+            return bucket, False
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket

@@ -422,7 +422,7 @@ def tail_logs(job_id: Optional[int],
     ]:
         # Not using `ray job logs` because it will put progress bar in
         # multiple lines.
-        with open(log_path, 'r', newline='') as log_file:
+        with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
             for line in _follow_job_logs(log_file,
@@ -432,7 +432,7 @@ def tail_logs(job_id: Optional[int],
     else:
         try:
             start_stream = False
-            with open(log_path, 'r') as f:
+            with open(log_path, 'r', encoding='utf-8') as f:
                 for line in f.readlines():
                     if start_stream_at in line:
                         start_stream = True

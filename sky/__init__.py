@@ -84,6 +84,7 @@ Kubernetes = clouds.Kubernetes
 OCI = clouds.OCI
 RunPod = clouds.RunPod
 Vsphere = clouds.Vsphere
+Fluidstack = clouds.Fluidstack
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -99,6 +100,7 @@ __all__ = [
     'RunPod',
     'SCP',
     'Vsphere',
+    'Fluidstack',
     'Optimizer',
     'OptimizeTarget',
     'backends',

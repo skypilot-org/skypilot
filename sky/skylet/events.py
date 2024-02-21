@@ -246,7 +246,7 @@ class AutostopEvent(SkyletEvent):
                      provider_config=cluster_config['provider'])
 
     def _replace_yaml_for_stopping(self, yaml_path: str, down: bool):
-        with open(yaml_path, 'r') as f:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
             yaml_str = f.read()
         yaml_str = self._UPSCALING_PATTERN.sub(r'upscaling_speed: 0', yaml_str)
         if down:
