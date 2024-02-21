@@ -3740,11 +3740,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if (sync_down_all_components or
                 service_component == serve_utils.ServiceComponent.REPLICA):
-            replica_id_arg = (replica_id if replica_id is not None else
-                              serve_constants.NO_REPLICA_ID_SPECIFIED)
             prepare_code = (
                 serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
-                    service_name, run_timestamp, replica_id_arg))
+                    service_name, run_timestamp, replica_id))
             backend = backend_utils.get_backend_from_handle(controller_handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
             assert isinstance(controller_handle,

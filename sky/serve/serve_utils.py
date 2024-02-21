@@ -624,15 +624,16 @@ def extract_replica_id_from_launch_log_file_name(file_name: str) -> int:
     raise ValueError(f'Failed to get replica id from file name: {file_name}')
 
 
-def has_valid_replica_id(file_name: str, target_replica_id: int) -> bool:
-    if target_replica_id == constants.NO_REPLICA_ID_SPECIFIED:
+def has_valid_replica_id(file_name: str,
+                         target_replica_id: Optional[int]) -> bool:
+    if target_replica_id is None:
         return True
     replica_id = extract_replica_id_from_launch_log_file_name(file_name)
     return replica_id == target_replica_id
 
 
 def prepare_replica_logs_for_download(service_name: str, timestamp: str,
-                                      target_replica_id: int) -> None:
+                                      target_replica_id: Optional[int]) -> None:
     logger.info('Preparing replica logs for download')
     remote_service_dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(remote_service_dir_name)
@@ -655,27 +656,26 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
         has_valid_replica_id(file, target_replica_id)
     ]
     for launch_log_file in launch_log_files:
-        target_replica_id = extract_replica_id_from_launch_log_file_name(
+        replica_id = extract_replica_id_from_launch_log_file_name(
             launch_log_file)
         replica_info = serve_state.get_replica_info_from_id(
-            service_name, target_replica_id)
+            service_name, replica_id)
         if replica_info is None:
             raise ValueError(
-                _FAILED_TO_FIND_REPLICA_MSG.format(
-                    replica_id=target_replica_id))
+                _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
 
         new_replica_log_file = os.path.join(dir_for_download,
-                                            f'replica_{target_replica_id}.log')
+                                            f'replica_{replica_id}.log')
         shutil.copy(launch_log_file, new_replica_log_file)
         if replica_info.status == serve_state.ReplicaStatus.PROVISIONING:
             continue
-        logger.info(f'Syncing down logs for replica {target_replica_id}...')
+        logger.info(f'Syncing down logs for replica {replica_id}...')
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(
             replica_info.cluster_name)
         if handle is None:
             logger.error(f'Cannot find cluster {replica_info.cluster_name} for '
-                         f'replica {target_replica_id} in the cluster table. '
+                         f'replica {replica_id} in the cluster table. '
                          'Skipping syncing down job logs.')
             continue
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -694,7 +694,7 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
         else:
             if not log_dirs:
                 logger.error(
-                    f'Failed to find the logs for replica {target_replica_id}.')
+                    f'Failed to find the logs for replica {replica_id}.')
             else:
                 log_dir = list(log_dirs.values())[0]
                 candidate_log_file_name = os.path.join(log_dir, 'run.log')
@@ -704,7 +704,7 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                 job_log_file_name = candidate_log_file_name
 
         if job_log_file_name is not None:
-            logger.info(f'\n== End of logs (Replica: {target_replica_id}) ==')
+            logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
             with open(new_replica_log_file, 'a',
                       encoding='utf-8') as replica_log_file, open(
                           job_log_file_name, 'r', encoding='utf-8') as job_file:
@@ -715,7 +715,7 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                       encoding='utf-8') as replica_log_file:
                 replica_log_file.write(
                     f'Failed to sync down job logs from replica '
-                    f'{target_replica_id}.\n')
+                    f'{replica_id}.\n')
 
 
 def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
@@ -968,7 +968,7 @@ class ServeCodeGen:
     @classmethod
     def prepare_replica_logs_for_download(cls, service_name: str,
                                           timestamp: str,
-                                          replica_id: int) -> str:
+                                          replica_id: Optional[int]) -> str:
         code = [
             'msg = serve_utils.prepare_replica_logs_for_download('
             f'{service_name!r}, {timestamp!r}, {replica_id})',

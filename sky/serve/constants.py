@@ -72,6 +72,3 @@ LOAD_BALANCER_PORT_RANGE = '30001-30100'
 
 # Initial version of service.
 INITIAL_VERSION = 1
-
-# Placeholder for when no replica ID is specified
-NO_REPLICA_ID_SPECIFIED = -1
