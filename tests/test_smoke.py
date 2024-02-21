@@ -100,6 +100,7 @@ _SPOT_CANCEL_WAIT = (
     'done; echo "$s"; echo; echo; echo "$s"')
 # TODO(zhwu): make the spot controller on GCP.
 
+DEFAULT_CMD_TIMEOUT = 15 * 60
 
 class Test(NamedTuple):
     name: str
@@ -108,7 +109,7 @@ class Test(NamedTuple):
     commands: List[str]
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
-    timeout: int = 15 * 60
+    timeout: int = DEFAULT_CMD_TIMEOUT
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -119,9 +120,10 @@ class Test(NamedTuple):
         print(message, file=sys.stderr, flush=True)
 
 
-def _get_timeout(generic_cloud: str, default_timeout: int = Test.timeout):
+def _get_timeout(generic_cloud: str,
+                 override_timeout: int = DEFAULT_CMD_TIMEOUT):
     timeouts = {'fluidstack': 60 * 60}  # file_mounts
-    return timeouts.get(generic_cloud, default_timeout)
+    return timeouts.get(generic_cloud, override_timeout)
 
 
 def _get_cluster_name() -> str:
