@@ -3752,9 +3752,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                   prepare_code,
                                                   require_outputs=False,
                                                   stream_logs=False)
-            subprocess_utils.handle_returncode(
-                prepare_returncode, prepare_code,
-                'Failed to prepare replica logs to sync down.')
+            try:
+                subprocess_utils.handle_returncode(
+                    prepare_returncode, prepare_code,
+                    'Failed to prepare replica logs to sync down.')
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
             remote_service_dir_name = (
                 serve_utils.generate_remote_service_dir_name(service_name))
             dir_for_download = os.path.join(remote_service_dir_name,
@@ -3771,10 +3774,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                  remove_code,
                                                  require_outputs=False,
                                                  stream_logs=False)
-            subprocess_utils.handle_returncode(
-                remove_returncode, remove_code,
-                'Failed to remove the replica logs for '
-                'download on the controller.')
+            try:
+                subprocess_utils.handle_returncode(
+                    remove_returncode, remove_code,
+                    'Failed to remove the replica logs for '
+                    'download on the controller.')
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
 
         # We download the replica logs first because that download creates
         # the timestamp directory, and we can just put the controller and
