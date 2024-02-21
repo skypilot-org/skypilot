@@ -54,7 +54,6 @@ def get_autostop_config() -> AutostopConfig:
 def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
     boot_time = psutil.boot_time()
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, down)
-    prev_autostop_config = get_autostop_config()
     configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
     logger.debug(f'set_autostop(): idle_minutes {idle_minutes}, down {down}.')
     # Reset timer whenever the autostop is set on the machine, i.e. the idle
