@@ -6,7 +6,7 @@ determine the return type based on the value of require_outputs.
 """
 import enum
 import typing
-from typing import List, Optional, Tuple, Union
+from typing import Any, Iterable, List, Optional, Tuple, Union
 
 from typing_extensions import Literal
 
@@ -39,38 +39,87 @@ class SshMode(enum.Enum):
     LOGIN: int
 
 
-class SSHCommandRunner:
+class CommandRunner:
+    node_id: str
+
+    def __init__(
+        self,
+        node_id: str,
+        node: Tuple[Any, ...],
+        **kwargs,
+    ) -> None:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: Literal[False] = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            separate_stderr: bool = ...,
+            **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: Literal[True],
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            separate_stderr: bool = ...,
+            **kwargs) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: bool = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            separate_stderr: bool = ...,
+            **kwargs) -> Union[Tuple[int, str, str], int]:
+        ...
+
+    def rsync(self,
+              source: str,
+              target: str,
+              *,
+              up: bool,
+              log_path: str = ...,
+              stream_logs: bool = ...) -> None:
+        ...
+
+    @classmethod
+    def make_runner_list(cls: typing.Type[CommandRunner],
+                         node_list: Iterable[Tuple[Any, ...]],
+                         **kwargs) -> List[CommandRunner]:
+        ...
+
+
+class SSHCommandRunner(CommandRunner):
     ip: str
+    port: int
     ssh_user: str
     ssh_private_key: str
     ssh_control_name: Optional[str]
     docker_user: str
-    port: int
     disable_control_master: Optional[bool]
 
     def __init__(
         self,
-        ip: str,
+        node: Tuple[str, int],
         ssh_user: str,
         ssh_private_key: str,
         ssh_control_name: Optional[str] = ...,
-        port: int = ...,
         docker_user: Optional[str] = ...,
         disable_control_master: Optional[bool] = ...,
     ) -> None:
-        ...
-
-    @staticmethod
-    def make_runner_list(
-        ip_list: List[str],
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = ...,
-        ssh_proxy_command: Optional[str] = ...,
-        port_list: Optional[List[int]] = ...,
-        docker_user: Optional[str] = ...,
-        disable_control_master: Optional[bool] = ...,
-    ) -> List['SSHCommandRunner']:
         ...
 
     @typing.overload
@@ -107,6 +156,66 @@ class SSHCommandRunner:
             *,
             require_outputs: bool = ...,
             port_forward: Optional[List[int]] = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            **kwargs) -> Union[Tuple[int, str, str], int]:
+        ...
+
+    def rsync(self,
+              source: str,
+              target: str,
+              *,
+              up: bool,
+              log_path: str = ...,
+              stream_logs: bool = ...) -> None:
+        ...
+
+
+class KubernetesCommandRunner(CommandRunner):
+
+    def __init__(
+        self,
+        node: Tuple[str, str],
+    ) -> None:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = ...,
+            require_outputs: Literal[False] = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = ...,
+            require_outputs: Literal[True],
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            **kwargs) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = ...,
+            require_outputs: bool = ...,
             log_path: str = ...,
             process_stream: bool = ...,
             stream_logs: bool = ...,

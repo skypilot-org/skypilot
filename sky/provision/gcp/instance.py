@@ -428,6 +428,8 @@ def get_cluster_info(
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
+        provider_name='gcp',
+        provider_config=provider_config,
     )
 
 

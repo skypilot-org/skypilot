@@ -1053,7 +1053,7 @@ def _count_healthy_nodes_from_ray(output: str,
 def get_docker_user(ip: str, cluster_config_file: str) -> str:
     """Find docker container username."""
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
-    runner = command_runner.SSHCommandRunner(ip, port=22, **ssh_credentials)
+    runner = command_runner.SSHCommandRunner(node=(ip, 22), **ssh_credentials)
     container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
     whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
         f'sudo docker exec {container_name} whoami',
@@ -1102,8 +1102,7 @@ def wait_until_ray_cluster_ready(
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file, docker_user)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip,
-                                             port=22,
+    runner = command_runner.SSHCommandRunner(node=(head_ip, 22),
                                              **ssh_credentials)
     with rich_utils.safe_status(
             '[bold cyan]Waiting for workers...') as worker_status:
@@ -1209,7 +1208,7 @@ def ssh_credential_from_yaml(
 
 
 def parallel_data_transfer_to_nodes(
-    runners: List[command_runner.SSHCommandRunner],
+    runners: List[command_runner.CommandRunner],
     source: Optional[str],
     target: str,
     cmd: Optional[str],
@@ -1223,7 +1222,7 @@ def parallel_data_transfer_to_nodes(
     """Runs a command on all nodes and optionally runs rsync from src->dst.
 
     Args:
-        runners: A list of SSHCommandRunner objects that represent multiple nodes.
+        runners: A list of CommandRunner objects that represent multiple nodes.
         source: Optional[str]; Source for rsync on local node
         target: str; Destination on remote node for rsync
         cmd: str; Command to be executed on all nodes
@@ -1236,7 +1235,7 @@ def parallel_data_transfer_to_nodes(
 
     origin_source = source
 
-    def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
+    def _sync_node(runner: 'command_runner.CommandRunner') -> None:
         if cmd is not None:
             rc, stdout, stderr = runner.run(cmd,
                                             log_path=log_path,
@@ -1733,42 +1732,9 @@ def _update_cluster_status_no_lock(
 
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
         try:
-            # TODO(zhwu): This function cannot distinguish transient network
-            # error in ray's get IPs vs. ray runtime failing.
-
-            # NOTE: fetching the IPs is very slow as it calls into
-            # `ray get head-ip/worker-ips`. Using cached IPs is safe because
-            # in the worst case we time out in the `ray status` SSH command
-            # below.
-            external_ips = handle.cached_external_ips
-            # This happens when user interrupt the `sky launch` process before
-            # the first time resources handle is written back to local database.
-            # This is helpful when user interrupt after the provision is done
-            # and before the skylet is restarted. After #2304 is merged, this
-            # helps keep the cluster status to INIT after `sky status -r`, so
-            # user will be notified that any auto stop/down might not be
-            # triggered.
-            if external_ips is None or len(external_ips) == 0:
-                logger.debug(f'Refreshing status ({cluster_name!r}): No cached '
-                             f'IPs found. Handle: {handle}')
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD)
-
-            # Potentially refresh the external SSH ports, in case the existing
-            # cluster before #2491 was launched without external SSH ports
-            # cached.
-            external_ssh_ports = handle.external_ssh_ports()
-            head_ssh_port = external_ssh_ports[0]
-
-            # Check if ray cluster status is healthy.
-            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
-                                                       handle.docker_user,
-                                                       handle.ssh_user)
-
-            runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     **ssh_credentials,
-                                                     port=head_ssh_port)
-            rc, output, stderr = runner.run(
+            runners = handle.get_command_runners()
+            head_runner = runners[0]
+            rc, output, stderr = head_runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
                 require_outputs=True,

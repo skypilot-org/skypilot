@@ -1,7 +1,7 @@
 """Kubernetes instance provisioning."""
 import copy
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 import uuid
 
 from sky import exceptions
@@ -12,6 +12,7 @@ from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
@@ -157,6 +158,15 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
     raise config_lib.KubernetesError(f'{timeout_err_msg}')
 
 
+def _raise_command_running_error(message: str, command: str, pod_name: str,
+                                 rc: int, stdout: str):
+    if rc == 0:
+        return
+    raise config_lib.KubernetesError(
+        f'Failed to {message} for pod {pod_name} with return '
+        f'code {rc}: {command!r}\nOutput: {stdout}.')
+
+
 def _wait_for_pods_to_schedule(namespace, new_nodes, timeout: int):
     """Wait for all pods to be scheduled.
 
@@ -240,20 +250,6 @@ def _wait_for_pods_to_run(namespace, new_nodes):
         time.sleep(1)
 
 
-def _run_command_on_pods(node_name, node_namespace, command):
-    cmd_output = kubernetes.stream()(
-        kubernetes.core_api().connect_get_namespaced_pod_exec,
-        node_name,
-        node_namespace,
-        command=command,
-        stderr=True,
-        stdin=False,
-        stdout=True,
-        tty=False,
-        _request_timeout=kubernetes.API_TIMEOUT)
-    return cmd_output
-
-
 def _set_env_vars_in_pods(namespace: str, new_pods: List):
     """Setting environment variables in pods.
 
@@ -270,46 +266,50 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     /etc/profile.d/, making them available for all users in future
     shell sessions.
     """
-    set_k8s_env_var_cmd = [
-        '/bin/sh', '-c',
-        ('prefix_cmd() '
-         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-         'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > '
-         '~/k8s_env_var.sh && '
-         'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-         '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
-    ]
+    set_k8s_env_var_cmd = (
+        'prefix_cmd() '
+        '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+        'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > '
+        '~/k8s_env_var.sh && '
+        'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
+        '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
 
     for new_pod in new_pods:
-        _run_command_on_pods(new_pod.metadata.name, namespace,
-                             set_k8s_env_var_cmd)
+        runner = command_runner.KubernetesCommandRunner(
+            (namespace, new_pod.metadata.name))
+        rc, stdout, _ = runner.run(set_k8s_env_var_cmd,
+                                   require_outputs=True,
+                                   stream_logs=False)
+        _raise_command_running_error('set env vars', set_k8s_env_var_cmd,
+                                     new_pod.metadata.name, rc, stdout)
 
 
 def _check_user_privilege(namespace: str, new_nodes: List) -> None:
     # Checks if the default user has sufficient privilege to set up
     # the kubernetes instance pod.
-    check_k8s_user_sudo_cmd = [
-        '/bin/sh',
-        '-c',
-        (
-            'if [ $(id -u) -eq 0 ]; then'
-            # If user is root, create an alias for sudo used in skypilot setup
-            '  echo \'alias sudo=""\' >> ~/.bashrc; '
-            'else '
-            '  if command -v sudo >/dev/null 2>&1; then '
-            '    timeout 2 sudo -l >/dev/null 2>&1 || '
-            f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
-            '  else '
-            f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
-            '  fi; '
-            'fi')
-    ]
+    check_k8s_user_sudo_cmd = (
+        'if [ $(id -u) -eq 0 ]; then'
+        # If user is root, create an alias for sudo used in skypilot setup
+        '  echo \'alias sudo=""\' >> ~/.bashrc; echo succeed;'
+        'else '
+        '  if command -v sudo >/dev/null 2>&1; then '
+        '    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+        '  else '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+        '  fi; '
+        'fi')
 
     for new_node in new_nodes:
-        privilege_check = _run_command_on_pods(new_node.metadata.name,
-                                               namespace,
-                                               check_k8s_user_sudo_cmd)
-        if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
+        runner = command_runner.KubernetesCommandRunner(
+            (namespace, new_node.metadata.name))
+        rc, stdout, _ = runner.run(check_k8s_user_sudo_cmd,
+                                   require_outputs=True,
+                                   stream_logs=False)
+        _raise_command_running_error('check user privilege',
+                                     check_k8s_user_sudo_cmd,
+                                     new_node.metadata.name, rc, stdout)
+        if stdout == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
                 'Ensure the default user has root access or '
@@ -320,38 +320,40 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
 def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
     # Setting up ssh for the pod instance. This is already setup for
     # the jump pod so it does not need to be run for it.
-    set_k8s_ssh_cmd = [
-        '/bin/sh',
-        '-c',
-        (
-            'prefix_cmd() '
-            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
-            'export DEBIAN_FRONTEND=noninteractive;'
-            '$(prefix_cmd) apt-get update;'
-            '$(prefix_cmd) apt install openssh-server rsync -y; '
-            '$(prefix_cmd) mkdir -p /var/run/sshd; '
-            '$(prefix_cmd) '
-            'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
-            '/etc/ssh/sshd_config; '
-            '$(prefix_cmd) sed '
-            '"s@session\\s*required\\s*pam_loginuid.so@session optional '
-            'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
-            'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
-            '$(prefix_cmd) mkdir -p ~/.ssh; '
-            '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey '
-            '~/.ssh/authorized_keys; '
-            '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
-            '$(prefix_cmd) chmod 700 ~/.ssh; '
-            '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
-            '$(prefix_cmd) service ssh restart; '
-            # Eliminate the error
-            # `mesg: ttyname failed: inappropriate ioctl for device`.
-            # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
-            '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
-    ]
-    # TODO(romilb): We need logging and surface errors here.
+    set_k8s_ssh_cmd = (
+        'prefix_cmd() '
+        '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+        'export DEBIAN_FRONTEND=noninteractive;'
+        '$(prefix_cmd) apt-get update;'
+        '$(prefix_cmd) apt install openssh-server rsync -y; '
+        '$(prefix_cmd) mkdir -p /var/run/sshd; '
+        '$(prefix_cmd) '
+        'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
+        '/etc/ssh/sshd_config; '
+        '$(prefix_cmd) sed '
+        '"s@session\\s*required\\s*pam_loginuid.so@session optional '
+        'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
+        'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
+        '$(prefix_cmd) mkdir -p ~/.ssh; '
+        '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey '
+        '~/.ssh/authorized_keys; '
+        '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
+        '$(prefix_cmd) chmod 700 ~/.ssh; '
+        '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
+        '$(prefix_cmd) service ssh restart; '
+        # Eliminate the error
+        # `mesg: ttyname failed: inappropriate ioctl for device`.
+        # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
+        '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
+
     for new_node in new_nodes:
-        _run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd)
+        runner = command_runner.KubernetesCommandRunner(
+            (namespace, new_node.metadata.name))
+        rc, stdout, _ = runner.run(set_k8s_ssh_cmd,
+                                   require_outputs=True,
+                                   stream_logs=False)
+        _raise_command_running_error('setup ssh', set_k8s_ssh_cmd,
+                                     new_node.metadata.name, rc, stdout)
 
 
 def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
@@ -658,11 +660,15 @@ def get_cluster_info(
     assert cpu_request is not None, 'cpu_request should not be None'
 
     ssh_user = 'sky'
-    get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
+    get_k8s_ssh_user_cmd = 'echo $(whoami)'
     assert head_pod_name is not None
-    ssh_user = _run_command_on_pods(head_pod_name, namespace,
-                                    get_k8s_ssh_user_cmd)
-    ssh_user = ssh_user.strip()
+    runner = command_runner.KubernetesCommandRunner((namespace, head_pod_name))
+    rc, stdout, _ = runner.run(get_k8s_ssh_user_cmd,
+                               require_outputs=True,
+                               stream_logs=False)
+    _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
+                                 head_pod_name, rc, stdout)
+    ssh_user = stdout.strip()
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
 
@@ -676,7 +682,10 @@ def get_cluster_info(
         custom_ray_options={
             'object-store-memory': 500000000,
             'num-cpus': cpu_request,
-        })
+        },
+        provider_name='kubernetes',
+        provider_config=provider_config,
+    )
 
 
 def query_instances(
@@ -723,3 +732,25 @@ def query_instances(
             continue
         cluster_status[pod.metadata.name] = pod_status
     return cluster_status
+
+
+def get_command_runner_type() -> Type[command_runner.CommandRunner]:
+    return command_runner.KubernetesCommandRunner
+
+
+def get_command_runners(
+    cluster_info: common.ClusterInfo,
+    **crednetials: Dict[str, Any],
+) -> List[command_runner.CommandRunner]:
+    """Get a command runner for the given cluster."""
+    assert cluster_info.provider_config is not None, cluster_info
+    instances = cluster_info.instances
+    namespace = _get_namespace(cluster_info.provider_config)
+    node_list = []
+    if cluster_info.head_instance_id is not None:
+        node_list = [(namespace, cluster_info.head_instance_id)]
+    node_list.extend((namespace, pod_name)
+                     for pod_name in instances.keys()
+                     if pod_name != cluster_info.head_instance_id)
+    return command_runner.KubernetesCommandRunner.make_runner_list(
+        node_list=node_list, **crednetials)
