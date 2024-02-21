@@ -767,12 +767,22 @@ class GCP(clouds.Cloud):
         # We only add the existing credential files. It should be safe to ignore
         # the missing files, as we successfully created the VM at this point,
         # meaning the authentication is successful.
-        credentials = {
-            f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
-            for filename in _CREDENTIAL_FILES
-            if os.path.exists(os.path.expanduser(
-                f'~/.config/gcloud/{filename}'))
-        }
+        credentials = {}
+        for filename in _CREDENTIAL_FILES:
+            path = f'~/.config/gcloud/{filename}'
+            if os.path.exists(os.path.expanduser(path)):
+                if filename == 'legacy_credentials':
+                    # TODO(zongheng): catch exceptions.
+                    identity = self.get_current_user_identity_str()
+                    if identity is not None:
+                        # Ex: 'skypilot-v1@skypilot-123.iam.gserviceaccount.com'
+                        identity = identity.split(' ')[0]
+                        subdir = f'{path}/{identity}'
+                        if os.path.exists(os.path.expanduser(subdir)):
+                            credentials[subdir] = subdir
+                    continue
+                credentials[path] = path
+
         application_key_path = self._find_application_key_path()
         if os.path.exists(os.path.expanduser(application_key_path)):
             # Upload the application key path to the default path, so that
