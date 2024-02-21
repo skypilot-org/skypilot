@@ -10,7 +10,8 @@ SPOT_TASK_YAML_PREFIX = '~/.sky/spot_tasks'
 # m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8s_v4 (8vCPUs, 32 GB)
 # for Azure, and n1-standard-8 (8 vCPUs, 32 GB) for GCP.
 # Based on profiling, memory should be at least 3x (in GB) as num vCPUs to avoid
-# OOM (each spot controller process use 0.25 CPU cores).
+# OOM (each CPU core can have 4 spot controller processes as we set the CPU
+# requirement to 4, and 3 GB is barely enough for 4 spot processes).
 # We use 50 GB disk size to reduce the cost.
 CONTROLLER_RESOURCES = {'memory': '3x', 'disk_size': 50}
 
