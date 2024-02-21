@@ -3720,10 +3720,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         return dict(zip(job_ids, local_log_dirs))
 
-    def sync_down_serve_logs(self, controller_handle: CloudVmRayResourceHandle,
-                             service_name: str, service_component: Optional[
-                                 serve_lib.ServiceComponent],
-                             replica_id: Optional[int]) -> None:
+    def sync_down_serve_logs(
+        self,
+        controller_handle: CloudVmRayResourceHandle,
+        service_name: str,
+        service_component: Optional[serve_lib.ServiceComponent],
+        replica_id: Optional[int],
+    ) -> None:
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             controller_handle.cluster_yaml, controller_handle.docker_user)
         runner = command_runner.SSHCommandRunner(
@@ -3737,8 +3740,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if (sync_down_all_components or
                 service_component == serve_utils.ServiceComponent.REPLICA):
-            replica_id_arg = replica_id if replica_id is not None \
-                else serve_constants.NO_REPLICA_ID_SPECIFIED
+            replica_id_arg = (replica_id if replica_id is not None else
+                              serve_constants.NO_REPLICA_ID_SPECIFIED)
             prepare_code = (
                 serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
                     service_name, run_timestamp, replica_id_arg))
