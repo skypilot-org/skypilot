@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import colorama
 
 from sky import sky_logging
+from sky.constants import SKY_HOME
 from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
@@ -20,7 +21,7 @@ CallbackType = Callable[[str], None]
 
 logger = sky_logging.init_logger(__name__)
 
-_DB_PATH = pathlib.Path('~/.sky/spot_jobs.db')
+_DB_PATH = pathlib.Path(f'{SKY_HOME}/spot_jobs.db')
 _DB_PATH = _DB_PATH.expanduser().absolute()
 _DB_PATH.parents[0].mkdir(parents=True, exist_ok=True)
 _DB_PATH = str(_DB_PATH)

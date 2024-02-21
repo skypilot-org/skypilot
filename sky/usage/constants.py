@@ -1,10 +1,11 @@
 """Constants for usage collection."""
+from sky.constants import SKY_HOME
 
 LOG_URL = 'http://usage.skypilot.co:9090/loki/api/v1/push'  # pylint: disable=line-too-long
 
 USAGE_MESSAGE_SCHEMA_VERSION = 1
 
-PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
+PRIVACY_POLICY_PATH = f'{SKY_HOME}/privacy_policy'
 
 USAGE_POLICY_MESSAGE = (
     'SkyPilot collects usage data to improve its services. '

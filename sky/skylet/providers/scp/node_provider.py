@@ -27,10 +27,11 @@ from ray.autoscaler.tags import TAG_RAY_USER_NODE_TYPE
 
 from sky.clouds.utils import scp_utils
 from sky.clouds.utils.scp_utils import SCPCreationFailError
+from sky.constants import SKY_HOME
 from sky.skylet.providers.scp.config import ZoneConfig
 from sky.utils import common_utils
 
-TAG_PATH_PREFIX = '~/.sky/generated/scp/metadata'
+TAG_PATH_PREFIX = f'{SKY_HOME}/generated/scp/metadata'
 REMOTE_RAY_YAML = '~/ray_bootstrap_config.yaml'
 
 logger = logging.getLogger(__name__)

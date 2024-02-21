@@ -2,6 +2,7 @@
 from packaging import version
 
 import sky
+from sky.constants import SKY_HOME
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
@@ -19,7 +20,7 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
     f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}')
 # The file contains the ports of the Ray cluster that SkyPilot launched,
 # i.e. the PORT_DICT_STR above.
-SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
+SKY_REMOTE_RAY_PORT_FILE = f'{SKY_HOME}/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.9.3'
 
@@ -64,7 +65,7 @@ SKYLET_VERSION = '8'
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
 SKYLET_LIB_VERSION = 1
-SKYLET_VERSION_FILE = '~/.sky/skylet_version'
+SKYLET_VERSION_FILE = f'{SKY_HOME}/skylet_version'
 
 # `sky spot dashboard`-related
 #

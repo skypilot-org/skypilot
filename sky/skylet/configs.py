@@ -4,9 +4,10 @@ import os
 import pathlib
 from typing import Callable, Optional, Union
 
+from sky.constants import SKY_HOME
 from sky.utils import db_utils
 
-_DB_PATH = os.path.expanduser('~/.sky/skylet_config.db')
+_DB_PATH = os.path.expanduser(f'{SKY_HOME}/skylet_config.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
 _table_created = False

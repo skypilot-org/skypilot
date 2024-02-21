@@ -49,6 +49,7 @@ from typing import Any, Dict, Iterable, Optional
 import yaml
 
 from sky import sky_logging
+from sky.constants import SKY_HOME
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -68,7 +69,7 @@ from sky.utils import ux_utils
 ENV_VAR_SKYPILOT_CONFIG = 'SKYPILOT_CONFIG'
 
 # Path to the local config file.
-CONFIG_PATH = '~/.sky/config.yaml'
+CONFIG_PATH = f'{SKY_HOME}/config.yaml'
 
 logger = sky_logging.init_logger(__name__)
 

@@ -18,6 +18,7 @@ import filelock
 import psutil
 
 from sky import sky_logging
+from sky.constants import SKY_HOME
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
@@ -28,7 +29,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
+_JOB_STATUS_LOCK = f'{SKY_HOME}/locks/.job_{{}}.lock'
 
 
 def _get_lock_path(job_id: int) -> str:
@@ -50,7 +51,7 @@ class JobInfoLoc(enum.IntEnum):
     RESOURCES = 8
 
 
-_DB_PATH = os.path.expanduser('~/.sky/jobs.db')
+_DB_PATH = os.path.expanduser(f'{SKY_HOME}/jobs.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
 

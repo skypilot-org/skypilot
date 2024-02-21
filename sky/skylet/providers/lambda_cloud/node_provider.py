@@ -16,12 +16,13 @@ from ray.autoscaler.tags import TAG_RAY_USER_NODE_TYPE
 
 from sky import authentication as auth
 from sky.clouds.utils import lambda_utils
+from sky.constants import SKY_HOME
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
-_TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
+_TAG_PATH_PREFIX = f'{SKY_HOME}/generated/lambda_cloud/metadata'
 _REMOTE_SSH_KEY_NAME = '~/.lambda_cloud/ssh_key_name'
 _REMOTE_RAY_SSH_KEY = '~/ray_bootstrap_key.pem'
 _REMOTE_RAY_YAML = '~/ray_bootstrap_config.yaml'

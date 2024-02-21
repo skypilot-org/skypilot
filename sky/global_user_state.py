@@ -18,6 +18,7 @@ import uuid
 
 from sky import clouds
 from sky import status_lib
+from sky.constants import SKY_HOME
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -27,7 +28,7 @@ if typing.TYPE_CHECKING:
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
-_DB_PATH = os.path.expanduser('~/.sky/state.db')
+_DB_PATH = os.path.expanduser(f'{SKY_HOME}/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 

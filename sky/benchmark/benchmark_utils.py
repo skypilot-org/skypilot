@@ -27,6 +27,7 @@ from sky import status_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.data import storage as storage_lib
+from sky.constants import SKY_HOME
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -41,8 +42,8 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
-_SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
+_SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser(f'{SKY_HOME}/benchmarks')
+_SKY_REMOTE_BENCHMARK_DIR = f'{SKY_HOME}/sky_benchmark_dir'
 # NOTE: This must be the same as _SKY_REMOTE_BENCHMARK_DIR
 # in sky/callbacks/sky_callback/base.py.
 _SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'

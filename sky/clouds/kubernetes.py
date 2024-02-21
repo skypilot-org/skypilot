@@ -9,6 +9,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
+from sky.constants import SKY_HOME
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
@@ -35,7 +36,7 @@ class Kubernetes(clouds.Cloud):
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
         'kubernetes-port-forward-proxy-command.sh.j2'
-    PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
+    PORT_FORWARD_PROXY_CMD_PATH = f'{SKY_HOME}/port-forward-proxy-cmd.sh'
     # Timeout for resource provisioning. This timeout determines how long to
     # wait for pod to be in pending status before giving up.
     # Larger timeout may be required for autoscaling clusters, since autoscaler

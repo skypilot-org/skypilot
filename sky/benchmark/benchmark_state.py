@@ -9,13 +9,15 @@ import time
 import typing
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
+from sky.constants import SKY_HOME
+
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 
 _BENCHMARK_BUCKET_NAME_KEY = 'bucket_name'
 _BENCHMARK_BUCKET_TYPE_KEY = 'bucket_type'
 
-_BENCHMARK_DB_PATH = os.path.expanduser('~/.sky/benchmark.db')
+_BENCHMARK_DB_PATH = os.path.expanduser(f'{SKY_HOME}/benchmark.db')
 os.makedirs(pathlib.Path(_BENCHMARK_DB_PATH).parents[0], exist_ok=True)
 
 

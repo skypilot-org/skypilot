@@ -17,6 +17,7 @@ from sky import sky_logging
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
+from sky.constants import SKY_HOME
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
@@ -57,7 +58,7 @@ _CREDENTIAL_FILES = [
 
 # NOTE: do not expanduser() on this path. It's used as a destination path on the
 # remote cluster.
-_GCLOUD_INSTALLATION_LOG = '~/.sky/logs/gcloud_installation.log'
+_GCLOUD_INSTALLATION_LOG = f'{SKY_HOME}/logs/gcloud_installation.log'
 _GCLOUD_VERSION = '424.0.0'
 # Need to be run with /bin/bash
 # We factor out the installation logic to keep it align in both spot

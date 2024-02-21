@@ -14,6 +14,7 @@ import yaml
 
 import sky
 from sky import spot
+from sky.constants import SKY_HOME
 from sky.utils import common_utils
 
 app = flask.Flask(__name__)
@@ -24,9 +25,9 @@ def _is_running_on_spot_controller() -> bool:
 
     Loads ~/.sky/sky_ray.yml and check cluster_name.
     """
-    if pathlib.Path('~/.sky/sky_ray.yml').expanduser().exists():
+    if pathlib.Path(f'{SKY_HOME}/sky_ray.yml').expanduser().exists():
         config = yaml.safe_load(
-            pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text())
+            pathlib.Path(f'{SKY_HOME}/sky_ray.yml').expanduser().read_text())
         return config.get('cluster_name', '').startswith('sky-spot-controller-')
     return False
 

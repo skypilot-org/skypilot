@@ -18,6 +18,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.constants import SKY_HOME
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet.log_lib import run_bash_command_with_log
@@ -45,7 +46,7 @@ JOB_STATUS_CHECK_GAP_SECONDS = 20
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
-_SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
+_SPOT_STATUS_CACHE = f'{SKY_HOME}/spot_status_cache.txt'
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 

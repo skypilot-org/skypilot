@@ -1,9 +1,10 @@
 """Constants used for Managed Spot."""
+from sky.constants import SKY_HOME
 
 SPOT_CONTROLLER_TEMPLATE = 'spot-controller.yaml.j2'
-SPOT_CONTROLLER_YAML_PREFIX = '~/.sky/spot_controller'
+SPOT_CONTROLLER_YAML_PREFIX = f'{SKY_HOME}/spot_controller'
 
-SPOT_TASK_YAML_PREFIX = '~/.sky/spot_tasks'
+SPOT_TASK_YAML_PREFIX = f'{SKY_HOME}/spot_tasks'
 
 # Resources as a dict for the spot controller.
 # Use default CPU instance type for spot controller with >= 24GB, i.e.

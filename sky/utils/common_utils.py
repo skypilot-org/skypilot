@@ -23,11 +23,12 @@ import yaml
 
 from sky import exceptions
 from sky import sky_logging
+from sky.constants import SKY_HOME
 from sky.skylet import constants
 from sky.utils import ux_utils
 from sky.utils import validator
 
-_USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+_USER_HASH_FILE = os.path.expanduser(f'{SKY_HOME}/user_hash')
 USER_HASH_LENGTH = 8
 USER_HASH_LENGTH_IN_CLUSTER_NAME = 4
 

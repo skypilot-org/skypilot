@@ -38,6 +38,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import status_lib
 from sky.clouds import cloud_registry
+from sky.constants import SKY_HOME
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -61,17 +62,17 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
+SKY_REMOTE_APP_DIR = f'{SKY_HOME}/sky_app'
 # Exclude subnet mask from IP address regex.
 IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
-SKY_REMOTE_PATH = '~/.sky/wheels'
-SKY_USER_FILE_PATH = '~/.sky/generated'
+SKY_REMOTE_PATH = f'{SKY_HOME}/wheels'
+SKY_USER_FILE_PATH = f'{SKY_HOME}/generated'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
 
 # Do not use /tmp because it gets cleared on VM restart.
-_SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
+_SKY_REMOTE_FILE_MOUNTS_DIR = f'{SKY_HOME}/file_mounts/'
 
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
@@ -97,16 +98,16 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
 # Filelocks for the cluster status change.
-CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
+CLUSTER_STATUS_LOCK_PATH = os.path.expanduser(f'{SKY_HOME}/.{{}}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
 # Filelocks for updating cluster's file_mounts.
 CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
-    '~/.sky/.{}_file_mounts.lock')
+    f'{SKY_HOME}/.{{}}_file_mounts.lock')
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
-_REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
+_REMOTE_RUNTIME_FILES_DIR = f'{SKY_HOME}/.runtime_files'
 
 # Include the fields that will be used for generating tags that distinguishes
 # the cluster in ray, to avoid the stopped cluster being discarded due to
@@ -389,7 +390,7 @@ class SSHConfigHelper(object):
     """Helper for handling local SSH configuration."""
 
     ssh_conf_path = '~/.ssh/config'
-    ssh_conf_lock_path = os.path.expanduser('~/.sky/ssh_config.lock')
+    ssh_conf_lock_path = os.path.expanduser(f'{SKY_HOME}/ssh_config.lock')
     ssh_cluster_path = SKY_USER_FILE_PATH + '/ssh/{}'
 
     @classmethod
