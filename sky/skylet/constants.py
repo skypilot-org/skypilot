@@ -111,7 +111,8 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 # Due to the CPU/memory usage of the controller process launched with sky job (
 # use ray job under the hood), we need to reserve some CPU/memory for each spot/
 # serve controller process.
-# Spot: A default controller with 8 vCPU can manage up to 32 spot jobs.
+# Spot: A default controller with 8 vCPU and 32 GB memory can manage up to 32
+# spot jobs.
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
 CONTROLLER_PROCESS_CPU_DEMAND = 0.25

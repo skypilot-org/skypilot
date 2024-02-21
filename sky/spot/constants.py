@@ -9,8 +9,8 @@ SPOT_TASK_YAML_PREFIX = '~/.sky/spot_tasks'
 # Use default CPU instance type for spot controller, i.e.
 # m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8s_v4 (8vCPUs, 32 GB)
 # for Azure, and n1-standard-8 (8 vCPUs, 32 GB) for GCP.
-# Based on profiling, the memory should be at least 3x than the CPU cores (we
-# allow 4x CPUs spot controller processes on the spot controller) to avoid OOM.
+# Based on profiling, the memory should be at least 3x than the CPU cores (each
+# spot controller process use 0.25 CPU cores) to avoid OOM.
 # We use 50 GB disk size to reduce the cost.
 CONTROLLER_RESOURCES = {'memory': '3x', 'disk_size': 50}
 

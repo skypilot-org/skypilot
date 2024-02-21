@@ -2464,8 +2464,8 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
         optionally accelerator demands.
     """
     # TODO: Custom CPU and other memory resources are not supported yet.
-    # For sky serve controller task, we set the CPU resource to a smaller
-    # value to support a larger number of services.
+    # For sky spot/serve controller task, we set the CPU resource to a smaller
+    # value to support a larger number of spot jobs and services.
     resources_dict = {
         'CPU': (constants.CONTROLLER_PROCESS_CPU_DEMAND
                 if task.is_controller_task() else DEFAULT_TASK_CPU_DEMAND)
