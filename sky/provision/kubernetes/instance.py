@@ -522,7 +522,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        })
 
     assert head_pod_name is not None, 'head_instance_id should not be None'
-    logger.debug(f'run_instances: Done. head pod name: {head_pod_name}')
     return common.ProvisionRecord(
         provider_name='kubernetes',
         region=region,
