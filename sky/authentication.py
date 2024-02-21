@@ -43,6 +43,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
+from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
@@ -461,4 +462,18 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         public_key = pub_key_file.read().strip()
         runpod.runpod().cli.groups.ssh.functions.add_ssh_key(public_key)
 
+    return configure_ssh_info(config)
+
+
+def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+
+    get_or_generate_keys()
+
+    client = fluidstack_utils.FluidstackClient()
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    public_key = None
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read()
+    client.get_or_add_ssh_key(public_key)
+    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
     return configure_ssh_info(config)

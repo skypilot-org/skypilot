@@ -12,7 +12,7 @@ resources:
 
 # You can use env vars in
 #   - the destination: source paths
-#   - for SkyPilot Storage
+#   - for bucket mounting
 #     - the "name" (bucket name) and "source" (local dir/file to upload) fields.
 #
 # Both syntaxes work: ${MY_BUCKET} and $MY_BUCKET.
