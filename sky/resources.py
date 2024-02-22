@@ -200,7 +200,6 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
-        self._try_validate_local()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_spot()
@@ -252,9 +251,6 @@ class Resources:
         memory = ''
         if self.memory is not None:
             memory = f', mem={self.memory}'
-
-        if isinstance(self.cloud, clouds.Local):
-            return f'{self.cloud}({self.accelerators})'
 
         use_spot = ''
         if self.use_spot:
@@ -452,7 +448,10 @@ class Resources:
 
         self._memory = str(memory)
         if isinstance(memory, str):
-            if memory.endswith('+'):
+            if memory.endswith(('+', 'x')):
+                # 'x' is used internally for make sure our resources used by
+                # spot controller (memory: 3x) to have enough memory based on
+                # the vCPUs.
                 num_memory_gb = memory[:-1]
             else:
                 num_memory_gb = memory
@@ -502,12 +501,6 @@ class Resources:
                     except ValueError:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
-
-            # Ignore check for the local cloud case.
-            # It is possible the accelerators dict can contain multiple
-            # types of accelerators for some on-prem clusters.
-            if not isinstance(self._cloud, clouds.Local):
-                assert len(accelerators) == 1, accelerators
 
             # Canonicalize the accelerator names.
             accelerators = {
@@ -721,7 +714,7 @@ class Resources:
                             f'number of vCPUs. {self.instance_type} has {cpus} '
                             f'vCPUs, but {self.cpus} is requested.')
             if self.memory is not None:
-                if self.memory.endswith('+'):
+                if self.memory.endswith(('+', 'x')):
                     if mem < float(self.memory[:-1]):
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
@@ -749,25 +742,6 @@ class Resources:
                     f'Spot recovery strategy {self._spot_recovery} '
                     'is not supported. The strategy should be among '
                     f'{list(spot.SPOT_STRATEGIES.keys())}')
-
-    def _try_validate_local(self) -> None:
-        if isinstance(self._cloud, clouds.Local):
-            if self._use_spot:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Local/On-prem mode does not support spot '
-                                     'instances.')
-            local_instance = clouds.Local.get_default_instance_type()
-            if (self._instance_type is not None and
-                    self._instance_type != local_instance):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Local/On-prem mode does not support instance type:'
-                        f' {self._instance_type}.')
-            if self._image_id is not None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Local/On-prem mode does not support custom '
-                        'images.')
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
@@ -870,21 +844,6 @@ class Resources:
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
                 self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
-        else:
-            at_least_one_cloud_supports_ports = False
-            for cloud in global_user_state.get_enabled_clouds():
-                try:
-                    cloud.check_features_are_supported(
-                        self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
-                    at_least_one_cloud_supports_ports = True
-                except exceptions.NotSupportedError:
-                    pass
-            if not at_least_one_cloud_supports_ports:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'No enabled clouds support opening ports. To fix: '
-                        'do not specify resources.ports, or enable a cloud '
-                        'that does support this feature.')
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
 

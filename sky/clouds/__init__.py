@@ -13,11 +13,11 @@ from sky.clouds.cloud_registry import CLOUD_REGISTRY
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
 from sky.clouds.cudo import Cudo
+from sky.clouds.fluidstack import Fluidstack
 from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
-from sky.clouds.local import Local
 from sky.clouds.oci import OCI
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
@@ -31,7 +31,6 @@ __all__ = [
     'Cudo',
     'GCP',
     'Lambda',
-    'Local',
     'SCP',
     'RunPod',
     'OCI',
@@ -43,6 +42,7 @@ __all__ = [
     'CLOUD_REGISTRY',
     'ProvisionerVersion',
     'StatusVersion',
+    'Fluidstack',
     # Utility functions
     'cloud_in_list',
 ]

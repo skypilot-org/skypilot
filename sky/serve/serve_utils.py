@@ -37,7 +37,8 @@ if typing.TYPE_CHECKING:
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
-NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
+NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
+                         constants.CONTROLLER_MEMORY_USAGE_GB)
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
@@ -432,7 +433,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     return '\n'.join(messages)
 
 
-def wait_service_initialization(service_name: str, job_id: int) -> str:
+def wait_service_registration(service_name: str, job_id: int) -> str:
     """Util function to call at the end of `sky.serve.up()`.
 
     This function will:
@@ -465,10 +466,19 @@ def wait_service_initialization(service_name: str, job_id: int) -> str:
                 raise RuntimeError('Max number of services reached. '
                                    'To spin up more services, please '
                                    'tear down some existing services.')
-        if time.time() - start_time > constants.INITIALIZATION_TIMEOUT_SECONDS:
+        elapsed = time.time() - start_time
+        if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
+            # Print the controller log to help user debug.
+            controller_log_path = (
+                generate_remote_controller_log_file_name(service_name))
+            with open(os.path.expanduser(controller_log_path),
+                      'r',
+                      encoding='utf-8') as f:
+                log_content = f.read()
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Initialization of service {service_name!r} timeout.')
+                raise ValueError(f'Failed to register service {service_name!r} '
+                                 'on the SkyServe controller. '
+                                 f'Reason:\n{log_content}')
         time.sleep(1)
 
 
@@ -836,9 +846,9 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def wait_service_initialization(cls, service_name: str, job_id: int) -> str:
+    def wait_service_registration(cls, service_name: str, job_id: int) -> str:
         code = [
-            'msg = serve_utils.wait_service_initialization('
+            'msg = serve_utils.wait_service_registration('
             f'{service_name!r}, {job_id})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)

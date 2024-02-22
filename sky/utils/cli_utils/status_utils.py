@@ -7,7 +7,6 @@ import colorama
 from sky import backends
 from sky import status_lib
 from sky.skylet import constants
-from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 
@@ -196,109 +195,6 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
-        click.echo(cluster_table)
-
-
-def show_local_status_table(local_clusters: List[str]):
-    """Lists all local clusters.
-
-    Lists both uninitialized and initialized local clusters. Uninitialized
-    local clusters are clusters that have their cluster configs in
-    ~/.sky/local. Sky does not know if the cluster is valid yet and does not
-    know what resources the cluster has. Hence, this func will return blank
-    values for such clusters. Initialized local clusters are created using
-    `sky launch`. Sky understands what types of resources are on the nodes and
-    has ran at least one job on the cluster.
-    """
-    # Import the backend_utils module here to avoid circular imports.
-    # TODO(zhwu): Local clusters are deprecated and replaced by our k8s support.
-    # We should remove the clouds.Local related implementation.
-    # pylint: disable=import-outside-toplevel
-    from sky.backends import backend_utils
-
-    clusters_status = backend_utils.get_clusters(
-        include_controller=False,
-        refresh=False,
-        cloud_filter=backend_utils.CloudFilter.LOCAL)
-    columns = [
-        'NAME',
-        'USER',
-        'HEAD_IP',
-        'RESOURCES',
-        'COMMAND',
-    ]
-
-    cluster_table = log_utils.create_table(columns)
-    names = []
-    # Handling for initialized clusters.
-    for cluster_status in clusters_status:
-        handle = cluster_status['handle']
-        config_path = handle.cluster_yaml
-        config = common_utils.read_yaml(config_path)
-        username = config['auth']['ssh_user']
-
-        if not isinstance(handle, backends.CloudVmRayResourceHandle):
-            raise ValueError(f'Unknown handle type {type(handle)} encountered.')
-
-        if (handle.launched_nodes is not None and
-                handle.launched_resources is not None):
-            if hasattr(handle,
-                       'local_handle') and handle.local_handle is not None:
-                local_cluster_resources = [
-                    r.accelerators
-                    for r in handle.local_handle['cluster_resources']
-                ]
-                # Replace with (no GPUs)
-                local_cluster_resources = [
-                    r if r is not None else '(no GPUs)'
-                    for r in local_cluster_resources
-                ]
-                head_ip = handle.local_handle['ips'][0]
-            else:
-                local_cluster_resources = []
-                head_ip = ''
-            for idx, resource in enumerate(local_cluster_resources):
-                if not bool(resource):
-                    local_cluster_resources[idx] = None
-            resources_str = '[{}]'.format(', '.join(
-                map(str, local_cluster_resources)))
-        command_str = cluster_status['last_use']
-        cluster_name = handle.cluster_name
-        row = [
-            # NAME
-            cluster_name,
-            # USER
-            username,
-            # HEAD_IP
-            head_ip,
-            # RESOURCES
-            resources_str,
-            # COMMAND
-            truncate_long_string(command_str, COMMAND_TRUNC_LENGTH),
-        ]
-        names.append(cluster_name)
-        cluster_table.add_row(row)
-
-    # Handling for uninitialized clusters.
-    for clus in local_clusters:
-        if clus not in names:
-            row = [
-                # NAME
-                clus,
-                # USER
-                '-',
-                # HEAD_IP
-                '-',
-                # RESOURCES
-                '-',
-                # COMMAND
-                '-',
-            ]
-            cluster_table.add_row(row)
-
-    if clusters_status or local_clusters:
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Local '
-                   f'clusters:{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
 
 

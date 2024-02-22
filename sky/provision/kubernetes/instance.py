@@ -338,11 +338,11 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
             'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
             '$(prefix_cmd) mkdir -p ~/.ssh; '
-            '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey '
-            '~/.ssh/authorized_keys; '
             '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
             '$(prefix_cmd) chmod 700 ~/.ssh; '
             '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
+            '$(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > '
+            '~/.ssh/authorized_keys; '
             '$(prefix_cmd) service ssh restart; '
             # Eliminate the error
             # `mesg: ttyname failed: inappropriate ioctl for device`.

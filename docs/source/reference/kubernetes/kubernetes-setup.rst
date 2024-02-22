@@ -361,7 +361,31 @@ This mode exposes ports by creating a Kubernetes `Ingress <https://kubernetes.io
 To use this mode:
 
 1. Install the Nginx Ingress Controller on your Kubernetes cluster. Refer to the `documentation <https://kubernetes.github.io/ingress-nginx/deploy/>`_ for installation instructions specific to your environment.
-2. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
+2. Verify that the ``ingress-nginx-controller`` service has a valid external IP:
+
+.. code-block:: bash
+
+    $ kubectl get service ingress-nginx-controller -n ingress-nginx
+
+    # Example output:
+    # NAME                             TYPE                CLUSTER-IP    EXTERNAL-IP     PORT(S)
+    # ingress-nginx-controller         LoadBalancer        10.24.4.254   35.202.58.117   80:31253/TCP,443:32699/TCP
+
+.. note::
+    If the ``EXTERNAL-IP`` field is ``<none>``, you must to manually assign a External IP.
+    This can be done by patching the service with an IP that can be accessed from outside the cluster.
+    If the service type is ``NodePort``, you can set the ``EXTERNAL-IP`` to any node's IP address:
+
+    .. code-block:: bash
+
+      # Patch the nginx ingress service with an external IP. Can be any node's IP if using NodePort service.
+      # Replace <IP> in the following command with the IP you select.
+      $ kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{"spec": {"externalIPs": ["<IP>"]}}'
+
+    If the ``EXTERNAL-IP`` field is left as ``<none>``, SkyPilot will use ``localhost`` as the external IP for the Ingress,
+    and the endpoint may not be accessible from outside the cluster.
+
+3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
 
 .. code-block:: yaml
 
