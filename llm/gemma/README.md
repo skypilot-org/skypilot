@@ -1,9 +1,11 @@
-# Serve Your Private Gemma
+# Serve Your Gemma on Any Cloud
 
 Google released [Gemma](https://blog.google/technology/developers/gemma-open-models/) and has made a big wave in the AI community.
 It opens the opportunity for the open-source community to serve and finetune private Gemini.
 
 ## Serve Gemma on any Cloud
+
+Serving Gemma on any cloud is easy with SkyPilot. We can find the [serve.yaml](serve.yaml) in this directory, which can be used to start hosting the model on any cloud with a single command.
 
 ### Prerequsite
 
