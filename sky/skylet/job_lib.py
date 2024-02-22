@@ -813,7 +813,11 @@ class JobLibCodeGen:
         'import os',
         'import getpass',
         'from sky.skylet import job_lib, log_lib, constants',
-        # Backward compatibility for old skylet lib version.
+        # Backward compatibility for old skylet lib version on the remote
+        # machine. The `job_owner` argument was removed in #3037, and if the
+        # remote machine has an old SkyPilot version before that, we need to
+        # pass the `job_owner` argument to the job_lib functions.
+        # TODO(zhwu): Remove this in 0.7.0 release.
         'job_owner_kwargs = {} '
         'if getattr(constants, "SKYLET_LIB_VERSION", 0) >= 1 '
         'else {"job_owner": getpass.getuser()}',
