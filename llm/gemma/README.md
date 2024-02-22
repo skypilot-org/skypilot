@@ -18,6 +18,12 @@ Go to the [application page](https://huggingface.co/google/gemma-7b) and click *
 
 Generate a read-only access token on huggingface [here](https://huggingface.co/settings/token), and make sure your huggingface account can access the Gemma models [here](https://huggingface.co/google/gemma-7b).
 
+3. Install SkyPilot
+
+```bash
+pip install "skypilot-nightly[all]"
+```
+For detailed installation instructions, please refer to the [installation guide](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
 
 ### Host on a Single Instance
 
@@ -33,7 +39,7 @@ IP=$(sky status --ip gemma)
 curl -L http://$IP:8000/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
-      "model": "google/gemma-7b",
+      "model": "google/gemma-7b-it",
       "prompt": "My favourite condiment is",
       "max_tokens": 25
   }' | jq .
@@ -47,6 +53,7 @@ We can scale the model serving across multiple instances, regions and clouds wit
 sky serve up -n gemma serve.yaml --env HF_TOKEN="xxx"
 ```
 
+> Notice the only change is from `sky launch` to `sky serve up`. The same YAML can be used without changes.
 
 After the cluster is launched, we can access the model with the following command:
 ```bash
@@ -55,7 +62,7 @@ ENDPOINT=$(sky serve status --endpoint gemma)
 curl -L http://$ENDPOINT/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
-      "model": "google/gemma-7b",
+      "model": "google/gemma-7b-it",
       "prompt": "My favourite condiment is",
       "max_tokens": 25
   }' | jq .

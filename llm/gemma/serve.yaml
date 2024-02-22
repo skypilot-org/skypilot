@@ -16,7 +16,7 @@ service:
   replicas: 2
 
 envs:
-  MODEL_NAME: google/gemma-7b
+  MODEL_NAME: google/gemma-7b-it
   HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
 
 resources: 
