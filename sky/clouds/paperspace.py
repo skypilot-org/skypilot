@@ -24,9 +24,23 @@ class Paperspace(clouds.Cloud):
 
     _REPR = "Paperspace"
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE: (
-            "Spot is not supported, as Paperspace API does not implement spot ."
-        ),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: 
+            'Spot is not supported, as Paperspace API does not implement spot .',
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            'Migrating '
+            f'disk is not supported in Paperspace.',
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
+            'Spot instances are'
+            f' not supported in Paperspace.',
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            'Specifying image ID '
+            f'is not supported for Paperspace.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            'Custom disk tiers'
+            f' is not supported in Paperspace.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            'Opening ports'
+            f'is not supported in Paperspace.',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
