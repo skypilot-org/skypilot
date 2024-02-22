@@ -108,12 +108,6 @@ AWS, where it succeeded after two regions:
 Multiple Candidate GPUs
 -------------------------
 
-.. tip::
-
-  Support for multiple resources via ``any_of`` or ``ordered`` was added after v0.4.1.
-
-  To use this feature, :ref:`install the nightly release <installation>`: ``pip install -U skypilot-nightly``
-
 If a task can be run on different GPUs, the user can specify multiple candidate GPUs,
 and SkyPilot will automatically find the cheapest available GPU.
 
