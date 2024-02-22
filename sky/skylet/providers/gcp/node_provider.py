@@ -280,6 +280,7 @@ class GCPNodeProvider(NodeProvider):
                     )
                     for node_id in reuse_node_ids:
                         result = resource.start_instance(node_id)
+                        resource.resize_disk(base_config, node_id)
                         result_dict[node_id] = {node_id: result}
                     for node_id in reuse_node_ids:
                         self.set_node_tags(node_id, tags)
