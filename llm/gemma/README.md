@@ -5,7 +5,7 @@ It opens the opportunity for the open-source community to serve and finetune pri
 
 ## Serve Gemma on any Cloud
 
-Serving Gemma on any cloud is easy with SkyPilot. We can find the [serve.yaml](serve.yaml) in this directory, which can be used to start hosting the model on any cloud with a single command.
+Serving Gemma on any cloud is easy with SkyPilot. With [serve.yaml](serve.yaml) in this directory, you host the model on any cloud with a single command.
 
 ### Prerequsite
 
