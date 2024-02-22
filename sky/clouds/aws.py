@@ -260,8 +260,7 @@ class AWS(clouds.Cloud):
         image_not_found_message = (
             f'Image {image_id!r} not found in AWS region {region}.\n'
             f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-            'Example: ami-0729d913a335efca7'
-        )
+            'Example: ami-0729d913a335efca7')
         try:
             image_info = client.describe_images(ImageIds=[image_id])
             image_info = image_info.get('Images', [])
