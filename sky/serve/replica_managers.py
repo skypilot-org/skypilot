@@ -1021,11 +1021,11 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._task_yaml_path = task_yaml_path
 
         # Iterate over current replicas, update replica version if the config of
-        # the current replica (w/o service) matches that of the new version.
-        new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
+        # the current replica matches that of the new version.
         # The 'service' key should already be checked to exist in serve.core.
         # SkyServe will create new file mounts for each version.
         # TODO(MaoZiming): Check whether user updates any file in file mounts.
+        new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         for key in ['service', 'file_mounts']:
             new_config.pop(key)
         replica_infos = serve_state.get_replica_infos(self._service_name)
