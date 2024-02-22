@@ -1,7 +1,6 @@
 """Test the controller_utils module."""
 import pytest
 
-from sky import skypilot_config
 from sky.serve import constants as serve_constants
 from sky.spot import constants as spot_constants
 from sky.utils import controller_utils
@@ -47,7 +46,7 @@ def test_get_controller_resources_spot(controller_type,
         if keys == (controller_type, 'controller', 'resources'):
             return custom_controller_resources_config
         else:
-            return skypilot_config.get_nested(keys, default)
+            return default
 
     monkeypatch.setattr('sky.skypilot_config.get_nested',
                         get_custom_controller_resources)
