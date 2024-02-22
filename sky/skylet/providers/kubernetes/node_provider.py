@@ -288,7 +288,7 @@ class KubernetesNodeProvider(NodeProvider):
                                 # TODO(romilb): We may have additional node
                                 #  affinity selectors in the future - in that
                                 #  case we will need to update this logic.
-                                if ('Insufficient nvidia.com/gpu'
+                                if ('Insufficient amd.com/gpu'
                                         in event_message or
                                         'didn\'t match Pod\'s node affinity/selector'
                                         in event_message):

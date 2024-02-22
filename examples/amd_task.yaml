@@ -1,0 +1,16 @@
+# Example task using AMD GPUs.
+# Runs rocm-smi to get GPU information.
+
+# Make sure
+# Your nodes are labelled correctly:
+#   kubectl label node <node-name> skypilot.co/accelerator=mi210
+# There's no nvidia runtime on your cluster:
+#   kubectl delete runtimeclasses.node.k8s.io nvidia nvidia-experimental
+
+resources:
+  cloud: kubernetes
+  image_id: rocm/pytorch:latest
+  accelerators: MI210:1
+
+run: |
+  rocm-smi

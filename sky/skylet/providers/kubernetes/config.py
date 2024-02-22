@@ -161,14 +161,14 @@ def _get_resource(container_resources: Dict[str, Any], resource_name: str,
         return float('inf')
     resources = container_resources[field_name]
     # Look for keys containing the resource_name. For example,
-    # the key 'nvidia.com/gpu' contains the key 'gpu'.
+    # the key 'amd.com/gpu' contains the key 'gpu'.
     matching_keys = [key for key in resources if resource_name in key.lower()]
     if len(matching_keys) == 0:
         return float('inf')
     if len(matching_keys) > 1:
         # Should have only one match -- mostly relevant for gpu.
         raise ValueError(f'Multiple {resource_name} types not supported.')
-    # E.g. 'nvidia.com/gpu' or 'cpu'.
+    # E.g. 'amd.com/gpu' or 'cpu'.
     resource_key = matching_keys.pop()
     resource_quantity = resources[resource_key]
     if resource_name == 'memory':

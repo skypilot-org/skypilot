@@ -64,12 +64,11 @@ def list_accelerators(
             accelerator_name = label_formatter.get_accelerator_from_label_value(
                 node.metadata.labels.get(key))
             accelerator_count = int(
-                node.status.allocatable.get('nvidia.com/gpu', 0))
+                node.status.allocatable.get('amd.com/gpu', 0))
 
             if accelerator_name and accelerator_count > 0:
                 for count in range(1, accelerator_count + 1):
                     accelerators.add((accelerator_name, count))
-
     result = []
     for accelerator_name, accelerator_count in accelerators:
         result.append(

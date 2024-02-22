@@ -31,7 +31,7 @@ MEMORY_SIZE_UNITS = {
     'P': 2**50,
 }
 NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. \
-If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
+If your cluster contains GPUs, make sure amd.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
 (e.g., skypilot.co/accelerators) are setup correctly. \
 To further debug, run: sky check.'
 
@@ -218,21 +218,21 @@ def detect_gpu_label_formatter(
 
 
 def detect_gpu_resource() -> Tuple[bool, Set[str]]:
-    """Checks if the Kubernetes cluster has nvidia.com/gpu resource.
+    """Checks if the Kubernetes cluster has amd.com/gpu resource.
 
-    If nvidia.com/gpu resource is missing, that typically means that the
+    If amd.com/gpu resource is missing, that typically means that the
     Kubernetes cluster does not have GPUs or the nvidia GPU operator and/or
     device drivers are not installed.
 
     Returns:
-        bool: True if the cluster has nvidia.com/gpu resource, False otherwise.
+        bool: True if the cluster has amd.com/gpu resource, False otherwise.
     """
     # Get the set of resources across all nodes
     cluster_resources: Set[str] = set()
     nodes = get_kubernetes_nodes()
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
-    has_gpu = 'nvidia.com/gpu' in cluster_resources
+    has_gpu = 'amd.com/gpu' in cluster_resources
 
     return has_gpu, cluster_resources
 
@@ -341,7 +341,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
         is True.
     Raises:
         ResourcesUnavailableError: Can be raised from the following conditions:
-            - The cluster does not have GPU resources (nvidia.com/gpu)
+            - The cluster does not have GPU resources (amd.com/gpu)
             - The cluster does not have GPU labels setup correctly
             - The cluster doesn't have any nodes with acc_type GPU
     """
@@ -428,11 +428,11 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 suffix = (' Available resources on the cluster: '
                           f'{cluster_resources}')
             raise exceptions.ResourcesUnavailableError(
-                'Could not detect GPU resources (`nvidia.com/gpu`) in '
+                'Could not detect GPU resources (`amd.com/gpu`) in '
                 'Kubernetes cluster. If this cluster contains GPUs, please '
                 'ensure GPU drivers are installed on the node. Check if the '
                 'GPUs are setup correctly by running `kubectl describe nodes` '
-                'and looking for the nvidia.com/gpu resource. '
+                'and looking for the amd.com/gpu resource. '
                 'Please refer to the documentation on how '
                 f'to set up GPUs.{suffix}')
 
