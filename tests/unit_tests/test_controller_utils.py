@@ -48,7 +48,7 @@ def test_get_controller_resources_spot(controller_type,
         else:
             return default
 
-    monkeypatch.setattr('sky.skypilot_config.loaded()', lambda: True)
+    monkeypatch.setattr('sky.skypilot_config.loaded', lambda: True)
     monkeypatch.setattr('sky.skypilot_config.get_nested',
                         get_custom_controller_resources)
 
