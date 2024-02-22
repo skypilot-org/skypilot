@@ -280,7 +280,7 @@ class Cudo(clouds.Cloud):
             _, error = cudo_api.client()
         except FileNotFoundError as e:
             return False, (
-                'Application credentials are not set. '
+                'Cudo credentials are not set. '
                 f'{cls._CREDENTIAL_HINT}\n'
                 f'{cls._INDENT_PREFIX}'
                 f'{common_utils.format_exception(e, use_bracket=True)}')
