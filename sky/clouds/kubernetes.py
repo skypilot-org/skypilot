@@ -227,8 +227,9 @@ class Kubernetes(clouds.Cloud):
 
         if resources.image_id is not None:
             # Use custom image specified in resources
-            image_id_with_region = resources.image_id['kubernetes']
-            image_id = image_id_with_region.lstrip('docker:')
+            image_id = resources.image_id['kubernetes']
+            if image_id.startswith('docker:'):
+                image_id = image_id[len('docker:'):]
         else:
             # Select image based on whether we are using GPUs or not.
             image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
