@@ -1,12 +1,10 @@
 """Test the controller_utils module."""
 import pytest
-import textwrap
 
-from sky.utils import controller_utils
-from sky.spot import constants as spot_constants
-from sky.serve import constants as serve_constants
 from sky import skypilot_config
-
+from sky.serve import constants as serve_constants
+from sky.spot import constants as spot_constants
+from sky.utils import controller_utils
 
 
 @pytest.mark.parametrize(
@@ -37,8 +35,8 @@ from sky import skypilot_config
         }),
     ])
 def test_get_controller_resources_spot(controller_type,
-                                       custom_controller_resources_config, expected,
-                                       enable_all_clouds,
+                                       custom_controller_resources_config,
+                                       expected, enable_all_clouds,
                                        monkeypatch):
     if controller_type == 'spot':
         controller_resources_config = spot_constants.CONTROLLER_RESOURCES
@@ -50,12 +48,12 @@ def test_get_controller_resources_spot(controller_type,
             return custom_controller_resources_config
         else:
             return skypilot_config.get_nested(keys, default)
-    
-    monkeypatch.setattr(skypilot_config, 'get_nested', get_custom_controller_resources)
+
+    monkeypatch.setattr(skypilot_config, 'get_nested',
+                        get_custom_controller_resources)
 
     controller_resources = controller_utils.get_controller_resources(
         controller_type, controller_resources_config)
     controller_resources_config = controller_resources.to_yaml_config()
     for k, v in expected.items():
-        assert controller_resources_config[k] == v, (
-            k, v, controller_resources)
+        assert controller_resources_config[k] == v, (k, v, controller_resources)
