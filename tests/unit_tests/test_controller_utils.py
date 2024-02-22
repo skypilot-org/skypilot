@@ -56,4 +56,5 @@ def test_get_controller_resources_spot(controller_type,
         controller_type, controller_resources_config)
     controller_resources_config = controller_resources.to_yaml_config()
     for k, v in expected.items():
-        assert controller_resources_config[k] == v, (k, v, controller_resources)
+        assert controller_resources_config[k] == v, (
+            controller_type, custom_controller_resources_config, expected, k, v)
