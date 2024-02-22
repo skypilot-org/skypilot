@@ -69,8 +69,7 @@ def handle_returncode(returncode: int,
                       command: str,
                       error_msg: Union[str, Callable[[], str]],
                       stderr: Optional[str] = None,
-                      stream_logs: bool = True,
-                      cluster_name: Optional[str] = None) -> None:
+                      stream_logs: bool = True) -> None:
     """Handle the returncode of a command.
 
     Args:

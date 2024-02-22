@@ -810,7 +810,8 @@ class JobLibCodeGen:
     """
 
     _PREFIX = [
-        'import os', 'import getpass',
+        'import os',
+        'import getpass',
         'from sky.skylet import job_lib, log_lib, constants',
         # Backward compatibility for old skylet lib version.
         'job_owner_kwargs = {} '
