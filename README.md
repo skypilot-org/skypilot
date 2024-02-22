@@ -27,7 +27,7 @@
 
 ----
 :fire: *News* :fire:
-- [Feb, 2024] Deploying and scaling [**Gemma**](https://blog.google/technology/developers/gemma-open-models/) wiht SkyServe: [**example**](./llm/gemma/)
+- [Feb, 2024] Deploying and scaling [**Gemma**](https://blog.google/technology/developers/gemma-open-models/) with SkyServe: [**example**](./llm/gemma/)
 - [Feb, 2024] Speed up your LLM deployments with [**SGLang**](https://github.com/sgl-project/sglang) for 5x throughput on SkyServe: [**example**](./llm/sglang/)
 - [Feb, 2024] Serving [**Code Llama 70B**](https://ai.meta.com/blog/code-llama-large-language-model-coding/) with vLLM and SkyServe: [**example**](./llm/codellama/)
 - [Dec, 2023] Using [**LoRAX**](https://github.com/predibase/lorax) to serve 1000s of finetuned LLMs on a single instance in the cloud: [**example**](./llm/lorax/)

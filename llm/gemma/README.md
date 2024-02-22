@@ -5,11 +5,11 @@ It opens the opportunity for the open-source community to serve and finetune pri
 
 ## Serve Gemma on any Cloud
 
-Serving Gemma on any cloud is easy with SkyPilot. We can find the [serve.yaml](serve.yaml) in this directory, which can be used to start hosting the model on any cloud with a single command.
+Serving Gemma on any cloud is easy with SkyPilot. With [serve.yaml](serve.yaml) in this directory, you host the model on any cloud with a single command.
 
 ### Prerequsite
 
-1. Apply for the access to the Gemma model
+1. Apply for access to the Gemma model
 
 Go to the [application page](https://huggingface.co/google/gemma-7b) and click **Acknowledge license** to apply for access to the model weights.
 
@@ -48,7 +48,7 @@ curl -L http://$IP:8000/v1/completions \
 ### Scale the Serving with SkyServe
 
 
-We can scale the model serving across multiple instances, regions and clouds with SkyServe:
+Using the same YAML, we can easily scale the model serving across multiple instances, regions and clouds with SkyServe:
 ```bash
 sky serve up -n gemma serve.yaml --env HF_TOKEN="xxx"
 ```
