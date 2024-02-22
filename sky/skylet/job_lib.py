@@ -816,7 +816,7 @@ class JobLibCodeGen:
         # Backward compatibility for old skylet lib version.
         'job_owner_kwargs = {} '
         'if getattr(constants, "SKYLET_LIB_VERSION", 0) >= 1 '
-        'else {"username": getpass.getuser()}',
+        'else {"job_owner": getpass.getuser()}',
     ]
 
     @classmethod
