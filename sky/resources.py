@@ -450,7 +450,8 @@ class Resources:
         if isinstance(memory, str):
             if memory.endswith(('+', 'x')):
                 # 'x' is used internally for make sure our resources used by
-                # controller to have enough memory based on the vCPUs.
+                # spot controller (memory: 3x) to have enough memory based on
+                # the vCPUs.
                 num_memory_gb = memory[:-1]
             else:
                 num_memory_gb = memory
