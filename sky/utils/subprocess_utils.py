@@ -69,8 +69,7 @@ def handle_returncode(returncode: int,
                       command: str,
                       error_msg: Union[str, Callable[[], str]],
                       stderr: Optional[str] = None,
-                      stream_logs: bool = True,
-                      cluster_name: Optional[str] = None) -> None:
+                      stream_logs: bool = True) -> None:
     """Handle the returncode of a command.
 
     Args:
@@ -81,24 +80,6 @@ def handle_returncode(returncode: int,
     """
     echo = logger.error if stream_logs else lambda _: None
     if returncode != 0:
-        if (stderr is not None and
-                'The SkyPilot runtime on remote cluster is outdated.'
-                in stderr):
-            # Backward compatibility for the outdated runtime. We automatically
-            # run the `sky start -f` command to update the runtime.
-            logger.info('The SkyPilot runtime on remote cluster is outdated. '
-                        'Updating the runtime...')
-            try:
-                run(f'sky start -f -y {cluster_name}')
-            except subprocess.CalledProcessError:
-                error_msg = (
-                    f'The SkyPilot runtime on remote cluster {cluster_name!r} '
-                    'is outdated, and fail to update the runtime automatically.'
-                    ' Please update the runtime with: '
-                    f'sky start -f {cluster_name}')
-            else:
-                return
-
         if stderr is not None:
             echo(stderr)
 

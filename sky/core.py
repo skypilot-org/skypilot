@@ -529,8 +529,7 @@ def queue(cluster_name: str,
         command=code,
         error_msg=f'Failed to get job queue on cluster {cluster_name}.',
         stderr=f'{jobs_payload + stderr}',
-        stream_logs=True,
-        cluster_name=cluster_name)
+        stream_logs=True)
     jobs = job_lib.load_job_queue(jobs_payload)
     return jobs
 
