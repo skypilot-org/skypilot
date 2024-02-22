@@ -84,10 +84,21 @@ def handle_returncode(returncode: int,
         if (stderr is not None and
                 'The SkyPilot runtime on remote cluster is outdated.'
                 in stderr):
-            error_msg = (
-                f'The SkyPilot runtime on remote cluster {cluster_name!r} is '
-                'outdated. Please update the runtime with: '
-                f'sky start -f {cluster_name}')
+            # Backward compatibility for the outdated runtime. We automatically
+            # run the `sky start -f` command to update the runtime.
+            logger.info('The SkyPilot runtime on remote cluster is outdated. '
+                        'Updating the runtime...')
+            try:
+                run(f'sky start -f -y {cluster_name}')
+            except subprocess.CalledProcessError:
+                error_msg = (
+                    f'The SkyPilot runtime on remote cluster {cluster_name!r} '
+                    'is outdated, and fail to update the runtime automatically.'
+                    ' Please update the runtime with: '
+                    f'sky start -f {cluster_name}')
+            else:
+                return
+
         if stderr is not None:
             echo(stderr)
 
