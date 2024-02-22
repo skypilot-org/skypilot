@@ -42,14 +42,14 @@ def test_get_controller_resources_spot(controller_type,
         controller_resources_config = spot_constants.CONTROLLER_RESOURCES
     else:
         controller_resources_config = serve_constants.CONTROLLER_RESOURCES
-
+    
     def get_custom_controller_resources(keys, default):
         if keys == (controller_type, 'controller', 'resources'):
             return custom_controller_resources_config
         else:
             return skypilot_config.get_nested(keys, default)
 
-    monkeypatch.setattr(skypilot_config, 'get_nested',
+    monkeypatch.setattr('sky.skypilot_config.get_nested',
                         get_custom_controller_resources)
 
     controller_resources = controller_utils.get_controller_resources(
