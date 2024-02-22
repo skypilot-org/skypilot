@@ -41,7 +41,7 @@ def test_get_controller_resources_spot(controller_type,
         controller_resources_config = spot_constants.CONTROLLER_RESOURCES
     else:
         controller_resources_config = serve_constants.CONTROLLER_RESOURCES
-    
+
     def get_custom_controller_resources(keys, default):
         if keys == (controller_type, 'controller', 'resources'):
             return custom_controller_resources_config
