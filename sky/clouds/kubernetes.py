@@ -238,9 +238,6 @@ class Kubernetes(clouds.Cloud):
             # Get the container image ID from the service catalog.
             image_id = service_catalog.get_image_id_from_tag(
                 image_id, clouds='kubernetes')
-        logger.info('\n\n')
-        logger.info(f'Using image {image_id} for instance type. Had {resources.image_id}')
-        logger.info('\n\n')
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')

@@ -10,7 +10,9 @@
 resources:
   cloud: kubernetes
   image_id: docker:rocm/pytorch:rocm6.0.2_ubuntu22.04_py3.10_pytorch_2.1.2 # rocm/pytorch:latest does not work since it uses python 3.11, which fails with ray 2.4.0
-  accelerators: MI210:1
+  accelerators: MI210:32
+  cpus: 128
+  memory: 512+
 
 setup: |
   pip install --upgrade --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/rocm6.0/
@@ -19,7 +21,7 @@ setup: |
   cd trl
   pip install .
   mkdir -p /root/.cache/huggingface/accelerate/
-  echo \"compute_environment: LOCAL_MACHINE\ndebug: false\ndistributed_type: MULTI_GPU\ndowncast_bf16: 'no'\ngpu_ids: all\nmachine_rank: 0\nmain_training_function: main\nmixed_precision: 'no'\nnum_machines: 1\nnum_processes: 32\nrdzv_backend: static\nsame_network: true\ntpu_env: []\ntpu_use_cluster: false\ntpu_use_sudo: false\nuse_cpu: false\" >/root/.cache/huggingface/accelerate/default_config.yaml
+  printf "compute_environment: LOCAL_MACHINE\ndebug: false\ndistributed_type: MULTI_GPU\ndowncast_bf16: 'no'\ngpu_ids: all\nmachine_rank: 0\nmain_training_function: main\nmixed_precision: 'no'\nnum_machines: 1\nnum_processes: 32\nrdzv_backend: static\nsame_network: true\ntpu_env: []\ntpu_use_cluster: false\ntpu_use_sudo: false\nuse_cpu: false\n" >/root/.cache/huggingface/accelerate/default_config.yaml
 
 run: |
   accelerate launch --num_processes 32 trl/examples/scripts/sft.py --model_name_or_path="facebook/opt-350m" --learning_rate=1.41e-5 --per_device_train_batch_size=64 --gradient_accumulation_steps=16 --output_dir="sft_openassistant-guanaco" --logging_steps=1 --num_train_epochs=3 --max_steps=-1 --gradient_checkpointing

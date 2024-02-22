@@ -676,6 +676,7 @@ def get_cluster_info(
         custom_ray_options={
             'object-store-memory': 500000000,
             'num-cpus': cpu_request,
+            'num-gpus': 100, # FIXME - This is hack for AMD support. Ray does not auto detect number of GPUs. We should read from amd.com/gpu count if amd gpu is set.
         })
 
 
