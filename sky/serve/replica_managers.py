@@ -1020,6 +1020,27 @@ class SkyPilotReplicaManager(ReplicaManager):
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
 
+        # Iterate over current replicas, update replica version if the resources
+        # of the current replica matches that of the new version.
+        new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
+        replica_infos = serve_state.get_replica_infos(self._service_name)
+        for info in replica_infos:
+            if info.version < version:
+                # Assume user does not change yaml on controller.
+                old_task_yaml_path = serve_utils.generate_task_yaml_file_name(
+                    self._service_name, info.version)
+                old_config = common_utils.read_yaml(
+                    os.path.expanduser(old_task_yaml_path))
+                if old_config['resources'] == new_config['resources']:
+                    logger.info(
+                        f'Updating replica {info.replica_id} to version '
+                        f'{version}. Replica {info.replica_id}\'s resource '
+                        f'{old_config["resources"]} is the same as '
+                        f'latest resource {new_config["resources"]}.')
+                    info.version = version
+                    serve_state.add_or_update_replica(self._service_name,
+                                                      info.replica_id, info)
+
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         spec = serve_state.get_spec(self._service_name, version)
         if spec is None:
