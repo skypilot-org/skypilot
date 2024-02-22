@@ -25,7 +25,6 @@ from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
-from sky.serve import service
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -782,12 +781,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         if self.least_recent_version < current_least_recent_version:
             for version in range(self.least_recent_version,
                                  current_least_recent_version):
-                task_yaml = serve_utils.generate_task_yaml_file_name(
-                    self._service_name, version)
                 # Delete old version metadata.
                 serve_state.delete_version(self._service_name, version)
-                # Delete storage buckets of older versions.
-                service.cleanup_storage(task_yaml)
             # newest version will be cleaned in serve down
             self.least_recent_version = current_least_recent_version
 
@@ -1038,6 +1033,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     os.path.expanduser(old_task_yaml_path))
                 for key in ['service', 'file_mounts']:
                     old_config.pop(key)
+                # bump replica version if resource, setup, run and other fields
+                # are the same.
                 if old_config == new_config:
                     logger.info(
                         f'Updating replica {info.replica_id} to version '

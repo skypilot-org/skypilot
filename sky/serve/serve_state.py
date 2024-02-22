@@ -315,14 +315,6 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_service_version(service_name: str) -> Optional[int]:
-    """Get the version of a service."""
-    service = get_service_from_name(service_name)
-    if service is None:
-        return None
-    return service['version']
-
-
 def get_glob_service_names(
         service_names: Optional[List[str]] = None) -> List[str]:
     """Get service names matching the glob patterns.
@@ -467,3 +459,12 @@ def delete_version(service_name: str, version: int) -> None:
         WHERE service_name=(?)
         AND version=(?)""", (service_name, version))
     _DB.conn.commit()
+
+
+def get_service_versions(service_name: str) -> List[int]:
+    """Gets all versions of a service."""
+    rows = _DB.cursor.execute(
+        """\
+        SELECT DISTINCT version FROM version_specs
+        WHERE service_name=(?)""", (service_name,)).fetchall()
+    return [row[0] for row in rows]
