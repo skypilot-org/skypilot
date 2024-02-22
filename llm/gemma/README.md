@@ -9,7 +9,7 @@ Serving Gemma on any cloud is easy with SkyPilot. With [serve.yaml](serve.yaml) 
 
 ### Prerequsite
 
-1. Apply for the access to the Gemma model
+1. Apply for access to the Gemma model
 
 Go to the [application page](https://huggingface.co/google/gemma-7b) and click **Acknowledge license** to apply for access to the model weights.
 
