@@ -9,7 +9,7 @@
 
 resources:
   cloud: kubernetes
-  image_id: rocm/pytorch:latest
+  image_id: docker:rocm/pytorch:rocm6.0.2_ubuntu22.04_py3.10_pytorch_2.1.2 # rocm/pytorch:latest does not work since it uses python 3.11, which fails with ray 2.4.0
   accelerators: MI210:1
 
 run: |
