@@ -1020,7 +1020,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
 
-        # Iterate over current replicas, update replica version if the resources
+        # Iterate over current replicas, update replica version if the config
         # of the current replica matches that of the new version.
         new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         replica_infos = serve_state.get_replica_infos(self._service_name)
@@ -1031,12 +1031,14 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._service_name, info.version)
                 old_config = common_utils.read_yaml(
                     os.path.expanduser(old_task_yaml_path))
-                if old_config['resources'] == new_config['resources']:
+                old_replica_config = old_config.pop('service')
+                new_replica_config = new_config.pop('service')
+                if old_replica_config == new_replica_config:
                     logger.info(
                         f'Updating replica {info.replica_id} to version '
-                        f'{version}. Replica {info.replica_id}\'s resource '
-                        f'{old_config["resources"]} is the same as '
-                        f'latest resource {new_config["resources"]}.')
+                        f'{version}. Replica {info.replica_id}\'s config '
+                        f'{old_replica_config} is the same as '
+                        f'latest version\'s {new_replica_config}.')
                     info.version = version
                     serve_state.add_or_update_replica(self._service_name,
                                                       info.replica_id, info)
