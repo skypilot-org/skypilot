@@ -27,8 +27,8 @@ setup: |
     conda activate codellama
   fi
 
-  pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git"
-  pip install git+https://github.com/huggingface/transformers
+  pip install transformers==4.38.0
+  pip install vllm==0.3.2
 
 run: |
   conda activate codellama
