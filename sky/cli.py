@@ -4669,6 +4669,9 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         \b
         # Tear down a specific replica
         sky serve down my-service --replica-id 1
+        \b
+        # Purge a specific replica
+        sky serve down my-service --replica-id 1 --purge
     """
     if sum([len(service_names) > 0, all]) != 1:
         argument_str = f'SERVICE_NAMES={",".join(service_names)}' if len(
