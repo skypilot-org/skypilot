@@ -228,13 +228,19 @@ class Kubernetes(clouds.Cloud):
         if resources.image_id is not None:
             # Use custom image specified in resources
             image_id_with_region = resources.image_id['kubernetes']
-            image_id = image_id_with_region.lstrip('docker:')
+            if image_id_with_region.startswith('docker:'):
+                image_id = image_id_with_region[len('docker:'):]
+            else:
+                image_id = image_id_with_region
         else:
             # Select image based on whether we are using GPUs or not.
             image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
             # Get the container image ID from the service catalog.
             image_id = service_catalog.get_image_id_from_tag(
                 image_id, clouds='kubernetes')
+        logger.info('\n\n')
+        logger.info(f'Using image {image_id} for instance type. Had {resources.image_id}')
+        logger.info('\n\n')
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')
