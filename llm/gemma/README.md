@@ -42,7 +42,7 @@ curl -L http://$IP:8000/v1/completions \
 ### Scale the Serving with SkyServe
 
 
-We can scale the model serving across multiple instances, regions and clouds with SkyServe:
+Using the same YAML, we can easily scale the model serving across multiple instances, regions and clouds with SkyServe:
 ```bash
 sky serve up -n gemma serve.yaml --env HF_TOKEN="xxx"
 ```
