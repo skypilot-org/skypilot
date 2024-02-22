@@ -194,8 +194,11 @@ def terminate_instances(
                 ) from e
     
     time.sleep(POLL_INTERVAL)
-    network = client.get_network(network_name=cluster_name_on_cloud)
-    client.delete_network(network_id=network['id'])
+    try:
+        network = client.get_network(network_name=cluster_name_on_cloud)
+        client.delete_network(network_id=network['id'])
+    except IndexError:
+        pass
 
 
 def get_cluster_info(
