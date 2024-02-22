@@ -33,7 +33,7 @@ def get_git_commit():
 
 
 __commit__ = get_git_commit()
-__version__ = '1.0.0-dev0'
+__version__ = '0.5.0'
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 # Keep this order to avoid cyclic imports
