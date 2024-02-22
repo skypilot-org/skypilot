@@ -164,8 +164,12 @@ class SkyServeController:
         async def terminate_replica(request: fastapi.Request):
             request_data = await request.json()
             try:
-                replica_id = request_data['replica_id']
-                purge = request_data['purge']
+                replica_id = request_data.get('replica_id')
+                if replica_id is None:
+                    return {'message': 'Error: replica ID is not specified.'}
+                purge = request_data.get('purge')
+                if purge is None:
+                    return {'message': 'Error: purge is not specified.'}
                 if purge:
                     return self._purge_replica(replica_id)
                 else:
