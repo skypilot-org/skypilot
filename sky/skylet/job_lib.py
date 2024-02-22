@@ -812,10 +812,10 @@ class JobLibCodeGen:
     _PREFIX = [
         'import os', 'import getpass',
         'from sky.skylet import job_lib, log_lib, constants',
-        'assert (getattr(constants, "SKYLET_LIB_VERSION", 0) '
-        f'>= {constants.SKYLET_LIB_VERSION}),'
-        '("The SkyPilot runtime on remote cluster is outdated.'
-        ' Please update the runtime with: sky start -f <cluster-name>")'
+        # Backward compatibility for old skylet lib version.
+        'job_owner_kwargs = {} '
+        'if getattr(constants, "SKYLET_LIB_VERSION", 0) >= 1 '
+        'else {"username": getpass.getuser()}',
     ]
 
     @classmethod
@@ -842,7 +842,7 @@ class JobLibCodeGen:
 
     @classmethod
     def update_status(cls) -> str:
-        code = ['job_lib.update_status()']
+        code = ['job_lib.update_status(**job_owner_kwargs)']
         return cls._build(code)
 
     @classmethod
@@ -860,7 +860,7 @@ class JobLibCodeGen:
         """See job_lib.cancel_jobs()."""
         code = [
             (f'cancelled = job_lib.cancel_jobs_encoded_results('
-             f' {job_ids!r}, {cancel_all})'),
+             f' {job_ids!r}, {cancel_all}, **job_owner_kwargs)'),
             # Print cancelled IDs. Caller should parse by decoding.
             'print(cancelled, flush=True)',
         ]
@@ -882,8 +882,8 @@ class JobLibCodeGen:
             f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',
             'run_timestamp = job_lib.get_run_timestamp(job_id)',
             f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
-            f'log_lib.tail_logs(job_id=job_id, log_dir=log_dir,'
-            f' spot_job_id={spot_job_id!r}, follow={follow})',
+            f'log_lib.tail_logs(job_id=job_id, log_dir=log_dir, '
+            f'spot_job_id={spot_job_id!r}, follow={follow}, **job_owner_kwargs)',
         ]
         return cls._build(code)
 
