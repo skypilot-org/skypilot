@@ -379,6 +379,7 @@ To use this mode:
     .. code-block:: bash
 
       # Patch the nginx ingress service with an external IP. Can be any node's IP if using NodePort service.
+      # Replace <IP> in the following command with the IP you select.
       $ kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{"spec": {"externalIPs": ["<IP>"]}}'
 
     If the ``EXTERNAL-IP`` field is left as ``<none>``, SkyPilot will use ``localhost`` as the external IP for the Ingress,

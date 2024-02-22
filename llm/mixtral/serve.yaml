@@ -11,6 +11,7 @@ service:
       messages:
         - role: user
           content: Hello! What is your name?
+      max_tokens: 1
     initial_delay_seconds: 1200
   replica_policy:
     min_replicas: 2
@@ -26,8 +27,9 @@ setup: |
     conda create -n mixtral -y python=3.10
     conda activate mixtral
   fi
-  pip list | grep vllm || pip install vllm==0.3.2
-  pip list | grep transformers || pip install transformers==4.38.0
+  pip install transformers==4.38.0
+  pip install vllm==0.3.2
+  pip list | grep megablocks || pip install megablocks
 
 run: |
   conda activate mixtral
