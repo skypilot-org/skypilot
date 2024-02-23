@@ -161,7 +161,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                     raise e
                 cli_logger.warning(f'Failed to get image {specific_image}. '
                                    f'Retrying in 3 seconds. Retry count: {cnt}')
-                time.sleep(3)
+                time.sleep(10)
 
         # Bootstrap files cannot be bind mounted because docker opens the
         # underlying inode. When the file is switched, docker becomes outdated.
