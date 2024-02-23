@@ -93,6 +93,8 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             except click.ClickException as e:
                 # We retry the command if it fails, because docker commands can
                 # fail due to the docker daemon not being ready yet.
+                # Ray command runner raise ClickException when the command
+                # fails.
                 cnt += 1
                 if cnt >= max_retry:
                     raise e
