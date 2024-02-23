@@ -45,6 +45,24 @@ curl -L http://$IP:8000/v1/completions \
   }' | jq .
 ```
 
+Chat API is also supported:
+```bash
+IP=$(sky status --ip gemma)
+
+curl -L http://$IP:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+      "model": "google/gemma-7b-it",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hello! What is your name?"
+        }
+      ],
+      "max_tokens": 25
+  }'
+```
+
 ### Scale the Serving with SkyServe
 
 
@@ -66,4 +84,20 @@ curl -L http://$ENDPOINT/v1/completions \
       "prompt": "My favourite condiment is",
       "max_tokens": 25
   }' | jq .
+```
+
+Chat API is also supported:
+```bash
+curl -L http://$ENDPOINT/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+      "model": "google/gemma-7b-it",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hello! What is your name?"
+        }
+      ],
+      "max_tokens": 25
+  }'
 ```
