@@ -83,16 +83,33 @@ class SkyDockerCommandRunner(DockerCommandRunner):
     `ray.autoscaler._private.command_runner.DockerCommandRunner`.
     """
 
+    def _run_with_retry(self, cmd, **kwargs):
+        """Run a command with retries for docker."""
+        cnt = 0
+        max_retry = 5
+        while True:
+            try:
+                return self.run(cmd, **kwargs)
+            except click.ClickException as e:
+                # We retry the command if it fails, because docker commands can
+                # fail due to the docker daemon not being ready yet.
+                cnt += 1
+                if cnt >= max_retry:
+                    raise e
+                cli_logger.warning(f'Failed to run command {cmd}. '
+                                   f'Retrying in 3 seconds. Retry count: {cnt}')
+                time.sleep(3)
+
     # SkyPilot: New function to check whether a container is exited
     # (but not removed). This is due to previous `sky stop` command,
     # which will stop the container but not remove it.
     def _check_container_exited(self) -> bool:
         if self.initialized:
             return True
-        output = (self.ssh_command_runner.run(
-            check_docker_running_cmd(self.container_name, self.docker_cmd),
-            with_output=True,
-        ).decode('utf-8').strip())
+        output = (self._run_with_retry(check_docker_running_cmd(
+            self.container_name, self.docker_cmd),
+                                       with_output=True,
+                                       run_env='host').decode('utf-8').strip())
         return 'false' in output.lower(
         ) and 'no such object' not in output.lower()
 
@@ -112,6 +129,9 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         # If true, then we can start the container directly.
         # Notice that we will skip all setup commands, so we need to
         # manually start the ssh service.
+        # We also add retries when checking the container status to make sure
+        # the docker daemon is ready, as it may not be ready immediately after
+        # the VM is started.
         if self._check_container_exited():
             self.initialized = True
             self.run(f'docker start {self.container_name}', run_env='host')
@@ -135,33 +155,15 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             if not specific_image.startswith(server_prefix):
                 specific_image = f'{server_prefix}{specific_image}'
 
-        cnt = 0
-        max_retry = 5
-        while True:
-            try:
-                if self.docker_config.get('pull_before_run', True):
-                    assert specific_image, (
-                        'Image must be included in config if '
-                        'pull_before_run is specified')
-                    self.run('{} pull {}'.format(self.docker_cmd,
-                                                 specific_image),
-                             run_env='host')
-                else:
-                    self.run(
-                        f'{self.docker_cmd} image inspect {specific_image} '
-                        '1> /dev/null  2>&1 || '
-                        f'{self.docker_cmd} pull {specific_image}')
-                break
-            except click.ClickException as e:
-                # We retry pulling the image if it fails, because docker pull
-                # can fail due to the docker daemon not being ready yet.
-                cnt += 1
-                if cnt >= max_retry:
-                    cli_logger.error(f'Failed to get image {specific_image}.')
-                    raise e
-                cli_logger.warning(f'Failed to get image {specific_image}. '
-                                   f'Retrying in 3 seconds. Retry count: {cnt}')
-                time.sleep(10)
+        if self.docker_config.get('pull_before_run', True):
+            assert specific_image, ('Image must be included in config if '
+                                    'pull_before_run is specified')
+            self.run('{} pull {}'.format(self.docker_cmd, specific_image),
+                     run_env='host')
+        else:
+            self.run(f'{self.docker_cmd} image inspect {specific_image} '
+                     '1> /dev/null  2>&1 || '
+                     f'{self.docker_cmd} pull {specific_image}')
 
         # Bootstrap files cannot be bind mounted because docker opens the
         # underlying inode. When the file is switched, docker becomes outdated.
