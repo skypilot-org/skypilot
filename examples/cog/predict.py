@@ -1,20 +1,20 @@
 import tempfile
 
-from cog import BasePredictor, Input, Path
-from PIL import Image, ImageFilter
+import cog
+import PIL
 
 
-class Predictor(BasePredictor):
+class Predictor(cog.BasePredictor):
 
     def predict(
-            self,
-            image: Path = Input(description='Input image'),
-            blur: float = Input(description='Blur radius', default=5),
-    ) -> Path:
+        self,
+        image: cog.Path = cog.Input(description='Input image'),
+        blur: float = cog.Input(description='Blur radius', default=5),
+    ) -> cog.Path:
         if blur == 0:
             return input
-        im = Image.open(str(image))
-        im = im.filter(ImageFilter.BoxBlur(blur))
-        out_path = Path(tempfile.mkdtemp()) / 'out.png'
+        im = PIL.Image.open(str(image))
+        im = im.filter(PIL.ImageFilter.BoxBlur(blur))
+        out_path = cog.Path(tempfile.mkdtemp()) / 'out.png'
         im.save(str(out_path))
         return out_path
