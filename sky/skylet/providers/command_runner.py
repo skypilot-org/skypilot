@@ -86,7 +86,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
     def _run_with_retry(self, cmd, **kwargs):
         """Run a command with retries for docker."""
         cnt = 0
-        max_retry = 10
+        max_retry = 3
         while True:
             try:
                 return self.run(cmd, **kwargs)
@@ -97,8 +97,8 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 if cnt >= max_retry:
                     raise e
                 cli_logger.warning(f'Failed to run command {cmd}. '
-                                   f'Retrying in 3 seconds. Retry count: {cnt}')
-                time.sleep(3)
+                                   f'Retrying in 10 seconds. Retry count: {cnt}')
+                time.sleep(10)
 
     # SkyPilot: New function to check whether a container is exited
     # (but not removed). This is due to previous `sky stop` command,
