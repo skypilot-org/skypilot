@@ -1,7 +1,7 @@
 import tempfile
 
+from PIL import Image, ImageFilter
 import cog
-import PIL
 
 
 class Predictor(cog.BasePredictor):
@@ -13,8 +13,8 @@ class Predictor(cog.BasePredictor):
     ) -> cog.Path:
         if blur == 0:
             return input
-        im = PIL.Image.open(str(image))
-        im = im.filter(PIL.ImageFilter.BoxBlur(blur))
+        im = Image.open(str(image))
+        im = im.filter(ImageFilter.BoxBlur(blur))
         out_path = cog.Path(tempfile.mkdtemp()) / 'out.png'
         im.save(str(out_path))
         return out_path
