@@ -287,6 +287,13 @@ Available fields and semantics:
               path: /tmp
               type: Directory
 
+    # Size of the /dev/shm shared memory for the pod (optional).
+    #
+    # Defaults to None, which means no size limits are set. If set, the value
+    # must be a string that is a valid Kubernetes quantity, e.g., "3Gi".
+    # https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/
+    dshm_size_limit: 3Gi
+
   # Advanced OCI configurations (optional).
   oci:
     # A dict mapping region names to region-specific configurations, or
