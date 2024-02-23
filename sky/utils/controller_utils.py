@@ -166,12 +166,14 @@ def _get_cloud_dependencies_installation_commands(
             for cloud in global_user_state.get_enabled_clouds()):
         commands.append(
             # Install k8s + skypilot dependencies
-            'sudo bash -c "apt update && apt install curl socat netcat -y" && '
+            'sudo bash -c "if '
+            '! command -v curl &> /dev/null || '
+            '! command -v socat &> /dev/null || '
+            '! command -v netcat &> /dev/null; '
+            'then apt update && apt install curl socat netcat -y; '
+            'fi" && '
             # Install kubectl
-            'curl -LO "https://dl.k8s.io/release/$(curl -L -s '
-            'https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && '
-            'sudo install -o root -g root -m 0755 '
-            'kubectl /usr/local/bin/kubectl && ')
+            '(command -v kubectl &>/dev/null || (curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl)) && ')
     return commands
 
 
