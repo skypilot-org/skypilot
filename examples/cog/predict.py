@@ -1,7 +1,8 @@
 import tempfile
 
-from PIL import Image, ImageFilter
 import cog
+from PIL import Image
+from PIL import ImageFilter
 
 
 class Predictor(cog.BasePredictor):
