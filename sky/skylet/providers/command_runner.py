@@ -1,8 +1,10 @@
 """Sky's DockerCommandRunner."""
 import json
 import os
+import time
 from typing import Dict
 
+import click
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler._private.command_runner import DockerCommandRunner
 from ray.autoscaler._private.docker import check_docker_running_cmd
@@ -133,16 +135,33 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             if not specific_image.startswith(server_prefix):
                 specific_image = f'{server_prefix}{specific_image}'
 
-        if self.docker_config.get('pull_before_run', True):
-            assert specific_image, ('Image must be included in config if ' +
-                                    'pull_before_run is specified')
-            self.run('{} pull {}'.format(self.docker_cmd, specific_image),
-                     run_env='host')
-        else:
-
-            self.run(f'{self.docker_cmd} image inspect {specific_image} '
-                     '1> /dev/null  2>&1 || '
-                     f'{self.docker_cmd} pull {specific_image}')
+        cnt = 0
+        max_retry = 5
+        while True:
+            try:
+                if self.docker_config.get('pull_before_run', True):
+                    assert specific_image, (
+                        'Image must be included in config if '
+                        'pull_before_run is specified')
+                    self.run('{} pull {}'.format(self.docker_cmd,
+                                                 specific_image),
+                             run_env='host')
+                else:
+                    self.run(
+                        f'{self.docker_cmd} image inspect {specific_image} '
+                        '1> /dev/null  2>&1 || '
+                        f'{self.docker_cmd} pull {specific_image}')
+                break
+            except click.ClickException as e:
+                # We retry pulling the image if it fails, because docker pull
+                # can fail due to the docker daemon not being ready yet.
+                cnt += 1
+                if cnt >= max_retry:
+                    cli_logger.error(f'Failed to get image {specific_image}.')
+                    raise e
+                cli_logger.warning(f'Failed to get image {specific_image}. '
+                                   f'Retrying in 1 seconds. Retry count: {cnt}')
+                time.sleep(1)
 
         # Bootstrap files cannot be bind mounted because docker opens the
         # underlying inode. When the file is switched, docker becomes outdated.
