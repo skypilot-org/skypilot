@@ -86,7 +86,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
     def _run_with_retry(self, cmd, **kwargs):
         """Run a command with retries for docker."""
         cnt = 0
-        max_retry = 5
+        max_retry = 10
         while True:
             try:
                 return self.run(cmd, **kwargs)
