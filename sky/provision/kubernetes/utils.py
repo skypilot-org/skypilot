@@ -1150,3 +1150,22 @@ def check_nvidia_runtime_class() -> bool:
     nvidia_exists = any(
         rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
     return nvidia_exists
+
+
+def check_secret_exists(secret_name: str, namespace: str) -> bool:
+    """Checks if a secret exists in a namespace
+
+    Args:
+        secret_name: Name of secret to check
+        namespace: Namespace to check
+    """
+
+    try:
+        kubernetes.core_api().read_namespaced_secret(
+            secret_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        if e.status == 404:
+            return False
+        raise
+    else:
+        return True

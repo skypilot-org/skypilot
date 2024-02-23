@@ -69,6 +69,7 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
+  * `Gemma <https://github.com/skypilot-org/skypilot/tree/master/llm/gemma>`_
   * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)
   * `Code Llama <https://github.com/skypilot-org/skypilot/tree/master/llm/codellama/>`_
   * `vLLM: Serving LLM 24x Faster On the Cloud <https://github.com/skypilot-org/skypilot/tree/master/llm/vllm>`_ (from official vLLM team)
