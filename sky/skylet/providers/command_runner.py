@@ -96,8 +96,9 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 cnt += 1
                 if cnt >= max_retry:
                     raise e
-                cli_logger.warning(f'Failed to run command {cmd}. '
-                                   f'Retrying in 10 seconds. Retry count: {cnt}')
+                cli_logger.warning(
+                    f'Failed to run command {cmd}. '
+                    f'Retrying in 10 seconds. Retry count: {cnt}')
                 time.sleep(10)
 
     # SkyPilot: New function to check whether a container is exited
