@@ -147,9 +147,8 @@ class DockerInitializer:
                                                  require_outputs=True,
                                                  stream_logs=False,
                                                  log_path=self.log_path)
-            if DOCKER_PERMISSION_DENIED_STR not in stdout + stderr:
-                break
-            if not wait_for_docker_daemon:
+            if (not wait_for_docker_daemon or
+                    DOCKER_PERMISSION_DENIED_STR not in stdout + stderr):
                 break
 
             cnt += 1
