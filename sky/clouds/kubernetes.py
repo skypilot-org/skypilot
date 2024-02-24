@@ -83,10 +83,13 @@ class Kubernetes(clouds.Cloud):
             # assigned an external IP. Users may use ingress, but that requires
             # blocking HTTP port 80.
             # For now, we disable port opening feature on kind clusters.
+
+            """
             unsupported_features[
                 clouds.CloudImplementationFeatures.OPEN_PORTS] = (
                     'Opening ports is not supported in Kubernetes when '
                     'using local kind cluster.')
+            """
         return unsupported_features
 
     @classmethod

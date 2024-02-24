@@ -116,6 +116,11 @@ class SkyLocalUpLineProcessor(LineProcessor):
         if 'SkyPilot CPU image loaded into kind cluster' in log_line:
             logger.info(f'{colorama.Fore.GREEN}SkyPilot CPU image pulled.'
                         f'{colorama.Style.RESET_ALL}')
+        if 'Starting installation of Nginx Ingress Controller...' in log_line:
+            self.status_display.update('[bold cyan]Creating Nginx Ingress Controller')
+        if 'Nginx Ingress Controller installed' in log_line:
+            logger.info(f'{colorama.Fore.GREEN}Nginx Ingress Controller installed.'
+                        f'{colorama.Style.RESET_ALL}')
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
@@ -184,3 +189,4 @@ def readable_time_duration(start: Optional[float],
         diff = diff.replace('hour', 'hr')
 
     return diff
+
