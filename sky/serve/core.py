@@ -156,6 +156,9 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
+        # TODO(romilb): THIS NEEDS TO BE FIXED. If the user doesn't specify a cloud
+        #  for the controller in their ~/.sky/config.yaml, this idle_minutes_to_autostop
+        #  will be None and provisioning would fail on k8s with unsupported feature error.
         idle_minutes_to_autostop = None if (
             controller_cloud and
             controller_cloud.is_same_cloud(clouds.Kubernetes())
