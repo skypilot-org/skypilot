@@ -99,7 +99,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 if cnt >= max_retry:
                     raise e
                 cli_logger.warning(
-                    f'Failed to run command {cmd}. '
+                    f'Failed to run command {cmd!r}. '
                     f'Retrying in 10 seconds. Retry count: {cnt}')
                 time.sleep(10)
 
@@ -147,12 +147,9 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             docker_login_config: docker_utils.DockerLoginConfig = self.docker_config[
                 "docker_login_config"]
             self._run_with_retry(
-                '{} login --username {} --password {} {}'.format(
-                    self.docker_cmd,
-                    docker_login_config.username,
-                    docker_login_config.password,
-                    docker_login_config.server,
-                ))
+                f'{self.docker_cmd} login --username '
+                f'{docker_login_config.username} --password '
+                f'{docker_login_config.password} {docker_login_config.server}')
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             server_prefix = f'{docker_login_config.server}/'
@@ -162,8 +159,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if '
                                     'pull_before_run is specified')
-            self._run_with_retry('{} pull {}'.format(self.docker_cmd,
-                                                     specific_image),
+            self._run_with_retry(f'{self.docker_cmd} pull {specific_image}',
                                  run_env='host')
         else:
             self._run_with_retry(
