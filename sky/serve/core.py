@@ -60,7 +60,12 @@ def up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
+    # Pickup the cloud if all resources are from the same cloud. This is to
+    # select the cloud for the controller if it does not exist yet. If the
+    # controller and all replicas are from the same cloud, it should provide
+    # better connectivity.
     requested_cloud: Optional['clouds.Cloud'] = None
+    requested_multiple_clouds = False
     service_port: Optional[int] = None
     for requested_resources in task.resources:
         if requested_resources.ports is None or len(
@@ -85,9 +90,10 @@ def up(
         if requested_cloud is None:
             requested_cloud = requested_resources.cloud
         if requested_cloud != requested_resources.cloud:
-            raise ValueError(f'Got multiple clouds: {requested_cloud} and '
-                             f'{requested_resources.cloud} in different '
-                             'resources. Please specify single cloud instead.')
+            requested_multiple_clouds = True
+    # If multiple clouds are used, skip this optimization.
+    if requested_multiple_clouds:
+        requested_cloud = None
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
