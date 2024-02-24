@@ -109,10 +109,27 @@ class SkyDockerCommandRunner(DockerCommandRunner):
     def _check_container_exited(self) -> bool:
         if self.initialized:
             return True
-        output = (self.run(check_docker_running_cmd(self.container_name,
-                                                    self.docker_cmd),
-                           with_output=True,
-                           run_env='host').decode('utf-8').strip())
+        cnt = 0
+        max_retry = 3
+        cmd = check_docker_running_cmd(self.container_name, self.docker_cmd)
+        # We manually retry the command based on the output, as the command will
+        # not fail even if the docker daemon is not ready, due to the underlying
+        # usage of `|| true` in the command.
+        while True:
+            output = (self.run(cmd, with_output=True,
+                               run_env='host').decode('utf-8').strip())
+            if docker_utils.DOCKER_PERMISSION_DENIED_STR in output:
+                cnt += 1
+                if cnt >= max_retry:
+                    raise click.ClickException(
+                        f'Failed to run command {cmd!r}. '
+                        f'Retry count: {cnt}. Output: {output}')
+                cli_logger.warning(
+                    f'Failed to run command {cmd!r}. '
+                    f'Retrying in 10 seconds. Retry count: {cnt}')
+                time.sleep(10)
+            else:
+                break
         return 'false' in output.lower(
         ) and 'no such object' not in output.lower()
 

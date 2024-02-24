@@ -15,8 +15,8 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
-                                 'the Docker daemon socket')
+DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
+                                'the Docker daemon socket')
 
 
 @dataclasses.dataclass
@@ -147,7 +147,7 @@ class DockerInitializer:
                                                  require_outputs=True,
                                                  stream_logs=False,
                                                  log_path=self.log_path)
-            if rc == 0 or _DOCKER_PERMISSION_DENIED_STR not in stdout:
+            if DOCKER_PERMISSION_DENIED_STR not in stdout + stderr:
                 break
             if not wait_for_docker_daemon:
                 break
