@@ -283,14 +283,29 @@ Fluidstack
 ~~~~~~~~~~~~~~~~~~
 `Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access, go to the `Home <https://console.fluidstack.io/`_ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` and the :code:`API token` to :code:`~/.fluidstack/api_token`.
 
+
 Cudo Compute
 ~~~~~~~~~~~~~~~~~~
-`Cudo Compute <https://www.cudocompute.com/>`__ is a cloud provider offering low-cost GPUs. To configure Cudo Compute access, install the cudo compute CLI by following the instructions in the `Cudo Compute documentation <https://www.cudocompute.com/docs/cli-tool/>`__ and then run:
+
+`Cudo Compute <https://www.cudocompute.com/>`__ GPU cloud provides low cost GPUs powered with green energy.
+
+1. Create an API Key by following `this guide <https://www.cudocompute.com/docs/guide/api-keys/>`__.
+2. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
+3. Run :code:`cudoctl init`:
 
 .. code-block:: shell
 
   cudoctl init
+    ✔ api key: my-api-key
+    ✔ project: my-project
+    ✔ billing account: my-billing-account
+    ✔ context: default
+    config file saved ~/.config/cudo/cudo.yml
+
   pip install "cudocompute>=0.1.8"
+
+If you want to want to use skypilot with a different Cudo Compute account or project, just run :code:`cudoctl init`: again.
+
 
 
 
