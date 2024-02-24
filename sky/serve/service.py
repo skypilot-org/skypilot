@@ -83,7 +83,7 @@ def cleanup_storage(task_yaml: str) -> bool:
     return True
 
 
-def _cleanup(service_name: str, task_yaml: str) -> bool:
+def _cleanup(service_name: str) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
@@ -114,14 +114,14 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
+    versions = serve_state.get_service_versions(service_name)
     serve_state.remove_service_versions(service_name)
     success = True
-    versions = serve_state.get_service_versions(service_name)
     for version in versions:
-        logger.info(f'Cleaning up storage for version {version}, '
-                    f'task_yaml: {task_yaml}')
         task_yaml = serve_utils.generate_task_yaml_file_name(
             service_name, version)
+        logger.info(f'Cleaning up storage for version {version}, '
+                    f'task_yaml: {task_yaml}')
         success = success and cleanup_storage(task_yaml)
     if not success:
         failed = True
@@ -227,7 +227,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             [process.pid for process in process_to_kill], force=True)
         for process in process_to_kill:
             process.join()
-        failed = _cleanup(service_name, task_yaml)
+        failed = _cleanup(service_name)
         if failed:
             serve_state.set_service_status(
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
