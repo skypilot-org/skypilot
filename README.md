@@ -77,8 +77,8 @@ pip install -U "skypilot[aws,gcp,azure,oci,lambda,runpod,fluidstack,cudo,ibm,scp
 Current supported providers (AWS, Azure, GCP, OCI, Lambda Cloud, RunPod, Fluidstack, Cudo, IBM, Samsung, Cloudflare, any Kubernetes cluster):
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png">
-    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/installation-docs/docs/source/images/cloud-logos-dark.png">
+    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/installation-docs/docs/source/images/cloud-logos-light.png" width=80%>
   </picture>
 </p>
 
