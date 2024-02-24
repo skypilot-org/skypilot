@@ -136,7 +136,7 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 #   should take the latest security group name.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
-    # AWS with new provisioner has docker_login_config in the
+    # Clouds with new provisioner has docker_login_config in the
     # docker field, instead of the provider field.
     ('docker', 'docker_login_config'),
     # Other clouds

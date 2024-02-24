@@ -40,15 +40,6 @@ provider:
   # NOTE: This is a new field added by SkyPilot to force use a specific VPC.
   vpc_name: {{vpc_name}}
 {% endif %}
-{%- if docker_login_config is not none %}
-  # We put docker login config in provider section because ray's schema disabled
-  # additionalProperties for docker config.
-  # See: https://github.com/ray-project/ray/blob/d2fc4823126927b2c54f89ec72fa3d24b442e6a3/python/ray/autoscaler/ray-schema.json#L227
-  docker_login_config:
-    username: {{docker_login_config.username}}
-    password: {{docker_login_config.password}}
-    server: {{docker_login_config.server}}
-{%- endif %}
   use_internal_ips: {{use_internal_ips}}
   # Disable launch config check for worker nodes as it can cause resource
   # leakage.

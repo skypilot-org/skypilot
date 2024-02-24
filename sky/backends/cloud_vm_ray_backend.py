@@ -1837,6 +1837,8 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     'Retrying launching in {:.1f} seconds.'.format(sleep))
                 time.sleep(sleep)
+            # TODO(zhwu): when we retry ray up, it is possible that the ray
+            # cluster fail to start because --no-restart flag is used.
             ray_up_return_value = ray_up()
 
         assert ray_up_return_value is not None

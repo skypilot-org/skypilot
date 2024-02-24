@@ -1,8 +1,10 @@
 """Sky's DockerCommandRunner."""
 import json
 import os
+import time
 from typing import Dict
 
+import click
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler._private.command_runner import DockerCommandRunner
 from ray.autoscaler._private.docker import check_docker_running_cmd
@@ -81,16 +83,53 @@ class SkyDockerCommandRunner(DockerCommandRunner):
     `ray.autoscaler._private.command_runner.DockerCommandRunner`.
     """
 
+    def _run_with_retry(self, cmd, **kwargs):
+        """Run a command with retries for docker."""
+        cnt = 0
+        max_retry = 3
+        while True:
+            try:
+                return self.run(cmd, **kwargs)
+            except click.ClickException as e:
+                # We retry the command if it fails, because docker commands can
+                # fail due to the docker daemon not being ready yet.
+                # Ray command runner raise ClickException when the command
+                # fails.
+                cnt += 1
+                if cnt >= max_retry:
+                    raise e
+                cli_logger.warning(
+                    f'Failed to run command {cmd!r}. '
+                    f'Retrying in 10 seconds. Retry count: {cnt}')
+                time.sleep(10)
+
     # SkyPilot: New function to check whether a container is exited
     # (but not removed). This is due to previous `sky stop` command,
     # which will stop the container but not remove it.
     def _check_container_exited(self) -> bool:
         if self.initialized:
             return True
-        output = (self.ssh_command_runner.run(
-            check_docker_running_cmd(self.container_name, self.docker_cmd),
-            with_output=True,
-        ).decode('utf-8').strip())
+        cnt = 0
+        max_retry = 3
+        cmd = check_docker_running_cmd(self.container_name, self.docker_cmd)
+        # We manually retry the command based on the output, as the command will
+        # not fail even if the docker daemon is not ready, due to the underlying
+        # usage of `|| true` in the command.
+        while True:
+            output = (self.run(cmd, with_output=True,
+                               run_env='host').decode('utf-8').strip())
+            if docker_utils.DOCKER_PERMISSION_DENIED_STR in output:
+                cnt += 1
+                if cnt >= max_retry:
+                    raise click.ClickException(
+                        f'Failed to run command {cmd!r}. '
+                        f'Retry count: {cnt}. Output: {output}')
+                cli_logger.warning(
+                    f'Failed to run command {cmd!r}. '
+                    f'Retrying in 10 seconds. Retry count: {cnt}')
+                time.sleep(10)
+            else:
+                break
         return 'false' in output.lower(
         ) and 'no such object' not in output.lower()
 
@@ -110,6 +149,9 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         # If true, then we can start the container directly.
         # Notice that we will skip all setup commands, so we need to
         # manually start the ssh service.
+        # We also add retries when checking the container status to make sure
+        # the docker daemon is ready, as it may not be ready immediately after
+        # the VM is started.
         if self._check_container_exited():
             self.initialized = True
             self.run(f'docker start {self.container_name}', run_env='host')
@@ -121,12 +163,10 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             # TODO(tian): Maybe support a command to get the login password?
             docker_login_config: docker_utils.DockerLoginConfig = self.docker_config[
                 "docker_login_config"]
-            self.run('{} login --username {} --password {} {}'.format(
-                self.docker_cmd,
-                docker_login_config.username,
-                docker_login_config.password,
-                docker_login_config.server,
-            ))
+            self._run_with_retry(
+                f'{self.docker_cmd} login --username '
+                f'{docker_login_config.username} --password '
+                f'{docker_login_config.password} {docker_login_config.server}')
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             server_prefix = f'{docker_login_config.server}/'
@@ -134,15 +174,15 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 specific_image = f'{server_prefix}{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
-            assert specific_image, ('Image must be included in config if ' +
+            assert specific_image, ('Image must be included in config if '
                                     'pull_before_run is specified')
-            self.run('{} pull {}'.format(self.docker_cmd, specific_image),
-                     run_env='host')
+            self._run_with_retry(f'{self.docker_cmd} pull {specific_image}',
+                                 run_env='host')
         else:
-
-            self.run(f'{self.docker_cmd} image inspect {specific_image} '
-                     '1> /dev/null  2>&1 || '
-                     f'{self.docker_cmd} pull {specific_image}')
+            self._run_with_retry(
+                f'{self.docker_cmd} image inspect {specific_image} '
+                '1> /dev/null  2>&1 || '
+                f'{self.docker_cmd} pull {specific_image}')
 
         # Bootstrap files cannot be bind mounted because docker opens the
         # underlying inode. When the file is switched, docker becomes outdated.
