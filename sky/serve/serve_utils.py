@@ -1,6 +1,7 @@
 """User interface with the SkyServe."""
 import base64
 import enum
+import math
 import os
 import pathlib
 import pickle
@@ -734,11 +735,14 @@ def format_service_table(service_records: List[Dict[str, Any]],
 def _sort_replica_records(
         replica_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
-    def sort_key(record: Dict[str, Any]) -> Tuple[int, int]:
+    def _sort_key(record: Dict[str, Any]) -> Tuple[int, int, int]:
+        # If no version, then position replica at the end.
+        version = int(record.get('version', -math.inf))
         status_priority = 0 if record['status'] == 'READY' else 1
-        return -int(record['version']), status_priority
+        replica_id = int(record['replica_id'])
+        return -version, status_priority, replica_id
 
-    sorted_records = sorted(replica_records, key=sort_key)
+    sorted_records = sorted(replica_records, key=_sort_key)
     return sorted_records
 
 
