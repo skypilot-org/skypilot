@@ -1,6 +1,7 @@
 """Util constants/functions for the backends."""
 from datetime import datetime
 import enum
+import functools
 import os
 import pathlib
 import pprint
@@ -32,13 +33,10 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import provision as provision_lib
-from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import status_lib
-from sky.backends import onprem_utils
 from sky.clouds import cloud_registry
-from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -138,7 +136,7 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 #   should take the latest security group name.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
-    # AWS with new provisioner has docker_login_config in the
+    # Clouds with new provisioner has docker_login_config in the
     # docker field, instead of the provider field.
     ('docker', 'docker_login_config'),
     # Other clouds
@@ -483,15 +481,17 @@ class SSHConfigHelper(object):
 
         if not os.path.exists(config_path):
             config = ['\n']
-            with open(config_path, 'w') as f:
+            with open(config_path,
+                      'w',
+                      encoding='utf-8',
+                      opener=functools.partial(os.open, mode=0o644)) as f:
                 f.writelines(config)
-            os.chmod(config_path, 0o644)
 
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = f.readlines()
 
         ssh_dir = cls.ssh_cluster_path.format('')
-        os.makedirs(os.path.expanduser(ssh_dir), exist_ok=True)
+        os.makedirs(os.path.expanduser(ssh_dir), exist_ok=True, mode=0o700)
 
         # Handle Include on top of Config file
         include_str = f'Include {cls.ssh_cluster_path.format("*")}'
@@ -505,7 +505,7 @@ class SSHConfigHelper(object):
                 break
         if not found:
             # Did not find Include string. Insert `Include` lines.
-            with open(config_path, 'w') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 config.insert(
                     0,
                     f'# Added by SkyPilot for ssh config of all clusters\n{include_str}\n'
@@ -540,7 +540,10 @@ class SSHConfigHelper(object):
         cluster_config_path = os.path.expanduser(
             cls.ssh_cluster_path.format(cluster_name))
 
-        with open(cluster_config_path, 'w') as f:
+        with open(cluster_config_path,
+                  'w',
+                  encoding='utf-8',
+                  opener=functools.partial(os.open, mode=0o644)) as f:
             f.write(codegen)
 
     @classmethod
@@ -568,7 +571,7 @@ class SSHConfigHelper(object):
         if not os.path.exists(config_path):
             return
 
-        with open(config_path) as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = f.readlines()
 
         start_line_idx = None
@@ -620,20 +623,20 @@ class SSHConfigHelper(object):
             config[prev_end_line_idx:end_line_idx] = [
                 '\n'
             ] if end_line_idx is not None else []
-            with open(config_path, 'w') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 f.write(''.join(config).strip())
                 f.write('\n' * 2)
 
         # Delete include statement if it exists in the config.
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
-        with open(config_path) as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = f.readlines()
 
         for i, line in enumerate(config):
             config_str = line.strip()
             if f'Include {cluster_config_path}' in config_str:
-                with open(config_path, 'w') as f:
+                with open(config_path, 'w', encoding='utf-8') as f:
                     if i < len(config) - 1 and config[i + 1] == '\n':
                         del config[i + 1]
                     # Delete Include string
@@ -757,6 +760,10 @@ def write_cluster_config(
             not appear in the catalog, or an ssh_proxy_command is specified but
             not for the given region, or GPUs are requested in a Kubernetes
             cluster but the cluster does not have nodes labeled with GPU types.
+        exceptions.InvalidCloudConfigs: if the user specifies some config for the
+            cloud that is not valid, e.g. remote_identity: SERVICE_ACCOUNT
+            for a cloud that does not support it, the caller should skip the
+            cloud in this case.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
@@ -779,36 +786,28 @@ def write_cluster_config(
     # for the validation.
     # TODO(tian): Move more cloud agnostic vars to resources.py.
     resources_vars = to_provision.make_deploy_variables(cluster_name_on_cloud,
-                                                        region, zones)
+                                                        region, zones, dryrun)
     config_dict = {}
 
-    azure_subscription_id = None
-    if isinstance(cloud, clouds.Azure):
-        azure_subscription_id = cloud.get_project_id(dryrun=dryrun)
-
-    gcp_project_id = None
-    if isinstance(cloud, clouds.GCP):
-        gcp_project_id = cloud.get_project_id(dryrun=dryrun)
-
     specific_reservations = set(
-        skypilot_config.get_nested(('gcp', 'specific_reservations'), set()))
-
-    reservations = to_provision.get_reservations_available_resources(
-        specific_reservations)
-
-    filtered_specific_reservations = [
-        r for r, available_resources in reservations.items()
-        if r in specific_reservations and available_resources > 0
-    ]
+        skypilot_config.get_nested(
+            (str(to_provision.cloud).lower(), 'specific_reservations'), set()))
 
     assert cluster_name is not None
-    credentials = sky_check.get_cloud_credential_file_mounts()
+    excluded_clouds = []
+    remote_identity = skypilot_config.get_nested(
+        (str(cloud).lower(), 'remote_identity'), 'LOCAL_CREDENTIALS')
+    if remote_identity == 'SERVICE_ACCOUNT':
+        if not cloud.supports_service_account_on_remote():
+            raise exceptions.InvalidCloudConfigs(
+                'remote_identity: SERVICE_ACCOUNT is specified in '
+                f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
+                'is not supported by this cloud. Remove the config or set: '
+                '`remote_identity: LOCAL_CREDENTIALS`.')
+        excluded_clouds = [cloud]
+    credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
-    ip_list = None
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
-    if isinstance(cloud, clouds.Local):
-        ip_list = onprem_utils.get_local_ips(cluster_name)
-        auth_config = onprem_utils.get_local_auth_config(cluster_name)
     region_name = resources_vars.get('region')
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
@@ -844,22 +843,15 @@ def write_cluster_config(
     instance_tags = {}
     instance_tags = skypilot_config.get_nested(
         (str(cloud).lower(), 'instance_tags'), {})
-    if not isinstance(instance_tags, dict):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Custom instance_tags in config.yaml should '
-                             f'be a dict, but received {type(instance_tags)}.')
+    # instance_tags is a dict, which is guaranteed by the type check in
+    # schemas.py
+    assert isinstance(instance_tags, dict), instance_tags
 
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
         f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-        f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
+        f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
-
-    # For TPU nodes. TPU VMs do not need TPU_NAME.
-    tpu_node_name = resources_vars.get('tpu_name')
-    if gcp_utils.is_tpu(to_provision) and not gcp_utils.is_tpu_vm(to_provision):
-        if tpu_node_name is None:
-            tpu_node_name = cluster_name
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -888,15 +880,9 @@ def write_cluster_config(
 
                 # User-supplied instance tags.
                 'instance_tags': instance_tags,
-
-                # Azure only:
-                'azure_subscription_id': azure_subscription_id,
-                'resource_group': f'{cluster_name}-{region_name}',
-
-                # GCP only:
-                'gcp_project_id': gcp_project_id,
-                'specific_reservations': filtered_specific_reservations,
-                'tpu_node_name': tpu_node_name,
+                # The reservation pools that specified by the user. This is
+                # currently only used by GCP.
+                'specific_reservations': specific_reservations,
 
                 # Conda setup
                 'conda_installation_commands':
@@ -910,6 +896,10 @@ def write_cluster_config(
                 'dump_port_command': dump_port_command,
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
+                # Command for waiting ray cluster to be ready on head.
+                'ray_head_wait_initialized_command':
+                    instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
+
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
                 # Sky remote utils.
@@ -918,14 +908,9 @@ def write_cluster_config(
                 # Add yaml file path to the template variables.
                 'sky_ray_yaml_remote_path':
                     cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH,
-                'sky_ray_yaml_local_path':
-                    tmp_yaml_path
-                    if not isinstance(cloud, clouds.Local) else yaml_path,
+                'sky_ray_yaml_local_path': tmp_yaml_path,
                 'sky_version': str(version.parse(sky.__version__)),
                 'sky_wheel_hash': wheel_hash,
-                # Local IP handling (optional).
-                'head_ip': None if ip_list is None else ip_list[0],
-                'worker_ips': None if ip_list is None else ip_list[1:],
                 # Authentication (optional).
                 **auth_config,
             }),
@@ -944,15 +929,15 @@ def write_cluster_config(
 
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
-        with open(yaml_path, 'r') as f:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
             old_yaml_content = f.read()
-        with open(tmp_yaml_path, 'r') as f:
+        with open(tmp_yaml_path, 'r', encoding='utf-8') as f:
             new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
             new_yaml_content, old_yaml_content,
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
             _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
-        with open(tmp_yaml_path, 'w') as f:
+        with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
     # Read the cluster name from the tmp yaml file, to take the backward
@@ -969,10 +954,7 @@ def write_cluster_config(
     # Note that the ray yaml file will be copied into that special dir (i.e.,
     # uploaded as part of the file_mounts), so the restore for backward
     # compatibility should go before this call.
-    if not isinstance(cloud, clouds.Local):
-        # Only optimize the file mounts for public clouds now, as local has not
-        # been fully tested yet.
-        _optimize_file_mounts(tmp_yaml_path)
+    _optimize_file_mounts(tmp_yaml_path)
 
     # Rename the tmp file to the final YAML path.
     os.rename(tmp_yaml_path, yaml_path)
@@ -987,7 +969,9 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
-    if isinstance(cloud, (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere)):
+    if isinstance(
+            cloud,
+        (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere, clouds.Cudo)):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
@@ -1001,12 +985,10 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_ibm_authentication(config)
     elif isinstance(cloud, clouds.RunPod):
         config = auth.setup_runpod_authentication(config)
+    elif isinstance(cloud, clouds.Fluidstack):
+        config = auth.setup_fluidstack_authentication(config)
     else:
-        assert isinstance(cloud, clouds.Local), cloud
-        # Local cluster case, authentication is already filled by the user
-        # in the local cluster config (in ~/.sky/local/...). There is no need
-        # for Sky to generate authentication.
-        pass
+        assert False, cloud
     common_utils.dump_yaml(cluster_config_file, config)
 
 
@@ -1365,22 +1347,16 @@ def _query_head_ip_with_retries(cluster_yaml: str,
 
 
 @timeline.event
-def get_node_ips(
-        cluster_yaml: str,
-        expected_num_nodes: int,
-        # TODO: remove this argument once we remove the legacy on-prem
-        # support.
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-        head_ip_max_attempts: int = 1,
-        worker_ip_max_attempts: int = 1,
-        get_internal_ips: bool = False) -> List[str]:
+def get_node_ips(cluster_yaml: str,
+                 expected_num_nodes: int,
+                 head_ip_max_attempts: int = 1,
+                 worker_ip_max_attempts: int = 1,
+                 get_internal_ips: bool = False) -> List[str]:
     """Returns the IPs of all nodes in the cluster, with head node at front.
 
     Args:
         cluster_yaml: Path to the cluster yaml.
         expected_num_nodes: Expected number of nodes in the cluster.
-        handle: Cloud VM Ray resource handle. It is only required for on-prem
-            clusters.
         head_ip_max_attempts: Max attempts to get head ip.
         worker_ip_max_attempts: Max attempts to get worker ips.
         get_internal_ips: Whether to get internal IPs. When False, it is still
@@ -1452,19 +1428,6 @@ def get_node_ips(
                              f'{backoff_time} seconds.')
                 time.sleep(backoff_time)
         worker_ips = re.findall(IP_ADDR_REGEX, out)
-        # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
-        # Workaround: List of IPs are shown in Stderr
-        cluster_name = os.path.basename(cluster_yaml).split('.')[0]
-        if ((handle is not None and hasattr(handle, 'local_handle') and
-             handle.local_handle is not None) or
-                onprem_utils.check_if_local_cloud(cluster_name)):
-            out = proc.stderr.decode()
-            worker_ips = re.findall(IP_ADDR_REGEX, out)
-            # Remove head ip from worker ip list.
-            for i, ip in enumerate(worker_ips):
-                if ip == head_ip_list[0]:
-                    del worker_ips[i]
-                    break
         if len(worker_ips) != expected_num_nodes - 1:
             n = expected_num_nodes - 1
             if len(worker_ips) > n:
@@ -2221,12 +2184,6 @@ def check_cluster_available(
                 f'{backends.CloudVmRayBackend.NAME}.'
                 f'{reset}')
     if cluster_status != status_lib.ClusterStatus.UP:
-        if onprem_utils.check_if_local_cloud(cluster_name):
-            raise exceptions.ClusterNotUpError(
-                constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
-                    cluster_name),
-                cluster_status=cluster_status,
-                handle=handle)
         with ux_utils.print_exception_no_traceback():
             hint_for_init = ''
             if cluster_status == status_lib.ClusterStatus.INIT:
@@ -2339,7 +2296,6 @@ class CloudFilter(enum.Enum):
 def get_clusters(
     include_controller: bool,
     refresh: bool,
-    cloud_filter: CloudFilter = CloudFilter.CLOUDS_AND_DOCKER,
     cluster_names: Optional[Union[str, List[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
@@ -2392,22 +2348,6 @@ def get_clusters(
             clusters_str = ', '.join(not_exist_cluster_names)
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
-
-    def _is_local_cluster(record):
-        handle = record['handle']
-        if isinstance(handle, backends.LocalDockerResourceHandle):
-            return False
-        cluster_resources = handle.launched_resources
-        return isinstance(cluster_resources.cloud, clouds.Local)
-
-    if cloud_filter == CloudFilter.LOCAL:
-        records = [record for record in records if _is_local_cluster(record)]
-    elif cloud_filter == CloudFilter.CLOUDS_AND_DOCKER:
-        records = [
-            record for record in records if not _is_local_cluster(record)
-        ]
-    elif cloud_filter not in CloudFilter:
-        raise ValueError(f'{cloud_filter} is not part of CloudFilter.')
 
     if not refresh:
         return records
@@ -2526,11 +2466,11 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
         optionally accelerator demands.
     """
     # TODO: Custom CPU and other memory resources are not supported yet.
-    # For sky serve controller task, we set the CPU resource to a smaller
-    # value to support a larger number of services.
+    # For sky spot/serve controller task, we set the CPU resource to a smaller
+    # value to support a larger number of spot jobs and services.
     resources_dict = {
-        'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND
-                if task.service_name is not None else DEFAULT_TASK_CPU_DEMAND)
+        'CPU': (constants.CONTROLLER_PROCESS_CPU_DEMAND
+                if task.is_controller_task() else DEFAULT_TASK_CPU_DEMAND)
     }
     if task.best_resources is not None:
         resources = task.best_resources
@@ -2550,8 +2490,8 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
     The resources string is only used as a display purpose, so we only show
     the accelerator demands (if any). Otherwise, the CPU demand is shown.
     """
-    task_cpu_demand = (serve_lib.SERVICES_TASK_CPU_DEMAND if task.service_name
-                       is not None else DEFAULT_TASK_CPU_DEMAND)
+    task_cpu_demand = (constants.CONTROLLER_PROCESS_CPU_DEMAND if
+                       task.is_controller_task() else DEFAULT_TASK_CPU_DEMAND)
     if task.best_resources is not None:
         accelerator_dict = task.best_resources.accelerators
         if accelerator_dict is None:
@@ -2612,18 +2552,11 @@ def check_public_cloud_enabled():
     Exceptions:
         exceptions.NoCloudAccessError: if no public cloud is enabled.
     """
-
-    def _no_public_cloud():
-        enabled_clouds = global_user_state.get_enabled_clouds()
-        return (len(enabled_clouds) == 0 or
-                (len(enabled_clouds) == 1 and
-                 isinstance(enabled_clouds[0], clouds.Local)))
-
-    if not _no_public_cloud():
+    if global_user_state.get_enabled_clouds():
         return
 
     sky_check.check(quiet=True)
-    if _no_public_cloud():
+    if not global_user_state.get_enabled_clouds():
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '

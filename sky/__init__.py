@@ -76,29 +76,31 @@ from sky.task import Task
 IBM = clouds.IBM
 AWS = clouds.AWS
 Azure = clouds.Azure
+Cudo = clouds.Cudo
 GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
-Local = clouds.Local
 Kubernetes = clouds.Kubernetes
 OCI = clouds.OCI
 RunPod = clouds.RunPod
 Vsphere = clouds.Vsphere
+Fluidstack = clouds.Fluidstack
 optimize = Optimizer.optimize
 
 __all__ = [
     '__version__',
     'AWS',
     'Azure',
+    'Cudo',
     'GCP',
     'IBM',
     'Kubernetes',
     'Lambda',
-    'Local',
     'OCI',
     'RunPod',
     'SCP',
     'Vsphere',
+    'Fluidstack',
     'Optimizer',
     'OptimizeTarget',
     'backends',

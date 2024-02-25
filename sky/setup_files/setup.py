@@ -40,7 +40,7 @@ def find_version():
     # Extract version information from filepath
     # Adapted from:
     #  https://github.com/ray-project/ray/blob/master/python/setup.py
-    with open(INIT_FILE_PATH, 'r') as fp:
+    with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
         version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',
                                   fp.read(), re.M)
         if version_match:
@@ -49,7 +49,7 @@ def find_version():
 
 
 def get_commit_hash():
-    with open(INIT_FILE_PATH, 'r') as fp:
+    with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
         commit_match = re.search(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
                                  fp.read(), re.M)
         if commit_match:
@@ -85,7 +85,7 @@ def get_commit_hash():
 def replace_commit_hash():
     """Fill in the commit hash in the __init__.py file."""
     try:
-        with open(INIT_FILE_PATH, 'r') as fp:
+        with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
             content = fp.read()
             global original_init_content
             original_init_content = content
@@ -93,7 +93,7 @@ def replace_commit_hash():
                              f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
                              content,
                              flags=re.M)
-        with open(INIT_FILE_PATH, 'w') as fp:
+        with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:
             fp.write(content)
     except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
@@ -106,7 +106,7 @@ def replace_commit_hash():
 def revert_commit_hash():
     try:
         if original_init_content is not None:
-            with open(INIT_FILE_PATH, 'w') as fp:
+            with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:
                 fp.write(original_init_content)
     except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
@@ -236,6 +236,8 @@ extras_require: Dict[str, List[str]] = {
     'kubernetes': ['kubernetes>=20.0.0'],
     'remote': remote,
     'runpod': ['runpod>=1.5.1'],
+    'fluidstack': [],  # No dependencies needed for fluidstack
+    'cudo': ['cudo-compute>=0.1.8'],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have

@@ -47,16 +47,6 @@ def validate_region_zone(
                                             zone)
 
 
-def accelerator_in_region_or_zone(
-    acc_name: str,
-    acc_count: int,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
-) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_get_df(), acc_name,
-                                                     acc_count, region, zone)
-
-
 def get_hourly_cost(
     instance_type: str,
     use_spot: bool = False,
@@ -129,14 +119,15 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 
 def list_accelerators(
-    gpus_only: bool,
-    name_filter: Optional[str],
-    region_filter: Optional[str],
-    quantity_filter: Optional[int],
-    case_sensitive: bool = True,
-    all_regions: bool = False,
-) -> Dict[str, List[common.InstanceTypeInfo]]:
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        quantity_filter: Optional[int],
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in vSphere offering GPUs."""
+    del require_price  # Unused.
     return common.list_accelerators_impl(
         _CLOUD_VSPHERE,
         _get_df(),

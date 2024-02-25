@@ -65,7 +65,7 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                       if args.line_processor is None else args.line_processor)
 
     out = []
-    with open(args.log_path, 'a') as fout:
+    with open(args.log_path, 'a', encoding='utf-8') as fout:
         with line_processor:
             while True:
                 line = out_io.readline()
@@ -140,8 +140,6 @@ def run_with_log(
     process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
-    ray_job_id: Optional[str] = None,
-    use_sudo: bool = False,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -154,8 +152,6 @@ def run_with_log(
         process_stream: Whether to post-process the stdout/stderr of the
             command, such as replacing or skipping lines on the fly. If
             enabled, lines are printed only when '\r' or '\n' is found.
-        ray_job_id: The id for a ray job.
-        use_sudo: Whether to use sudo to create log_path.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -166,19 +162,7 @@ def run_with_log(
 
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
-    if use_sudo:
-        # Sudo case is encountered when submitting
-        # a job for Sky on-prem, when a non-admin user submits a job.
-        subprocess.run(f'sudo mkdir -p {dirname}', shell=True, check=True)
-        subprocess.run(f'sudo touch {log_path}; sudo chmod a+rwx {log_path}',
-                       shell=True,
-                       check=True)
-        # Hack: Subprocess Popen does not accept sudo.
-        # subprocess.Popen in local mode with shell=True does not work,
-        # as it does not understand what -H means for sudo.
-        shell = False
-    else:
-        os.makedirs(dirname, exist_ok=True)
+    os.makedirs(dirname, exist_ok=True)
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout_arg = stderr_arg = None
@@ -208,14 +192,7 @@ def run_with_log(
                 '--proc-pid',
                 str(proc.pid),
             ]
-            # Bool use_sudo is true in the Sky On-prem case.
-            # In this case, subprocess_daemon.py should run on the root user
-            # and the Ray job id should be passed for daemon to poll for
-            # job status (as `ray job stop` does not work in the
-            # multitenant case).
-            if use_sudo:
-                daemon_cmd.insert(0, 'sudo')
-                daemon_cmd.extend(['--local-ray-job-id', str(ray_job_id)])
+
             subprocess.Popen(
                 daemon_cmd,
                 start_new_session=True,
@@ -311,16 +288,11 @@ def add_ray_env_vars(
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              job_owner: Optional[str] = None,
-                              job_id: Optional[int] = None,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
-                              with_ray: bool = False,
-                              use_sudo: bool = False):
+                              with_ray: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
-        if use_sudo:
-            env_vars = add_ray_env_vars(env_vars)
         bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
         fp.write(bash_command)
         fp.flush()
@@ -330,22 +302,13 @@ def run_bash_command_with_log(bash_command: str,
         inner_command = f'/bin/bash -i {script_path}'
 
         subprocess_cmd: Union[str, List[str]]
-        if use_sudo and job_owner is not None:
-            subprocess.run(f'chmod a+rwx {script_path}', shell=True, check=True)
-            subprocess_cmd = job_lib.make_job_command_with_user_switching(
-                job_owner, inner_command)
-        else:
-            subprocess_cmd = inner_command
+        subprocess_cmd = inner_command
 
-        ray_job_id = job_lib.make_ray_job_id(job_id,
-                                             job_owner) if job_id else None
         return run_with_log(
             subprocess_cmd,
             log_path,
-            ray_job_id=ray_job_id,
             stream_logs=stream_logs,
             with_ray=with_ray,
-            use_sudo=use_sudo,
             # Disable input to avoid blocking.
             stdin=subprocess.DEVNULL,
             shell=True)
@@ -399,15 +362,13 @@ def _follow_job_logs(file,
             status = job_lib.get_status_no_lock(job_id)
 
 
-def tail_logs(job_owner: str,
-              job_id: Optional[int],
+def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
               spot_job_id: Optional[int] = None,
               follow: bool = True) -> None:
     """Tail the logs of a job.
 
     Args:
-        job_owner: The owner username of the job.
         job_id: The job id.
         log_dir: The log directory of the job.
         spot_job_id: The spot job id (for logging info only to avoid confusion).
@@ -433,7 +394,7 @@ def tail_logs(job_owner: str,
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
-    status = job_lib.update_job_status(job_owner, [job_id], silent=True)[0]
+    status = job_lib.update_job_status([job_id], silent=True)[0]
 
     # Wait for the log to be written. This is needed due to the `ray submit`
     # will take some time to start the job and write the log.
@@ -451,7 +412,7 @@ def tail_logs(job_owner: str,
         print(f'INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
-        status = job_lib.update_job_status(job_owner, [job_id], silent=True)[0]
+        status = job_lib.update_job_status([job_id], silent=True)[0]
 
     start_stream_at = 'INFO: Tip: use Ctrl-C to exit log'
     if follow and status in [
@@ -461,7 +422,7 @@ def tail_logs(job_owner: str,
     ]:
         # Not using `ray job logs` because it will put progress bar in
         # multiple lines.
-        with open(log_path, 'r', newline='') as log_file:
+        with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
             for line in _follow_job_logs(log_file,
@@ -471,7 +432,7 @@ def tail_logs(job_owner: str,
     else:
         try:
             start_stream = False
-            with open(log_path, 'r') as f:
+            with open(log_path, 'r', encoding='utf-8') as f:
                 for line in f.readlines():
                     if start_stream_at in line:
                         start_stream = True

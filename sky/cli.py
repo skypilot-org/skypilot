@@ -57,7 +57,6 @@ from sky import sky_logging
 from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import backend_utils
-from sky.backends import onprem_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
@@ -74,7 +73,6 @@ from sky.utils import dag_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
-from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -130,12 +128,7 @@ def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0 and not silent:
-            if onprem_utils.check_if_local_cloud(cluster):
-                click.echo(
-                    constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
-                        cluster=cluster))
-            else:
-                click.echo(f'Cluster {cluster} not found.')
+            click.echo(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
 
@@ -149,15 +142,6 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
             click.echo(f'Storage {storage_object} not found.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
-
-
-def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
-                           message: str) -> bool:
-    """Raises warning if the cluster name is a local cluster."""
-    if cluster in local_clusters:
-        click.echo(message)
-        return False
-    return True
 
 
 def _interactive_node_cli_command(cli_func):
@@ -367,12 +351,6 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
 
 
 _TASK_OPTIONS = [
-    click.option('--name',
-                 '-n',
-                 required=False,
-                 type=str,
-                 help=('Task name. Overrides the "name" '
-                       'config in the YAML if both are supplied.')),
     click.option(
         '--workdir',
         required=False,
@@ -475,6 +453,14 @@ _TASK_OPTIONS = [
         same value of ``$MY_ENV3`` in the local environment.""",
     )
 ]
+_TASK_OPTIONS_WITH_NAME = [
+    click.option('--name',
+                 '-n',
+                 required=False,
+                 type=str,
+                 help=('Task name. Overrides the "name" '
+                       'config in the YAML if both are supplied.')),
+] + _TASK_OPTIONS
 _EXTRA_RESOURCES_OPTIONS = [
     click.option(
         '--gpus',
@@ -537,7 +523,7 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
 
 
 def _get_click_major_version():
-    return int(click.__version__.split('.')[0])
+    return int(click.__version__.split('.', maxsplit=1)[0])
 
 
 def _get_shell_complete_args(complete_fn):
@@ -851,12 +837,9 @@ def _launch_with_confirm(
         prompt = None
         if maybe_status is None:
             cluster_str = '' if cluster is None else f' {cluster!r}'
-            if onprem_utils.check_if_local_cloud(cluster):
-                prompt = f'Initializing local cluster{cluster_str}. Proceed?'
-            else:
-                prompt = (
-                    f'Launching a new cluster{cluster_str}{clone_source_str}. '
-                    'Proceed?')
+            prompt = (
+                f'Launching a new cluster{cluster_str}{clone_source_str}. '
+                'Proceed?')
         elif maybe_status == status_lib.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
@@ -934,10 +917,6 @@ def _create_and_ssh_into_node(
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
-    if onprem_utils.check_if_local_cloud(cluster_name):
-        raise click.BadParameter(
-            f'Name {cluster_name!r} taken by a local cluster and cannot '
-            f'be used for a {node_type}.')
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if not isinstance(backend, backends.CloudVmRayBackend):
@@ -1037,8 +1016,9 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     yaml_file_provided = (len(shell_splits) == 1 and
                           (shell_splits[0].endswith('yaml') or
                            shell_splits[0].endswith('.yml')))
+    invalid_reason = ''
     try:
-        with open(entrypoint, 'r') as f:
+        with open(entrypoint, 'r', encoding='utf-8') as f:
             try:
                 config = list(yaml.safe_load_all(f))
                 if config:
@@ -1105,7 +1085,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     *,
     entrypoint_name: str = 'Task',
     name: Optional[str] = None,
-    cluster: Optional[str] = None,
     workdir: Optional[str] = None,
     cloud: Optional[str] = None,
     region: Optional[str] = None,
@@ -1132,7 +1111,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         Otherwise, a task.
     """
     entrypoint = ' '.join(entrypoint)
-    is_yaml, yaml_config = _check_yaml(entrypoint)
+    is_yaml, _ = _check_yaml(entrypoint)
     entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
@@ -1149,9 +1128,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                         fg='yellow',
                         nl=False)
             click.secho(entrypoint, bold=True)
-
-    if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
-        cloud = 'local'
 
     override_params = _parse_override_params(cloud=cloud,
                                              region=region,
@@ -1335,7 +1311,7 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1445,7 +1421,6 @@ def launch(
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
-        cluster=cluster,
         workdir=workdir,
         cloud=cloud,
         region=region,
@@ -1515,7 +1490,7 @@ def launch(
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(
@@ -1603,10 +1578,6 @@ def exec(
         cluster, operation_str='Executing task on it')
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        if onprem_utils.check_if_local_cloud(cluster):
-            raise click.BadParameter(
-                constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
-                    cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1614,7 +1585,6 @@ def exec(
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
-        cluster=cluster,
         workdir=workdir,
         cloud=cloud,
         region=region,
@@ -1806,7 +1776,7 @@ def _get_services(service_names: Optional[List[str]],
               required=False,
               default=None,
               type=int,
-              help=('Get the endpoint URL for the specified port number on the'
+              help=('Get the endpoint URL for the specified port number on the '
                     'cluster. This option will override all other options.'))
 @click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
@@ -2009,7 +1979,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
                 if endpoint is not None:
                     # If cluster had no ports to be exposed
-                    if str(endpoint) not in handle.launched_resources.ports:
+                    ports_set = resources_utils.port_ranges_to_set(
+                        handle.launched_resources.ports)
+                    if endpoint not in ports_set:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(f'Port {endpoint} is not exposed '
                                              'on cluster '
@@ -2066,13 +2038,10 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 controllers.append(cluster_record)
             else:
                 normal_clusters.append(cluster_record)
-        local_clusters = onprem_utils.check_and_get_local_clusters(
-            suppress_error=True)
 
         num_pending_autostop = 0
         num_pending_autostop += status_utils.show_status_table(
             normal_clusters + controllers, all)
-        status_utils.show_local_status_table(local_clusters)
 
         def _try_get_future_result(future) -> Tuple[bool, Any]:
             result = None
@@ -2260,11 +2229,9 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
-    show_local_clusters = False
     if clusters:
         clusters = _get_glob_clusters(clusters)
     else:
-        show_local_clusters = True
         cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
 
@@ -2272,26 +2239,18 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     for cluster in clusters:
         try:
             job_table = core.queue(cluster, skip_finished, all_users)
-        except (RuntimeError, ValueError, exceptions.NotSupportedError,
-                exceptions.ClusterNotUpError, exceptions.CloudUserIdentityError,
+        except (exceptions.CommandError, ValueError,
+                exceptions.NotSupportedError, exceptions.ClusterNotUpError,
+                exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             if isinstance(e, exceptions.NotSupportedError):
                 unsupported_clusters.append(cluster)
             click.echo(f'{colorama.Fore.YELLOW}Failed to get the job queue for '
                        f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
-                       f'  {common_utils.class_fullname(e.__class__)}: '
-                       f'{common_utils.remove_color(str(e))}')
+                       f'  {common_utils.format_exception(e)}')
             continue
         job_table = job_lib.format_job_queue(job_table)
         click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
-
-    local_clusters = onprem_utils.check_and_get_local_clusters()
-    for local_cluster in local_clusters:
-        if local_cluster not in clusters and show_local_clusters:
-            click.secho(
-                f'Local cluster {local_cluster} is uninitialized;'
-                ' skipped.',
-                fg='yellow')
 
     if unsupported_clusters:
         click.secho(
@@ -2774,13 +2733,6 @@ def start(
     else:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
-        local_clusters = onprem_utils.check_and_get_local_clusters()
-        clusters = [
-            c for c in clusters
-            if _warn_if_local_cluster(c, local_clusters, (
-                f'Skipping local cluster {c}, as it does not support '
-                '`sky start`.'))
-        ]
 
         for name in clusters:
             cluster_status, _ = backend_utils.refresh_cluster_status_handle(
@@ -2918,9 +2870,6 @@ def down(
     stops), and any data on the attached disks will be lost.  Accelerators
     (e.g., TPUs) that are part of the cluster will be deleted too.
 
-    For local on-prem clusters, this command does not terminate the local
-    cluster, but instead removes the cluster from the status table and
-    terminates the calling user's running jobs.
 
     Examples:
 
@@ -3089,17 +3038,7 @@ def _down_or_stop_clusters(
             name for name in _get_glob_clusters(names)
             if controller_utils.Controllers.from_name(name) is None
         ]
-        if not down:
-            local_clusters = onprem_utils.check_and_get_local_clusters()
-            # Local clusters are allowed to `sky down`, but not
-            # `sky start/stop`. `sky down` unregisters the local cluster
-            # from sky.
-            names = [
-                c for c in names
-                if _warn_if_local_cluster(c, local_clusters, (
-                    f'Skipping local cluster {c}, as it does not support '
-                    '`sky stop/autostop`.'))
-            ]
+
         # Make sure the controllers are explicitly specified without other
         # normal clusters.
         if controllers:
@@ -3125,9 +3064,19 @@ def _down_or_stop_clusters(
                     controller_name)
                 assert controller is not None
                 hint_or_raise = _CONTROLLER_TO_HINT_OR_RAISE[controller]
-                hint_or_raise(controller_name)
+                try:
+                    hint_or_raise(controller_name)
+                except exceptions.ClusterOwnerIdentityMismatchError as e:
+                    if purge:
+                        click.echo(common_utils.format_exception(e))
+                    else:
+                        raise
                 confirm_str = 'delete'
+                input_prefix = ('Since --purge is set, errors will be ignored '
+                                'and controller will be removed from '
+                                'local state.\n') if purge else ''
                 user_input = click.prompt(
+                    f'{input_prefix}'
                     f'To proceed, please type {colorama.Style.BRIGHT}'
                     f'{confirm_str!r}{colorama.Style.RESET_ALL}',
                     type=str)
@@ -3849,84 +3798,6 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
 
-# TODO(skypilot): remove all code related to the deprecated `sky admin` code
-# path.
-@cli.group(cls=_NaturalOrderGroup, hidden=True)
-def admin():
-    """SkyPilot On-prem administrator CLI."""
-    pass
-
-
-@admin.command('deploy', cls=_DocumentedCodeCommand)
-@click.argument('clusterspec_yaml', required=True, type=str, nargs=-1)
-@usage_lib.entrypoint
-def admin_deploy(clusterspec_yaml: str):
-    """Launches Sky on a local cluster.
-
-    Performs preflight checks (environment setup, cluster resources)
-    and launches Ray to serve sky tasks on the cluster. Finally
-    generates a distributable YAML that can be used by multiple
-    users sharing the cluster.
-
-    This command should be run once by the cluster admin, not cluster users.
-
-    Example:
-
-    .. code-block:: bash
-
-        sky admin deploy examples/local/cluster-config.yaml
-    """
-    steps = 1
-    clusterspec_yaml = ' '.join(clusterspec_yaml)
-    assert clusterspec_yaml
-    is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
-    common_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
-                                 'Invalid cluster YAML: ')
-    if not is_yaml:
-        raise ValueError('Must specify cluster config')
-    assert yaml_config is not None, (is_yaml, yaml_config)
-
-    auth_config = yaml_config['auth']
-    ips = yaml_config['cluster']['ips']
-    if not isinstance(ips, list):
-        ips = [ips]
-    local_cluster_name = yaml_config['cluster']['name']
-    usage_lib.record_cluster_name_for_current_operation(local_cluster_name)
-    usage_lib.messages.usage.update_cluster_resources(
-        len(ips), sky.Resources(sky.Local()))
-
-    # Check for Ray
-    click.secho(f'[{steps}/4] Installing on-premise dependencies\n',
-                fg='green',
-                nl=False)
-    onprem_utils.check_and_install_local_env(ips, auth_config)
-    steps += 1
-
-    # Detect what GPUs the cluster has (which can be heterogeneous)
-    click.secho(f'[{steps}/4] Auto-detecting cluster resources\n',
-                fg='green',
-                nl=False)
-    custom_resources = onprem_utils.get_local_cluster_accelerators(
-        ips, auth_config)
-    steps += 1
-
-    # Launching Ray Autoscaler service
-    click.secho(f'[{steps}/4] Launching sky runtime\n', fg='green', nl=False)
-    onprem_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
-    steps += 1
-
-    # Generate sanitized yaml file to be sent to non-admin users
-    click.secho(f'[{steps}/4] Generating sanitized local yaml file\n',
-                fg='green',
-                nl=False)
-    sanitized_yaml_path = onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
-        local_cluster_name)
-    onprem_utils.save_distributable_yaml(yaml_config)
-    click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
-    click.secho(f'Successfully deployed local cluster {local_cluster_name!r}\n',
-                fg='green')
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def bench():
     """SkyPilot Benchmark CLI."""
@@ -3946,7 +3817,7 @@ def spot():
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--spot-recovery',
               default=None,
               type=str,
@@ -4074,16 +3945,7 @@ def spot_launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    for task in dag.tasks:
-        # We try our best to validate the cluster name before we launch the
-        # task. If the cloud is not specified, this will only validate the
-        # cluster name against the regex, and the cloud-specific validation will
-        # be done by the spot controller when actually launching the spot
-        # cluster.
-        for resources in task.resources:
-            task_cloud = (resources.cloud
-                          if resources.cloud is not None else clouds.Cloud)
-            task_cloud.check_cluster_name_is_valid(name)
+    common_utils.check_cluster_name_is_valid(name)
 
     sky.spot_launch(dag,
                     name,
@@ -4349,15 +4211,54 @@ def serve():
     pass
 
 
-def _generate_task_with_service(service_yaml_args: List[str],
-                                not_supported_cmd: str) -> sky.Task:
+def _generate_task_with_service(
+    service_name: str,
+    service_yaml_args: List[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Tuple[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    not_supported_cmd: str,
+) -> sky.Task:
     """Generate a task with service section from a service YAML file."""
     is_yaml, _ = _check_yaml(''.join(service_yaml_args))
     if not is_yaml:
         raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
+    env = _merge_env_vars(env_file, env)
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
-        service_yaml_args, entrypoint_name='Service')
+        service_yaml_args,
+        # For Service YAML, we override the `name` field with service name.
+        name=service_name,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env=env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+        entrypoint_name='Service',
+    )
     if isinstance(task, sky.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command=not_supported_cmd))
@@ -4407,16 +4308,34 @@ def _generate_task_with_service(service_yaml_args: List[str],
               type=str,
               help='A service name. Unique for each service. If not provided, '
               'a unique name is autogenerated.')
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(tian): Support the task_option overrides for the service.
+@timeline.event
+@usage_lib.entrypoint
 def serve_up(
     service_yaml: List[str],
     service_name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Tuple[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
     yes: bool,
 ):
     """Launch a SkyServe service.
@@ -4450,8 +4369,27 @@ def serve_up(
     if service_name is None:
         service_name = serve_lib.generate_service_name()
 
-    task = _generate_task_with_service(service_yaml_args=service_yaml,
-                                       not_supported_cmd='sky serve up')
+    task = _generate_task_with_service(
+        service_name=service_name,
+        service_yaml_args=service_yaml,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env_file=env_file,
+        env=env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+        not_supported_cmd='sky serve up',
+    )
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
@@ -4479,13 +4417,36 @@ def serve_up(
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-def serve_update(service_name: str, service_yaml: List[str], yes: bool):
+@timeline.event
+@usage_lib.entrypoint
+def serve_update(
+    service_name: str,
+    service_yaml: List[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Tuple[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    yes: bool,
+):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
@@ -4496,8 +4457,27 @@ def serve_update(service_name: str, service_yaml: List[str], yes: bool):
 
         sky serve update sky-service-16aa new_service.yaml
     """
-    task = _generate_task_with_service(service_yaml_args=service_yaml,
-                                       not_supported_cmd='sky serve update')
+    task = _generate_task_with_service(
+        service_name=service_name,
+        service_yaml_args=service_yaml,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env_file=env_file,
+        env=env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+        not_supported_cmd='sky serve update',
+    )
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
@@ -4835,7 +4815,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
               required=True,
               type=str,
               help='Benchmark name.')
-@_add_click_options(_TASK_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME)
 @click.option('--gpus',
               required=False,
               type=str,

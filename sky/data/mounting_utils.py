@@ -19,7 +19,7 @@ def get_s3_mount_install_cmd() -> str:
     install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
                    'releases/download/0.24.0-romilb-upstream/goofys '
                    '-O /usr/local/bin/goofys && '
-                   'sudo chmod +x /usr/local/bin/goofys')
+                   'sudo chmod 755 /usr/local/bin/goofys')
     return install_cmd
 
 

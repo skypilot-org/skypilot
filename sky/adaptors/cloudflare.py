@@ -152,7 +152,7 @@ def create_endpoint():
     """Reads accountid necessary to interact with R2"""
 
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
-    with open(accountid_path, 'r') as f:
+    with open(accountid_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
         accountid = lines[0]
 
@@ -202,7 +202,7 @@ def r2_profile_in_aws_cred() -> bool:
     profile_path = os.path.expanduser(R2_CREDENTIALS_PATH)
     r2_profile_exists = False
     if os.path.isfile(profile_path):
-        with open(profile_path, 'r') as file:
+        with open(profile_path, 'r', encoding='utf-8') as file:
             for line in file:
                 if f'[{R2_PROFILE_NAME}]' in line:
                     r2_profile_exists = True

@@ -20,11 +20,6 @@ SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.4.0'
 
-# TODO(mluo): Make explicit `sky launch -c <name> ''` optional.
-UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
-    'Found uninitialized local cluster {cluster}. Run this '
-    'command to initialize it locally: sky launch -c {cluster} \'\'')
-
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
 # same spot task.
@@ -46,7 +41,11 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '6'
+SKYLET_VERSION = '7'
+# The version of the lib files that skylet/jobs use. Whenever there is an API
+# change for the job_lib or log_lib, we need to bump this version, so that the
+# user can be notified to update their SkyPilot version on the remote cluster.
+SKYLET_LIB_VERSION = 1
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky spot dashboard`-related
@@ -93,7 +92,7 @@ USER_ENV_VAR = 'SKYPILOT_USER'
 
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
-CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'
+CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
@@ -108,3 +107,12 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 # controller and sky serve controller.
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
+
+# Due to the CPU/memory usage of the controller process launched with sky job (
+# use ray job under the hood), we need to reserve some CPU/memory for each spot/
+# serve controller process.
+# Spot: A default controller with 8 vCPU and 32 GB memory can manage up to 32
+# spot jobs.
+# Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
+# services.
+CONTROLLER_PROCESS_CPU_DEMAND = 0.25

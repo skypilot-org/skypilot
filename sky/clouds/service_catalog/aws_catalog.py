@@ -198,14 +198,6 @@ def validate_region_zone(
     return common.validate_region_zone_impl('aws', _get_df(), region, zone)
 
 
-def accelerator_in_region_or_zone(acc_name: str,
-                                  acc_count: int,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_get_df(), acc_name,
-                                                     acc_count, region, zone)
-
-
 def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
@@ -294,8 +286,10 @@ def list_accelerators(
         region_filter: Optional[str],
         quantity_filter: Optional[int],
         case_sensitive: bool = True,
-        all_regions: bool = False) -> Dict[str, List[common.InstanceTypeInfo]]:
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in AWS offering accelerators."""
+    del require_price  # Unused.
     return common.list_accelerators_impl('AWS', _get_df(), gpus_only,
                                          name_filter, region_filter,
                                          quantity_filter, case_sensitive,

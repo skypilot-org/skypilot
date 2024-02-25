@@ -72,11 +72,11 @@ def _is_valid_name(name: Optional[str]) -> bool:
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
 
 
-def _fill_in_env_vars_in_file_mounts(
-    file_mounts: Dict[str, Any],
+def _fill_in_env_vars(
+    yaml_field: Dict[str, Any],
     task_envs: Dict[str, str],
 ) -> Dict[str, Any]:
-    """Detects env vars in file_mounts and fills them with task_envs.
+    """Detects env vars in yaml field and fills them with task_envs.
 
     Use cases of env vars in file_mounts:
     - dst/src paths; e.g.,
@@ -84,8 +84,20 @@ def _fill_in_env_vars_in_file_mounts(
     - storage's name (bucket name)
     - storage's source (local path)
 
-    We simply dump file_mounts into a json string, and replace env vars using
-    regex. This should be safe as file_mounts has been schema-validated.
+    Use cases of env vars in service:
+    - model type; e.g.,
+        service:
+          readiness_probe:
+            path: /v1/chat/completions
+            post_data:
+              model: $MODEL_NAME
+              messages:
+                - role: user
+                  content: How to print hello world?
+              max_tokens: 1
+
+    We simply dump yaml_field into a json string, and replace env vars using
+    regex. This should be safe as yaml config has been schema-validated.
 
     Env vars of the following forms are detected:
         - ${ENV}
@@ -93,7 +105,7 @@ def _fill_in_env_vars_in_file_mounts(
     where <ENV> must appear in task.envs.
     """
     # TODO(zongheng): support ${ENV:-default}?
-    file_mounts_str = json.dumps(file_mounts)
+    yaml_field_str = json.dumps(yaml_field)
 
     def replace_var(match):
         var_name = match.group(1)
@@ -102,8 +114,8 @@ def _fill_in_env_vars_in_file_mounts(
 
     # Pattern for valid env var names in bash.
     pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
-    file_mounts_str = re.sub(pattern, replace_var, file_mounts_str)
-    return json.loads(file_mounts_str)
+    yaml_field_str = re.sub(pattern, replace_var, yaml_field_str)
+    return json.loads(yaml_field_str)
 
 
 def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
@@ -361,8 +373,13 @@ class Task:
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         if config.get('file_mounts') is not None:
-            config['file_mounts'] = _fill_in_env_vars_in_file_mounts(
-                config['file_mounts'], config.get('envs', {}))
+            config['file_mounts'] = _fill_in_env_vars(config['file_mounts'],
+                                                      config.get('envs', {}))
+
+        # Fill in any Task.envs into service (e.g. MODEL_NAME).
+        if config.get('service') is not None:
+            config['service'] = _fill_in_env_vars(config['service'],
+                                                  config.get('envs', {}))
 
         task = Task(
             config.pop('name', None),
@@ -966,6 +983,10 @@ class Task:
                     k) and not data_utils.is_cloud_store_url(v):
                 d[k] = v
         return d
+
+    def is_controller_task(self) -> bool:
+        """Returns whether this task is a spot/serve controller process."""
+        return self.spot_dag is not None or self.service_name is not None
 
     def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=cloud URL).

@@ -1,4 +1,5 @@
 """Azure instance provisioning."""
+import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from sky import sky_logging
@@ -7,6 +8,11 @@ from sky.provision import common
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# Suppress noisy logs from Azure SDK. Reference:
+# https://github.com/Azure/azure-sdk-for-python/issues/9422
+azure_logger = logging.getLogger('azure')
+azure_logger.setLevel(logging.WARNING)
 
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'

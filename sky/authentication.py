@@ -41,8 +41,10 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.adaptors import kubernetes
 from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
+from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
@@ -88,11 +90,15 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
     with open(
             private_key_path,
             'w',
+            encoding='utf-8',
             opener=functools.partial(os.open, mode=0o600),
     ) as f:
         f.write(private_key)
 
-    with open(public_key_path, 'w') as f:
+    with open(public_key_path,
+              'w',
+              encoding='utf-8',
+              opener=functools.partial(os.open, mode=0o644)) as f:
         f.write(public_key)
 
 
@@ -116,7 +122,7 @@ def get_or_generate_keys() -> Tuple[str, str]:
 
 def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
+    with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
     config_str = common_utils.dump_yaml_str(config)
     config_str = config_str.replace('skypilot:ssh_user',
@@ -217,13 +223,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             # within their google workspace after the os-login credentials
             # were established.
             config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
-            sky_backup_config_path = os.path.expanduser(
-                clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
-            assert os.path.exists(sky_backup_config_path), (
-                'GCP credential backup file '
-                f'{sky_backup_config_path!r} does not exist.')
-
-            with open(sky_backup_config_path, 'r') as infile:
+            with open(config_path, 'r', encoding='utf-8') as infile:
                 for line in infile:
                     if line.startswith('account'):
                         account = line.split('=')[1].strip()
@@ -270,7 +270,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 # and public key content, then encode it back.
 def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
+    with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
     for node_type in config['available_node_types']:
         node_config = config['available_node_types'][node_type]['node_config']
@@ -301,7 +301,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Ensure ssh key is registered with Lambda Cloud
     lambda_client = lambda_utils.LambdaCloudClient()
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-    with open(public_key_path, 'r') as f:
+    with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
     prefix = f'sky-key-{common_utils.get_user_hash()}'
     name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
@@ -399,29 +399,29 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 from None
     get_or_generate_keys()
 
-    # Run kubectl command to add the public key to the cluster.
+    # Add the user's public key to the SkyPilot cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-    key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
-    cmd = f'kubectl create secret generic {key_label} ' \
-          f'--from-file=ssh-publickey={public_key_path}'
-    try:
-        subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
-    except subprocess.CalledProcessError as e:
-        output = e.output.decode('utf-8')
-        suffix = f'\nError message: {output}'
-        if 'already exists' in output:
-            logger.debug(
-                f'Key {key_label} already exists in the cluster, using it...')
-        elif any(err in output for err in ['connection refused', 'timeout']):
-            with ux_utils.print_exception_no_traceback():
-                raise ConnectionError(
-                    'Failed to connect to the cluster. Check if your '
-                    'cluster is running, your kubeconfig is correct '
-                    'and you can connect to it using: '
-                    f'kubectl get namespaces.{suffix}') from e
-        else:
-            logger.error(suffix)
-            raise
+    secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
+    secret_field_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_FIELD_NAME
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    k8s = kubernetes.get_kubernetes()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read()
+        if not public_key.endswith('\n'):
+            public_key += '\n'
+        secret_metadata = k8s.client.V1ObjectMeta(name=secret_name,
+                                                  labels={'parent': 'skypilot'})
+        secret = k8s.client.V1Secret(
+            metadata=secret_metadata,
+            string_data={secret_field_name: public_key})
+    if kubernetes_utils.check_secret_exists(secret_name, namespace):
+        logger.debug(f'Key {secret_name} exists in the cluster, patching it...')
+        kubernetes.core_api().patch_namespaced_secret(secret_name, namespace,
+                                                      secret)
+    else:
+        logger.debug(
+            f'Key {secret_name} does not exist in the cluster, creating it...')
+        kubernetes.core_api().create_namespaced_secret(namespace, secret)
 
     ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
     if network_mode == nodeport_mode:
@@ -439,7 +439,6 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Setup service for SSH jump pod. We create the SSH jump service here
     # because we need to know the service IP address and port to set the
     # ssh_proxy_command in the autoscaler config.
-    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
     kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, service_type)
 
     ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
@@ -463,4 +462,18 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         public_key = pub_key_file.read().strip()
         runpod.runpod().cli.groups.ssh.functions.add_ssh_key(public_key)
 
+    return configure_ssh_info(config)
+
+
+def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+
+    get_or_generate_keys()
+
+    client = fluidstack_utils.FluidstackClient()
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    public_key = None
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read()
+    client.get_or_add_ssh_key(public_key)
+    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
     return configure_ssh_info(config)

@@ -5,7 +5,6 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
@@ -20,15 +19,19 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-CREDENTIAL_PATH = '~/.kube/config'
+# Check if KUBECONFIG is set, and use it if it is.
+DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
+CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
-    SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
-    SKY_SSH_JUMP_NAME = f'sky-ssh-jump-{common_utils.get_user_hash()}'
+    SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
+    SKY_SSH_KEY_SECRET_FIELD_NAME = \
+        f'ssh-publickey-{common_utils.get_user_hash()}'
+    SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
         'kubernetes-port-forward-proxy-command.sh.j2'
     PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
@@ -195,10 +198,13 @@ class Kubernetes(clouds.Cloud):
         return 0
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud, zones  # Unused.
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud, zones, dryrun  # Unused.
         if region is None:
             region = self._regions[0]
 
@@ -221,8 +227,9 @@ class Kubernetes(clouds.Cloud):
 
         if resources.image_id is not None:
             # Use custom image specified in resources
-            image_id_with_region = resources.image_id['kubernetes']
-            image_id = image_id_with_region.lstrip('docker:')
+            image_id = resources.image_id['kubernetes']
+            if image_id.startswith('docker:'):
+                image_id = image_id[len('docker:'):]
         else:
             # Select image based on whether we are using GPUs or not.
             image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
@@ -341,7 +348,12 @@ class Kubernetes(clouds.Cloud):
                     f'check if {CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {CREDENTIAL_PATH: CREDENTIAL_PATH}
+        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+            # Upload kubeconfig to the default path to avoid having to set
+            # KUBECONFIG in the environment.
+            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
+        else:
+            return {}
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
@@ -356,18 +368,6 @@ class Kubernetes(clouds.Cloud):
             raise ValueError('Kubernetes support does not support setting zone.'
                              ' Cluster used is determined by the kubeconfig.')
         return region, zone
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        try:
-            # Check if accelerator is available by checking node labels
-            _, _ = kubernetes_utils.get_gpu_label_key_value(accelerator)
-            return True
-        except exceptions.ResourcesUnavailableError:
-            return False
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
