@@ -69,12 +69,12 @@ def launch_cluster(task_yaml_path: str,
     try:
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         task = sky.Task.from_yaml_config(config)
-        resources = task.resources
         if resources_override is not None:
+            resources = task.resources
             overrided_resources = [
                 r.copy(**resources_override) for r in resources
             ]
-        task.set_resources(type(resources)(overrided_resources))
+            task.set_resources(type(resources)(overrided_resources))
         logger.info(f'Launching replica cluster {cluster_name} with '
                     f'resources: {task.resources}')
     except Exception as e:  # pylint: disable=broad-except

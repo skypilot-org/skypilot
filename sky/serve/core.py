@@ -74,8 +74,10 @@ def _validate_service_task(task: 'sky.Task') -> None:
         if (task.service.use_ondemand_fallback and
                 not requested_resources.use_spot):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Please explicitly specify `use_spot: true` '
-                                 'in resources for on-demand fallback.')
+                raise ValueError(
+                    '`use_ondemand_fallback` is only supported '
+                    'for spot resources. Please explicitly specify '
+                    '`use_spot: true` in resources for on-demand fallback.')
         requested_ports = list(
             resources_utils.port_ranges_to_set(requested_resources.ports))
         if len(requested_ports) != 1:

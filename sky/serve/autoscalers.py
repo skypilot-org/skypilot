@@ -100,16 +100,14 @@ class Autoscaler:
         raise NotImplementedError
 
     @classmethod
-    def from_spec(
-            cls,
-            spec: 'service_spec.SkyServiceSpec') -> 'RequestRateAutoscaler':
+    def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
         if spec.use_ondemand_fallback:
             return FallbackRequestRateAutoscaler(spec)
         else:
             return RequestRateAutoscaler(spec)
 
-    def get_dynamic_states(self) -> Dict[str, Any]:
+    def dump_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
         raise NotImplementedError
 
@@ -162,10 +160,11 @@ class RequestRateAutoscaler(Autoscaler):
     def _cal_target_num_replicas_based_on_qps(self) -> int:
         # Recalculate target_num_replicas based on QPS.
         # Reclip self.target_num_replicas with new min and max replicas.
+        if self.target_qps_per_replica is None:
+            return self.min_replicas
         target_num_replicas = math.ceil(
             len(self.request_timestamps) / self.qps_window_size /
-            self.target_qps_per_replica
-        ) if self.target_qps_per_replica is not None else self.min_replicas
+            self.target_qps_per_replica)
         return max(self.min_replicas, min(self.max_replicas,
                                           target_num_replicas))
 
@@ -214,7 +213,7 @@ class RequestRateAutoscaler(Autoscaler):
 
     def _set_target_num_replica_with_hysteresis(self) -> None:
         """Set target_num_replicas based on request rate with hysteresis."""
-        # Maintain self.target_num_replicas when autoscaling
+        # Keep self.target_num_replicas unchange when autoscaling
         # is not enabled, i.e. self.target_qps_per_replica is None.
         # In this case, self.target_num_replicas will be min_replicas.
         if self.target_qps_per_replica is None:
@@ -260,7 +259,7 @@ class RequestRateAutoscaler(Autoscaler):
     ) -> List[int]:
 
         status_order = serve_state.ReplicaStatus.scale_down_decision_order()
-        # Also sort by provisioned time (by replica_id) to make sure
+        # Also sort by provisioned time (indicated by replica_id) to make sure
         # we terminate the replicas that starts provisioning later first
         replica_infos_sorted = sorted(
             replica_infos,
@@ -368,15 +367,17 @@ class RequestRateAutoscaler(Autoscaler):
             logger.info('No scaling needed.')
         return scaling_options
 
-    def get_dynamic_states(self) -> Dict[str, Any]:
+    def dump_states(self) -> Dict[str, Any]:
         return {
             'request_timestamps': self.request_timestamps,
+            'latest_version': self.latest_version
         }
 
     def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         if 'request_timestamps' in dynamic_states:
-            self.request_timestamps = dynamic_states['request_timestamps']
-            dynamic_states.pop('request_timestamps')
+            self.request_timestamps = dynamic_states.pop('request_timestamps')
+        if 'latest_version' in dynamic_states:
+            self.latest_version = dynamic_states.pop('latest_version')
         if dynamic_states:
             logger.info(f'Remaining dynamic states: {dynamic_states}')
 
@@ -384,9 +385,8 @@ class RequestRateAutoscaler(Autoscaler):
 class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
     """FallbackRequestRateAutoscaler
 
-    Autoscale based on request rate. It adds additional
-    ability to RequestRateAutoscaler for having
-    spot instances with on-demand fallback.
+    Autoscale based on request rate. It adds additional ability to
+    RequestRateAutoscaler for having spot with on-demand fallback.
 
     When spec.base_ondemand_fallback_replicas is set, we make sure
     there are at least spec.base_ondemand_fallback_replicas on-demands
@@ -404,7 +404,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             if spec.base_ondemand_fallback_replicas is not None else 0)
         # Assert: Either dynamic_ondemand_fallback is set
         # or base_ondemand_fallback_replicas is greater than 0.
-        assert spec._use_ondemand_fallback
+        assert spec.use_ondemand_fallback
         self.dynamic_ondemand_fallback: bool = (
             spec.dynamic_ondemand_fallback
             if spec.dynamic_ondemand_fallback is not None else False)

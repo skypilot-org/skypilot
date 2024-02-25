@@ -125,15 +125,12 @@ class SkyServeController:
 
                 if not (isinstance(
                         self._autoscaler,
-                        type(
-                            autoscalers.RequestRateAutoscaler.from_spec(
-                                service)))):
+                        type(autoscalers.Autoscaler.from_spec(service)))):
                     old_autoscaler = self._autoscaler
                     self._autoscaler = (
-                        autoscalers.RequestRateAutoscaler.from_spec(service))
+                        autoscalers.Autoscaler.from_spec(service))
                     self._autoscaler.load_dynamic_states(
-                        old_autoscaler.get_dynamic_states())
-                    self._autoscaler.latest_version = version
+                        old_autoscaler.dump_states())
                 else:
                     self._autoscaler.update_version(version, service)
                 return {'message': 'Success'}
