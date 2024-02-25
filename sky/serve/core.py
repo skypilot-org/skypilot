@@ -61,8 +61,8 @@ def up(
             raise RuntimeError('Service section not found.')
 
     # If all resources are from the same cloud, set the cloud of the controller
-    # to be that cloud if it does not exist yet. If the controller and all replicas 
-    # are from the same cloud, it should provide better connectivity.
+    # to be that cloud if it does not exist yet. If the controller and all
+    #replicas  are from the same cloud, it should provide better connectivity.
     requested_cloud: Optional['clouds.Cloud'] = None
     requested_multiple_clouds: bool = False
     service_port: Optional[int] = None
