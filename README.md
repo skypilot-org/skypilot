@@ -27,6 +27,7 @@
 
 ----
 :fire: *News* :fire:
+- [Feb, 2024] Deploying and scaling [**Gemma**](https://blog.google/technology/developers/gemma-open-models/) with SkyServe: [**example**](./llm/gemma/)
 - [Feb, 2024] Speed up your LLM deployments with [**SGLang**](https://github.com/sgl-project/sglang) for 5x throughput on SkyServe: [**example**](./llm/sglang/)
 - [Feb, 2024] Serving [**Code Llama 70B**](https://ai.meta.com/blog/code-llama-large-language-model-coding/) with vLLM and SkyServe: [**example**](./llm/codellama/)
 - [Dec, 2023] Using [**LoRAX**](https://github.com/predibase/lorax) to serve 1000s of finetuned LLMs on a single instance in the cloud: [**example**](./llm/lorax/)
@@ -66,18 +67,18 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 
 Install with pip (we recommend the nightly build for the latest features or [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)):
 ```bash
-pip install "skypilot-nightly[aws,gcp,azure,oci,lambda,runpod,ibm,scp,kubernetes]"  # choose your clouds
+pip install "skypilot-nightly[aws,gcp,azure,oci,lambda,runpod,fluidstack,cudo,ibm,scp,kubernetes]"  # choose your clouds
 ```
 To get the last release, use:
 ```bash
-pip install -U "skypilot[aws,gcp,azure,oci,lambda,runpod,ibm,scp,kubernetes]"  # choose your clouds
+pip install -U "skypilot[aws,gcp,azure,oci,lambda,runpod,fluidstack,cudo,ibm,scp,kubernetes]"  # choose your clouds
 ```
 
-Current supported providers (AWS, Azure, GCP, OCI, Lambda Cloud, RunPod, IBM, Samsung, Cloudflare, any Kubernetes cluster):
+Current supported providers (AWS, Azure, GCP, OCI, Lambda Cloud, RunPod, Fluidstack, Cudo, IBM, Samsung, Cloudflare, any Kubernetes cluster):
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png">
-    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%>
+    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=85%>
   </picture>
 </p>
 
@@ -148,6 +149,7 @@ To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest
 <!-- Keep this section in sync with index.rst in SkyPilot Docs -->
 Runnable examples:
 - LLMs on SkyPilot
+  - [Gemma](./llm/gemma/)
   - [Mixtral 8x7B](./llm/mixtral/); [Mistral 7B](https://docs.mistral.ai/self-deployment/skypilot/) (from official Mistral team)
   - [Code Llama](./llm/codellama/)
   - [vLLM: Serving LLM 24x Faster On the Cloud](./llm/vllm/) (from official vLLM team)
