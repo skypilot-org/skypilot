@@ -172,7 +172,7 @@ wait_for_nginx_ingress_controller_install() {
     SECONDS=0
     TIMEOUT=600  # 10 minutes in seconds
 
-    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+    kubectl apply -f nginx-deploy.yaml
 
     while true; do
         if kubectl get pod -n ingress-nginx -l app.kubernetes.io/component=controller -o wide | grep 'Running'; then
