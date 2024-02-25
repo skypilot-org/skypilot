@@ -3452,13 +3452,14 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @cli.command()
+@click.argument('user_specified_clouds', required=False, type=str, nargs=-1)
 @click.option('--verbose',
               '-v',
               is_flag=True,
               default=False,
               help='Show the activated account for each cloud.')
 @usage_lib.entrypoint
-def check(verbose: bool):
+def check(user_specified_clouds: Tuple[str], verbose: bool):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -3468,7 +3469,10 @@ def check(verbose: bool):
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
     """
-    sky_check.check(verbose=verbose)
+    user_specified_clouds_arg = user_specified_clouds if len(
+        user_specified_clouds) > 0 else None
+    sky_check.check(verbose=verbose,
+                    user_specified_clouds=user_specified_clouds_arg)
 
 
 @cli.command()

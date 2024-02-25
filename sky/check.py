@@ -10,9 +10,19 @@ from sky.adaptors import cloudflare
 
 
 # TODO(zhwu): add check for a single cloud to improve performance
-def check(quiet: bool = False, verbose: bool = False) -> None:
+def check(
+    quiet: bool = False,
+    verbose: bool = False,
+    user_specified_clouds: Optional[Tuple[str]] = None,
+) -> None:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
+
+    user_specified_clouds_set = set()
+    if user_specified_clouds is not None:
+        for cloud in user_specified_clouds:
+            clouds.CLOUD_REGISTRY.from_str(cloud)  # verify cloud
+            user_specified_clouds_set.add(cloud.lower())
 
     enabled_clouds = []
 
@@ -42,7 +52,10 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     clouds_to_check.append(('Cloudflare, for R2 object store', cloudflare))
 
     for cloud_tuple in sorted(clouds_to_check):
-        check_one_cloud(cloud_tuple)
+        cloud_repr = cloud_tuple[0].lower()
+        if (user_specified_clouds is None or
+                cloud_repr in user_specified_clouds_set):
+            check_one_cloud(cloud_tuple)
 
     # Cloudflare is not a real cloud in clouds.CLOUD_REGISTRY, and should not be
     # inserted into the DB (otherwise `sky launch` and other code would error
