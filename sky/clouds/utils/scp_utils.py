@@ -258,9 +258,6 @@ class SCPClient:
                 'serviceValue': '80'
             }, {
                 'serviceType': 'TCP',
-                'serviceValue': '1000'
-            }, {
-                'serviceType': 'TCP',
                 'serviceValue': '443'
             }],
             'destinationIpAddresses': ['0.0.0.0/0'],
@@ -299,9 +296,6 @@ class SCPClient:
             }, {
                 'serviceType': 'TCP',
                 'serviceValue': '80'
-            }, {
-                'serviceType': 'TCP',
-                'serviceValue': '1000'
             }, {
                 'serviceType': 'TCP',
                 'serviceValue': '443'
