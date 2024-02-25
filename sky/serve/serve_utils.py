@@ -734,7 +734,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
 def _sort_replica_records(
         replica_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
-    def sort_key(record) -> Tuple[int, int]:
+    def sort_key(record: Dict[str, Any]) -> Tuple[int, int]:
         status_priority = 0 if record['status'] == 'READY' else 1
         return -int(record['version']), status_priority
 
