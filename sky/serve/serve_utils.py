@@ -11,7 +11,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
-                    TextIO, Type, TypeVar)
+                    TextIO, Tuple, Type, TypeVar)
 import uuid
 
 import colorama
@@ -731,10 +731,22 @@ def format_service_table(service_records: List[Dict[str, Any]],
             f'{replica_table}')
 
 
+def _sort_replica_records(
+        replica_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+
+    def sort_key(record) -> Tuple[int, int]:
+        status_priority = 0 if record['status'] == 'READY' else 1
+        return -int(record['version']), status_priority
+
+    sorted_records = sorted(replica_records, key=sort_key)
+    return sorted_records
+
+
 def _format_replica_table(replica_records: List[Dict[str, Any]],
                           show_all: bool) -> str:
     if not replica_records:
         return 'No existing replicas.'
+    replica_records = _sort_replica_records(replica_records)
 
     replica_columns = [
         'SERVICE_NAME', 'ID', 'VERSION', 'IP', 'LAUNCHED', 'RESOURCES',
