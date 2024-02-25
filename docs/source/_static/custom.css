@@ -94,3 +94,21 @@ html[data-theme="dark"] {
   background-color: var(--pst-color-background);
   color: var(--pst-color-text-muted);
 }
+
+/* Display a "New" icon for new items (custom.js) */
+.new-item::after {
+    content: "New";
+    display: inline-block;
+    color: white; /* Keeps the text color white for contrast */
+    font-size: 12px; /* Adjusted for a smaller font size */
+
+    background-color: #0d6efd; /* Bootstrap's 'primary' blue color for Bootstrap 5 */
+
+    border-radius: 2px;
+    margin: 0px 0px 0px 4px;
+    padding: 2px 5px; /* Reduced padding for a more compact label */
+    margin-left: 6px; /* Space between the text and the label */
+
+    vertical-align: middle;
+    line-height: 1; /* Adjust line height to ensure vertical alignment */
+}
