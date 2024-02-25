@@ -64,7 +64,7 @@ def up(
     # to be that cloud if it does not exist yet. If the controller and all replicas 
     # are from the same cloud, it should provide better connectivity.
     requested_cloud: Optional['clouds.Cloud'] = None
-    requested_multiple_clouds = False
+    requested_multiple_clouds: bool = False
     service_port: Optional[int] = None
     for requested_resources in task.resources:
         if requested_resources.ports is None or len(
