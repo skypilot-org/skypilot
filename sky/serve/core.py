@@ -60,10 +60,9 @@ def up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
-    # Pickup the cloud if all resources are from the same cloud. This is to
-    # select the cloud for the controller if it does not exist yet. If the
-    # controller and all replicas are from the same cloud, it should provide
-    # better connectivity.
+    # If all resources are from the same cloud, set the cloud of the controller
+    # to be that cloud if it does not exist yet. If the controller and all replicas 
+    # are from the same cloud, it should provide better connectivity.
     requested_cloud: Optional['clouds.Cloud'] = None
     requested_multiple_clouds = False
     service_port: Optional[int] = None
