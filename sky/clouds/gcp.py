@@ -113,22 +113,21 @@ def is_api_disabled(endpoint: str, project_id: str) -> bool:
     return proc.returncode != 0
 
 
-class GCPIdentityType(enum.Enum):
-    """GCP identity type.
-
-    The account type is determined by the current user identity, based on
-    the identity email.
-    """
-    # Example of a service account email:
-    #   skypilot-v1@xxxx.iam.gserviceaccount.com
-    SERVICE_ACCOUNT = 'iam.gserviceaccount.com'
-
-    SHARED_CREDENTIALS_FILE = ''
-
-
 @clouds.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
+
+    class GCPIdentityType(enum.Enum):
+        """GCP identity type.
+
+        The account type is determined by the current user identity, based on
+        the identity email.
+        """
+        # Example of a service account email:
+        #   skypilot-v1@xxxx.iam.gserviceaccount.com
+        SERVICE_ACCOUNT = 'iam.gserviceaccount.com'
+
+        SHARED_CREDENTIALS_FILE = ''
 
     _REPR = 'GCP'
 
@@ -642,7 +641,7 @@ class GCP(clouds.Cloud):
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
         identity_type = cls._get_identity_type()
-        if identity_type == GCPIdentityType.SHARED_CREDENTIALS_FILE:
+        if identity_type == GCP.GCPIdentityType.SHARED_CREDENTIALS_FILE:
             # This files are only required when using the shared credentials
             # to access GCP. They are not required when using service account.
             try:
@@ -767,11 +766,22 @@ class GCP(clouds.Cloud):
         # We only add the existing credential files. It should be safe to ignore
         # the missing files, as we successfully created the VM at this point,
         # meaning the authentication is successful.
+        credential_files = list(_CREDENTIAL_FILES)
+        is_using_service_account = (
+            self._get_identity_type() == GCP.GCPIdentityType.SERVICE_ACCOUNT)
+        if is_using_service_account:
+            logger.info('Using service account credentials.')
+            credential_files = [
+                f for f in credential_files
+                if f not in ('access_tokens.db', 'credentials.db')
+            ]
         credentials = {}
-        for filename in _CREDENTIAL_FILES:
+        for filename in credential_files:
             path = f'~/.config/gcloud/{filename}'
             if os.path.exists(os.path.expanduser(path)):
-                if filename == 'legacy_credentials':
+                if (is_using_service_account and
+                        filename == 'legacy_credentials'):
+                    # For service account, mount the specific account dir.
                     # TODO(zongheng): catch exceptions.
                     identity = self.get_current_user_identity_str()
                     if identity is not None:
@@ -797,9 +807,9 @@ class GCP(clouds.Cloud):
             account = cls.get_current_user_identity()[0]
         except exceptions.CloudUserIdentityError:
             return None
-        if GCPIdentityType.SERVICE_ACCOUNT.value in account:
-            return GCPIdentityType.SERVICE_ACCOUNT
-        return GCPIdentityType.SHARED_CREDENTIALS_FILE
+        if GCP.GCPIdentityType.SERVICE_ACCOUNT.value in account:
+            return GCP.GCPIdentityType.SERVICE_ACCOUNT
+        return GCP.GCPIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.

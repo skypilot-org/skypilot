@@ -808,6 +808,23 @@ def write_cluster_config(
         excluded_clouds = [cloud]
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
+    def _activate_gcp_service_account_command() -> str:
+        """Returns the command to activate the GCP service account."""
+        # TODO(zongheng): catch exceptions.
+        identity = clouds.GCP.get_current_user_identity_str()
+        if (clouds.GCP._get_identity_type()
+                == clouds.GCP.GCPIdentityType.SERVICE_ACCOUNT and
+                identity is not None):
+            # Ex: 'skypilot-v1@skypilot-123.iam.gserviceaccount.com'
+            identity = identity.split(' ')[0]
+            service_account_key = (
+                f'~/.config/gcloud/legacy_credentials/{identity}/adc.json')
+            if os.path.exists(os.path.expanduser(service_account_key)):
+                return (
+                    'gcloud auth activate-service-account --key-file '
+                    f'{service_account_key};')
+        return ''
+
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
     region_name = resources_vars.get('region')
 
@@ -857,6 +874,8 @@ def write_cluster_config(
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
+    # import ipdb
+    # ipdb.set_trace()
     common_utils.fill_template(
         cluster_config_template,
         dict(
@@ -888,6 +907,10 @@ def write_cluster_config(
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
+
+                # GCP service account activation command.
+                'activate_gcp_service_account_command':
+                    _activate_gcp_service_account_command(),
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
