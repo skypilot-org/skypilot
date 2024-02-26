@@ -2,7 +2,7 @@
 import re
 import tempfile
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 import colorama
 
@@ -60,11 +60,10 @@ def up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
-    # If all resources are from the same cloud, set the cloud of the controller
-    # to be that cloud if it does not exist yet. If the controller and all
-    # replicas are from the same cloud, it should provide better connectivity.
-    requested_cloud: Optional['clouds.Cloud'] = None
-    requested_multiple_clouds: bool = False
+    # If the controller and all replicas are from the same cloud, it should
+    # provide better connectivity. We will let the controller choose from
+    # any cloud in the resources if the controller does not exist.
+    requested_clouds: Set['clouds.Cloud'] = set()
     service_port: Optional[int] = None
     for requested_resources in task.resources:
         if requested_resources.ports is None or len(
@@ -86,13 +85,7 @@ def up(
             raise ValueError(
                 f'Got multiple ports: {service_port} and {resource_port} '
                 'in different resources. Please specify single port instead.')
-        if requested_cloud is None:
-            requested_cloud = requested_resources.cloud
-        if requested_cloud != requested_resources.cloud:
-            requested_multiple_clouds = True
-    # If multiple clouds are used, skip this optimization.
-    if requested_multiple_clouds:
-        requested_cloud = None
+        requested_clouds.add(requested_resources.cloud)
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
@@ -113,9 +106,11 @@ def up(
             serve_utils.generate_remote_config_yaml_file_name(service_name))
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
-        controller_resources = (controller_utils.get_controller_resources(
-            controller_type='serve',
-            controller_resources_config=serve_constants.CONTROLLER_RESOURCES))
+        controller_resources_in_config = (
+            controller_utils.get_controller_resources(
+                controller_type='serve',
+                controller_resources_config=serve_constants.CONTROLLER_RESOURCES
+            ))
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
@@ -135,16 +130,21 @@ def up(
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
             is not None)
-        controller_cloud = (requested_cloud if not controller_exist and
-                            controller_resources.cloud is None else
-                            controller_resources.cloud)
+        if (not controller_exist and
+                controller_resources_in_config.cloud is None):
+            controller_clouds = requested_clouds
+        else:
+            controller_clouds = {controller_resources_in_config.cloud}
         # TODO(tian): Probably run another sky.launch after we get the load
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
         # any connection to the unregistered ports.
-        controller_resources = controller_resources.copy(
-            cloud=controller_cloud,
-            ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+        controller_resources = {
+            controller_resources_in_config.copy(
+                cloud=controller_cloud,
+                ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+            for controller_cloud in controller_clouds
+        }
         controller_task.set_resources(controller_resources)
 
         # # Set service_name so the backend will know to modify default ray
