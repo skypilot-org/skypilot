@@ -101,14 +101,12 @@ def list_accelerators(
     region_filter: Optional[str],
     quantity_filter: Optional[int],
     case_sensitive: bool = True,
+    all_regions: bool = False,
+    require_price: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Paperspace offering GPUs."""
-    return common.list_accelerators_impl(
-        'Paperspace',
-        _df,
-        gpus_only,
-        name_filter,
-        region_filter,
-        quantity_filter,
-        case_sensitive,
-    )
+    del require_price  # unused
+    return common.list_accelerators_impl('Paperspace', _df, gpus_only,
+                                         name_filter, region_filter,
+                                         quantity_filter, case_sensitive,
+                                         all_regions)

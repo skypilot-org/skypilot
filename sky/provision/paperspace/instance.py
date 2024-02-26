@@ -7,6 +7,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
 from sky.provision.paperspace.utils import PaperspaceCloudClient
+from sky.provision.paperspace.utils import PaperspaceCloudError
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -62,7 +63,12 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             break
         for instance_id, instance_meta in instances.items():
             if instance_meta['state'] == 'off':
-                client.start(instance_id=instance_id)
+                try:
+                    client.start(instance_id=instance_id)
+                except PaperspaceCloudError as e:
+                    if 'This machine is currently starting.' in str(e):
+                        continue
+                    raise e
         logger.info(f'Waiting for {len(instances)} instances to be ready.')
         time.sleep(POLL_INTERVAL)
     exist_instances = _filter_instances(cluster_name_on_cloud, ['ready'])
@@ -186,13 +192,14 @@ def terminate_instances(
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
 
-    time.sleep(POLL_INTERVAL)
-    try:
-        network = client.get_network(network_name=cluster_name_on_cloud)
-        client.delete_network(network_id=network['id'])
-    except IndexError:
-        logger.warning(f'Network {cluster_name_on_cloud}'
-                       'already deleted')
+    if not worker_only:
+        try:
+            time.sleep(POLL_INTERVAL)
+            network = client.get_network(network_name=cluster_name_on_cloud)
+            client.delete_network(network_id=network['id'])
+        except IndexError:
+            logger.warning(f'Network {cluster_name_on_cloud}'
+                           'already deleted')
 
 
 def get_cluster_info(

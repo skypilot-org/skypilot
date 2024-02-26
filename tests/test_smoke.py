@@ -1767,9 +1767,8 @@ def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
     # the VM is terminated.
-    autodown_timeout = 900 if generic_cloud in ['azure', 'paperspace'] else 240
-    total_timeout_minutes = 90 if generic_cloud in ['azure', 'paperspace'
-                                                   ] else 20
+    autodown_timeout = 900 if generic_cloud == 'azure' else 240
+    total_timeout_minutes = 90 if generic_cloud == 'azure' else 20
     test = Test(
         'autodown',
         [
