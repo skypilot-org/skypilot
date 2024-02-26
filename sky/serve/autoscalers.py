@@ -422,6 +422,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                                           if spec.dynamic_ondemand_fallback
                                           is not None else False)
 
+    # spot_recovery field is checked earlier in core
     def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': True}
 

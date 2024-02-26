@@ -500,6 +500,8 @@ class ReplicaInfo:
             version = -1
 
         if version < 0:
+            # It will be handled with RequestRateAutoscaler.
+            # Treated similar to on-demand instances.
             self.is_spot = False
 
         self.__dict__.update(state)
