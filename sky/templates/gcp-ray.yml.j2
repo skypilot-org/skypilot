@@ -133,6 +133,7 @@ available_node_types:
   {%- if use_spot or gpu is not none %}
       scheduling:
   {%- if use_spot %}
+        preemptible: true
         provisioningModel: SPOT
   {%- endif %}
   {%- if gpu is not none %}
