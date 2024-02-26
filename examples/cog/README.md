@@ -17,7 +17,7 @@ curl http://$IP:5000/predictions -X POST \
 ```
 
 ## Scale up the deployment using SkyServe
-We can use SkyServe (`sky serve`) to scale up the deployment to multiple instances, while enjoying load balancing, autoscaling, and other [[SkyServe features](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html)].
+We can use SkyServe (`sky serve`) to scale up the deployment to multiple instances, while enjoying load balancing, autoscaling, and other [SkyServe features](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html).
 ```console
 sky serve up -n cog ./sky.yaml
 ```
