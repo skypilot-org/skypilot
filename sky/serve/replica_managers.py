@@ -304,9 +304,6 @@ class ReplicaStatusProperty:
             # Pending to launch
             return serve_state.ReplicaStatus.PENDING
         if self.sky_launch_status == ProcessStatus.RUNNING:
-            if self.sky_down_status == ProcessStatus.RUNNING:
-                # sky.down is running since a scale down interrupted sky.launch
-                return serve_state.ReplicaStatus.SHUTTING_DOWN
             if self.sky_down_status == ProcessStatus.FAILED:
                 return serve_state.ReplicaStatus.FAILED_CLEANUP
             if self.sky_down_status == ProcessStatus.SUCCEEDED:
@@ -315,6 +312,9 @@ class ReplicaStatusProperty:
                 return serve_state.ReplicaStatus.UNKNOWN
             # Still launching
             return serve_state.ReplicaStatus.PROVISIONING
+        if self.sky_launch_status == ProcessStatus.INTERRUPTED:
+            # sky.down is running and a scale down interrupted sky.launch
+            return serve_state.ReplicaStatus.SHUTTING_DOWN
         if self.sky_down_status is not None:
             if self.preempted:
                 # Replica (spot) is preempted
@@ -641,6 +641,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                            replica_drain_delay_seconds: int) -> None:
 
         if replica_id in self._launch_process_pool:
+            info = serve_state.get_replica_info_from_id(self._service_name,
+                                                        replica_id)
+            assert info is not None
+            info.status_property.sky_launch_status = ProcessStatus.INTERRUPTED
             launch_process = self._launch_process_pool[replica_id]
             if launch_process.is_alive():
                 assert launch_process.pid is not None
@@ -648,10 +652,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                 launch_process.join()
             logger.info(f'Interrupted launch process for replica {replica_id} '
                         'and deleted the cluster.')
-            info = serve_state.get_replica_info_from_id(self._service_name,
-                                                        replica_id)
-            assert info is not None
-            info.status_property.sky_launch_status = ProcessStatus.INTERRUPTED
             del self._launch_process_pool[replica_id]
 
         if replica_id in self._down_process_pool:
