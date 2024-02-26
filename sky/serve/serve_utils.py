@@ -1,13 +1,13 @@
 """User interface with the SkyServe."""
 import base64
 import enum
-import math
 import os
 import pathlib
 import pickle
 import re
 import shlex
 import shutil
+import sys
 import threading
 import time
 import typing
@@ -737,7 +737,7 @@ def _sort_replica_records(
 
     def _sort_key(record: Dict[str, Any]) -> Tuple[int, int, int]:
         # If no version, then position replica at the end.
-        version = int(record.get('version', -math.inf))
+        version = int(record.get('version', -sys.maxsize))
         status_priority = 0 if record['status'] == 'READY' else 1
         replica_id = int(record['replica_id'])
         return -version, status_priority, replica_id
