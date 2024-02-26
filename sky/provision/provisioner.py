@@ -349,25 +349,25 @@ def _wait_ssh_connection_indirect(ip: str,
     logger.debug(f'Waiting for SSH using command: {_shlex_join(command)}')
     try:
         proc = subprocess.run(command,
-                            shell=False,
-                            check=False,
-                            timeout=10,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.PIPE)
+                              shell=False,
+                              check=False,
+                              timeout=10,
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE)
         if proc.returncode != 0:
             stderr = proc.stderr.decode('utf-8')
             stderr = f'Error: {stderr}'
-            logger.debug(
-                f'Waiting for SSH to {ip} with command: {_shlex_join(command)}\n'
-                f'{stderr}')
+            logger.debug(f'Waiting for SSH to {ip} with command: '
+                         f'{_shlex_join(command)}\n'
+                         f'{stderr}')
             return False, stderr
-        return True, ''
     except subprocess.TimeoutExpired as e:
+        stderr = f'Error: {str(e)}'
         logger.debug(
             f'Waiting for SSH to {ip} with command: {_shlex_join(command)}\n'
-            f'{e.stderr}'
-        )
-        return False, e.stderr
+            f'{stderr}')
+        return False, stderr
+    return True, ''
 
 
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,

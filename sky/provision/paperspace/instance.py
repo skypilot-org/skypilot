@@ -19,22 +19,22 @@ MAX_POLLS_STOP = MAX_POLLS * 8
 logger = sky_logging.init_logger(__name__)
 
 
-def _filter_instances(
-    cluster_name_on_cloud: str, status_filters: Optional[List[str]]
-) -> Dict[str, Any]:
+def _filter_instances(cluster_name_on_cloud: str,
+                      status_filters: Optional[List[str]]) -> Dict[str, Any]:
     client = PaperspaceCloudClient()
     instances = client.list_instances()
     possible_names = [
-        f"{cluster_name_on_cloud}-head",
-        f"{cluster_name_on_cloud}-worker",
+        f'{cluster_name_on_cloud}-head',
+        f'{cluster_name_on_cloud}-worker',
     ]
 
     filtered_instances = {}
     for instance in instances:
-        instance_id = instance["id"]
-        if status_filters is not None and instance["state"] not in status_filters:
+        instance_id = instance['id']
+        if status_filters is not None and instance[
+                'state'] not in status_filters:
             continue
-        if instance.get("name") in possible_names:
+        if instance.get('name') in possible_names:
             filtered_instances[instance_id] = instance
     return filtered_instances
 
@@ -42,46 +42,45 @@ def _filter_instances(
 def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     head_instance_id = None
     for inst_id, inst in instances.items():
-        if inst["name"].endswith("-head"):
+        if inst['name'].endswith('-head'):
             head_instance_id = inst_id
             break
     return head_instance_id
 
 
-def run_instances(
-    region: str, cluster_name_on_cloud: str, config: common.ProvisionConfig
-) -> common.ProvisionRecord:
+def run_instances(region: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
 
-    pending_status = ["starting", "restarting", "upgrading", "provisioning", "off"]
+    pending_status = [
+        'starting', 'restarting', 'upgrading', 'provisioning', 'off'
+    ]
     client = PaperspaceCloudClient()
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
         if not instances:
             break
         for instance_id, instance_meta in instances.items():
-            if instance_meta["state"] == "off":
+            if instance_meta['state'] == 'off':
                 client.start(instance_id=instance_id)
-        logger.info(f"Waiting for {len(instances)} instances to be ready.")
+        logger.info(f'Waiting for {len(instances)} instances to be ready.')
         time.sleep(POLL_INTERVAL)
-    exist_instances = _filter_instances(cluster_name_on_cloud, ["ready"])
+    exist_instances = _filter_instances(cluster_name_on_cloud, ['ready'])
     head_instance_id = _get_head_instance_id(exist_instances)
 
     to_start_count = config.count - len(exist_instances)
     if to_start_count < 0:
         raise RuntimeError(
-            f"Cluster {cluster_name_on_cloud} already has "
-            f"{len(exist_instances)} nodes, but {config.count} are required."
-        )
+            f'Cluster {cluster_name_on_cloud} already has '
+            f'{len(exist_instances)} nodes, but {config.count} are required.')
     if to_start_count == 0:
         if head_instance_id is None:
-            raise RuntimeError(f"Cluster {cluster_name_on_cloud} has no head node.")
-        logger.info(
-            f"Cluster {cluster_name_on_cloud} already has "
-            f"{len(exist_instances)} nodes, no need to start more."
-        )
+            raise RuntimeError(
+                f'Cluster {cluster_name_on_cloud} has no head node.')
+        logger.info(f'Cluster {cluster_name_on_cloud} already has '
+                    f'{len(exist_instances)} nodes, no need to start more.')
         return common.ProvisionRecord(
-            provider_name="paperspace",
+            provider_name='paperspace',
             cluster_name=cluster_name_on_cloud,
             region=region,
             zone=None,
@@ -92,37 +91,35 @@ def run_instances(
 
     created_instance_ids = []
     for _ in range(to_start_count):
-        node_type = "head" if head_instance_id is None else "worker"
+        node_type = 'head' if head_instance_id is None else 'worker'
         try:
             instance_id = client.launch(
-                name=f"{cluster_name_on_cloud}-{node_type}",
-                instance_type=config.node_config["InstanceType"],
-                network_id=config.node_config["NetworkId"],
+                name=f'{cluster_name_on_cloud}-{node_type}',
+                instance_type=config.node_config['InstanceType'],
+                network_id=config.node_config['NetworkId'],
                 region=region,
-                disk_size=config.node_config["DiskSize"],
-            )
+                disk_size=config.node_config['DiskSize'],
+            )['data']['id']
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f"run_instances error: {e}")
-            raise
-        logger.info(f"Launched instance {instance_id}.")
+            logger.warning(f'run_instances error: {e}')
+            raise e
+        logger.info(f'Launched instance {instance_id}.')
         created_instance_ids.append(instance_id)
         if head_instance_id is None:
             head_instance_id = instance_id
 
     # Wait for instances to be ready.
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, ["ready"])
-        logger.info(
-            "Waiting for instances to be ready: "
-            f"({len(instances)}/{config.count})."
-        )
+        instances = _filter_instances(cluster_name_on_cloud, ['ready'])
+        logger.info('Waiting for instances to be ready: '
+                    f'({len(instances)}/{config.count}).')
         if len(instances) == config.count:
             break
 
         time.sleep(POLL_INTERVAL)
-    assert head_instance_id is not None, "head_instance_id should not be None"
+    assert head_instance_id is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(
-        provider_name="paperspace",
+        provider_name='paperspace',
         cluster_name=cluster_name_on_cloud,
         region=region,
         zone=None,
@@ -132,10 +129,10 @@ def run_instances(
     )
 
 
-def wait_instances(
-    region: str, cluster_name_on_cloud: str, state: Optional[status_lib.ClusterStatus]
-) -> None:
-    del region, cluster_name_on_cloud, state
+def wait_instances(region: str, cluster_name_on_cloud: str,
+                   state: Optional[status_lib.ClusterStatus]) -> None:
+    del region, cluster_name_on_cloud, state  # unused
+    # We already wait on ready state in `run_instances` no need
 
 
 def stop_instances(
@@ -143,11 +140,11 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    del provider_config  # unused
+    del provider_config, worker_only  # unused
     client = PaperspaceCloudClient()
     all_instances = _filter_instances(
-        cluster_name_on_cloud, ["ready", "serviceready", "upgrading", "provisioning", "starting"]
-    )
+        cluster_name_on_cloud,
+        ['ready', 'serviceready', 'upgrading', 'provisioning', 'starting'])
     num_instances = len(all_instances)
 
     # Request a stop on all instances
@@ -156,15 +153,13 @@ def stop_instances(
 
     # Wait for instances to stop
     for _ in range(MAX_POLLS_STOP):
-        all_instances = _filter_instances(
-            cluster_name_on_cloud, ["off"]
-        )
+        all_instances = _filter_instances(cluster_name_on_cloud, ['off'])
         if len(all_instances) < num_instances:
             break
         time.sleep(POLL_INTERVAL)
     else:
         raise RuntimeError(f'Maximum number of polls: '
-                           f'{constants.MAX_POLLS_STOP} reached. '
+                           f'{MAX_POLLS_STOP} reached. '
                            f'Instance {all_instances} is still not in '
                            'STOPPED status.')
 
@@ -177,28 +172,27 @@ def terminate_instances(
     """See sky/provision/__init__.py"""
     del provider_config  # unused
     client = PaperspaceCloudClient()
-    network_id = None
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
-        logger.info(f"Terminating instance {inst_id}")
-        if worker_only and inst["name"].endswith("-head"):
+        logger.info(f'Terminating instance {inst_id}')
+        if worker_only and inst['name'].endswith('-head'):
             continue
         try:
             client.remove(inst_id)
-            network_id = inst['networkId']
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f"Failed to terminate instance {inst_id}: "
-                    f"{common_utils.format_exception(e, use_bracket=False)}"
+                    f'Failed to terminate instance {inst_id}: '
+                    f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
-    
+
     time.sleep(POLL_INTERVAL)
     try:
         network = client.get_network(network_name=cluster_name_on_cloud)
         client.delete_network(network_id=network['id'])
     except IndexError:
-        pass
+        logger.warning(f'Network {cluster_name_on_cloud}'
+                       'already deleted')
 
 
 def get_cluster_info(
@@ -207,20 +201,20 @@ def get_cluster_info(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> common.ClusterInfo:
     del region, provider_config  # unused
-    running_instances = _filter_instances(cluster_name_on_cloud, ["ready"])
+    running_instances = _filter_instances(cluster_name_on_cloud, ['ready'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info["privateIp"],
-                external_ip=instance_info["publicIp"],
+                internal_ip=instance_info['privateIp'],
+                external_ip=instance_info['publicIp'],
                 ssh_port=22,
                 tags={},
             )
         ]
-        if instance_info["name"].endswith("-head"):
+        if instance_info['name'].endswith('-head'):
             head_instance_id = instance_id
 
     return common.ClusterInfo(
@@ -239,16 +233,16 @@ def query_instances(
     instances = _filter_instances(cluster_name_on_cloud, None)
 
     status_map = {
-        "starting": status_lib.ClusterStatus.INIT,
-        "restarting": status_lib.ClusterStatus.INIT,
-        "upgrading": status_lib.ClusterStatus.INIT,
-        "provisioning": status_lib.ClusterStatus.INIT,
-        "ready": status_lib.ClusterStatus.UP,
-        "off": status_lib.ClusterStatus.STOPPED,
+        'starting': status_lib.ClusterStatus.INIT,
+        'restarting': status_lib.ClusterStatus.INIT,
+        'upgrading': status_lib.ClusterStatus.INIT,
+        'provisioning': status_lib.ClusterStatus.INIT,
+        'ready': status_lib.ClusterStatus.UP,
+        'off': status_lib.ClusterStatus.STOPPED,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
     for inst_id, inst in instances.items():
-        status = status_map[inst["state"]]
+        status = status_map[inst['state']]
         if non_terminated_only and status is None:
             continue
         statuses[inst_id] = status
@@ -260,4 +254,4 @@ def cleanup_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    del cluster_name_on_cloud, provider_config
+    del cluster_name_on_cloud, provider_config, ports

@@ -100,6 +100,8 @@ _SPOT_CANCEL_WAIT = (
     'done; echo "$s"; echo; echo; echo "$s"')
 # TODO(zhwu): make the spot controller on GCP.
 
+DEFAULT_CMD_TIMEOUT = 15 * 60
+
 
 class Test(NamedTuple):
     name: str
@@ -108,7 +110,7 @@ class Test(NamedTuple):
     commands: List[str]
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
-    timeout: int = 15 * 60
+    timeout: int = DEFAULT_CMD_TIMEOUT
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -119,9 +121,10 @@ class Test(NamedTuple):
         print(message, file=sys.stderr, flush=True)
 
 
-def _get_timeout(generic_cloud: str, default_timeout: int = Test.timeout):
+def _get_timeout(generic_cloud: str,
+                 override_timeout: int = DEFAULT_CMD_TIMEOUT):
     timeouts = {'fluidstack': 60 * 60}  # file_mounts
-    return timeouts.get(generic_cloud, default_timeout)
+    return timeouts.get(generic_cloud, override_timeout)
 
 
 def _get_cluster_name() -> str:
@@ -1047,8 +1050,8 @@ def test_scp_logs():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue instead
 @pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
+@pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
-@pytest.mark.no_paperspace # Paperspace does not have T4 gpus. run test_paperspace_job_queue instead.
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1079,6 +1082,7 @@ def test_job_queue(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support docker for now
 @pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
+@pytest.mark.no_paperspace  # Doesn't support Paperspace for now
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
@@ -1178,33 +1182,11 @@ def test_scp_job_queue():
     )
     run_one_test(test)
 
-@pytest.mark.paperspace
-def test_paperspace_job_queue():
-    name = _get_cluster_name()
-    test = Test(
-        'paperspace_job_queue',
-        [
-            f'sky launch -y -c {name} --cloud paperspace --gpus v100',
-            f'sky exec {name} -n {name}-1 --cloud paperspace -d examples/job_queue/job_paperspace.yaml',
-            f'sky exec {name} -n {name}-2 --cloud paperspace -d examples/job_queue/job_paperspace.yaml',
-            f'sky exec {name} -n {name}-3 --cloud paperspace -d examples/job_queue/job_paperspace.yaml',
-            f'sky queue {name} | grep {name}-1 | grep RUNNING',
-            f'sky queue {name} | grep {name}-2 | grep RUNNING',
-            f'sky queue {name} | grep {name}-3 | grep PENDING',
-            f'sky cancel -y {name} 2',
-            'sleep 5',
-            f'sky queue {name} | grep {name}-3 | grep RUNNING',
-            f'sky cancel -y {name} 3',
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
-
 
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
-@pytest.mark.no_paperspace # Paperspace does not have T4 gpus, run test_paperspace_job_queue_multinode instead
+@pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
@@ -1345,49 +1327,12 @@ def test_ibm_job_queue_multinode():
     )
     run_one_test(test)
 
-@pytest.mark.ibm
-def test_paperspace_job_queue_multinode():
-    name = _get_cluster_name()
-    task_file = 'examples/job_queue/job_multinode_ibm.yaml'
-    test = Test(
-        'paperspace_job_queue_multinode',
-        [
-            f'sky launch -y -c {name} --cloud paperspace --gpus v100 --num-nodes 2',
-            f'sky exec {name} -n {name}-1 -d {task_file}',
-            f'sky exec {name} -n {name}-2 -d {task_file}',
-            f'sky launch -y -c {name} -n {name}-3 --detach-setup -d {task_file}',
-            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
-            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
-            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-3 | grep SETTING_UP)',
-            'sleep 90',
-            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
-            f'sky cancel -y {name} 1',
-            'sleep 5',
-            f'sky queue {name} | grep {name}-3 | grep RUNNING',
-            f'sky cancel -y {name} 1 2 3',
-            f'sky launch -c {name} -n {name}-4 --detach-setup -d {task_file}',
-            # Test the job status is correctly set to SETTING_UP, during the setup is running,
-            # and the job can be cancelled during the setup.
-            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
-            f'sky cancel -y {name} 4',
-            f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
-            f'sky exec {name} --gpus v100:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky exec {name} --gpus v100:0.2 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky exec {name} --gpus v100:1 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky logs {name} 5 --status',
-            f'sky logs {name} 6 --status',
-            f'sky logs {name} 7 --status',
-        ],
-        f'sky down -y {name}',
-        timeout=20 * 60,  # 20 mins
-    )
-    run_one_test(test)
-
 
 # ---------- Docker with preinstalled package. ----------
 @pytest.mark.no_fluidstack  # Doesn't support Fluidstack for now
 @pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
+@pytest.mark.no_paperspace  # Doesn't support Paperspace for now
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
@@ -1409,8 +1354,8 @@ def test_docker_preinstalled_package(generic_cloud: str):
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
+@pytest.mark.no_paperspace  # Paperspace does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus
-@pytest.mark.no_paperspace # Paperspace does not have T4 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 def test_multi_echo(generic_cloud: str):
@@ -1822,8 +1767,9 @@ def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
     # the VM is terminated.
-    autodown_timeout = 900 if generic_cloud == 'azure' else 240
-    total_timeout_minutes = 90 if generic_cloud == 'azure' else 20
+    autodown_timeout = 900 if generic_cloud in ['azure', 'paperspace'] else 240
+    total_timeout_minutes = 90 if generic_cloud in ['azure', 'paperspace'
+                                                   ] else 20
     test = Test(
         'autodown',
         [
@@ -1942,6 +1888,7 @@ def test_cancel_azure():
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
+@pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
@@ -1995,9 +1942,9 @@ def test_cancel_ibm():
 @pytest.mark.no_fluidstack  # FluidStack does not support spot instances
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
-@pytest.mark.no_paperspace # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
@@ -2050,7 +1997,7 @@ def test_stop_gcp_spot():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
-@pytest.mark.no_paperspace # Paperspace does not support spot instances
+@pytest.mark.no_paperspace  # Papperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
@@ -2086,7 +2033,7 @@ def test_spot(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
-@pytest.mark.no_paperspace # Paperspace does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_pipeline(generic_cloud: str):
@@ -2128,7 +2075,7 @@ def test_spot_pipeline(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
-@pytest.mark.no_paperspace # Paperspace does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_failed_setup(generic_cloud: str):
@@ -2154,7 +2101,7 @@ def test_spot_failed_setup(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
-@pytest.mark.no_paperspace # Paperspace does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_pipeline_failed_setup(generic_cloud: str):
@@ -2349,6 +2296,7 @@ def test_spot_pipeline_recovery_gcp():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
@@ -2571,8 +2519,8 @@ def test_spot_cancellation_gcp():
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
-@pytest.mark.no_paperspace # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_storage(generic_cloud: str):
@@ -2631,6 +2579,7 @@ def test_spot_tpu():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
@@ -4267,6 +4216,7 @@ def test_multiple_resources():
 
 # ---------- Sky Benchmark ----------
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
+@pytest.mark.no_paperspace  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
 def test_sky_bench(generic_cloud: str):
     name = _get_cluster_name()

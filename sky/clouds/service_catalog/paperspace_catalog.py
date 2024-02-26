@@ -13,7 +13,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog("paperspace/vms.csv")
+_df = common.read_catalog('paperspace/vms.csv')
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -21,26 +21,12 @@ def instance_type_exists(instance_type: str) -> bool:
 
 
 def validate_region_zone(
-    region: Optional[str], zone: Optional[str]
-) -> Tuple[Optional[str], Optional[str]]:
+        region: Optional[str],
+        zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError("Paperspace does not support zones.")
-    return common.validate_region_zone_impl("Paperspace", _df, region, zone)
-
-
-def accelerator_in_region_or_zone(
-    acc_name: str,
-    acc_count: int,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
-) -> bool:
-    if zone is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError("Paperspace does not support zones.")
-    return common.accelerator_in_region_or_zone_impl(
-        _df, acc_name, acc_count, region, zone
-    )
+            raise ValueError('Paperspace does not support zones.')
+    return common.validate_region_zone_impl('Paperspace', _df, region, zone)
 
 
 def get_hourly_cost(
@@ -52,13 +38,13 @@ def get_hourly_cost(
     """Returns the cost, or the cheapest cost among all zones for spot."""
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError("Paperspace does not support zones.")
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region, zone)
+            raise ValueError('Paperspace does not support zones.')
+    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
+                                       zone)
 
 
 def get_vcpus_mem_from_instance_type(
-    instance_type: str,
-) -> Tuple[Optional[float], Optional[float]]:
+    instance_type: str,) -> Tuple[Optional[float], Optional[float]]:
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
@@ -69,10 +55,12 @@ def get_default_instance_type(
 ) -> Optional[str]:
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
+    del disk_tier  # unused
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
 
 
-def get_accelerators_from_instance_type(instance_type: str) -> Optional[Dict[str, int]]:
+def get_accelerators_from_instance_type(
+        instance_type: str) -> Optional[Dict[str, int]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
@@ -88,7 +76,7 @@ def get_instance_type_for_accelerator(
     """Returns a list of instance types that have the given accelerator."""
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError("Paperspace does not support zones.")
+            raise ValueError('Paperspace does not support zones.')
     return common.get_instance_type_for_accelerator_impl(
         df=_df,
         acc_name=acc_name,
@@ -101,10 +89,9 @@ def get_instance_type_for_accelerator(
     )
 
 
-def get_region_zones_for_instance_type(
-    instance_type: str, use_spot: bool
-) -> List["cloud.Region"]:
-    df = _df[_df["InstanceType"] == instance_type]
+def get_region_zones_for_instance_type(instance_type: str,
+                                       use_spot: bool) -> List['cloud.Region']:
+    df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
 
@@ -117,7 +104,7 @@ def list_accelerators(
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Paperspace offering GPUs."""
     return common.list_accelerators_impl(
-        "Paperspace",
+        'Paperspace',
         _df,
         gpus_only,
         name_filter,

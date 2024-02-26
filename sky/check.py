@@ -12,7 +12,8 @@ from sky.adaptors import cloudflare
 # TODO(zhwu): add check for a single cloud to improve performance
 def check(quiet: bool = False, verbose: bool = False) -> None:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
-    echo("Checking credentials to enable clouds for SkyPilot.")
+    echo('Checking credentials to enable clouds for SkyPilot.')
+
     enabled_clouds = []
 
     def check_one_cloud(cloud_tuple: Tuple[str, clouds.Cloud]) -> None:
@@ -29,11 +30,11 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
             if verbose and cloud is not cloudflare:
                 activated_account = cloud.get_current_user_identity_str()
                 if activated_account is not None:
-                    echo(f"    Activated account: {activated_account}")
+                    echo(f'    Activated account: {activated_account}')
             if reason is not None:
-                echo(f"    Hint: {reason}")
+                echo(f'    Hint: {reason}')
         else:
-            echo(f"    Reason: {reason}")
+            echo(f'    Reason: {reason}')
 
     clouds_to_check = [
         (repr(cloud), cloud) for cloud in clouds.CLOUD_REGISTRY.values()
@@ -54,12 +55,10 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     if len(enabled_clouds) == 0:
         click.echo(
             click.style(
-                "No cloud is enabled. SkyPilot will not be able to run any "
-                "task. Run `sky check` for more info.",
-                fg="red",
-                bold=True,
-            )
-        )
+                'No cloud is enabled. SkyPilot will not be able to run any '
+                'task. Run `sky check` for more info.',
+                fg='red',
+                bold=True))
         raise SystemExit()
     else:
         echo(

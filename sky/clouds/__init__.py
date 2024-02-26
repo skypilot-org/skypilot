@@ -32,7 +32,6 @@ __all__ = [
     'Cloud',
     'GCP',
     'Lambda',
-    'Local',
     'Paperspace',
     'SCP',
     'RunPod',

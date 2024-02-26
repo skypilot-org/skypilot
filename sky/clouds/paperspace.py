@@ -1,20 +1,23 @@
 """ Paperspace Cloud. """
 
 import json
-import requests
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import requests
+
 from sky import clouds
 from sky.clouds import service_catalog
-from sky.provision.paperspace.utils import PaperspaceCloudClient, PaperspaceCloudError
+from sky.provision.paperspace.utils import PaperspaceCloudClient
+from sky.provision.paperspace.utils import PaperspaceCloudError
+from sky.utils.resources_utils import DiskTier
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 _CREDENTIAL_FILES = [
     # credential files for Paperspace,
-    "config.json",
+    'config.json',
 ]
 
 
@@ -22,25 +25,23 @@ _CREDENTIAL_FILES = [
 class Paperspace(clouds.Cloud):
     """Paperspace GPU Cloud"""
 
-    _REPR = "Paperspace"
+    _REPR = 'Paperspace'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE: 
-            'Spot is not supported, as Paperspace API does not implement spot .',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             'Migrating '
-            f'disk is not supported in Paperspace.',
+            f'disk is not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             'Spot instances are'
-            f' not supported in Paperspace.',
+            f' not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.IMAGE_ID:
             'Specifying image ID '
-            f'is not supported for Paperspace.',
+            f'is not supported for {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
-            f' is not supported in Paperspace.',
+            f' is not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             'Opening ports'
-            f'is not supported in Paperspace.',
+            f'is not supported in {_REPR}.',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -78,14 +79,13 @@ class Paperspace(clouds.Cloud):
         region: Optional[str],
         zone: Optional[str],
     ) -> List[clouds.Region]:
-        assert zone is None, "Paperspace does not support zones."
+        assert zone is None, 'Paperspace does not support zones.'
         del accelerators, zone  # unused
         if use_spot:
             return []
         else:
             regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, "paperspace"
-            )
+                instance_type, use_spot, 'paperspace')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -97,8 +97,7 @@ class Paperspace(clouds.Cloud):
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
         return service_catalog.get_vcpus_mem_from_instance_type(
-            instance_type, clouds="paperspace"
-        )
+            instance_type, clouds='paperspace')
 
     @classmethod
     def zones_provision_loop(
@@ -111,9 +110,11 @@ class Paperspace(clouds.Cloud):
         use_spot: bool = False,
     ) -> Iterator[None]:
         del num_nodes  # unused
-        regions = cls.regions_with_offering(
-            instance_type, accelerators, use_spot, region=region, zone=None
-        )
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=region,
+                                            zone=None)
         for r in regions:
             assert r.zones is None, r
             yield r.zones
@@ -130,7 +131,7 @@ class Paperspace(clouds.Cloud):
             use_spot=use_spot,
             region=region,
             zone=zone,
-            clouds="paperspace",
+            clouds='paperspace',
         )
 
     def accelerators_to_hourly_cost(
@@ -148,7 +149,7 @@ class Paperspace(clouds.Cloud):
         return 0.0
 
     def __repr__(self):
-        return "Paperspace"
+        return 'Paperspace'
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
@@ -159,20 +160,19 @@ class Paperspace(clouds.Cloud):
         cls,
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
-        disk_tier: Optional[str] = None,
+        disk_tier: Optional[DiskTier] = None,
     ) -> Optional[str]:
         """Returns the default instance type for Paperspace."""
-        return service_catalog.get_default_instance_type(
-            cpus=cpus, memory=memory, disk_tier=disk_tier, clouds="paperspace"
-        )
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         disk_tier=disk_tier,
+                                                         clouds='paperspace')
 
     @classmethod
     def get_accelerators_from_instance_type(
-        cls, instance_type: str
-    ) -> Optional[Dict[str, int]]:
+            cls, instance_type: str) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds="paperspace"
-        )
+            instance_type, clouds='paperspace')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -180,27 +180,28 @@ class Paperspace(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self,
-            resources: "resources_lib.Resources",
+            resources: 'resources_lib.Resources',
             cluster_name_on_cloud: str,
-            region: "clouds.Region",
-            zones: Optional[List["clouds.Zone"]],
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del zones, dryrun
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(",", ":"))
+            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
 
         return {
-            "instance_type": resources.instance_type,
-            "custom_resources": custom_resources,
-            "region": region.name,
+            'instance_type': resources.instance_type,
+            'custom_resources': custom_resources,
+            'region': region.name,
         }
 
-    def _get_feasible_launchable_resources(self, resources: "resources_lib.Resources"):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         """Returns a list of feasible resources for the given resources."""
         if resources.use_spot:
             return ([], [])
@@ -226,8 +227,7 @@ class Paperspace(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type
             default_instance_type = Paperspace.get_default_instance_type(
-                cpus=resources.cpus
-            )
+                cpus=resources.cpus)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -243,9 +243,8 @@ class Paperspace(clouds.Cloud):
                 cpus=resources.cpus,
                 region=resources.region,
                 zone=resources.zone,
-                clouds="paperspace",
-            )
-        )
+                clouds='paperspace',
+            ))
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
@@ -253,35 +252,31 @@ class Paperspace(clouds.Cloud):
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Verify that the user has valid credentials for Paperspace."""
-        # TODO : need to check that user has valid API credentials and has private networks created.
         try:
             # attempt to make a CURL request for listing instances
             PaperspaceCloudClient().list_instances()
         except (AssertionError, KeyError, PaperspaceCloudError):
             return False, (
-                "Failed to access Paperspace Cloud with credentials. "
-                "To configure credentials, follow the instructions at:\n    "
-                "https://docs.digitalocean.com/reference/paperspace/api-keys/ \n    "
-                "to generate API key and create a json with \n     "
-                "```\n     "
-                "{\n       "
-                "   'apiKey': [YOUR API KEY] \n     "
-                "}\n     "
-                "```\n     "
-                "at `~/.paperspace/config.json`"
-            )
+                'Failed to access Paperspace Cloud with credentials.\n    '
+                'To configure credentials, follow the instructions at:\n    '
+                'docs.digitalocean.com/reference/paperspace/api-keys/\n    '
+                'to generate API key and create a json with \n     '
+                '```\n     '
+                '{\n       '
+                '   "apiKey": [YOUR API KEY] \n     '
+                '}\n     '
+                '```\n     '
+                'at `~/.paperspace/config.json`')
         except requests.exceptions.ConnectionError:
-            return False, (
-                "Failed to verify Paperspace Cloud credentials. "
-                "Check your network connection "
-                "and try again."
-            )
-        
+            return False, ('Failed to verify Paperspace Cloud credentials. '
+                           'Check your network connection '
+                           'and try again.')
+
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
-            f"~/.paperspace/{filename}": f"~/.paperspace/{filename}"
+            f'~/.paperspace/{filename}': f'~/.paperspace/{filename}'
             for filename in _CREDENTIAL_FILES
         }
 
@@ -292,18 +287,9 @@ class Paperspace(clouds.Cloud):
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return service_catalog.instance_type_exists(instance_type, "paperspace")
+        return service_catalog.instance_type_exists(instance_type, 'paperspace')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region, zone, clouds="paperspace")
-
-    def accelerator_in_region_or_zone(
-        self,
-        accelerator: str,
-        acc_count: int,
-        region: Optional[str] = None,
-        zone: Optional[str] = None,
-    ) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, "paperspace"
-        )
+        return service_catalog.validate_region_zone(region,
+                                                    zone,
+                                                    clouds='paperspace')
