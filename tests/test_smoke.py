@@ -3033,6 +3033,69 @@ def test_skyserve_base_ondemand_fallback():
 
 @pytest.mark.gcp
 @pytest.mark.sky_serve
+def test_skyserve_dynamic_ondemand_fallback():
+    name = _get_service_name()
+    zone = 'us-central1-a'
+
+    # Reference: test_spot_recovery_gcp
+    def terminate_replica(replica_id: int) -> str:
+        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
+        query_cmd = (f'gcloud compute instances list --filter='
+                     f'"(labels.ray-cluster-name:{cluster_name})" '
+                     f'--zones={zone} --format="value(name)"')
+        return (f'gcloud compute instances delete --zone={zone}'
+                f' --quiet $({query_cmd})')
+
+    def _check_both_spot_on_demand_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'echo "$output" | grep "GCP(\[Spot\]vCPU=2)" && '
+                'echo "$output" | grep "GCP(vCPU=2)";')
+
+    def _check_spot_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'echo "$output" | grep "GCP(\[Spot\]vCPU=2)";')
+
+    def _check_ondemand_not_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'echo "$output" | grep -v "GCP(vCPU=2)";')
+
+    test = Test(
+        f'test-skyserve-dynamic-ondemand-fallback',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
+            f'sleep 10',
+
+            # 2 on-demand (provisioning) + 2 Spot (provisioning).
+            f'output=$(sky serve status {name});'
+            'echo "$output" | grep -q "0/4" && break;',
+            f'sleep 10',
+            _check_both_spot_on_demand_in_status(name),
+
+            # Wait until 2 spot instances are ready.
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _check_spot_in_status(name),
+            _check_ondemand_not_in_status(name),
+            terminate_replica(1),
+            f'sleep 10',
+
+            # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
+            f'output=$(sky serve status {name});'
+            'echo "$output" | grep -q "1/3";',
+            _check_both_spot_on_demand_in_status(name),
+
+            # Wait until 2 spot instances are ready.
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _check_spot_in_status(name),
+            _check_ondemand_not_in_status(name),
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
 def test_skyserve_spot_user_bug():
     """Tests that spot recovery doesn't occur for non-preemption failures"""
     name = _get_service_name()

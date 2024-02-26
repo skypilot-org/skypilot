@@ -278,7 +278,6 @@ class ReplicaStatusProperty:
             return True
         if not self.service_ready_now:
             return False
-        assert isinstance(self.first_ready_time, int)
         return self.first_ready_time != -1
 
     def should_track_service_status(self) -> bool:
@@ -645,6 +644,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                                                         replica_id)
             assert info is not None
             info.status_property.sky_launch_status = ProcessStatus.INTERRUPTED
+            serve_state.add_or_update_replica(self._service_name, replica_id,
+                                              info)
             launch_process = self._launch_process_pool[replica_id]
             if launch_process.is_alive():
                 assert launch_process.pid is not None
