@@ -429,15 +429,17 @@ class ReplicaInfo:
                     f'code {response.status_code}')
             if response.status_code == 200:
                 msg += '.'
+                log_method = logger.info
             else:
                 msg += f' and response {response.text}.'
-            logger.info(msg)
+                log_method = logger.error
+            log_method(msg)
             if response.status_code == 200:
                 logger.debug(f'{replica_identity.capitalize()} is ready.')
                 return self, True, probe_time
         except requests.exceptions.RequestException as e:
-            logger.info(f'Error when probing {replica_identity}: '
-                        f'{common_utils.format_exception(e)}.')
+            logger.error(f'Error when probing {replica_identity}: '
+                         f'{common_utils.format_exception(e)}.')
         return self, False, probe_time
 
 
