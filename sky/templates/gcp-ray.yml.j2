@@ -133,6 +133,10 @@ available_node_types:
   {%- if use_spot or gpu is not none %}
       scheduling:
   {%- if use_spot %}
+        automaticRestart: false
+        instanceTerminationAction: DELETE
+        onHostMaintenance: TERMINATE
+        provisioningModel: SPOT
         preemptible: true
   {%- endif %}
   {%- if gpu is not none %}
