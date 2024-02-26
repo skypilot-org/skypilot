@@ -185,3 +185,22 @@ def run_with_retries(
                 continue
         break
     return returncode, stdout, stderr
+
+
+def log_command_output(command: str) -> None:
+    """Log output of a command.
+
+    Args:
+        command: The command to run.
+    """
+    try:
+        result = subprocess.run(command,
+                                shell=True,
+                                check=True,
+                                text=True,
+                                capture_output=True)
+        logger.info(result.stdout)
+        if result.stderr:
+            logger.error(result.stderr)
+    except subprocess.CalledProcessError as e:
+        logger.error(f'Command "{command}" failed with error: {e}')

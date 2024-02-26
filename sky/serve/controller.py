@@ -19,6 +19,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -117,6 +118,7 @@ class SkyServeController:
                 service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
                 logger.info(
                     f'Update to new version version {version}: {service}')
+                subprocess_utils.log_command_output(f'cat {latest_task_yaml}')
 
                 self._replica_manager.update_version(version, service)
                 self._autoscaler.update_version(version, service)
