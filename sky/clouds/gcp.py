@@ -765,20 +765,23 @@ class GCP(clouds.Cloud):
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
         # We only add the existing credential files. It should be safe to ignore
-        # the missing files, as we successfully created the VM at this point,
-        # meaning the authentication is successful.
+        # the missing files, as we have checked the cloud credentials in
+        # `check_credentials()` when the user calls `sky check`.
         credentials = {
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
             if os.path.exists(os.path.expanduser(
                 f'~/.config/gcloud/{filename}'))
         }
-        application_key_path = self._find_application_key_path()
-        if os.path.exists(os.path.expanduser(application_key_path)):
+        try:
+            application_key_path = self._find_application_key_path()
             # Upload the application key path to the default path, so that
             # autostop and GCS can be accessed on the remote cluster.
             credentials[DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH] = (
                 application_key_path)
+        except FileNotFoundError:
+            # Skip if the application key path is not found.
+            pass
         return credentials
 
     @classmethod
