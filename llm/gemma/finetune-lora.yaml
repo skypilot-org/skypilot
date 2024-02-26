@@ -1,0 +1,53 @@
+resources:
+  cloud: gcp
+  accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB}
+  disk_tier: best
+
+envs:
+  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
+  BUCKET_NAME: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
+  WANDB_API_KEY: "" # Change to your own wandb api key
+
+workdir: ./scripts
+
+file_mounts:
+  /artifacts:
+    name: $BUCKET_NAME
+    mode: MOUNT
+
+setup: |
+  conda activate gemma
+  if [ $? -ne 0 ]; then
+    conda create -n gemma python=3.10 -y
+    conda activate gemma
+  fi
+  pip install -U bitsandbytes==0.42.0
+  pip install -U peft==0.8.2
+  pip install -U trl==0.7.10
+  pip install -U accelerate==0.27.1
+  pip install -U datasets==2.17.0
+  pip install -U transformers==4.38.1
+  pip install "torch<2.2" torchvision --index-url https://download.pytorch.org/whl/cu121
+
+
+run: |
+  conda activate gemma
+
+  NUM_NODES=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  HOST_ADDR=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+
+  # Turn off wandb if no api key is provided
+  if [ $WANDB_API_KEY == "" ]; then
+    WANDB_MODE="offline"
+  fi
+
+  torchrun \
+    --nnodes=$NUM_NODES \
+    --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
+    --master_port=12375 \
+    --master_addr=$HOST_ADDR \
+    --node_rank=${SKYPILOT_NODE_RANK} \
+    lora.py \
+    --model_name_or_path google/gemma-7b \
+    --save_steps 4 \
+    --output_dir /artifacts
