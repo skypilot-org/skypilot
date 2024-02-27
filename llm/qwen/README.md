@@ -1,11 +1,10 @@
 # Serving Qwen1.5 on Your Own Cloud
 
-Qwen1.5 is an open model 
+[Qwen1.5](https://github.com/QwenLM/Qwen1.5) is one of the open LLMs.
 
-The followings are the demos of Code Llama 70B hosted by SkyPilot Serve (aka SkyServe) (see more details about the setup in later sections):
 
 ## References
-* [Qwen docs]
+* [Qwen docs](https://qwen.readthedocs.io/en/latest/)
 
 ## Why use SkyPilot to deploy over commercial hosted solutions?
 
