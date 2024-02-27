@@ -25,7 +25,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
-from sky.serve import constants
+from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
@@ -42,7 +42,8 @@ logger = sky_logging.init_logger(__name__)
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
-NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
+NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
+                         serve_constants.SERVICES_MEMORY_USAGE_GB)
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
@@ -178,7 +179,7 @@ def generate_service_name():
 
 def generate_remote_service_dir_name(service_name: str) -> str:
     service_name = service_name.replace('-', '_')
-    return os.path.join(constants.SKYSERVE_METADATA_DIR, service_name)
+    return os.path.join(serve_constants.SKYSERVE_METADATA_DIR, service_name)
 
 
 def generate_remote_tmp_task_yaml_file_name(service_name: str) -> str:
@@ -205,13 +206,13 @@ def generate_remote_config_yaml_file_name(service_name: str) -> str:
 def generate_remote_controller_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, constants.CONTROLLER_LOG_FILE_NAME)
+    return os.path.join(dir_name, serve_constants.CONTROLLER_LOG_FILE_NAME)
 
 
 def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, constants.LOAD_BALANCER_LOG_FILE_NAME)
+    return os.path.join(dir_name, serve_constants.LOAD_BALANCER_LOG_FILE_NAME)
 
 
 def generate_replica_launch_log_file_name(service_name: str,
@@ -417,7 +418,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
         else:
             # Send the terminate signal to controller.
             signal_file = pathlib.Path(
-                constants.SIGNAL_FILE_PATH.format(service_name))
+                serve_constants.SIGNAL_FILE_PATH.format(service_name))
             # Filelock is needed to prevent race condition between signal
             # check/removal and signal writing.
             with filelock.FileLock(str(signal_file) + '.lock'):
@@ -469,7 +470,8 @@ def wait_service_initialization(service_name: str, job_id: int) -> str:
                 raise RuntimeError('Max number of services reached. '
                                    'To spin up more services, please '
                                    'tear down some existing services.')
-        if time.time() - start_time > constants.INITIALIZATION_TIMEOUT_SECONDS:
+        if time.time(
+        ) - start_time > serve_constants.INITIALIZATION_TIMEOUT_SECONDS:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Initialization of service {service_name!r} timeout.')
