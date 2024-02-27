@@ -278,7 +278,7 @@ class ReplicaStatusProperty:
             return True
         if not self.service_ready_now:
             return False
-        return self.first_ready_time != -1
+        return self.first_ready_time >= 0.0
 
     def should_track_service_status(self) -> bool:
         """Should we track the status of the replica.
@@ -361,7 +361,7 @@ class ReplicaStatusProperty:
         if self.service_ready_now:
             # Service is ready
             return serve_state.ReplicaStatus.READY
-        if self.first_ready_time is not None and self.first_ready_time != -1:
+        if self.first_ready_time is not None and self.first_ready_time >= 0.0:
             # Service was ready before but not now
             return serve_state.ReplicaStatus.NOT_READY
         else:
@@ -1060,7 +1060,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                                 'exceeding initial delay seconds. Terminating '
                                 'the replica...')
                             should_teardown = True
-                            info.status_property.first_ready_time = -1
+                            info.status_property.first_ready_time = -1.0
                         else:
                             current_delay_seconds = int(current_delay_seconds)
                             logger.info(f'Replica {info.replica_id} is not '
