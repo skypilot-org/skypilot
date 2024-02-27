@@ -1169,3 +1169,22 @@ def check_secret_exists(secret_name: str, namespace: str) -> bool:
         raise
     else:
         return True
+
+
+def get_cuda_visible_devices_env_var(
+        pod_spec: Dict[str, Any]) -> Dict[str, str]:
+    """Returns the CUDA_VISIBLE_DEVICES environment variable for the pod spec
+
+    Set to empty string if no GPUs are requested.
+    """
+    gpu_count = pod_spec['spec']['containers'][0]['resources']['requests'].get(
+        'nvidia.com/gpu', 0)
+
+    # TODO(romilb): This method of populating CUDA_VISIBLE is incorrect since
+    #  the actual device ids need to be fetched from Kubernetes, and if we run
+    #  in privileged mode, there's no GPUs "allocated" to the container
+    #  ($NVIDIA_VISIBLE_DEVICES is set to all). We should instead use the
+    #  figure out a way to not use privileged mode for all containers.
+    return {
+        'CUDA_VISIBLE_DEVICES': ','.join([str(i) for i in range(gpu_count)])
+    }
