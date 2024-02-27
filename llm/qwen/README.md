@@ -1,6 +1,6 @@
 # Serving Qwen1.5 on Your Own Cloud
 
-[Qwen1.5](https://github.com/QwenLM/Qwen1.5) is one of the open LLMs.
+[Qwen1.5](https://github.com/QwenLM/Qwen1.5) is one of the top open LLMs.
 
 
 ## References
