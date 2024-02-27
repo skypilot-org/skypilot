@@ -3547,6 +3547,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         service_component: Optional[serve_lib.ServiceComponent],
         replica_id: Optional[int],
     ) -> None:
+        """Sync down serve logs. Will sync down logs for controller, load
+         balancer, replica, or everything.
+
+         Args:
+             controller_handle: The handle to the sky serve controller.
+             service_name: The name of the service.
+             service_component: The component to sync down the logs of.
+                Could be controller, load balancer, replica, or None.
+                None means to sync down logs for everything.
+             replica_id: The replica ID to tail the logs of. Only used when
+                target is replica.
+        """
         if service_component is None:
             assert replica_id is None
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
