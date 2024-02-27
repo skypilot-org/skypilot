@@ -122,4 +122,4 @@ The service will scale down all replicas when there is no traffic to the system 
 
 .. tip::
 
-    If the scale-to-zero is set, the clients that access the endpoint should make sure to have a retry mechanism to be able to wait until the replicas are provisioned and ready.
+    If the scale-to-zero is set, the clients that access the endpoint should make sure to have a retry mechanism to be able to wait until the replicas are provisioned and ready, i.e., starting a new replica when there is zero replica available.
