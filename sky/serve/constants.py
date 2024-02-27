@@ -75,3 +75,6 @@ LOAD_BALANCER_PORT_RANGE = '30001-30100'
 
 # Initial version of service.
 INITIAL_VERSION = 1
+
+# Pattern used for extracting replica ID from replica launch or log files.
+REPLICA_ID_PATTERN = r'.*replica_(\d+)(_launch)?\.log'
