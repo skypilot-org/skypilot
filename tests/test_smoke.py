@@ -3037,14 +3037,21 @@ def test_skyserve_dynamic_ondemand_fallback():
     name = _get_service_name()
     zone = 'us-central1-a'
 
-    def _check_both_spot_on_demand_in_status(name: str) -> str:
-        return (f'output=$(sky serve status {name});'
-                'echo "$output" | grep "GCP(\[Spot\]vCPU=2)" && '
-                'echo "$output" | grep "GCP(vCPU=2)";')
+    def _check_two_spot_in_status(name: str) -> str:
+        return (
+            f'output=$(sky serve status {name});'
+            'count=$(echo "$output" | grep -o "GCP(\[Spot\]vCPU=2)" | wc -l);'
+            ' if [ $count -ne 2 ]; then exit 1; fi;')
 
-    def _check_spot_in_status(name: str) -> str:
+    def _check_two_ondemand_in_status(name: str) -> str:
         return (f'output=$(sky serve status {name});'
-                'echo "$output" | grep "GCP(\[Spot\]vCPU=2)";')
+                'count=$(echo "$output" | grep -o "GCP(vCPU=2)" | wc -l);'
+                ' if [ $count -ne 2 ]; then exit 1; fi;')
+
+    def _check_one_ondemand_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'count=$(echo "$output" | grep -o "GCP(vCPU=2)" | wc -l);'
+                ' if [ $count -ne 1 ]; then exit 1; fi;')
 
     def _check_ondemand_not_in_status(name: str) -> str:
         return (f'output=$(sky serve status {name});'
@@ -3060,23 +3067,25 @@ def test_skyserve_dynamic_ondemand_fallback():
             f'output=$(sky serve status {name});'
             'echo "$output" | grep -q "0/4" && break;',
             f'sleep 10',
-            _check_both_spot_on_demand_in_status(name),
+            _check_two_spot_in_status(name),
+            _check_two_ondemand_in_status(name),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            _check_spot_in_status(name),
+            _check_two_spot_in_status(name),
             _check_ondemand_not_in_status(name),
             _terminate_gcp_replica(name, zone, 1),
-            f'sleep 10',
+            f'sleep 20',
 
             # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
             f'output=$(sky serve status {name});'
             'echo "$output" | grep -q "1/3";',
-            _check_both_spot_on_demand_in_status(name),
+            _check_two_spot_in_status(name),
+            _check_one_ondemand_in_status(name),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            _check_spot_in_status(name),
+            _check_two_spot_in_status(name),
             _check_ondemand_not_in_status(name),
         ],
         _TEARDOWN_SERVICE.format(name=name),
