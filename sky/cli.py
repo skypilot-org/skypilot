@@ -2561,10 +2561,10 @@ def autostop(
 
     - A new autostop idle time is set.
 
-    Example: say a cluster with autostop set to be 2 hours has been idle for 1
+    Example: say a cluster with autostop set to 2 hours has been idle for 1
     hour, then autostop is reset to 30 minutes. The cluster will not be
-    immediately autostopped. Instead, the idleness timer only restart counting
-    after autostop setting was reset.
+    immediately autostopped. Instead, the idleness timer restarts counting
+    when the second autostop setting of 30 minutes was submitted.
 
     Typical usage:
 
