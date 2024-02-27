@@ -545,7 +545,7 @@ class AWS(clouds.Cloud):
             # created by an SSO account, i.e. the VM will be assigned the IAM
             # role: skypilot-v1.
             hints = f'AWS IAM role is set.{single_cloud_hint}'
-        else:
+        elif identity_type is None:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
             # `get_current_user_identity` does not guarantee this file exists.
