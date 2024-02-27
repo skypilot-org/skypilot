@@ -586,7 +586,7 @@ def sync_down_logs(service_name: str,
         msg = 'No service is found.'
         if controller_status == status_lib.ClusterStatus.INIT:
             msg = ('The SkyServe controller being initialized. Please '
-                   'wait for it to be ready')
+                   'wait for it to be ready.')
         raise exceptions.ClusterNotUpError(msg,
                                            cluster_status=controller_status)
     backend = backend_utils.get_backend_from_handle(controller_handle)

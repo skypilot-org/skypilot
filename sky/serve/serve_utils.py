@@ -634,7 +634,7 @@ def has_valid_replica_id(file_name: str,
 
 def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                                       target_replica_id: Optional[int]) -> None:
-    logger.info('Preparing replica logs for download')
+    logger.info('Preparing replica logs for download...')
     remote_service_dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(remote_service_dir_name)
     dir_for_download = os.path.join(dir_name, timestamp)
@@ -719,7 +719,7 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
 
 
 def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
-    logger.info('Removing replica logs')
+    logger.info('Removing replica logs...')
     remote_service_dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(remote_service_dir_name)
     dir_to_remove = os.path.join(dir_name, timestamp)
