@@ -56,7 +56,7 @@ def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, down)
     configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
     logger.debug(f'set_autostop(): idle_minutes {idle_minutes}, down {down}.')
-    # Reset timer whenever the autostop is set on the machine, i.e. the idle
+    # Reset timer whenever an autostop setting is submitted, i.e. the idle
     # time will be counted from now.
     set_last_active_time_to_now()
 
