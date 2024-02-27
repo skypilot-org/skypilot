@@ -3727,6 +3727,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         service_component: Optional[serve_lib.ServiceComponent],
         replica_id: Optional[int],
     ) -> None:
+        if service_component is None:
+            assert replica_id is None
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             controller_handle.cluster_yaml, controller_handle.docker_user)
         runner = command_runner.SSHCommandRunner(
@@ -3747,7 +3749,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             assert isinstance(backend, backends.CloudVmRayBackend)
             assert isinstance(controller_handle,
                               backends.CloudVmRayResourceHandle)
-            logger.info('Preparing replica logs for download on controller')
+            logger.info('Preparing replica logs for download on controller...')
             prepare_returncode = self.run_on_head(controller_handle,
                                                   prepare_code,
                                                   require_outputs=False,
