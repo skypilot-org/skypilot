@@ -3589,7 +3589,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             try:
                 subprocess_utils.handle_returncode(
                     prepare_returncode, prepare_code,
-                    'Failed to prepare replica logs to sync down.')
+                    'Failed to prepare replica logs to sync down. '
+                    'Sky serve controller may be older and not support sync '
+                    'down for replica logs.')
             except exceptions.CommandError as e:
                 raise RuntimeError(e.error_msg) from e
             remote_service_dir_name = (
