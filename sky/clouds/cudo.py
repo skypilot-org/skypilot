@@ -263,20 +263,27 @@ class Cudo(clouds.Cloud):
         except (ImportError, subprocess.CalledProcessError) as e:
             return False, (
                 f'{cls._DEPENDENCY_HINT}\n'
-                f'{cls._INDENT_PREFIX}{common_utils.format_exception(e, use_bracket=True)}'
-            )
+                f'{cls._INDENT_PREFIX}'
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
         try:
             _run_output('cudoctl --version')
         except (ImportError, subprocess.CalledProcessError) as e:
             return False, (
                 f'{cls._CREDENTIAL_HINT}\n'
-                f'{cls._INDENT_PREFIX}{common_utils.format_exception(e, use_bracket=True)}'
-            )
+                f'{cls._INDENT_PREFIX}'
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         # pylint: disable=import-outside-toplevel,unused-import
         from cudo_compute import cudo_api
         from cudo_compute.rest import ApiException
-        _, error = cudo_api.client()
+        try:
+            _, error = cudo_api.client()
+        except FileNotFoundError as e:
+            return False, (
+                'Cudo credentials are not set. '
+                f'{cls._CREDENTIAL_HINT}\n'
+                f'{cls._INDENT_PREFIX}'
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
         if error is not None:
             return False, (

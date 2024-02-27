@@ -1,7 +1,7 @@
 # SGLang: Fast and Expressive LLM Inference with RadixAttention for 5x throughput
 
 <p align="center">
-    <img src="https://imgur.com/juCzh0y.png" alt="SGLang"/>
+    <img src="https://github.com/skypilot-org/skypilot/assets/6753189/10b23cf8-b9b7-4014-a635-10f30a559e7c" alt="SGLang"/>
 </p>
 
 

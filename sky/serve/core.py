@@ -62,7 +62,11 @@ def up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
+    # If all resources are from the same cloud, set the cloud of the controller
+    # to be that cloud if it does not exist yet. If the controller and all
+    # replicas are from the same cloud, it should provide better connectivity.
     requested_cloud: Optional['clouds.Cloud'] = None
+    requested_multiple_clouds: bool = False
     service_port: Optional[int] = None
     for requested_resources in task.resources:
         if requested_resources.ports is None or len(
@@ -87,9 +91,10 @@ def up(
         if requested_cloud is None:
             requested_cloud = requested_resources.cloud
         if requested_cloud != requested_resources.cloud:
-            raise ValueError(f'Got multiple clouds: {requested_cloud} and '
-                             f'{requested_resources.cloud} in different '
-                             'resources. Please specify single cloud instead.')
+            requested_multiple_clouds = True
+    # If multiple clouds are used, skip this optimization.
+    if requested_multiple_clouds:
+        requested_cloud = None
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
@@ -179,11 +184,11 @@ def up(
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
         # change after the first time, so there is no consistency issue.
         with rich_utils.safe_status(
-                '[cyan]Waiting for the service to initialize[/]'):
+                '[cyan]Waiting for the service to register[/]'):
             # This function will check the controller job id in the database
             # and return the endpoint if the job id matches. Otherwise it will
             # return None.
-            code = serve_utils.ServeCodeGen.wait_service_initialization(
+            code = serve_utils.ServeCodeGen.wait_service_registration(
                 service_name, controller_job_id)
             backend = backend_utils.get_backend_from_handle(controller_handle)
             assert isinstance(backend, backends.CloudVmRayBackend)

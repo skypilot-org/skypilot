@@ -784,7 +784,7 @@ class Optimizer:
 
             chosen_str = ''
             if chosen:
-                chosen_str = (colorama.Fore.GREEN + '   ' + u'\u2714' +
+                chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
             row = Row(cloud, resources.instance_type + spot, vcpus, mem,
                       str(accelerators), str(region_or_zone), cost_str,
@@ -1183,15 +1183,6 @@ def _fill_in_launchable_resources(
         else:
             clouds_list = ([resources.cloud]
                            if resources.cloud is not None else enabled_clouds)
-            # Hack: When >=2 cloud candidates, always remove local cloud from
-            # possible candidates. This is so the optimizer will consider
-            # public clouds, except local. Local will be included as part of
-            # optimizer in a future PR.
-            # TODO(mluo): Add on-prem to cloud spillover.
-            if len(clouds_list) >= 2:
-                clouds_list = [
-                    c for c in clouds_list if not isinstance(c, clouds.Local)
-                ]
             for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list) = (
                     cloud.get_feasible_launchable_resources(
