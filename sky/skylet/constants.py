@@ -90,7 +90,10 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
-    # ray cluster is already running
+    # ray cluster is already running, to avoid the ray cluster being restarted.
+    # NOTE: this will only work for the cluster with ray cluster on our latest
+    # ray port 6380, but those existing cluster launched before #1790 that has
+    # ray cluster on the default port 6379 will be upgraded and restarted.
     f'{RAY_STATUS} || {{ pip3 list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null || '
     f'pip3 install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; }};'  # pylint: disable=line-too-long
