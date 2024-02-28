@@ -15,15 +15,14 @@ def check(
     verbose: bool = False,
     user_specified_clouds: Optional[Tuple[str]] = None,
 ) -> None:
-    echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
-    echo('Checking credentials to enable clouds for SkyPilot.')
-
     user_specified_clouds_set = set()
     if user_specified_clouds is not None:
         for cloud in user_specified_clouds:
             clouds.CLOUD_REGISTRY.from_str(cloud)  # verify cloud
             user_specified_clouds_set.add(cloud.lower())
 
+    echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
+    echo('Checking credentials to enable clouds for SkyPilot.')
     enabled_clouds = []
 
     def check_one_cloud(cloud_tuple: Tuple[str, clouds.Cloud]) -> None:

@@ -3466,6 +3466,8 @@ def check(user_specified_clouds: Tuple[str], verbose: bool):
     cloud is detected to be inaccessible, the reason and correction steps will
     be shown.
 
+    If CLOUDS are specified, checks credentials for only those clouds.
+
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
     """
