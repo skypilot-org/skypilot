@@ -596,6 +596,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         version = self.latest_version
         while version >= serve_constants.INITIAL_VERSION:
             spec = serve_state.get_spec(self._service_name, version)
+            # Return URLs from replica version that has at least min_replicas
+            # replicas to avoid overloading the new replicas.
             if spec is not None and version in version2url and version2count[
                     version] > spec.min_replicas:
                 return version2url[version]
