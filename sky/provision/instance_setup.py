@@ -53,8 +53,7 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
 RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
-    f'while `RAY_ADDRESS=127.0.0.1:{constants.SKY_REMOTE_RAY_PORT} '
-    'ray status | grep -q "No cluster status."`; do '
+    f'while `{constants.RAY_STATUS} | grep -q "No cluster status."`; do '
     'sleep 0.5; '
     'echo "Waiting ray cluster to be initialized"; '
     'done;')

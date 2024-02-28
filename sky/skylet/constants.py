@@ -83,13 +83,17 @@ CONDA_INSTALLATION_COMMANDS = (
     'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;')
 
 _sky_version = str(version.parse(sky.__version__))
+RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} ray status'
 RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     '(type -a python | grep -q python3) || '
     'echo \'alias python=python3\' >> ~/.bashrc;'
     '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
-    f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null || '  # pylint: disable=line-too-long
-    f'pip3 install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION};'
+    # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
+    # ray cluster is already running
+    f'{RAY_STATUS} || {{ pip3 list | grep "ray " | '
+    f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null || '
+    f'pip3 install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; }};'  # pylint: disable=line-too-long
     'source ~/.bashrc;'
     '{ pip3 list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
@@ -98,6 +102,7 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; '
+    f'{RAY_STATUS} || '
     'python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;')
 
 # The name for the environment variable that stores SkyPilot user hash, which
