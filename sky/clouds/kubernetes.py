@@ -6,7 +6,6 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
@@ -251,9 +250,6 @@ class Kubernetes(clouds.Cloud):
 
         port_mode = network_utils.get_port_mode(None)
 
-        devshm_size_limit = skypilot_config.get_nested(
-            ('kubernetes', 'devshm_size_limit'), None)
-
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -270,7 +266,6 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_value': k8s_acc_label_value,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
-            'k8s_devshm_size_limit': devshm_size_limit,
             # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
         }

@@ -603,9 +603,6 @@ def get_config_schema():
                     'required': [],
                     # Allow arbitrary keys since validating pod spec is hard
                     'additionalProperties': True,
-                },
-                'devshm_size_limit': {
-                    'type': 'string'
                 }
             }
         },
