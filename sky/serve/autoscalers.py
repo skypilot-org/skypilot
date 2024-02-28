@@ -1,11 +1,12 @@
 """Autoscalers: perform autoscaling by monitoring metrics."""
 import bisect
+import collections
 import dataclasses
 import enum
 import math
 import time
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -110,7 +111,9 @@ class Autoscaler:
         else:
             return RequestRateAutoscaler(service_name, spec)
 
-    def get_latest_version_with_min_replicas(self) -> Optional[int]:
+    def get_latest_version_with_min_replicas(
+        self, replica_infos: Iterable['replica_managers.ReplicaInfo']
+    ) -> Optional[int]:
         """Get the latest version with at least min_replicas replicas."""
         raise NotImplementedError
 
@@ -294,13 +297,21 @@ class RequestRateAutoscaler(Autoscaler):
         else:
             return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
 
-    def get_latest_version_with_min_replicas(self) -> Optional[int]:
+    def get_latest_version_with_min_replicas(
+        self, replica_infos: Iterable['replica_managers.ReplicaInfo']
+    ) -> Optional[int]:
         # Find the latest version with at least min_replicas replicas.
+
+        version2count: DefaultDict[int, int] = collections.defaultdict(int)
+        for info in replica_infos:
+            if info.is_ready:
+                version2count[info.version] += 1
+
         version = self.latest_version
         while version >= constants.INITIAL_VERSION:
             spec = serve_state.get_spec(self._service_name, version)
             if (spec is not None and
-                    self.target_num_replicas >= spec.min_replicas):
+                    version2count[version] >= spec.min_replicas):
                 return version
             version -= 1
         return None
@@ -308,8 +319,10 @@ class RequestRateAutoscaler(Autoscaler):
     def select_outdated_replicas_to_scale_down(
             self, replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
+
         latest_version_with_min_replicas = (
-            self.get_latest_version_with_min_replicas())
+            self.get_latest_version_with_min_replicas(replica_infos))
+
         # Select replicas earlier than latest_version_with_min_replicas to scale
         # down.
         all_replica_ids_to_scale_down: List[int] = []

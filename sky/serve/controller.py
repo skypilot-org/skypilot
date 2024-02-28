@@ -96,6 +96,7 @@ class SkyServeController:
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
             # TODO(MaoZiming): Check aggregator type.
+            replica_info = serve_state.get_replica_infos(self._service_name)
             request_aggregator: Dict[str, Any] = request_data.get(
                 'request_aggregator', {})
             timestamps: List[int] = request_aggregator.get('timestamps', [])
@@ -103,7 +104,8 @@ class SkyServeController:
             self._autoscaler.collect_request_information(request_aggregator)
             version2url = self._replica_manager.get_version2url()
             latest_version_with_min_replicas = (
-                self._autoscaler.get_latest_version_with_min_replicas())
+                self._autoscaler.get_latest_version_with_min_replicas(
+                    replica_info))
             ready_replica_urls = []
 
             # Return URLs from replica version that has at least min_replicas
