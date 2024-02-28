@@ -172,7 +172,7 @@ Setting up GPU support
 If your Kubernetes cluster has Nvidia GPUs, ensure that:
 
 1. The Nvidia GPU operator is installed (i.e., ``nvidia.com/gpu`` resource is available on each node) and ``nvidia`` is set as the default runtime for your container engine. See `Nvidia's installation guide <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_ for more details.
-2. Each node in your cluster is labelled with the GPU type. This labelling can be done by adding a label of the format ``skypilot.co/accelerator: <gpu_name>``, where the ``<gpu_name>`` is the lowercase name of the GPU. For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerator: v100`.
+2. Each node in your cluster is labelled with the GPU type. This labelling can be done using `SkyPilot's GPU labelling script <automatic-gpu-labelling_>`_ or by manually adding a label of the format ``skypilot.co/accelerator: <gpu_name>``, where the ``<gpu_name>`` is the lowercase name of the GPU. For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerator: v100`.
 
 .. tip::
     You can check if GPU operator is installed and the ``nvidia`` runtime is set as default by running:
@@ -191,6 +191,10 @@ If your Kubernetes cluster has Nvidia GPUs, ensure that:
 .. note::
 
     GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerator`` label.
+
+.. note::
+
+    GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
 
 .. _automatic-gpu-labelling:
 
@@ -211,10 +215,6 @@ We provide a convenience script that automatically detects GPU types and labels 
 
 .. note::
 
-    GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
-
-.. note::
-
     If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
 
 Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/config``, verify your setup by running :code:`sky check`:
@@ -230,6 +230,14 @@ You can also check the GPUs available on your nodes by running:
 .. code-block:: console
 
     $ sky show-gpus --cloud kubernetes
+
+.. tip::
+
+    If automatic GPU labelling fails, you can manually label your nodes with the GPU type. Use the following command to label your nodes:
+
+    .. code-block:: console
+
+        $ kubectl label nodes <node-name> skypilot.co/accelerator=<gpu_name>
 
 .. _kubernetes-setup-onprem-distro-specific:
 
@@ -393,6 +401,10 @@ To use this mode:
 
     kubernetes:
       ports: ingress
+
+.. tip::
+
+    For RKE2 and K3s, the pre-installed Nginx ingress is not correctly configured by default. Follow the `bare-metal installation instructions <https://kubernetes.github.io/ingress-nginx/deploy/#bare-metal-clusters/>`_ to set up the Nginx ingress controller correctly.
 
 When using this mode, SkyPilot creates an ingress resource and a ClusterIP service for each port opened. The port can be accessed externally by using the Ingress URL plus a path prefix of the form :code:`/skypilot/{pod_name}/{port}`.
 

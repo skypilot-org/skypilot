@@ -257,7 +257,8 @@ To verify that your cluster supports Nginx Ingress, we will create an example in
         $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/cpu_test_pod.yaml
         $ kubectl delete -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/ingress_test_svc.yaml
 
-If your IP is not acquired, check the service's status with :code:`kubectl describe svc ingress-nginx-controller -n ingress-nginx`. Your ingress's service must be of type :code:`LoadBalancer` and should have an external IP.
+If your IP is not acquired, check the service's status with :code:`kubectl describe svc ingress-nginx-controller -n ingress-nginx`.
+Your ingress's service must be of type :code:`LoadBalancer` or :code:`NodePort` and must have an external IP.
 
 Is SkyPilot configured to use Nginx Ingress?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -284,7 +285,7 @@ Next, try running a simple task with a service to verify that SkyPilot can launc
 
 .. code-block:: bash
 
-    $ sky launch -y -c myserver --cloud kubernetes --port 8080 -- "python -m http.server 8080"
+    $ sky launch -y -c myserver --cloud kubernetes --ports 8080 -- "python -m http.server 8080"
 
     # Obtain the endpoint of the service
     $ sky status --endpoint 8080 myserver
