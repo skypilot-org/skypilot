@@ -1117,7 +1117,6 @@ class SkyPilotReplicaManager(ReplicaManager):
         # to restart those replicas. This can significantly improve the speed
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
-        # TODO(MaoZiming): Check whether user updates any file in file mounts.
         new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         for key in ['service']:
             new_config.pop(key)
@@ -1134,6 +1133,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # bump replica version if resource, setup, run and other fields
                 # are the same.
                 if old_config == new_config:
+                    # File mounts should both be empty, as update always
+                    # create new buckets if they are not empty.
+                    assert old_config['file_mounts'] == new_config[
+                        'file_mounts'] == {}
                     logger.info(
                         f'Updating replica {info.replica_id} to version '
                         f'{version}. Replica {info.replica_id}\'s config '
