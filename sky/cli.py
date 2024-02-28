@@ -4418,6 +4418,12 @@ def serve_up(
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--rolling-update',
+              is_flag=True,
+              default=False,
+              required=False,
+              help=('Perform rolling update, i.e. incrementally replacing the '
+                    'current replicas with new ones.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -4445,11 +4451,14 @@ def serve_update(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    rolling_update: bool,
     yes: bool,
 ):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
+
+    TODO: Explain rolling update and normal update
 
     Example:
 
@@ -4493,7 +4502,7 @@ def serve_update(
                       abort=True,
                       show_default=True)
 
-    serve_lib.update(task, service_name)
+    serve_lib.update(task, service_name, rolling_update=rolling_update)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)

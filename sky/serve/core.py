@@ -269,7 +269,10 @@ def up(
 
 
 @usage_lib.entrypoint
-def update(task: 'sky.Task', service_name: str) -> None:
+def update(task: 'sky.Task',
+           service_name: str,
+           rolling_update: bool = False) -> None:
+    """Update a service."""
 
     cluster_status, handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -378,8 +381,8 @@ def update(task: 'sky.Task', service_name: str) -> None:
                                  {remote_task_yaml_path: service_file.name},
                                  storage_mounts=None)
 
-        code = serve_utils.ServeCodeGen.update_service(service_name,
-                                                       current_version)
+        code = serve_utils.ServeCodeGen.update_service(
+            service_name, current_version, rolling_update=rolling_update)
         returncode, _, stderr = backend.run_on_head(handle,
                                                     code,
                                                     require_outputs=True,

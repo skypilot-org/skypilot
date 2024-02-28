@@ -110,6 +110,7 @@ class SkyServeController:
                 version = request_data.get('version', None)
                 if version is None:
                     return {'message': 'Error: version is not specified.'}
+                rolling_update = request_data.get('rolling_update', False)
                 # The yaml with the name latest_task_yaml will be synced
                 # See sky/serve/core.py::update
                 latest_task_yaml = serve_utils.generate_task_yaml_file_name(
@@ -118,8 +119,10 @@ class SkyServeController:
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
-                self._replica_manager.update_version(version, service)
-                self._autoscaler.update_version(version, service)
+                self._replica_manager.update_version(version, service,
+                                                     rolling_update)
+                self._autoscaler.update_version(version, service,
+                                                rolling_update)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in update_service: '

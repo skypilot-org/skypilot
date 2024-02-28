@@ -453,6 +453,8 @@ class ReplicaManager:
         logger.info(f'Readiness probe path: {spec.readiness_path}\n'
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
                     f'Post data: {spec.post_data}')
+        # Perform rolling update or not
+        self.rolling_update: bool = False
 
         # Newest version among the currently provisioned and launched replicas
         self.latest_version: int = serve_constants.INITIAL_VERSION
@@ -477,8 +479,8 @@ class ReplicaManager:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       rolling_update: bool) -> None:
         raise NotImplementedError
 
 
@@ -1008,8 +1010,8 @@ class SkyPilotReplicaManager(ReplicaManager):
     # SkyServe Update and replica versioning. #
     ###########################################
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       rolling_update: bool) -> None:
         if version <= self.latest_version:
             logger.error(f'Invalid version: {version}, '
                          f'latest version: {self.latest_version}')
@@ -1019,6 +1021,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_version(self._service_name, version, spec)
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
+        self.rolling_update = rolling_update
+
 
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         spec = serve_state.get_spec(self._service_name, version)

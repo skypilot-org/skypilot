@@ -72,9 +72,10 @@ class Autoscaler:
         # Target number of replicas is initialized to min replicas.
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
+        self.rolling_update: bool = False
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       rolling_update: bool) -> None:
         if version <= self.latest_version:
             logger.error(f'Invalid version: {version}, '
                          f'latest version: {self.latest_version}')
@@ -86,6 +87,7 @@ class Autoscaler:
         # Reclip self.target_num_replicas with new min and max replicas.
         self.target_num_replicas = max(
             self.min_replicas, min(self.max_replicas, self.target_num_replicas))
+        self.rolling_update = rolling_update
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -143,9 +145,9 @@ class RequestRateAutoscaler(Autoscaler):
 
         self.bootstrap_done: bool = False
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
-        super().update_version(version, spec)
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       rolling_update: bool) -> None:
+        super().update_version(version, spec, rolling_update)
         self.target_qps_per_replica = spec.target_qps_per_replica
         upscale_delay_seconds = (
             spec.upscale_delay_seconds if spec.upscale_delay_seconds is not None
