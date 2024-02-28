@@ -292,7 +292,7 @@ Available fields and semantics:
     # Defaults to None, which means no size limits are set. If set, the value
     # must be a string that is a valid Kubernetes quantity, e.g., "3Gi".
     # https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/
-    dshm_size_limit: 3Gi
+    devshm_size_limit: 3Gi
 
   # Advanced OCI configurations (optional).
   oci:
