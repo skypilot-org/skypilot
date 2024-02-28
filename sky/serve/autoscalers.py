@@ -260,11 +260,24 @@ class RequestRateAutoscaler(Autoscaler):
             replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
 
+        ready_replicas = []
+        other_replicas = []
+        for info in replica_infos:
+            if info.is_ready:
+                ready_replicas.append(info)
+            else:
+                other_replicas.append(info)
+
+
         status_order = serve_state.ReplicaStatus.scale_down_decision_order()
-        # Also sort by provisioned time (indicated by replica_id) to make sure
-        # we terminate the replicas that starts provisioning later first
-        replica_infos_sorted = sorted(
-            replica_infos,
+        # We scale down older ready replicas first.
+        ready_replicas = sorted(
+            ready_replicas,
+            key=lambda info: info.replica_id)
+        # For other replicas, we sort them by status and the time it starts
+        # launching.
+        other_replicas = sorted(
+            other_replicas,
             key=lambda info: (
                 status_order.index(info.status)
                 # Use -1 for other status that will be terminated first.
@@ -278,7 +291,7 @@ class RequestRateAutoscaler(Autoscaler):
                 # take a longer time for it to be READY.
                 -info.replica_id))
 
-        return [info.replica_id for info in replica_infos_sorted][:num_limit]
+        return [info.replica_id for info in other_replicas + ready_replicas][:num_limit]
 
     def get_decision_interval(self) -> int:
         # Reduce autoscaler interval when target_num_replicas = 0.
@@ -301,10 +314,25 @@ class RequestRateAutoscaler(Autoscaler):
             else:
                 old_replicas.append(info)
 
+        num_latest_ready_replicas = len(latest_ready_replicas)
         all_replica_ids_to_scale_down: List[int] = []
-        if len(latest_ready_replicas) >= self.min_replicas:
+        if num_latest_ready_replicas >= self.min_replicas:
             for info in old_replicas:
                 all_replica_ids_to_scale_down.append(info.replica_id)
+        elif self.rolling_update:
+            # This is guaranteed as num_latest_ready_replicas < min_replicas <= self.target_num_replicas
+            assert self.target_num_replicas >= num_latest_ready_replicas, (self.target_num_replicas, num_latest_ready_replicas)
+            # If rolling update is in progress, we scale down old replicas
+            # based on the number of ready new replicas.
+            num_old_replicas_to_keep = self.target_num_replicas - num_latest_ready_replicas
+            old_ready_replicas = list(filter(old_replicas, lambda info: info.is_ready))
+            num_old_replicas_to_scale_down = (len(old_ready_replicas) - num_old_replicas_to_keep)
+            # scale_down_order = serve_state.ReplicaStatus.scale_down_decision_order()
+            if num_old_replicas_to_scale_down > 0:
+                all_replica_ids_to_scale_down.extend(
+                    self._select_replicas_to_scale_down(
+                        num_old_replicas_to_scale_down, old_ready_replicas))
+
 
         return all_replica_ids_to_scale_down
 
@@ -337,6 +365,8 @@ class RequestRateAutoscaler(Autoscaler):
         # Case 1. Once there is min_replicas number of
         # ready new replicas, we will direct all traffic to them,
         # we can scale down all old replicas.
+        # Or, if rolling update is in progress, we scale down old replicas
+        # based on the number of ready new replicas.
         all_replica_ids_to_scale_down.extend(
             self.select_outdated_replicas_to_scale_down(replica_infos))
 

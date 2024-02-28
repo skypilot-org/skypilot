@@ -886,7 +886,7 @@ class ServeCodeGen:
                        rolling_update: bool) -> str:
         code = [
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
-            f'{version}, rolling_update=rolling_update)',
+            f'{version}, rolling_update={rolling_update})',
             'print(msg, end="", flush=True)',
         ]
         return cls._build(code)
