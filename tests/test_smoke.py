@@ -3227,6 +3227,44 @@ def test_skyserve_update():
 
 @pytest.mark.gcp
 @pytest.mark.sky_serve
+def test_skyserve_fast_update():
+    """Test skyserve with fast update (Increment version of old replicas)"""
+    name = _get_service_name()
+
+    def _check_three_ready_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'count=$(echo "$output" | grep -o "READY" | wc -l);'
+                ' if [ $count -ne 3 ]; then exit 1; fi;')
+
+    def _check_one_provisioning_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'count=$(echo "$output" | grep -o "PROVISIONING" | wc -l);'
+                ' if [ $count -ne 1 ]; then exit 1; fi;')
+
+    test = Test(
+        f'test-skyserve-fast-update',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/update/bump_version_before.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} -y tests/skyserve/update/bump_version_after.yaml',
+            # sleep to wait for update to be registered.
+            'sleep 30',
+            # READY for service + two READY replicas.
+            _check_three_ready_in_status(name),
+            # One PROVISIONING replica.
+            _check_one_provisioning_in_status(name),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
 def test_skyserve_update_autoscale():
     """Test skyserve update with autoscale"""
     name = _get_service_name()
