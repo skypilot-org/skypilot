@@ -1121,7 +1121,7 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
                     assert len(value) == 1, \
                         f'Expected only one container, found {value}'
                     _merge_dicts(value[0], destination[key][0])
-                if key in ['volumes', 'volumeMounts']:
+                elif key in ['volumes', 'volumeMounts']:
                     # If the key is 'volumes' or 'volumeMounts', we search for
                     # item with the same name and merge it.
                     for new_volume in value:
