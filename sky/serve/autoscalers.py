@@ -1,12 +1,11 @@
 """Autoscalers: perform autoscaling by monitoring metrics."""
 import bisect
-import collections
 import dataclasses
 import enum
 import math
 import time
 import typing
-from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -309,15 +308,8 @@ class RequestRateAutoscaler(Autoscaler):
     def select_outdated_replicas_to_scale_down(
             self, replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
-
-        version2count: DefaultDict[int, int] = collections.defaultdict(int)
-        for info in replica_infos:
-            if info.is_ready:
-                version2count[info.version] += 1
-
         latest_version_with_min_replicas = (
             self.get_latest_version_with_min_replicas())
-
         # Select replicas earlier than latest_version_with_min_replicas to scale
         # down.
         all_replica_ids_to_scale_down: List[int] = []
