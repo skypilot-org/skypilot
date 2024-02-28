@@ -189,7 +189,7 @@ remote = [
     # https://github.com/ray-project/ray/issues/36990
     # >=1.10.8 is needed for ray>=2.6. See
     # https://github.com/ray-project/ray/issues/35661
-    'pydantic <2.0, >=1.10.8',
+    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3',
 ]
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
