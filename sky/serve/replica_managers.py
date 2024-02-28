@@ -1023,7 +1023,6 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._task_yaml_path = task_yaml_path
         self.rolling_update = rolling_update
 
-
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         spec = serve_state.get_spec(self._service_name, version)
         if spec is None:
