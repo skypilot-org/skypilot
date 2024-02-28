@@ -286,10 +286,10 @@ Available fields and semantics:
             hostPath:
               path: /tmp
               type: Directory
-          - name: dshm          # SkyPilot creates a /dev/shm volume for each pod called dshm. You can set the sizeLimit or change volume type here.
+          - name: dshm          # SkyPilot creates a volume called dshm for /dev/shm on the pods
             emptyDir:
               medium: Memory
-              sizeLimit: 3Gi
+              sizeLimit: 3Gi    # Set a size limit for the /dev/shm volume
 
   # Advanced OCI configurations (optional).
   oci:
