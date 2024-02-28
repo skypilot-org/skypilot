@@ -1112,9 +1112,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
 
-        # Update the version for all replicas that have the same config as
-        # the new version (except for the `service` field), as we do not need
-        # to restart those replicas. This can significantly improve the speed
+        # Reuse all replicas that have the same config as the new version
+        # (except for the `service` field) by directly setting the version to be
+        # the latest version. This can significantly improve the speed
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
         # TODO(MaoZiming): Check whether user updates any file in file mounts.
