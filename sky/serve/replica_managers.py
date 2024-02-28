@@ -1112,9 +1112,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
 
-        # Update the version for all replicas that have the same config as
-        # the new version (except for the `service` field), as we do not need
-        # to restart those replicas. This can significantly improve the speed
+        # Reuse all replicas that have the same config as the new version
+        # (except for the `service` field) by directly setting the version to be
+        # the latest version. This can significantly improve the speed
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
         new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
@@ -1130,8 +1130,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     os.path.expanduser(old_task_yaml_path))
                 for key in ['service']:
                     old_config.pop(key)
-                # bump replica version if resource, setup, run and other fields
-                # are the same.
+                # Bump replica version if all fields except for service are the same.
                 if old_config == new_config:
                     # File mounts should both be empty, as update always
                     # create new buckets if they are not empty.
