@@ -21,12 +21,78 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import clouds
+
+logger = sky_logging.init_logger(__name__)
+
+
+def _validate_service_task(task: 'sky.Task') -> None:
+    """Validate the task for Sky Serve.
+
+    Args:
+        task: sky.Task to validate
+
+    Raises:
+        ValueError: if the arguments are invalid.
+        RuntimeError: if the task.serve is not found.
+    """
+    spot_resources: List['sky.Resources'] = [
+        resource for resource in task.resources if resource.use_spot
+    ]
+    # TODO(MaoZiming): Allow mixed on-demand and spot specification in resources
+    # On-demand fallback should go to the resources specified as on-demand.
+    if len(spot_resources) not in [0, len(task.resources)]:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Resources must either all use spot or none use spot. '
+                'To use on-demand and spot instances together, '
+                'use `dynamic_ondemand_fallback` or set '
+                'base_ondemand_fallback_replicas.')
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Service section not found.')
+
+    policy_description = ('on-demand'
+                          if task.service.dynamic_ondemand_fallback else 'spot')
+    for resource in list(task.resources):
+        if resource.spot_recovery is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('spot_recovery is disabled for SkyServe. '
+                                 'SkyServe will replenish preempted spot '
+                                 f'with {policy_description} instances.')
+
+    replica_ingress_port: Optional[int] = None
+    for requested_resources in task.resources:
+        if (task.service.use_ondemand_fallback and
+                not requested_resources.use_spot):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    '`use_ondemand_fallback` is only supported '
+                    'for spot resources. Please explicitly specify '
+                    '`use_spot: true` in resources for on-demand fallback.')
+        requested_ports = list(
+            resources_utils.port_ranges_to_set(requested_resources.ports))
+        if len(requested_ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port = requested_ports[0]
+        if replica_ingress_port is None:
+            replica_ingress_port = service_port
+        elif service_port != replica_ingress_port:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Got multiple ports: {service_port} and '
+                    f'{replica_ingress_port} in different resources. '
+                    'Please specify the same port instead.')
 
 
 @usage_lib.entrypoint
@@ -56,38 +122,7 @@ def up(
                              'only contains lower letters, numbers and dash): '
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
-    if task.service is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Service section not found.')
-
-    requested_cloud: Optional['clouds.Cloud'] = None
-    service_port: Optional[int] = None
-    for requested_resources in task.resources:
-        if requested_resources.ports is None or len(
-                requested_resources.ports) != 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify one port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
-        service_port_str = requested_resources.ports[0]
-        if not service_port_str.isdigit():
-            # For the case when the user specified a port range like 10000-10010
-            raise ValueError(f'Port {service_port_str!r} is not a valid port '
-                             'number. Please specify a single port instead. '
-                             f'Got: {service_port_str!r}')
-        resource_port = int(service_port_str)
-        if service_port is None:
-            service_port = resource_port
-        if service_port != resource_port:
-            raise ValueError(
-                f'Got multiple ports: {service_port} and {resource_port} '
-                'in different resources. Please specify single port instead.')
-        if requested_cloud is None:
-            requested_cloud = requested_resources.cloud
-        if requested_cloud != requested_resources.cloud:
-            raise ValueError(f'Got multiple clouds: {requested_cloud} and '
-                             f'{requested_resources.cloud} in different '
-                             'resources. Please specify single cloud instead.')
+    _validate_service_task(task)
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
@@ -130,6 +165,7 @@ def up(
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
             is not None)
+        requested_cloud = list(task.resources)[0].cloud
         controller_cloud = (requested_cloud if not controller_exist and
                             controller_resources.cloud is None else
                             controller_resources.cloud)
@@ -265,7 +301,15 @@ def up(
 
 @usage_lib.entrypoint
 def update(task: 'sky.Task', service_name: str) -> None:
+    """Update an existing service.
 
+    Please refer to the sky.cli.serve_update for the document.
+
+    Args:
+        task: sky.Task to update.
+        service_name: Name of the service.
+    """
+    _validate_service_task(task)
     cluster_status, handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
@@ -328,10 +372,6 @@ def update(task: 'sky.Task', service_name: str) -> None:
     if prompt is not None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
-
-    if task.service is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Service section not found in the task. ')
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
