@@ -251,7 +251,8 @@ class Kubernetes(clouds.Cloud):
 
         port_mode = network_utils.get_port_mode(None)
 
-        dshm_size_limit = skypilot_config.get_nested(('kubernetes', 'dshm_size_limit'), None)
+        dshm_size_limit = skypilot_config.get_nested(
+            ('kubernetes', 'dshm_size_limit'), None)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
