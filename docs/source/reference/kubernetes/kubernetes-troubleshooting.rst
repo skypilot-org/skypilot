@@ -1,6 +1,6 @@
 .. _kubernetes-troubleshooting:
 
-Troubleshooting Kubernetes
+Kubernetes Troubleshooting
 ==========================
 
 If you're unable to run SkyPilot tasks on your Kubernetes cluster, this guide will help you debug common issues.
@@ -171,8 +171,8 @@ Next, try running a simple GPU task to verify that SkyPilot can launch GPU tasks
 
 .. code-block:: bash
 
-    # Use the GPU type from the output in your task launch command
-    $ sky launch -y -c mygpucluster --cloud kubernetes --gpu <specify-a-gpu-type>:1 -- "nvidia-smi"
+    # Replace the GPU type from the sky show-gpus output in the task launch command
+    $ sky launch -y -c mygpucluster --cloud kubernetes --gpu <gpu-type>:1 -- "nvidia-smi"
 
     # Task should run and print the nvidia-smi output to the console
 
@@ -249,7 +249,8 @@ To verify that your cluster supports Nginx Ingress, we will create an example in
         $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/cpu_test_pod.yaml
         $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/ingress_test.yaml
 
-        $ IP=$(kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[*].ip}')
+        # Get the external IP of the ingress using the externalIPs field or the loadBalancer field
+        $ IP=$(kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.spec.externalIPs[*]}') && [ -z "$IP" ] && IP=$(kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[*].ip}')
         $ echo "Got IP: $IP"
         $ curl http://$IP/skytest
 
