@@ -1,11 +1,12 @@
 """Autoscalers: perform autoscaling by monitoring metrics."""
 import bisect
+import collections
 import dataclasses
 import enum
 import math
 import time
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -290,18 +291,26 @@ class RequestRateAutoscaler(Autoscaler):
             self, replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
 
-        latest_ready_replicas: List['replica_managers.ReplicaInfo'] = []
-        old_replicas: List['replica_managers.ReplicaInfo'] = []
+        version2count: DefaultDict[int, int] = collections.defaultdict(int)
         for info in replica_infos:
-            if info.version == self.latest_version:
-                if info.is_ready:
-                    latest_ready_replicas.append(info)
-            else:
-                old_replicas.append(info)
+            if info.is_ready:
+                version2count[info.version] += 1
 
+        # Find the latest version with at least min_replicas replicas.
+        version = self.latest_version
+        latest_version_with_min_replicas = None
+        while version >= constants.INITIAL_VERSION:
+            if version2count[version] > self.min_replicas:
+                latest_version_with_min_replicas = version
+                break
+            version -= 1
+
+        # Select replicas earlier than latest_version_with_min_replicas to scale
+        # down.
         all_replica_ids_to_scale_down: List[int] = []
-        if len(latest_ready_replicas) >= self.min_replicas:
-            for info in old_replicas:
+        for info in replica_infos:
+            if (latest_version_with_min_replicas is not None and
+                    info.version < latest_version_with_min_replicas):
                 all_replica_ids_to_scale_down.append(info.replica_id)
 
         return all_replica_ids_to_scale_down
