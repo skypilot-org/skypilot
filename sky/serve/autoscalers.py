@@ -416,9 +416,9 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             spec.dynamic_ondemand_fallback
             if spec.dynamic_ondemand_fallback is not None else False)
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
-        super().update_version(version, spec)
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       rolling_update: bool) -> None:
+        super().update_version(version, spec, rolling_update=rolling_update)
         self.base_ondemand_fallback_replicas = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
