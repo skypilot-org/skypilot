@@ -1118,6 +1118,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
         new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
+        # Always create new replicas and scale down old ones when file_mounts
+        # are not empty.
+        if new_config.get('file_mounts', None) is not None:
+            return
         for key in ['service']:
             new_config.pop(key)
         replica_infos = serve_state.get_replica_infos(self._service_name)
@@ -1130,12 +1134,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                     os.path.expanduser(old_task_yaml_path))
                 for key in ['service']:
                     old_config.pop(key)
-                # Bump replica version if all fields except for service are the same.
-                if old_config == new_config:
-                    # File mounts should both be empty, as update always
-                    # create new buckets if they are not empty.
-                    assert old_config['file_mounts'] == new_config[
-                        'file_mounts'] == {}
+                # Bump replica version if all fields except for service are
+                # the same. File mounts should both be empty, as update always
+                # create new buckets if they are not empty.
+                if (old_config == new_config and
+                        old_config.get('file_mounts', None) is None):
                     logger.info(
                         f'Updating replica {info.replica_id} to version '
                         f'{version}. Replica {info.replica_id}\'s config '
