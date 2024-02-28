@@ -1093,12 +1093,18 @@ def test_job_queue(generic_cloud: str):
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
-def test_job_queue_with_docker(generic_cloud: str):
+@pytest.mark.parametrize("image_id", [
+    "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
+    "docker:ubuntu:18.04",
+    # Test image with python 3.11 installed by default.
+    "docker:continuumio/miniconda3",
+])
+def test_job_queue_with_docker(generic_cloud: str, image_id: str):
     name = _get_cluster_name()
     test = Test(
         'job_queue_with_docker',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_docker.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} examples/job_queue/cluster_docker.yaml',
             f'sky exec {name} -n {name}-1 -d examples/job_queue/job_docker.yaml',
             f'sky exec {name} -n {name}-2 -d examples/job_queue/job_docker.yaml',
             f'sky exec {name} -n {name}-3 -d examples/job_queue/job_docker.yaml',
@@ -2659,6 +2665,8 @@ def test_aws_custom_image():
 @pytest.mark.parametrize("image_id", [
     "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
     "docker:ubuntu:18.04",
+    # Test image with python 3.11 installed by default.
+    "docker:continuumio/miniconda3",
 ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
