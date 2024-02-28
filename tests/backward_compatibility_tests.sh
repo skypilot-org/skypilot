@@ -53,7 +53,7 @@ rm -r  ~/.sky/wheels || true
 which sky
 sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME} examples/minimal.yaml
 sky autostop -i 10 -y ${CLUSTER_NAME}
-sky exec --cloud ${CLOUD} ${CLUSTER_NAME} sleep 100
+sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 100
 
 conda activate sky-back-compat-current
 sky status -r ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
@@ -61,7 +61,7 @@ rm -r  ~/.sky/wheels || true
 if [ "$need_launch" -eq "1" ]; then
   sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}
 fi
-sky exec --cloud ${CLOUD} ${CLUSTER_NAME} sleep 30
+sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 30
 s=$(sky launch --cloud ${CLOUD} -d -c ${CLUSTER_NAME} examples/minimal.yaml)
 echo $s
 # remove color and find the job id
