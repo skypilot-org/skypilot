@@ -1,0 +1,13 @@
+service:
+  readiness_probe: /health
+  replicas: 1
+
+resources:
+  ports: 8087
+  cpus: 2
+
+workdir: examples/serve/authentication
+
+setup: pip install fastapi uvicorn
+
+run: python3 server.py
