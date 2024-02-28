@@ -287,7 +287,7 @@ class RayCodeGen:
                 sys.stdout.flush()
                 sys.stderr.flush()
                 return returncodes
-            
+
             run_fn = None
             futures = []
             """),
@@ -3275,7 +3275,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Handle multiple resources exec case.
         task_copy.set_resources(valid_resource)
         if len(task.resources) > 1:
-            logger.info('Multiple resources are specified'
+            logger.info('Multiple resources are specified '
                         f'for the task, using: {valid_resource}')
         task_copy.best_resources = None
         resources_str = backend_utils.get_task_resources_str(task_copy)
