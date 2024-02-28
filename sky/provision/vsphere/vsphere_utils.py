@@ -320,8 +320,8 @@ def get_vsphere_credentials(name=None):
     """
     credential_path = os.path.expanduser(CREDENTIALS_PATH)
     assert os.path.exists(
-        credential_path), f' Missing credential file at {credential_path}.'
-    with open(credential_path, 'r') as file:
+        credential_path), f'Missing credential file at {credential_path}.'
+    with open(credential_path, 'r', encoding='utf-8') as file:
         credential = yaml.safe_load(file)
         vcenters = credential['vcenters']
         if name is None:

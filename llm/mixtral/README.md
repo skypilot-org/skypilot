@@ -59,6 +59,24 @@ curl -L http://$IP:8000/v1/completions \
   }'
 ```
 
+Chat API is also supported:
+```bash
+IP=$(sky status --ip mixtral)
+
+curl -L http://$IP:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+      "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hello! What is your name?"
+        }
+      ],
+      "max_tokens": 25
+  }'
+```
+
 ## 2. Serve with multiple instances
 
 When scaling up is required, [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) is the library built on top of SkyPilot, which can help you scale up the serving with multiple instances, while still providing a single endpoint. To serve Mixtral with multiple instances, run the following command:
@@ -77,6 +95,7 @@ service:
       messages:
         - role: user
           content: Hello! What is your name?
+      max_tokens: 1
     initial_delay_seconds: 1200
   replica_policy:
     min_replicas: 1
@@ -102,6 +121,24 @@ curl -L http://$ENDPOINT/v1/completions \
   -d '{
       "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
       "prompt": "My favourite condiment is",
+      "max_tokens": 25
+  }'
+```
+
+Chat API is also supported:
+```bash
+ENDPOINT=$(sky serve status --endpoint mixtral)
+
+curl -L http://$ENDPOINT/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+      "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hello! What is your name?"
+        }
+      ],
       "max_tokens": 25
   }'
 ```

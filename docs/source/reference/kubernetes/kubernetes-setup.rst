@@ -183,9 +183,19 @@ If your Kubernetes cluster has Nvidia GPUs, ensure that:
         $ watch kubectl get pods
         # If the pod status changes to completed after a few minutes, your Kubernetes environment is set up correctly.
 
+.. note::
+
+    Refer to :ref:`Notes for specific Kubernetes distributions <kubernetes-setup-onprem-distro-specific>` for additional instructions on setting up GPU support on specific Kubernetes distributions, such as RKE2 and K3s.
+
 
 .. note::
-    If you are using RKE2, the GPU operator installation through helm requires extra flags to set ``nvidia`` as the default runtime for containerd. Refer to instructions on `Nvidia GPU Operator installation with Helm on RKE2 <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#custom-configuration-for-runtime-containerd>`_ for details.
+
+    GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerators`` label.
+
+.. _automatic-gpu-labelling:
+
+Automatic GPU labelling
+~~~~~~~~~~~~~~~~~~~~~~~
 
 We provide a convenience script that automatically detects GPU types and labels each node. You can run it with:
 
@@ -199,16 +209,13 @@ We provide a convenience script that automatically detects GPU types and labels 
  To check the status of GPU labeling jobs, run `kubectl get jobs --namespace=kube-system -l job=sky-gpu-labeler`
  You can check if nodes have been labeled by running `kubectl describe nodes` and looking for labels of the format `skypilot.co/accelerator: <gpu_name>`.
 
+.. note::
+
+    GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
 
 .. note::
- GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerator`` label.
 
-.. note::
- GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
-
-
-.. note::
- If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
+    If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
 
 Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/config``, verify your setup by running :code:`sky check`:
 
@@ -216,6 +223,79 @@ Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/co
 
     $ sky check
 
+This should show ``Kubernetes: Enabled`` without any warnings.
+
+You can also check the GPUs available on your nodes by running:
+
+.. code-block:: console
+
+    $ sky show-gpus --cloud kubernetes
+
+.. _kubernetes-setup-onprem-distro-specific:
+
+Notes for specific Kubernetes distributions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Rancher Kubernetes Engine 2 (RKE2)
+**********************************
+
+Nvidia GPU operator installation on RKE2 through helm requires extra flags to set ``nvidia`` as the default runtime for containerd.
+
+.. code-block:: console
+
+    $ helm install gpu-operator -n gpu-operator --create-namespace \
+      nvidia/gpu-operator $HELM_OPTIONS \
+        --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \
+        --set 'toolkit.env[0].value=/var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl' \
+        --set 'toolkit.env[1].name=CONTAINERD_SOCKET' \
+        --set 'toolkit.env[1].value=/run/k3s/containerd/containerd.sock' \
+        --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \
+        --set 'toolkit.env[2].value=nvidia' \
+        --set 'toolkit.env[3].name=CONTAINERD_SET_AS_DEFAULT' \
+        --set-string 'toolkit.env[3].value=true'
+
+Refer to instructions on `Nvidia GPU Operator installation with Helm on RKE2 <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#rancher-kubernetes-engine-2>`_ for details.
+
+K3s
+***
+
+Installing Nvidia GPU operator on K3s is similar to `RKE2 instructions from Nvidia <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#rancher-kubernetes-engine-2>`_, but requires changing
+the ``CONTAINERD_CONFIG`` variable to ``/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl``. Here is an example command to install the Nvidia GPU operator on K3s:
+
+.. code-block:: console
+
+    $ helm install gpu-operator -n gpu-operator --create-namespace \
+      nvidia/gpu-operator $HELM_OPTIONS \
+        --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \
+        --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \
+        --set 'toolkit.env[1].name=CONTAINERD_SOCKET' \
+        --set 'toolkit.env[1].value=/run/k3s/containerd/containerd.sock' \
+        --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \
+        --set 'toolkit.env[2].value=nvidia'
+
+Check the status of the GPU operator installation by running ``kubectl get pods -n gpu-operator``. It takes a few minutes to install and some CrashLoopBackOff errors are expected during the installation process.
+
+.. tip::
+
+    If your gpu-operator installation stays stuck in CrashLoopBackOff, you may need to create a symlink to the ``ldconfig`` binary to work around a `known issue <https://github.com/NVIDIA/nvidia-docker/issues/614#issuecomment-423991632>`_ with nvidia-docker runtime. Run the following command on your nodes:
+
+    .. code-block:: console
+
+        $ ln -s /sbin/ldconfig /sbin/ldconfig.real
+
+After the GPU operator is installed, create the nvidia RuntimeClass required by K3s. This runtime class will automatically be used by SkyPilot to schedule GPU pods:
+
+.. code-block:: console
+
+    $ kubectl apply -f - <<EOF
+    apiVersion: node.k8s.io/v1
+    kind: RuntimeClass
+    metadata:
+      name: nvidia
+    handler: nvidia
+    EOF
+
+Now you can label your K3s nodes with the :code:`skypilot.co/accelerator` label using the `SkyPilot GPU labelling script <automatic-gpu-labelling_>`_ above.
 
 .. _kubernetes-ports:
 
@@ -283,7 +363,31 @@ This mode exposes ports by creating a Kubernetes `Ingress <https://kubernetes.io
 To use this mode:
 
 1. Install the Nginx Ingress Controller on your Kubernetes cluster. Refer to the `documentation <https://kubernetes.github.io/ingress-nginx/deploy/>`_ for installation instructions specific to your environment.
-2. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
+2. Verify that the ``ingress-nginx-controller`` service has a valid external IP:
+
+.. code-block:: bash
+
+    $ kubectl get service ingress-nginx-controller -n ingress-nginx
+
+    # Example output:
+    # NAME                             TYPE                CLUSTER-IP    EXTERNAL-IP     PORT(S)
+    # ingress-nginx-controller         LoadBalancer        10.24.4.254   35.202.58.117   80:31253/TCP,443:32699/TCP
+
+.. note::
+    If the ``EXTERNAL-IP`` field is ``<none>``, you must to manually assign a External IP.
+    This can be done by patching the service with an IP that can be accessed from outside the cluster.
+    If the service type is ``NodePort``, you can set the ``EXTERNAL-IP`` to any node's IP address:
+
+    .. code-block:: bash
+
+      # Patch the nginx ingress service with an external IP. Can be any node's IP if using NodePort service.
+      # Replace <IP> in the following command with the IP you select.
+      $ kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{"spec": {"externalIPs": ["<IP>"]}}'
+
+    If the ``EXTERNAL-IP`` field is left as ``<none>``, SkyPilot will use ``localhost`` as the external IP for the Ingress,
+    and the endpoint may not be accessible from outside the cluster.
+
+3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
 
 .. code-block:: yaml
 

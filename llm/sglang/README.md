@@ -1,5 +1,10 @@
 # SGLang: Fast and Expressive LLM Inference with RadixAttention for 5x throughput
 
+<p align="center">
+    <img src="https://github.com/skypilot-org/skypilot/assets/6753189/10b23cf8-b9b7-4014-a635-10f30a559e7c" alt="SGLang"/>
+</p>
+
+
 This README contains instructions to run a demo for SGLang, an open-source library for fast and expressive LLM inference and serving with **5x throughput**.
 
 * [Repo](https://github.com/sgl-project/sglang)
@@ -12,7 +17,7 @@ pip install "skypilot-nightly[all]"
 sky check
 ```
 
-## Serving Llama-2 with SGLang using SkyServe
+## Serving vision-language model LLaVA with SGLang for more traffic using SkyServe
 1. Create a [`SkyServe Service YAML`](https://skypilot.readthedocs.io/en/latest/serving/service-yaml-spec.html) with a  `service` section:
 
 ```yaml
@@ -23,34 +28,119 @@ service:
   replicas: 2
 ```
 
-The entire Service YAML can be found here: [sglang.yaml](sglang.yaml).
+The entire Service YAML can be found here: [llava.yaml](llava.yaml).
 
 2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
 ```bash
-sky serve up -n sglang sglang.yaml
+sky serve up -n sglang-llava llava.yaml
 ```
 
 3. Use `sky serve status` to check the status of the serving:
 ```bash
-sky serve status sglang
+sky serve status sglang-llava
 ```
 
 You should get a similar output as the following:
 
 ```console
 Services
-NAME    VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
-sglang  1        8m 16s  READY   2/2       34.32.43.41:30001
+NAME          VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
+sglang-llava  1        8m 16s  READY   2/2       34.32.43.41:30001
 
 Service Replicas
 SERVICE_NAME  ID  VERSION  IP              LAUNCHED     RESOURCES          STATUS  REGION
-sglang        1   1        34.85.154.76    16 mins ago  1x GCP({'L4': 1})  READY   us-east4
-sglang        2   1        34.145.195.253  16 mins ago  1x GCP({'L4': 1})  READY   us-east4
+sglang-llava  1   1        34.85.154.76    16 mins ago  1x GCP({'L4': 1})  READY   us-east4
+sglang-llava  2   1        34.145.195.253  16 mins ago  1x GCP({'L4': 1})  READY   us-east4
 ```
 
 4. Check the endpoint of the service:
 ```bash
-ENDPOINT=$(sky serve status --endpoint sglang)
+ENDPOINT=$(sky serve status --endpoint sglang-llava)
+```
+
+4. Once it status is `READY`, you can use the endpoint to talk to the model with both text and image inputs:
+<figure align="center">
+  <img src="https://raw.githubusercontent.com/sgl-project/sglang/main/examples/quick_start/images/cat.jpeg" alt="" width="50%">
+  <figcaption>Input image to the LLaVA model.</figcaption>
+</figure>
+
+```bash
+curl -L $ENDPOINT/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "liuhaotian/llava-v1.6-vicuna-7b",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Describe this image"},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": "https://raw.githubusercontent.com/sgl-project/sglang/main/examples/quick_start/images/cat.jpeg"
+                }
+            }
+        ]
+      }
+    ]
+  }'
+```
+
+You should get a similar response as the following:
+
+```console
+{
+  "id": "b044d5f637694d3bba30a2d784441c6c",
+  "object": "chat.completion",
+  "created": 1707565348,
+  "model": "liuhaotian/llava-v1.6-vicuna-7b",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": " This is an image of a cute, anthropomorphized cat character."
+    },
+    "finish_reason": null
+  }],
+  "usage": {
+    "prompt_tokens": 2188,
+    "total_tokens": 2204,
+    "completion_tokens": 16
+  }
+}
+```
+
+
+## Serving Llama-2 with SGLang for more traffic using SkyServe
+1. The process is the same as serving LLaVA, but with the model path changed to Llama-2. Below are example commands for reference.
+
+2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
+```bash
+sky serve up -n sglang-llama2 llama2.yaml --env HF_TOKEN=<your-huggingface-token>
+```
+The entire Service YAML can be found here: [llama2.yaml](llama2.yaml).
+
+3. Use `sky serve status` to check the status of the serving:
+```bash
+sky serve status sglang-llama2
+```
+
+You should get a similar output as the following:
+
+```console
+Services
+NAME           VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
+sglang-llama2  1        8m 16s  READY   2/2       34.32.43.41:30001
+
+Service Replicas
+SERVICE_NAME   ID  VERSION  IP              LAUNCHED     RESOURCES          STATUS  REGION
+sglang-llama2  1   1        34.85.154.76    16 mins ago  1x GCP({'L4': 1})  READY   us-east4
+sglang-llama2  2   1        34.145.195.253  16 mins ago  1x GCP({'L4': 1})  READY   us-east4
+```
+
+4. Check the endpoint of the service:
+```bash
+ENDPOINT=$(sky serve status --endpoint sglang-llama2)
 ```
 
 4. Once it status is `READY`, you can use the endpoint to interact with the model:

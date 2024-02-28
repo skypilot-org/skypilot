@@ -102,6 +102,8 @@ class AWS(clouds.Cloud):
     # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 248
 
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
+
     _regions: List[clouds.Region] = []
 
     _INDENT_PREFIX = '    '
@@ -255,9 +257,17 @@ class AWS(clouds.Cloud):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
         client = aws.client('ec2', region_name=region)
+        image_not_found_message = (
+            f'Image {image_id!r} not found in AWS region {region}.\n'
+            f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            'Example: ami-0729d913a335efca7')
         try:
             image_info = client.describe_images(ImageIds=[image_id])
-            image_info = image_info['Images'][0]
+            image_info = image_info.get('Images', [])
+            if not image_info:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(image_not_found_message)
+            image_info = image_info[0]
             image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
         except aws.botocore_exceptions().NoCredentialsError:
@@ -267,10 +277,7 @@ class AWS(clouds.Cloud):
             return DEFAULT_AMI_GB
         except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Image {image_id!r} not found in AWS region {region}.\n'
-                    f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-                    'Example: ami-0729d913a335efca7') from None
+                raise ValueError(image_not_found_message) from None
         return image_size
 
     @classmethod

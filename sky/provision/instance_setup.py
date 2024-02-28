@@ -34,7 +34,8 @@ _RAY_PRLIMIT = (
 _DUMP_RAY_PORTS = (
     'python -c \'import json, os; '
     f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\'')
+    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
+    'encoding="utf-8"))\';')
 
 _RAY_PORT_COMMAND = (
     'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
@@ -47,8 +48,17 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     f'{_RAY_PORT_COMMAND}; '
     'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
+# Command that waits for the ray status to be initialized. Otherwise, a later
+# `sky status -r` may fail due to the ray cluster not being ready.
+RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
+    f'while `RAY_ADDRESS=127.0.0.1:{constants.SKY_REMOTE_RAY_PORT} '
+    'ray status | grep -q "No cluster status."`; do '
+    'sleep 0.5; '
+    'echo "Waiting ray cluster to be initialized"; '
+    'done;')
+
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
+MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet;'
 
 
 def _auto_retry(func):
@@ -217,6 +227,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                                                  **ssh_credentials)
     assert cluster_info.head_instance_id is not None, (cluster_name,
                                                        cluster_info)
+
     # Log the head node's output to the provision.log
     log_path_abs = str(provision_logging.get_log_path())
     ray_options = (
@@ -230,6 +241,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         ray_options += f' --resources=\'{custom_resource}\''
 
     if cluster_info.custom_ray_options:
+        if 'use_external_ip' in cluster_info.custom_ray_options:
+            cluster_info.custom_ray_options.pop('use_external_ip')
         for key, value in cluster_info.custom_ray_options.items():
             ray_options += f' --{key}={value}'
 
@@ -243,7 +256,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
            f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
-           _DUMP_RAY_PORTS)
+           _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = ssh_runner.run(cmd,
@@ -285,11 +298,19 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 
     head_instance = cluster_info.get_head_instance()
     assert head_instance is not None, cluster_info
-    head_private_ip = head_instance.internal_ip
+    use_external_ip = False
+    if cluster_info.custom_ray_options:
+        # Some cloud providers, e.g. fluidstack, cannot connect to the internal
+        # IP of the head node from the worker nodes. In this case, we need to
+        # use the external IP of the head node.
+        use_external_ip = cluster_info.custom_ray_options.pop(
+            'use_external_ip', False)
+    head_ip = (head_instance.internal_ip
+               if not use_external_ip else head_instance.external_ip)
 
-    ray_options = (
-        f'--address={head_private_ip}:{constants.SKY_REMOTE_RAY_PORT} '
-        f'--object-manager-port=8076')
+    ray_options = (f'--address={head_ip}:{constants.SKY_REMOTE_RAY_PORT} '
+                   f'--object-manager-port=8076')
+
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
@@ -310,7 +331,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         # Instead, we check whether the raylet process is running on gcs address
         # that is connected to the head with the correct port.
         cmd = (f'RAY_PORT={ray_port}; ps aux | grep "ray/raylet/raylet" | '
-               f'grep "gcs-address={head_private_ip}:${{RAY_PORT}}" || '
+               f'grep "gcs-address={head_ip}:${{RAY_PORT}}" || '
                f'{{ {cmd} }}')
     else:
         cmd = 'ray stop; ' + cmd
@@ -356,8 +377,8 @@ def start_skylet_on_head_node(cluster_name: str,
                                                  **ssh_credentials)
     assert cluster_info.head_instance_id is not None, cluster_info
     log_path_abs = str(provision_logging.get_log_path())
-    logger.info(f'Running command on head node: {_MAYBE_SKYLET_RESTART_CMD}')
-    returncode, stdout, stderr = ssh_runner.run(_MAYBE_SKYLET_RESTART_CMD,
+    logger.info(f'Running command on head node: {MAYBE_SKYLET_RESTART_CMD}')
+    returncode, stdout, stderr = ssh_runner.run(MAYBE_SKYLET_RESTART_CMD,
                                                 stream_logs=False,
                                                 require_outputs=True,
                                                 log_path=log_path_abs)

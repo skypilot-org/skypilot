@@ -112,7 +112,7 @@ sky logs ${CLUSTER_NAME}-4 2
 fi
 
 # (1 node) sky start + sky exec + sky queue + sky logs
-if [ "$start_form" -le 5 ]; then
+if [ "$start_from" -le 5 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME}-5 examples/minimal.yaml

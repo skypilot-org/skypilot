@@ -648,6 +648,10 @@ class Azure(clouds.Cloud):
             original_statuses_list = [original_statuses_list]
         statuses = []
         for s in original_statuses_list:
+            if s not in status_map:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ClusterStatusFetchingError(
+                        f'Failed to parse status from Azure response: {stdout}')
             node_status = status_map[s]
             if node_status is not None:
                 statuses.append(node_status)

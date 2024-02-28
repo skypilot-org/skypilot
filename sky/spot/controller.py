@@ -390,7 +390,7 @@ def _handle_signal(job_id):
         # updated
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(str(signal_file) + '.lock'):
-            with signal_file.open(mode='r') as f:
+            with signal_file.open(mode='r', encoding='utf-8') as f:
                 user_signal = f.read().strip()
                 try:
                     user_signal = spot_utils.UserSignal(user_signal)
