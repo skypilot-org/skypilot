@@ -169,7 +169,9 @@ def up(
     # import yaml
     # def literal_presenter(dumper, data):
     #     if '\n' in data:
-    #         return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+    #         return dumper.represent_scalar('tag:yaml.org,2002:str',
+    #                                        data,
+    #                                        style='|')
     #     return dumper.represent_scalar('tag:yaml.org,2002:str', data)
     # yaml.add_representer(str, literal_presenter, Dumper=yaml.SafeDumper)
     # print(yaml.safe_dump(task.to_yaml_config(), sort_keys=False))
