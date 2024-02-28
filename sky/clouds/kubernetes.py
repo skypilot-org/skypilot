@@ -77,19 +77,6 @@ class Kubernetes(clouds.Cloud):
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
-        curr_context = kubernetes_utils.get_current_kube_config_context_name()
-        if curr_context == kubernetes_utils.KIND_CONTEXT_NAME:
-            # If we are using KIND, the loadbalancer service will never be
-            # assigned an external IP. Users may use ingress, but that requires
-            # blocking HTTP port 80.
-            # For now, we disable port opening feature on kind clusters.
-
-            """
-            unsupported_features[
-                clouds.CloudImplementationFeatures.OPEN_PORTS] = (
-                    'Opening ports is not supported in Kubernetes when '
-                    'using local kind cluster.')
-            """
         return unsupported_features
 
     @classmethod
