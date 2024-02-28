@@ -255,6 +255,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     # Reference: https://github.com/skypilot-org/skypilot/issues/2441
     cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+           'RAY_LOG_TO_DRIVER_EVENT_LEVEL="FATAL" '
+           'RAY_BACKEND_LOG_LEVEL="FATAL" '
            f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
            _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
@@ -322,6 +324,8 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     # `start_ray_on_head_node`.
     cmd = (f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+           'RAY_LOG_TO_DRIVER_EVENT_LEVEL="FATAL" '
+           'RAY_BACKEND_LOG_LEVEL="FATAL" '
            f'ray start --disable-usage-stats {ray_options} || exit 1;' +
            _RAY_PRLIMIT)
     if no_restart:
