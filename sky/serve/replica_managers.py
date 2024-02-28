@@ -1131,8 +1131,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     os.path.expanduser(old_task_yaml_path))
                 for key in ['service']:
                     old_config.pop(key)
-                # bump replica version if resource, setup, run and other fields
-                # are the same.
+                # Bump replica version if all fields except for service are the same.
                 if old_config == new_config:
                     logger.info(
                         f'Updating replica {info.replica_id} to version '
