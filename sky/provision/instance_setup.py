@@ -2,6 +2,7 @@
 from concurrent import futures
 import functools
 import hashlib
+import json
 import os
 import resource
 import time
@@ -13,6 +14,7 @@ from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
+from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -214,6 +216,17 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                              ssh_credentials=ssh_credentials)
 
 
+def _ray_gpu_options(custom_resource: str) -> str:
+    acc_dict = json.loads(custom_resource)
+    assert len(acc_dict) == 1, acc_dict
+    acc_name, acc_count = list(acc_dict.items())[0]
+    if not accelerator_registry.is_schedulable_non_gpu_accelerator(acc_name):
+        # We need to manually set the number of GPUs, as it may not
+        # automatically detect the GPUs within the container.
+        return f'--num-gpus={acc_count}'
+    return ''
+
+
 @_log_start_end
 @_auto_retry
 def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
@@ -239,6 +252,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += _ray_gpu_options(custom_resource)
 
     if cluster_info.custom_ray_options:
         if 'use_external_ip' in cluster_info.custom_ray_options:
@@ -315,6 +329,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += _ray_gpu_options(custom_resource)
 
     if cluster_info.custom_ray_options:
         for key, value in cluster_info.custom_ray_options.items():
