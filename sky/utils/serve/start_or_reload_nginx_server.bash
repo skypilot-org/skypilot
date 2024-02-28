@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Usage: sudo SERVER_PORT=... NGINX_PORT=... /path/to/start_or_reload_nginx_server.bash
+# Usage: sudo SERVER_PORT=... NGINX_PORT=... USERNAME=... PASSWORD=... \
+#          /path/to/start_or_reload_nginx_server.bash
 
 # TODO(tian): This script will be called multiple times on the controller. Make this
 # script to add a new nginx proxy everytime, instead of overwriting the original one.
