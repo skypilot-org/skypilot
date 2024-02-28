@@ -1121,6 +1121,19 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
                     assert len(value) == 1, \
                         f'Expected only one container, found {value}'
                     _merge_dicts(value[0], destination[key][0])
+                if key in ['volumes', 'volumeMounts']:
+                    # If the key is 'volumes' or 'volumeMounts', we search for
+                    # item with the same name and merge it.
+                    for new_volume in value:
+                        new_volume_name = new_volume.get('name')
+                        if new_volume_name is not None:
+                            destination_volume = next(
+                                (v for v in destination[key]
+                                 if v.get('name') == new_volume_name), None)
+                            if destination_volume is not None:
+                                _merge_dicts(new_volume, destination_volume)
+                            else:
+                                destination[key].append(new_volume)
                 else:
                     destination[key].extend(value)
             else:
