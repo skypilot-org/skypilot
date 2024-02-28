@@ -289,9 +289,13 @@ Available fields and semantics:
 
     # Size of the /dev/shm shared memory for the pod (optional).
     #
-    # Defaults to None, which means no size limits are set. If set, the value
+    # This field sets the upper limit on the size of the /dev/shm shared memory
+    # for the pod. Defaults to None, which means no size limits are set. If set, the value
     # must be a string that is a valid Kubernetes quantity, e.g., "3Gi".
     # https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/
+    #
+    # This may be required in certain production environments to limit misbehaving
+    # applications from consuming too much shared memory.
     devshm_size_limit: 3Gi
 
   # Advanced OCI configurations (optional).
