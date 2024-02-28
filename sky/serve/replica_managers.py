@@ -542,8 +542,8 @@ class ReplicaManager:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
-    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
-                       rolling_update: bool) -> None:
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
         raise NotImplementedError
 
 
@@ -583,13 +583,11 @@ class SkyPilotReplicaManager(ReplicaManager):
     ################################
 
     def get_ready_replica_urls(self) -> List[str]:
-        ready_replica_urls = []
         version2url = collections.defaultdict(list)
         for info in serve_state.get_replica_infos(self._service_name):
             if info.status == serve_state.ReplicaStatus.READY:
                 assert info.url is not None
                 version2url[info.version].append(info.url)
-                ready_replica_urls.append(info.url)
         # Try all version in descending order. There is possibility that
         # user consecutively update the service several times, and some
         # version might not have any ready replicas.
@@ -1102,8 +1100,8 @@ class SkyPilotReplicaManager(ReplicaManager):
     # SkyServe Update and replica versioning. #
     ###########################################
 
-    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
-                       rolling_update: bool) -> None:
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
         if version <= self.latest_version:
             logger.error(f'Invalid version: {version}, '
                          f'latest version: {self.latest_version}')
@@ -1113,7 +1111,6 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_version(self._service_name, version, spec)
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
-        self.rolling_update = rolling_update
 
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         spec = serve_state.get_spec(self._service_name, version)

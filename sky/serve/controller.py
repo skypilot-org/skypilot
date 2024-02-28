@@ -122,8 +122,7 @@ class SkyServeController:
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
-                self._replica_manager.update_version(
-                    version, service, rolling_update=rolling_update)
+                self._replica_manager.update_version(version, service)
 
                 if not (isinstance(
                         self._autoscaler,
