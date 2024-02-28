@@ -3061,12 +3061,12 @@ def test_skyserve_dynamic_ondemand_fallback():
         f'test-skyserve-dynamic-ondemand-fallback',
         [
             f'sky serve up -n {name} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
-            f'sleep 10',
+            f'sleep 20',
 
             # 2 on-demand (provisioning) + 2 Spot (provisioning).
             f'output=$(sky serve status {name});'
             'echo "$output" | grep -q "0/4" && break;',
-            f'sleep 10',
+            f'sleep 20',
             _check_two_spot_in_status(name),
             _check_two_ondemand_in_status(name),
 
