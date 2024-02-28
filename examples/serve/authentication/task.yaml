@@ -1,3 +1,9 @@
+# Usage:
+#   sky serve up -n authentication examples/serve/authentication/task.yaml
+#   export ENDPOINT=$(sky serve status --endpoint authentication)
+#   curl -H "Authorization: Bearer static_secret_token" \
+#     --location-trusted http://$ENDPOINT/compute
+
 service:
   readiness_probe: /health
   replicas: 1
