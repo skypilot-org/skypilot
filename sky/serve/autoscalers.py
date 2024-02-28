@@ -300,7 +300,7 @@ class RequestRateAutoscaler(Autoscaler):
         version = self.latest_version
         latest_version_with_min_replicas = None
         while version >= constants.INITIAL_VERSION:
-            if version2count[version] > self.min_replicas:
+            if version2count[version] >= self.min_replicas:
                 latest_version_with_min_replicas = version
                 break
             version -= 1
