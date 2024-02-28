@@ -103,7 +103,9 @@ Run :code:`kubectl describe nodes` or the below snippet to verify that your node
     $ kubectl get nodes -o json | jq '.items[] | {name: .metadata.name, capacity: .status.capacity}'
     # Look for the `nvidia.com/gpu` field under resources in the output. It should show the number of GPUs available for each node.
 
-If you do not see the :code:`nvidia.com/gpu` field, your cluster likely does not have the Nvidia GPU operator installed. Please follow the instructions in :ref:`kubernetes-setup-gpusupport` to install the Nvidia GPU operator.
+If you do not see the :code:`nvidia.com/gpu` field, your cluster likely does not have the Nvidia GPU operator installed.
+Please follow the instructions in :ref:`kubernetes-setup-gpusupport` to install the Nvidia GPU operator.
+Note that GPU operator installation can take several minutes, and you may see 0 capacity for ``nvidia.com/gpu`` resources until the installation is complete.
 
 .. tip::
 

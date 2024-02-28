@@ -190,7 +190,7 @@ If your Kubernetes cluster has Nvidia GPUs, ensure that:
 
 .. note::
 
-    GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerators`` label.
+    GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerator`` label.
 
 .. _automatic-gpu-labelling:
 
@@ -205,7 +205,7 @@ We provide a convenience script that automatically detects GPU types and labels 
 
  Created GPU labeler job for node ip-192-168-54-76.us-west-2.compute.internal
  Created GPU labeler job for node ip-192-168-93-215.us-west-2.compute.internal
- GPU labeling started - this may take a few minutes to complete.
+ GPU labeling started - this may take 10 min or more to complete.
  To check the status of GPU labeling jobs, run `kubectl get jobs --namespace=kube-system -l job=sky-gpu-labeler`
  You can check if nodes have been labeled by running `kubectl describe nodes` and looking for labels of the format `skypilot.co/accelerator: <gpu_name>`.
 

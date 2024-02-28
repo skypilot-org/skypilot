@@ -144,7 +144,7 @@ def label():
               'please ensure that they have the label '
               '`nvidia.com/gpu: <number of GPUs>`')
     else:
-        print('GPU labeling started - this may take a few minutes to complete.'
+        print('GPU labeling started - this may take 10 min or more to complete.'
               '\nTo check the status of GPU labeling jobs, run '
               '`kubectl get jobs -n kube-system -l job=sky-gpu-labeler`'
               '\nYou can check if nodes have been labeled by running '
