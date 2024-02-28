@@ -48,7 +48,7 @@ class SkyServeController:
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.Autoscaler.from_spec(service_spec))
+            autoscalers.Autoscaler.from_spec(service_name, service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -125,10 +125,12 @@ class SkyServeController:
 
                 if not (isinstance(
                         self._autoscaler,
-                        type(autoscalers.Autoscaler.from_spec(service)))):
+                        type(
+                            autoscalers.Autoscaler.from_spec(
+                                self._service_name, service)))):
                     old_autoscaler = self._autoscaler
-                    self._autoscaler = (
-                        autoscalers.Autoscaler.from_spec(service))
+                    self._autoscaler = (autoscalers.Autoscaler.from_spec(
+                        self._service_name, service))
                     self._autoscaler.load_dynamic_states(
                         old_autoscaler.dump_dynamic_states())
                 else:

@@ -57,7 +57,8 @@ class AutoscalerDecision:
 class Autoscaler:
     """Abstract class for autoscalers."""
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the autoscaler.
 
         Variables:
@@ -67,6 +68,7 @@ class Autoscaler:
             target_num_replicas: Target number of replicas output by autoscaler.
             latest_version: latest version of the service.
         """
+        self._service_name: str = service_name
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = (spec.max_replicas if spec.max_replicas
                                   is not None else spec.min_replicas)
@@ -101,12 +103,13 @@ class Autoscaler:
         raise NotImplementedError
 
     @classmethod
-    def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
+    def from_spec(cls, service_name: str,
+                  spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
         if spec.use_ondemand_fallback:
-            return FallbackRequestRateAutoscaler(spec)
+            return FallbackRequestRateAutoscaler(service_name, spec)
         else:
-            return RequestRateAutoscaler(spec)
+            return RequestRateAutoscaler(service_name, spec)
 
     def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
@@ -125,7 +128,8 @@ class RequestRateAutoscaler(Autoscaler):
     either spot or on-demand, but not both.
     """
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
@@ -137,7 +141,7 @@ class RequestRateAutoscaler(Autoscaler):
             scale_up_consecutive_periods: period for scaling up.
             scale_down_consecutive_periods: period for scaling down.
         """
-        super().__init__(spec)
+        super().__init__(service_name, spec)
         self.target_qps_per_replica: Optional[
             float] = spec.target_qps_per_replica
         self.qps_window_size: int = constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
@@ -300,7 +304,8 @@ class RequestRateAutoscaler(Autoscaler):
         version = self.latest_version
         latest_version_with_min_replicas = None
         while version >= constants.INITIAL_VERSION:
-            if version2count[version] >= self.min_replicas:
+            spec = serve_state.get_spec(self._service_name, version)
+            if spec is not None and version2count[version] >= spec.min_replicas:
                 latest_version_with_min_replicas = version
                 break
             version -= 1
@@ -411,8 +416,9 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
     on-demand instance are used as dynamic fallback of spot.
     """
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
-        super().__init__(spec)
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
+        super().__init__(service_name, spec)
         self.base_ondemand_fallback_replicas: int = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
