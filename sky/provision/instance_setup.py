@@ -220,11 +220,11 @@ def _ray_gpu_options(custom_resource: str) -> str:
     acc_dict = json.loads(custom_resource)
     assert len(acc_dict) == 1, acc_dict
     acc_name, acc_count = list(acc_dict.items())[0]
-    if not accelerator_registry.is_schedulable_non_gpu_accelerator(acc_name):
-        # We need to manually set the number of GPUs, as it may not
-        # automatically detect the GPUs within the container.
-        return f'--num-gpus={acc_count}'
-    return ''
+    if accelerator_registry.is_schedulable_non_gpu_accelerator(acc_name):
+        return ''
+    # We need to manually set the number of GPUs, as it may not automatically
+    # detect the GPUs within the container.
+    return f' --num-gpus={acc_count}'
 
 
 @_log_start_end
