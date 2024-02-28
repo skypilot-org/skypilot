@@ -130,7 +130,7 @@ class SkyServeController:
                     self._autoscaler = (
                         autoscalers.Autoscaler.from_spec(service))
                     self._autoscaler.load_dynamic_states(
-                        old_autoscaler.dump_states())
+                        old_autoscaler.dump_dynamic_states())
                 else:
                     self._autoscaler.update_version(version, service)
                 return {'message': 'Success'}

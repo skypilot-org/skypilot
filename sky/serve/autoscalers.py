@@ -107,7 +107,7 @@ class Autoscaler:
         else:
             return RequestRateAutoscaler(spec)
 
-    def dump_states(self) -> Dict[str, Any]:
+    def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
         raise NotImplementedError
 
@@ -269,6 +269,11 @@ class RequestRateAutoscaler(Autoscaler):
                 # Including: NOT_READY, SHUTTING_DOWN, FAILED,
                 # FAILED_CLEANUP, PREEMPTED, UNKNOWN.
                 if info.status in status_order else -1,
+                # `-info.replica_id` is to furhter sort the replicas with the
+                # same state by the time it starts launching. In that case,
+                # if two replicas are both in PROVISIONING state, we will scale
+                # down the one that starts provisioning later, i.e., it will
+                # take a longer time for it to be READY.
                 -info.replica_id))
 
         return [info.replica_id for info in replica_infos_sorted][:num_limit]
@@ -367,7 +372,7 @@ class RequestRateAutoscaler(Autoscaler):
             logger.info('No scaling needed.')
         return scaling_options
 
-    def dump_states(self) -> Dict[str, Any]:
+    def dump_dynamic_states(self) -> Dict[str, Any]:
         return {
             'request_timestamps': self.request_timestamps,
             'latest_version': self.latest_version

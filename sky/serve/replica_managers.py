@@ -175,9 +175,7 @@ def _get_resources_ports(task_yaml: str) -> str:
 
 def _should_use_spot(task_yaml: str,
                      resource_override: Optional[Dict[str, Any]]) -> bool:
-    """Get whether the task should use spot based on the overeride
-    and task_yaml.
-    """
+    """Get whether the task should use spot."""
     if resource_override is not None:
         use_spot_override = resource_override.get('use_spot')
         if use_spot_override is not None:

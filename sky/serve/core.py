@@ -68,7 +68,6 @@ def _validate_service_task(task: 'sky.Task') -> None:
                                  'SkyServe will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
-    requested_cloud: Optional['clouds.Cloud'] = None
     replica_ingress_port: Optional[int] = None
     for requested_resources in task.resources:
         if (task.service.use_ondemand_fallback and
@@ -94,12 +93,6 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     f'Got multiple ports: {service_port} and '
                     f'{replica_ingress_port} in different resources. '
                     'Please specify the same port instead.')
-        if requested_cloud is None:
-            requested_cloud = requested_resources.cloud
-        if requested_cloud != requested_resources.cloud:
-            raise ValueError(f'Got multiple clouds: {requested_cloud} and '
-                             f'{requested_resources.cloud} in different '
-                             'resources. Please specify single cloud instead.')
 
 
 @usage_lib.entrypoint
