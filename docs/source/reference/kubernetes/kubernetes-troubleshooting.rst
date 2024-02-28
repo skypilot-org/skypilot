@@ -1,19 +1,19 @@
-.. _kubernetes-debugging:
+.. _kubernetes-troubleshooting:
 
-Debugging Kubernetes Issues
-===========================
+Troubleshooting Kubernetes
+==========================
 
 If you're unable to run SkyPilot tasks on your Kubernetes cluster, this guide will help you debug common issues.
 
 If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <http://www.github.com/skypilot-org/skypilot>`_.
 
-.. _kubernetes-debugging-basic:
+.. _kubernetes-troubleshooting-basic:
 
 Verifying basic setup
 ---------------------
 
 Step A0 - Is Kubectl functional?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Are you able to run :code:`kubectl get nodes` without any errors?
 
@@ -32,7 +32,7 @@ If you see an error, ensure that your kubeconfig file at :code:`~/.kube/config` 
     For example, :code:`--context`, :code:`--token`, :code:`--certificate-authority`, etc. should all be configured directly in the kubeconfig file.
 
 Step A1 - Can you create pods and services?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 As a sanity check, we will now try creating a simple pod running a HTTP server and a service to verify that your cluster and it's networking is functional.
 
@@ -69,7 +69,7 @@ If you see an error, ensure that your kubeconfig file at :code:`~/.kube/config` 
 
 
 Step A3 - Can you launch a SkyPilot task?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Next, try running a simple hello world task to verify that SkyPilot can launch tasks on your cluster.
 
@@ -84,7 +84,7 @@ Next, try running a simple hello world task to verify that SkyPilot can launch t
 If your task does not run, check the terminal and provisioning logs for errors. Path to provisioning logs can be found at the start of the SkyPilot output,
 starting with "To view detailed progress: ...".
 
-.. _kubernetes-debugging-gpus:
+.. _kubernetes-troubleshooting-gpus:
 
 Checking GPU support
 --------------------
@@ -134,7 +134,7 @@ For example, for RKE2, refer to instructions on `Nvidia GPU Operator installatio
 
 
 Step B2 - Are your nodes labeled correctly?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 SkyPilot requires nodes to be labeled with the correct GPU type to run GPU tasks. Run :code:`kubectl get nodes -o json` to verify that your nodes are labeled correctly.
 
@@ -180,7 +180,7 @@ Next, try running a simple GPU task to verify that SkyPilot can launch GPU tasks
 If your task does not run, check the terminal and provisioning logs for errors. Path to provisioning logs can be found at the start of the SkyPilot output,
 starting with "To view detailed progress: ...".
 
-.. _kubernetes-debugging-ports:
+.. _kubernetes-troubleshooting-ports:
 
 Verifying ports support
 -----------------------
@@ -190,7 +190,7 @@ to configure SkyPilot and your cluster to use the desired method (LoadBalancer s
 
 In this section, we will first verify that your cluster has ports support and services launched by SkyPilot can be accessed.
 
-.. _kubernetes-debugging-ports-loadbalancer:
+.. _kubernetes-troubleshooting-ports-loadbalancer:
 
 Step C0 - Verifying LoadBalancer service setup
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -199,7 +199,7 @@ If you are using LoadBalancer services for ports support, follow the below steps
 
 .. tip::
 
-    If you are using Nginx Ingress for ports support, skip to :ref:`kubernetes-debugging-ports-nginx`.
+    If you are using Nginx Ingress for ports support, skip to :ref:`kubernetes-troubleshooting-ports-nginx`.
 
 Does your cluster support LoadBalancer services?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -226,7 +226,7 @@ To verify that your cluster supports LoadBalancer services, we will create an ex
 If your service does not get an external IP, check the service's status with :code:`kubectl describe svc skytest-loadbalancer`. Your cluster may not support LoadBalancer services.
 
 
-.. _kubernetes-debugging-ports-nginx:
+.. _kubernetes-troubleshooting-ports-nginx:
 
 Step C0 - Verifying Nginx Ingress setup
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -273,7 +273,7 @@ Take a look at your :code:`~/.sky/config.yaml` file to verify that the :code:`po
 
 If not, add the :code:`ports: ingress` section to your :code:`~/.sky/config.yaml` file.
 
-.. _kubernetes-debugging-ports-dryrun:
+.. _kubernetes-troubleshooting-ports-dryrun:
 
 Step C1 - Verifying SkyPilot can launch services
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

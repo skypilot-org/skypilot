@@ -455,3 +455,7 @@ Note that this dashboard can only be accessed from the machine where the ``kubec
     `Kubernetes documentation <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_
     for more information on how to set up access control for the dashboard.
 
+Troubleshooting Kubernetes Setup
+--------------------------------
+
+If you encounter issues while setting up your Kubernetes cluster, please refer to the :ref:`troubleshooting guide <kubernetes-troubleshooting>` to diagnose and fix issues.
