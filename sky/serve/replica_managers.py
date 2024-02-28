@@ -1120,7 +1120,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         # Always create new replicas and scale down old ones when file_mounts
         # are not empty.
-        if new_config.get('file_mounts', None) is not None:
+        if new_config.get('file_mounts', None) != {}:
             return
         for key in ['service']:
             new_config.pop(key)
@@ -1138,7 +1138,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # the same. File mounts should both be empty, as update always
                 # create new buckets if they are not empty.
                 if (old_config == new_config and
-                        old_config.get('file_mounts', None) is None):
+                        old_config.get('file_mounts', None) == {}):
                     logger.info(
                         f'Updating replica {info.replica_id} to version '
                         f'{version}. Replica {info.replica_id}\'s config '
