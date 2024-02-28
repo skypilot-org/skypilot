@@ -236,6 +236,7 @@ extras_require: Dict[str, List[str]] = {
     'kubernetes': ['kubernetes>=20.0.0'],
     'remote': remote,
     'runpod': ['runpod>=1.5.1'],
+    'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.8'],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
