@@ -327,12 +327,22 @@ def get_service_schema():
                 'properties': {
                     'min_replicas': {
                         'type': 'integer',
+                        'minimum': 0,
                     },
                     'max_replicas': {
                         'type': 'integer',
+                        'minimum': 0,
                     },
                     'target_qps_per_replica': {
                         'type': 'number',
+                        'minimum': 0,
+                    },
+                    'dynamic_ondemand_fallback': {
+                        'type': 'boolean',
+                    },
+                    'base_ondemand_fallback_replicas': {
+                        'type': 'integer',
+                        'minimum': 0,
                     },
                     'upscale_delay_seconds': {
                         'type': 'number',

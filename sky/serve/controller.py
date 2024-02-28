@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 import traceback
+from typing import Any, Dict, List
 
 import fastapi
 import uvicorn
@@ -47,7 +48,7 @@ class SkyServeController:
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.RequestRateAutoscaler(service_spec))
+            autoscalers.Autoscaler.from_spec(service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -94,9 +95,11 @@ class SkyServeController:
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
-            request_aggregator = request_data.get('request_aggregator')
-            logger.info(
-                f'Received inflight request information: {request_aggregator}')
+            # TODO(MaoZiming): Check aggregator type.
+            request_aggregator: Dict[str, Any] = request_data.get(
+                'request_aggregator', {})
+            timestamps: List[int] = request_aggregator.get('timestamps', [])
+            logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
             return {
                 'ready_replica_urls':
@@ -119,10 +122,22 @@ class SkyServeController:
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
-                self._replica_manager.update_version(version, service,
-                                                     rolling_update)
-                self._autoscaler.update_version(version, service,
-                                                rolling_update)
+                self._replica_manager.update_version(version, service)
+
+                if not (isinstance(
+                        self._autoscaler,
+                        type(autoscalers.Autoscaler.from_spec(service)))):
+                    if rolling_update:
+                        logger.info('Rolling update is not supported for '
+                                    'changing autoscaler type. Ignoring.')
+                    old_autoscaler = self._autoscaler
+                    self._autoscaler = (
+                        autoscalers.Autoscaler.from_spec(service))
+                    self._autoscaler.load_dynamic_states(
+                        old_autoscaler.dump_dynamic_states())
+                else:
+                    self._autoscaler.update_version(
+                        version, service, rolling_update=rolling_update)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in update_service: '
