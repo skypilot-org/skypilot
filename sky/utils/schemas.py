@@ -316,7 +316,20 @@ def get_service_schema():
                             }, {
                                 'type': 'object',
                             }]
-                        }
+                        },
+                        'authentication': {
+                            'type': 'object',
+                            'required': ['username', 'password'],
+                            'additionalProperties': False,
+                            'properties': {
+                                'username': {
+                                    'type': 'string',
+                                },
+                                'password': {
+                                    'type': 'string',
+                                },
+                            },
+                        },
                     }
                 }]
             },

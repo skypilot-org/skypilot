@@ -95,6 +95,43 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     'Please specify the same port instead.')
 
 
+def _try_rewrite_service_with_authentication(task: 'sky.Task') -> None:
+    """Try to rewrite the task with authentication.
+
+    Must be called after _validate_service_task.
+    """
+    assert task.service is not None
+    if not task.service.has_auth_section:
+        return
+
+    # 1. Rewrite the replica ingress port with nginx proxy port.
+    requested_resources = list(task.resources)[0]
+    replica_ingress_port = list(
+        resources_utils.port_ranges_to_set(requested_resources.ports))[0]
+    # TODO(tian): Automatically select a new ingress port for nginx
+    if replica_ingress_port == serve_constants.SKYSERVE_NGINX_PORT:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Port {replica_ingress_port} is reserved for SkyServe nginx '
+                'reverse proxy. Please specify another port for the service.')
+    new_resources_list = []
+    for resources in task.resources:
+        new_resources_list.append(
+            resources.copy(ports=[serve_constants.SKYSERVE_NGINX_PORT]))
+    task.set_resources(type(task.resources)(new_resources_list))
+
+    # 2. Add nginx reverse proxy to the task.
+    original_setup = '' if task.setup is None else task.setup
+    task.setup = ('SKY_PATH=$(python -c "import os, sky; '
+                  'print(os.path.dirname(sky.__file__))")\n'
+                  f'sudo SERVER_PORT={replica_ingress_port} '
+                  f'NGINX_PORT={serve_constants.SKYSERVE_NGINX_PORT} '
+                  f'USERNAME={task.service.auth_username} '
+                  f'PASSWORD={task.service.auth_password} '
+                  f'$SKY_PATH/utils/serve/start_or_reload_nginx_server.bash\n'
+                  f'{original_setup}')
+
+
 @usage_lib.entrypoint
 def up(
     task: 'sky.Task',
@@ -123,6 +160,11 @@ def up(
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     _validate_service_task(task)
+
+    _try_rewrite_service_with_authentication(task)
+    import yaml
+    print(yaml.dump(task.to_yaml_config()))
+    exit()
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
@@ -310,6 +352,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
         service_name: Name of the service.
     """
     _validate_service_task(task)
+    _try_rewrite_service_with_authentication(task)
     cluster_status, handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
