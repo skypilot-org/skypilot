@@ -119,7 +119,22 @@ class PaperspaceCloudClient:
         return self.list_startup_scripts(ADD_KEY_SCRIPT)[0]['id']
 
     def set_sky_key_script(self, public_key: str) -> None:
-        script = f'echo "{public_key}" >> /home/paperspace/.ssh/authorized_keys'
+        script = (
+            'if ! command -v docker &> /dev/null; then \n'
+            'apt-get update \n'
+            'apt-get install -y ca-certificates curl \n'
+            'install -m 0755 -d /etc/apt/keyrings \n'
+            'curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \n'  # pylint: disable=line-too-long
+            'chmod a+r /etc/apt/keyrings/docker.asc \n'
+            'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \\\n'  # pylint: disable=line-too-long
+            '$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \\\n'
+            'tee /etc/apt/sources.list.d/docker.list > /dev/null \n'
+            'apt-get update \n'
+            'apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \n'  # pylint: disable=line-too-long
+            'fi \n'
+            'docker run hello-world \n'
+            'usermod -aG docker paperspace \n'
+            f'echo "{public_key}" >> /home/paperspace/.ssh/authorized_keys \n')
         try:
             script_id = self.get_sky_key_script()
             _try_request_with_backoff(

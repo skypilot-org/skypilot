@@ -1340,7 +1340,6 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_fluidstack  # Doesn't support Fluidstack for now
 @pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
-@pytest.mark.no_paperspace  # Doesn't support Paperspace for now
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
