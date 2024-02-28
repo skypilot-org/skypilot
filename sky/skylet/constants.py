@@ -1,4 +1,7 @@
 """Constants for SkyPilot."""
+from packaging import version
+
+import sky
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
@@ -78,6 +81,24 @@ CONDA_INSTALLATION_COMMANDS = (
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     'conda config --set auto_activate_base true); '
     'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;')
+
+_sky_version = str(version.parse(sky.__version__))
+RAY_SKYPILOT_INSTALLATION_COMMANDS = (
+    '(type -a python | grep -q python3) || '
+    'echo \'alias python=python3\' >> ~/.bashrc;'
+    '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
+    'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
+    f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null || '  # pylint: disable=line-too-long
+    f'pip3 install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION};'
+    'source ~/.bashrc;'
+    '{ pip3 list | grep "skypilot " && '
+    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
+    '{ pip3 uninstall skypilot -y; '
+    'pip3 install "$(echo ~/.sky/wheels/{sky_wheel_hash}/'
+    f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
+    'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
+    'exit 1; }; '
+    'python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;')
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
