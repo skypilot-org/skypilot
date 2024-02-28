@@ -1,5 +1,4 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
-import collections
 import dataclasses
 import enum
 import functools
@@ -10,7 +9,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, DefaultDict, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
 import requests
@@ -524,12 +523,6 @@ class ReplicaManager:
         serve_state.add_or_update_version(self._service_name,
                                           self.latest_version, spec)
 
-    def get_version2url(self) -> DefaultDict[int, List[str]]:
-        """Get a dict that maps replica versions to all ready replicas 's
-        IP addresses of the matching versions.
-        """
-        raise NotImplementedError
-
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
         """Scale up the service by 1 replica with resources_override.
@@ -581,14 +574,6 @@ class SkyPilotReplicaManager(ReplicaManager):
     ################################
     # Replica management functions #
     ################################
-
-    def get_version2url(self) -> DefaultDict[int, List[str]]:
-        version2url: DefaultDict[int, List[str]] = collections.defaultdict(list)
-        for info in serve_state.get_replica_infos(self._service_name):
-            if info.status == serve_state.ReplicaStatus.READY:
-                assert info.url is not None
-                version2url[info.version].append(info.url)
-        return version2url
 
     def _launch_replica(
         self,

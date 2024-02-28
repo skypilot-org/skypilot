@@ -2,12 +2,12 @@
 
 Responsible for autoscaling and replica management.
 """
-
+import collections
 import logging
 import threading
 import time
 import traceback
-from typing import Any, Dict, List
+from typing import Any, DefaultDict, Dict, List
 
 import fastapi
 import uvicorn
@@ -102,7 +102,13 @@ class SkyServeController:
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
-            version2url = self._replica_manager.get_version2url()
+            version2url: DefaultDict[int,
+                                     List[str]] = collections.defaultdict(list)
+            for info in serve_state.get_replica_infos(self._service_name):
+                if info.status == serve_state.ReplicaStatus.READY:
+                    assert info.url is not None
+                    version2url[info.version].append(info.url)
+
             latest_version_with_min_replicas = (
                 self._autoscaler.get_latest_version_with_min_replicas(
                     replica_info))
@@ -115,8 +121,9 @@ class SkyServeController:
                     latest_version_with_min_replicas, [])
             elif len(version2url) > 0:
                 # if there is no version with min_replicas replicas,
-                # return the latest version with at least one replica.
-                ready_replica_urls = version2url.get(max(version2url.keys()),
+                # return the earliest version with at least one replica
+                # for better backward compatibility.
+                ready_replica_urls = version2url.get(min(version2url.keys()),
                                                      [])
                 assert len(ready_replica_urls) > 0, version2url
 
