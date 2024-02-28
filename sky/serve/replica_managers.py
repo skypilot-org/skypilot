@@ -25,6 +25,7 @@ from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.serve import service
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -884,8 +885,12 @@ class SkyPilotReplicaManager(ReplicaManager):
         if self.least_recent_version < current_least_recent_version:
             for version in range(self.least_recent_version,
                                  current_least_recent_version):
+                task_yaml = serve_utils.generate_task_yaml_file_name(
+                    self._service_name, version)
                 # Delete old version metadata.
                 serve_state.delete_version(self._service_name, version)
+                # Delete storage buckets of older versions.
+                service.cleanup_storage(task_yaml)
             # newest version will be cleaned in serve down
             self.least_recent_version = current_least_recent_version
 
@@ -1114,17 +1119,17 @@ class SkyPilotReplicaManager(ReplicaManager):
         # service specs, e.g. scale down the service.
         # TODO(MaoZiming): Check whether user updates any file in file mounts.
         new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
-        for key in ['service', 'file_mounts']:
+        for key in ['service']:
             new_config.pop(key)
         replica_infos = serve_state.get_replica_infos(self._service_name)
         for info in replica_infos:
-            if info.version < version and info.is_launched:
+            if info.version < version and info.is_provisioning_or_launched:
                 # Assume user does not change the yaml file on the controller.
                 old_task_yaml_path = serve_utils.generate_task_yaml_file_name(
                     self._service_name, info.version)
                 old_config = common_utils.read_yaml(
                     os.path.expanduser(old_task_yaml_path))
-                for key in ['service', 'file_mounts']:
+                for key in ['service']:
                     old_config.pop(key)
                 # bump replica version if resource, setup, run and other fields
                 # are the same.
