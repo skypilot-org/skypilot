@@ -258,6 +258,7 @@ class RayCodeGen:
                 address={ray_address!r},
                 namespace='__sky__{job_id}__',
                 log_to_driver=True,
+                logging_level='CRITICAL',
                 **kwargs
             )
             def get_or_fail(futures, pg) -> List[int]:
@@ -285,7 +286,6 @@ class RayCodeGen:
                 # next job can be scheduled on the released resources immediately.
                 ray_util.remove_placement_group(pg)
                 sys.stdout.flush()
-                sys.stderr.flush()
                 return returncodes
 
             run_fn = None
@@ -372,14 +372,12 @@ class RayCodeGen:
                 message = {_CTRL_C_TIP_MESSAGE!r} + '\\n'
                 message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
                 print(message,
-                      file=sys.stderr,
                       flush=True)
                 # FIXME: This will print the error message from autoscaler if
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
                 print('INFO: All task resources reserved.',
-                      file=sys.stderr,
                       flush=True)
                 """)
         ]
@@ -427,7 +425,6 @@ class RayCodeGen:
                     print('ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with '
                         'return code list:{colorama.Style.RESET_ALL}',
                         setup_returncodes,
-                        file=sys.stderr,
                         flush=True)
                     # Need this to set the job status in ray job to be FAILED.
                     sys.exit(1)
@@ -623,7 +620,6 @@ class RayCodeGen:
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
                       reason,
-                      file=sys.stderr,
                       flush=True)
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
@@ -3139,7 +3135,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{cd} && ray job submit '
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
-            f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
+            # Redirect stderr to /dev/null to avoid distracting error from ray.
+            f'"{executable} -u {script_path} > {remote_log_path} 2> /dev/null"')
 
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
