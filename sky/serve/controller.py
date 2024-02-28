@@ -122,7 +122,8 @@ class SkyServeController:
             elif len(version2url) > 0:
                 # if there is no version with min_replicas replicas,
                 # return the earliest version with at least one replica
-                # for better backward compatibility.
+                # for better backward compatibility. This ensures redirected
+                # replica versions are monotonically increasing.
                 ready_replica_urls = version2url.get(min(version2url.keys()),
                                                      [])
                 assert len(ready_replica_urls) > 0, version2url
