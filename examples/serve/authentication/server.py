@@ -1,5 +1,6 @@
 import fastapi
 from fastapi import security
+import uvicorn
 
 app = fastapi.FastAPI()
 
@@ -27,5 +28,4 @@ async def compute(_=fastapi.Depends(verify_token)):
 
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8087)
