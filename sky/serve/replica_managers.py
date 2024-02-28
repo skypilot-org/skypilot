@@ -602,6 +602,13 @@ class SkyPilotReplicaManager(ReplicaManager):
                     version] > spec.min_replicas:
                 return version2url[version]
             version -= 1
+        # if there is no version with min_replicas replicas,
+        # return the latest version with at least one replica.
+        version = self.latest_version
+        while version >= serve_constants.INITIAL_VERSION:
+            if version in version2url:
+                return version2url[version]
+            version -= 1
         return []
 
     def _launch_replica(
