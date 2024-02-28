@@ -162,8 +162,8 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
-            {% if k8s_dshm_size_limit is not none %}
-            sizeLimit: {{k8s_dshm_size_limit}}
+            {% if k8s_devshm_size_limit is not none %}
+            sizeLimit: {{k8s_devshm_size_limit}}
             {% endif %}
         - name: dev-fuse    # Required for fuse mounting
           hostPath:

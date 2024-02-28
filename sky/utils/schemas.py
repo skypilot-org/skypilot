@@ -604,7 +604,7 @@ def get_config_schema():
                     # Allow arbitrary keys since validating pod spec is hard
                     'additionalProperties': True,
                 },
-                'dshm_size_limit': {
+                'devshm_size_limit': {
                     'type': 'string'
                 }
             }
