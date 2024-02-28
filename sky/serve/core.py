@@ -28,6 +28,8 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import clouds
 
+logger = sky_logging.init_logger(__name__)
+
 
 @usage_lib.entrypoint
 def up(
@@ -277,8 +279,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
         'Service controller is stopped. There is no service to update. '
         f'To spin up a new service, use {backend_utils.BOLD}'
         f'sky serve up{backend_utils.RESET_BOLD}',
-        non_existent_message='Service does not exist. '
-        'To spin up a new service, '
+        non_existent_message='To spin up a new service, '
         f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
 
@@ -469,6 +470,56 @@ def down(
         raise RuntimeError(e.error_msg) from e
 
     sky_logging.print(stdout)
+
+
+@usage_lib.entrypoint
+def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
+    """Tear down a specific replica
+
+    Args:
+        service_name: Name of the service.
+        replica_id: ID of replica to terminate.
+        purge: Whether to terminate replicas in a failed status. These replicas
+          may lead to resource leaks.
+
+    Raises:
+        sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
+        RuntimeError: if failed to terminate the replica.
+    """
+    cluster_status, handle = backend_utils.is_controller_up(
+        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        stopped_message=
+        'No service is running now. Please spin up a service first.',
+        non_existent_message='To spin up a new service, '
+        f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
+    )
+    if handle is None or handle.head_ip is None:
+        # The error message is already printed in
+        # backend_utils.is_controller_up
+        # TODO(zhwu): Move the error message into the exception.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(message='',
+                                               cluster_status=cluster_status)
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    code = serve_utils.ServeCodeGen.terminate_replica(service_name, replica_id,
+                                                      purge)
+    returncode = backend.run_on_head(handle,
+                                     code,
+                                     require_outputs=False,
+                                     stream_logs=False)
+    try:
+        subprocess_utils.handle_returncode(
+            returncode, code, f'Failed to terminate replica {replica_id}')
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+    logger.info(
+        f'{colorama.Fore.GREEN}Termination of replica {replica_id} for '
+        f'{service_name!r} has been scheduled.{colorama.Style.RESET_ALL}\n'
+        f'Please use {backend_utils.BOLD}sky serve status {service_name} '
+        f'{backend_utils.RESET_BOLD}to check the latest status.')
 
 
 @usage_lib.entrypoint

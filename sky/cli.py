@@ -4634,9 +4634,15 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--replica-id',
+              '-r',
+              default=None,
+              type=int,
+              help='Tear down a given replica')
 # pylint: disable=redefined-builtin
-def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
-    """Teardown service(s).
+def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
+               replica_id: Optional[int]):
+    """Teardown service(s) or a replica.
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
     both SERVICE_NAMES and ``--all`` are supplied, the latter takes precedence.
@@ -4662,6 +4668,12 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
         \b
         # Forcefully tear down a service in failed status.
         sky serve down failed-service --purge
+        \b
+        # Tear down a specific replica
+        sky serve down my-service --replica-id 1
+        \b
+        # Purge a specific replica
+        sky serve down my-service --replica-id 1 --purge
     """
     if sum([len(service_names) > 0, all]) != 1:
         argument_str = f'SERVICE_NAMES={",".join(service_names)}' if len(
@@ -4670,6 +4682,11 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
         raise click.UsageError(
             'Can only specify one of SERVICE_NAMES or --all. '
             f'Provided {argument_str!r}.')
+    replica_id_is_defined = replica_id is not None
+    if replica_id_is_defined and len(service_names) != 1:
+        raise click.UsageError(
+            'Must specify one and only one service when replica ID is '
+            'specified.')
 
     _, handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -4678,17 +4695,23 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
         # Hint messages already printed by the call above.
         sys.exit(1)
 
-    if not yes:
-        quoted_service_names = [f'{name!r}' for name in service_names]
-        service_identity_str = f'service(s) {", ".join(quoted_service_names)}'
-        if all:
-            service_identity_str = 'all services'
-        click.confirm(f'Terminating {service_identity_str}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
-
-    serve_lib.down(service_names=service_names, all=all, purge=purge)
+    if replica_id_is_defined:
+        if not yes:
+            click.confirm(f'Terminating replica ID {replica_id} in '
+                          f'{service_names[0]!r}. Proceed?')
+        serve_lib.terminate_replica(service_names[0], replica_id, purge)
+    else:
+        if not yes:
+            quoted_service_names = [f'{name!r}' for name in service_names]
+            service_identity_str = (f'service(s) '
+                                    f'{", ".join(quoted_service_names)}')
+            if all:
+                service_identity_str = 'all services'
+            click.confirm(f'Terminating {service_identity_str}. Proceed?',
+                          default=True,
+                          abort=True,
+                          show_default=True)
+        serve_lib.down(service_names=service_names, all=all, purge=purge)
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
