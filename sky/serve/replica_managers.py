@@ -10,7 +10,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, DefaultDict, Dict, List, Optional, Tuple
 
 import psutil
 import requests
@@ -582,18 +582,22 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def get_ready_replica_urls(self) -> List[str]:
         ready_replica_urls = []
-        version2url = collections.defaultdict(list)
+        version2url: DefaultDict[int, List[str]] = collections.defaultdict(list)
+        version2count: DefaultDict[int, int] = collections.defaultdict(int)
         for info in serve_state.get_replica_infos(self._service_name):
             if info.status == serve_state.ReplicaStatus.READY:
                 assert info.url is not None
                 version2url[info.version].append(info.url)
+                version2count[info.version] += 1
                 ready_replica_urls.append(info.url)
         # Try all version in descending order. There is possibility that
         # user consecutively update the service several times, and some
         # version might not have any ready replicas.
         version = self.latest_version
         while version >= serve_constants.INITIAL_VERSION:
-            if version in version2url:
+            spec = serve_state.get_spec(self._service_name, version)
+            if spec is not None and version in version2url and version2count[
+                    version] > spec.min_replicas:
                 return version2url[version]
             version -= 1
         return []
