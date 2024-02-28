@@ -118,8 +118,6 @@ def _cleanup(service_name: str) -> bool:
     serve_state.remove_service_versions(service_name)
     success = True
     for version in versions:
-        logger.info(f'Cleaning up storage for version {version}, '
-                    f'task_yaml: {task_yaml}')
         task_yaml: str = serve_utils.generate_task_yaml_file_name(
             service_name, version)
         logger.info(f'Cleaning up storage for version {version}, '
