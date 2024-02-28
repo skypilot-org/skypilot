@@ -101,10 +101,24 @@ class SkyServeController:
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
-            return {
-                'ready_replica_urls':
-                    self._replica_manager.get_ready_replica_urls()
-            }
+            version2url = self._replica_manager.get_version2url()
+            latest_version_with_min_replicas = (
+                self._autoscaler.get_latest_version_with_min_replicas())
+            ready_replica_urls = []
+
+            # Return URLs from replica version that has at least min_replicas
+            # replicas to avoid overloading the new replicas.
+            if latest_version_with_min_replicas is not None:
+                ready_replica_urls = version2url.get(
+                    latest_version_with_min_replicas, [])
+            elif len(version2url) > 0:
+                # if there is no version with min_replicas replicas,
+                # return the latest version with at least one replica.
+                ready_replica_urls = version2url.get(max(version2url.keys()),
+                                                     [])
+                assert len(ready_replica_urls) > 0, version2url
+
+            return {'ready_replica_urls': ready_replica_urls}
 
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request):

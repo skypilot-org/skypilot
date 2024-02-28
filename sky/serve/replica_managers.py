@@ -524,8 +524,10 @@ class ReplicaManager:
         serve_state.add_or_update_version(self._service_name,
                                           self.latest_version, spec)
 
-    def get_ready_replica_urls(self) -> List[str]:
-        """Get all ready replica's IP addresses."""
+    def get_version2url(self) -> DefaultDict[int, List[str]]:
+        """Get a dict that maps replica versions to all ready replicas 's
+        IP addresses of the matching versions.
+        """
         raise NotImplementedError
 
     def scale_up(self,
@@ -580,36 +582,13 @@ class SkyPilotReplicaManager(ReplicaManager):
     # Replica management functions #
     ################################
 
-    def get_ready_replica_urls(self) -> List[str]:
-        ready_replica_urls = []
+    def get_version2url(self) -> DefaultDict[int, List[str]]:
         version2url: DefaultDict[int, List[str]] = collections.defaultdict(list)
-        version2count: DefaultDict[int, int] = collections.defaultdict(int)
         for info in serve_state.get_replica_infos(self._service_name):
             if info.status == serve_state.ReplicaStatus.READY:
                 assert info.url is not None
                 version2url[info.version].append(info.url)
-                version2count[info.version] += 1
-                ready_replica_urls.append(info.url)
-        # Try all version in descending order. There is possibility that
-        # user consecutively update the service several times, and some
-        # version might not have any ready replicas.
-        version = self.latest_version
-        while version >= serve_constants.INITIAL_VERSION:
-            spec = serve_state.get_spec(self._service_name, version)
-            # Return URLs from replica version that has at least min_replicas
-            # replicas to avoid overloading the new replicas.
-            if spec is not None and version in version2url and version2count[
-                    version] >= spec.min_replicas:
-                return version2url[version]
-            version -= 1
-        # if there is no version with min_replicas replicas,
-        # return the latest version with at least one replica.
-        version = self.latest_version
-        while version >= serve_constants.INITIAL_VERSION:
-            if version in version2url:
-                return version2url[version]
-            version -= 1
-        return []
+        return version2url
 
     def _launch_replica(
         self,

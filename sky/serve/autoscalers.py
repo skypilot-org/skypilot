@@ -111,6 +111,10 @@ class Autoscaler:
         else:
             return RequestRateAutoscaler(service_name, spec)
 
+    def get_latest_version_with_min_replicas(self) -> Optional[int]:
+        """Get the latest version with at least min_replicas replicas."""
+        raise NotImplementedError
+
     def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
         raise NotImplementedError
@@ -291,6 +295,17 @@ class RequestRateAutoscaler(Autoscaler):
         else:
             return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
 
+    def get_latest_version_with_min_replicas(self) -> Optional[int]:
+        # Find the latest version with at least min_replicas replicas.
+        version = self.latest_version
+        while version >= constants.INITIAL_VERSION:
+            spec = serve_state.get_spec(self._service_name, version)
+            if (spec is not None and
+                    self.target_num_replicas >= spec.min_replicas):
+                return version
+            version -= 1
+        return None
+
     def select_outdated_replicas_to_scale_down(
             self, replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
@@ -300,15 +315,8 @@ class RequestRateAutoscaler(Autoscaler):
             if info.is_ready:
                 version2count[info.version] += 1
 
-        # Find the latest version with at least min_replicas replicas.
-        version = self.latest_version
-        latest_version_with_min_replicas = None
-        while version >= constants.INITIAL_VERSION:
-            spec = serve_state.get_spec(self._service_name, version)
-            if spec is not None and version2count[version] >= spec.min_replicas:
-                latest_version_with_min_replicas = version
-                break
-            version -= 1
+        latest_version_with_min_replicas = (
+            self.get_latest_version_with_min_replicas())
 
         # Select replicas earlier than latest_version_with_min_replicas to scale
         # down.
