@@ -124,11 +124,14 @@ def _try_rewrite_service_with_authentication(task: 'sky.Task') -> None:
     original_setup = '' if task.setup is None else task.setup
     task.setup = ('SKY_PATH=$(python -c "import os, sky; '
                   'print(os.path.dirname(sky.__file__))")\n'
+                  'START_NGINX_SCRIPT=$SKY_PATH/utils/serve/'
+                  'start_or_reload_nginx_server.bash\n'
+                  'chmod +x $START_NGINX_SCRIPT\n'
                   f'sudo SERVER_PORT={replica_ingress_port} '
                   f'NGINX_PORT={serve_constants.SKYSERVE_NGINX_PORT} '
                   f'USERNAME={task.service.auth_username} '
                   f'PASSWORD={task.service.auth_password} '
-                  f'$SKY_PATH/utils/serve/start_or_reload_nginx_server.bash\n'
+                  f'$START_NGINX_SCRIPT\n'
                   f'{original_setup}')
 
 
@@ -162,6 +165,15 @@ def up(
     _validate_service_task(task)
 
     _try_rewrite_service_with_authentication(task)
+    # TODO(tian): Remove this
+    # import yaml
+    # def literal_presenter(dumper, data):
+    #     if '\n' in data:
+    #         return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+    #     return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+    # yaml.add_representer(str, literal_presenter, Dumper=yaml.SafeDumper)
+    # print(yaml.safe_dump(task.to_yaml_config(), sort_keys=False))
+    # exit()
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
