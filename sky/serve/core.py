@@ -162,9 +162,6 @@ def up(
     _validate_service_task(task)
 
     _try_rewrite_service_with_authentication(task)
-    import yaml
-    print(yaml.dump(task.to_yaml_config()))
-    exit()
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
