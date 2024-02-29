@@ -3297,6 +3297,7 @@ def test_skyserve_update_autoscale():
     )
     run_one_test(test)
 
+
 @pytest.mark.gcp
 @pytest.mark.sky_serve
 def test_skyserve_new_autoscaler_update():
@@ -3330,6 +3331,7 @@ def test_skyserve_new_autoscaler_update():
         timeout=20 * 60,
     )
     run_one_test(test)
+
 
 # ------- Testing user ray cluster --------
 def test_user_ray_cluster(generic_cloud: str):
