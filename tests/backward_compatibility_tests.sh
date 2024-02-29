@@ -186,4 +186,4 @@ echo "$s" | grep "CANCELLED" | wc -l | grep 1 || exit 1
 fi
 
 sky down ${CLUSTER_NAME}* -y
-sky spot cancel ${CLUSTER_NAME}* -y
+sky spot cancel -n ${CLUSTER_NAME}* -y
