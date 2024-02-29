@@ -20,7 +20,7 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
     f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}')
 # The file contains the ports of the Ray cluster that SkyPilot launched,
 # i.e. the PORT_DICT_STR above.
-SKY_REMOTE_RAY_PORT_FILE = f'{SKY_HOME}/ray_port.json'
+SKY_REMOTE_RAY_PORT_FILE = '~/sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.9.3'
 
