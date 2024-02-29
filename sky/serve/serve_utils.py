@@ -74,6 +74,10 @@ class UserSignal(enum.Enum):
         """Get the error corresponding to the signal."""
         return _SIGNAL_TO_ERROR[self]
 
+class UpdateMode(enum.Enum):
+    """Update mode for updating a service."""
+    ROLLING = 'rolling'
+    BLUE_GREEN = 'blue_green'
 
 _SIGNAL_TO_ERROR = {
     UserSignal.TERMINATE: exceptions.ServeUserTerminatedError,
@@ -263,8 +267,7 @@ def update_service_status() -> None:
 
 
 def update_service_encoded(service_name: str, version: int,
-                           rolling_update: bool) -> str:
-    # TODO(zhwu): rolling update
+                           update_mode: str) -> str:
     service_status = _get_service_status(service_name)
     if service_status is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
@@ -274,7 +277,7 @@ def update_service_encoded(service_name: str, version: int,
         '/controller/update_service',
         json={
             'version': version,
-            'rolling_update': rolling_update,
+            'update_mode': update_mode.value,
         })
     if resp.status_code == 404:
         raise ValueError('The service is up-ed in an old version and does not '
@@ -883,10 +886,10 @@ class ServeCodeGen:
 
     @classmethod
     def update_service(cls, service_name: str, version: int,
-                       rolling_update: bool) -> str:
+                       update_mode: UpdateMode) -> str:
         code = [
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
-            f'{version}, rolling_update={rolling_update})',
+            f'{version}, update_mode={update_mode.value!r})',
             'print(msg, end="", flush=True)',
         ]
         return cls._build(code)

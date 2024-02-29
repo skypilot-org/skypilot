@@ -11,6 +11,7 @@ from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Union
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
+from sky.serve import serve_utils
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
@@ -75,10 +76,10 @@ class Autoscaler:
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
-        self.rolling_update: bool = False
+        self.update_mode: serve_utils.UpdateMode = serve_utils.UpdateMode.ROLLING
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
-                       rolling_update: bool) -> None:
+                       update_mode: serve_utils.UpdateMode) -> None:
         if version <= self.latest_version:
             logger.error(f'Invalid version: {version}, '
                          f'latest version: {self.latest_version}')
@@ -90,7 +91,7 @@ class Autoscaler:
         # Reclip self.target_num_replicas with new min and max replicas.
         self.target_num_replicas = max(
             self.min_replicas, min(self.max_replicas, self.target_num_replicas))
-        self.rolling_update = rolling_update
+        self.update_mode = update_mode
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -125,7 +126,7 @@ class Autoscaler:
 
     def load_dynamic_states(self,
                             dynamic_states: Dict[str, Any],
-                            rolling_update: bool = False) -> None:
+                            update_mode: serve_utils.UpdateMode) -> None:
         """Load dynamic states to autoscaler."""
         raise NotImplementedError
 
@@ -184,8 +185,8 @@ class RequestRateAutoscaler(Autoscaler):
                                           target_num_replicas))
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
-                       rolling_update: bool) -> None:
-        super().update_version(version, spec, rolling_update)
+                       update_mode: serve_utils.UpdateMode) -> None:
+        super().update_version(version, spec, update_mode)
         self.target_qps_per_replica = spec.target_qps_per_replica
         upscale_delay_seconds = (
             spec.upscale_delay_seconds if spec.upscale_delay_seconds is not None
@@ -346,7 +347,7 @@ class RequestRateAutoscaler(Autoscaler):
                 old_replicas.append(info)
 
         num_latest_ready_replicas = len(latest_ready_replicas)
-        if self.rolling_update:
+        if self.update_mode == serve_utils.UpdateMode.ROLLING:
             if num_latest_ready_replicas >= self.target_num_replicas:
                 # Once the number of ready new replicas is greater than or equal
                 # to the target, we can scale down all old replicas.
@@ -453,14 +454,14 @@ class RequestRateAutoscaler(Autoscaler):
 
     def load_dynamic_states(self,
                             dynamic_states: Dict[str, Any],
-                            rolling_update: bool = False) -> None:
+                            update_mode: serve_utils.UpdateMode) -> None:
         if 'request_timestamps' in dynamic_states:
             self.request_timestamps = dynamic_states.pop('request_timestamps')
         if 'latest_version' in dynamic_states:
             self.latest_version = dynamic_states.pop('latest_version')
         if dynamic_states:
             logger.info(f'Remaining dynamic states: {dynamic_states}')
-        self.rolling_update = rolling_update
+        self.update_mode = update_mode
 
 
 class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
@@ -492,8 +493,8 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             if spec.dynamic_ondemand_fallback is not None else False)
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
-                       rolling_update: bool) -> None:
-        super().update_version(version, spec, rolling_update=rolling_update)
+                       update_mode: serve_utils.UpdateMode) -> None:
+        super().update_version(version, spec, update_mode=update_mode)
         self.base_ondemand_fallback_replicas = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
