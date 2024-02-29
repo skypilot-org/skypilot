@@ -148,7 +148,7 @@ class Kubernetes(clouds.Cloud):
             cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
         if memory is not None:
             if memory.endswith('+'):
-                instance_mem = memory[:-1]
+                instance_mem = float(memory[:-1])
             elif memory.endswith('x'):
                 instance_mem = float(memory[:-1]) * instance_cpus
             else:
