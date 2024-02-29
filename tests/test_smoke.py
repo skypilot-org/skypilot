@@ -3091,7 +3091,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 
             # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
             f'output=$(sky serve status {name});'
-            'echo "$output" | grep -q "1/3";',
+            'echo "$output" | grep -q "1/3"',
             _check_two_spot_in_status(name),
             _check_one_ondemand_in_status(name),
 
