@@ -258,7 +258,6 @@ class RayCodeGen:
                 address={ray_address!r},
                 namespace='__sky__{job_id}__',
                 log_to_driver=True,
-                logging_level='CRITICAL',
                 **kwargs
             )
             def get_or_fail(futures, pg) -> List[int]:

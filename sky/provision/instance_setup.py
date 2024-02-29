@@ -216,6 +216,11 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
 
 
 def _ray_gpu_options(custom_resource: str) -> str:
+    """Return the GPU options for the ray start command.
+    
+    For some cases (e.g., within docker container), we need to explicitly set
+    --num-gpus to have ray clusters recognize the schedulable GPUs.
+    """
     acc_dict = json.loads(custom_resource)
     assert len(acc_dict) == 1, acc_dict
     acc_name, acc_count = list(acc_dict.items())[0]
@@ -268,8 +273,6 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     # Reference: https://github.com/skypilot-org/skypilot/issues/2441
     cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-           'RAY_LOG_TO_DRIVER_EVENT_LEVEL="FATAL" '
-           'RAY_BACKEND_LOG_LEVEL="FATAL" '
            f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
            _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
@@ -338,8 +341,6 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     # `start_ray_on_head_node`.
     cmd = (f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-           'RAY_LOG_TO_DRIVER_EVENT_LEVEL="FATAL" '
-           'RAY_BACKEND_LOG_LEVEL="FATAL" '
            f'ray start --disable-usage-stats {ray_options} || exit 1;' +
            _RAY_PRLIMIT)
     if no_restart:

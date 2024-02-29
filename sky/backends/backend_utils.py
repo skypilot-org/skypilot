@@ -887,7 +887,7 @@ def write_cluster_config(
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
-                # We should not use `.format`, as it caontins '{}' as the bash
+                # We should not use `.format`, as it contains '{}' as the bash
                 # syntax.
                 'ray_skypilot_installation_commands':
                     (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(

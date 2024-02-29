@@ -69,8 +69,8 @@ DOCKER_LOGIN_ENV_VARS = {
 }
 
 # Install conda on the remote cluster if it is not already installed.
-# We do not install the latest conda with python 3.11 because ray has not
-# officially supported it yet.
+# We use conda with python 3.10 to be consistent across multiple clouds with
+# best effort.
 # https://github.com/ray-project/ray/issues/31606
 # We use python 3.10 to be consistent with the python version of the
 # AWS's Deep Learning AMI's default conda environment.
@@ -84,6 +84,9 @@ CONDA_INSTALLATION_COMMANDS = (
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} ray status'
+# Install ray and skypilot on the remote cluster if they are not already
+# installed. {var} will be replaced with the actual value in
+# backend_utils.write_cluster_config.
 RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     '(type -a python | grep -q python3) || '
     'echo \'alias python=python3\' >> ~/.bashrc;'
