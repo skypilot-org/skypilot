@@ -105,7 +105,7 @@ curl -L http://$ENDPOINT/v1/chat/completions \
 
 ## Finetune Gemma on Your Own Data
 
-You can also finetune Gemma on your own data with SkyPilot as well. We have an example LoRA finetuning script in [scripts/finetune-lora.py](scripts/finetune-lora.py), where we finetune the model on `Abirate/english_quotes` dataset.
+You can also finetune Gemma on your own data with SkyPilot. We provide an example LoRA finetuning script in [scripts/finetune-lora.py](scripts/finetune-lora.py), where the model is finetuned on  the `Abirate/english_quotes` dataset.
 
 
 With [finetune.yaml-lora](finetune-lora.yaml) in this directory, you can finetune the model on any cloud with a single command.
