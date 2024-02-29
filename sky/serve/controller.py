@@ -2,12 +2,11 @@
 
 Responsible for autoscaling and replica management.
 """
-import collections
 import logging
 import threading
 import time
 import traceback
-from typing import Any, DefaultDict, Dict, List
+from typing import Any, Dict, List
 
 import fastapi
 import uvicorn
@@ -56,15 +55,16 @@ class SkyServeController:
         logger.info('Starting autoscaler.')
         while True:
             try:
-                replica_info = serve_state.get_replica_infos(self._service_name)
+                replica_infos = serve_state.get_replica_infos(
+                    self._service_name)
                 replica_info_dicts = [
                     info.to_info_dict(
                         with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
-                    for info in replica_info
+                    for info in replica_infos
                 ]
                 logger.info(f'All replica info: {replica_info_dicts}')
                 scaling_options = self._autoscaler.evaluate_scaling(
-                    replica_info)
+                    replica_infos)
                 for scaling_option in scaling_options:
                     logger.info(f'Scaling option received: {scaling_option}')
                     if (scaling_option.operator ==
@@ -96,38 +96,24 @@ class SkyServeController:
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
             # TODO(MaoZiming): Check aggregator type.
-            replica_info = serve_state.get_replica_infos(self._service_name)
+            replica_infos = serve_state.get_replica_infos(self._service_name)
             request_aggregator: Dict[str, Any] = request_data.get(
                 'request_aggregator', {})
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
-            version2url: DefaultDict[int,
-                                     List[str]] = collections.defaultdict(list)
-            for info in serve_state.get_replica_infos(self._service_name):
-                if info.status == serve_state.ReplicaStatus.READY:
-                    assert info.url is not None
-                    version2url[info.version].append(info.url)
 
-            latest_version_with_min_replicas = (
+            ready_replicas = filter(lambda info: info.is_ready, replica_infos)
+            chosen_version = (
                 self._autoscaler.get_latest_version_with_min_replicas(
-                    replica_info))
-            ready_replica_urls = []
+                    replica_infos))
+            if chosen_version is None:
+                chosen_version = min(info.version for info in ready_replicas)
 
-            # Return URLs from replica version that has at least min_replicas
-            # replicas to avoid overloading the new replicas.
-            if latest_version_with_min_replicas is not None:
-                ready_replica_urls = version2url.get(
-                    latest_version_with_min_replicas, [])
-            elif len(version2url) > 0:
-                # if there is no version with min_replicas replicas,
-                # return the earliest version with at least one replica
-                # for better backward compatibility. This ensures redirected
-                # replica versions are monotonically increasing.
-                ready_replica_urls = version2url.get(min(version2url.keys()),
-                                                     [])
-                assert len(ready_replica_urls) > 0, version2url
-
+            chosen_replicas = list(
+                filter(lambda info: info.version == chosen_version,
+                       ready_replicas))
+            ready_replica_urls = [info.url for info in chosen_replicas]
             return {'ready_replica_urls': ready_replica_urls}
 
         @self._app.post('/controller/update_service')
@@ -146,15 +132,11 @@ class SkyServeController:
                     f'Update to new version version {version}: {service}')
 
                 self._replica_manager.update_version(version, service)
-
-                if not (isinstance(
-                        self._autoscaler,
-                        type(
-                            autoscalers.Autoscaler.from_spec(
-                                self._service_name, service)))):
+                new_autoscaler = autoscalers.Autoscaler.from_spec(
+                    self._service_name, service)
+                if not isinstance(self._autoscaler, type(new_autoscaler)):
                     old_autoscaler = self._autoscaler
-                    self._autoscaler = (autoscalers.Autoscaler.from_spec(
-                        self._service_name, service))
+                    self._autoscaler = new_autoscaler
                     self._autoscaler.load_dynamic_states(
                         old_autoscaler.dump_dynamic_states())
                 else:
