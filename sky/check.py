@@ -24,6 +24,7 @@ def check(
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
     enabled_clouds = []
+    disabled_clouds = []
 
     def check_one_cloud(cloud_tuple: Tuple[str, sky_clouds.Cloud]) -> None:
         cloud_repr, cloud = cloud_tuple
@@ -43,6 +44,7 @@ def check(
             if reason is not None:
                 echo(f'    Hint: {reason}')
         else:
+            disabled_clouds.append(cloud_repr)
             echo(f'    Reason: {reason}')
 
     clouds_to_check = [
@@ -61,6 +63,17 @@ def check(
     enabled_clouds = [
         cloud for cloud in enabled_clouds if not cloud.startswith('Cloudflare')
     ]
+    disabled_clouds = [
+        cloud for cloud in disabled_clouds if not cloud.startswith('Cloudflare')
+    ]
+    previously_enabled_clouds = [
+        repr(cloud) for cloud in global_user_state.get_enabled_clouds()
+    ]
+    for cloud in previously_enabled_clouds:
+        is_not_duplicate = cloud not in enabled_clouds
+        is_not_disabled = cloud not in disabled_clouds
+        if is_not_duplicate and is_not_disabled:
+            enabled_clouds.append(cloud)
     global_user_state.set_enabled_clouds(enabled_clouds)
 
     if len(enabled_clouds) == 0:
