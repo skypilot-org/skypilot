@@ -111,8 +111,10 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     for inst_id, inst in exist_instances.items():
         if head_instance_id is None:
             head_instance_id = inst_id
-            rename(inst_id, f'{cluster_name_on_cloud}-head')
-            logger.info(f'Rename head node {head_instance_id}.')
+            instance_name = f'{cluster_name_on_cloud}-head'
+            rename(inst_id, instance_name)
+            logger.info(f'Rename head node {head_instance_id} to '
+                        f'{instance_name}')
         if inst_id != head_instance_id and inst['hostname'].endswith('-head'):
             logger.info(f'Rename worker node {inst_id}.')
             try:
