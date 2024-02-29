@@ -1,5 +1,4 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
-import collections
 import dataclasses
 import enum
 import functools
@@ -526,10 +525,6 @@ class ReplicaManager:
         serve_state.add_or_update_version(self._service_name,
                                           self.latest_version, spec)
 
-    def get_ready_replica_urls(self) -> List[str]:
-        """Get all ready replica's IP addresses."""
-        raise NotImplementedError
-
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
         """Scale up the service by 1 replica with resources_override.
@@ -581,22 +576,6 @@ class SkyPilotReplicaManager(ReplicaManager):
     ################################
     # Replica management functions #
     ################################
-
-    def get_ready_replica_urls(self) -> List[str]:
-        version2url = collections.defaultdict(list)
-        for info in serve_state.get_replica_infos(self._service_name):
-            if info.status == serve_state.ReplicaStatus.READY:
-                assert info.url is not None
-                version2url[info.version].append(info.url)
-        # Try all version in descending order. There is possibility that
-        # user consecutively update the service several times, and some
-        # version might not have any ready replicas.
-        version = self.latest_version
-        while version >= serve_constants.INITIAL_VERSION:
-            if version in version2url:
-                return version2url[version]
-            version -= 1
-        return []
 
     def _launch_replica(
         self,
@@ -1111,6 +1090,42 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_version(self._service_name, version, spec)
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
+
+        # Reuse all replicas that have the same config as the new version
+        # (except for the `service` field) by directly setting the version to be
+        # the latest version. This can significantly improve the speed
+        # for updating an existing service with only config changes to the
+        # service specs, e.g. scale down the service.
+        new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
+        # Always create new replicas and scale down old ones when file_mounts
+        # are not empty.
+        if new_config.get('file_mounts', None) != {}:
+            return
+        for key in ['service']:
+            new_config.pop(key)
+        replica_infos = serve_state.get_replica_infos(self._service_name)
+        for info in replica_infos:
+            if info.version < version and info.is_provisioning_or_launched:
+                # Assume user does not change the yaml file on the controller.
+                old_task_yaml_path = serve_utils.generate_task_yaml_file_name(
+                    self._service_name, info.version)
+                old_config = common_utils.read_yaml(
+                    os.path.expanduser(old_task_yaml_path))
+                for key in ['service']:
+                    old_config.pop(key)
+                # Bump replica version if all fields except for service are
+                # the same. File mounts should both be empty, as update always
+                # create new buckets if they are not empty.
+                if (old_config == new_config and
+                        old_config.get('file_mounts', None) == {}):
+                    logger.info(
+                        f'Updating replica {info.replica_id} to version '
+                        f'{version}. Replica {info.replica_id}\'s config '
+                        f'{old_config} is the same as '
+                        f'latest version\'s {new_config}.')
+                    info.version = version
+                    serve_state.add_or_update_replica(self._service_name,
+                                                      info.replica_id, info)
 
     def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         spec = serve_state.get_spec(self._service_name, version)
