@@ -2559,17 +2559,17 @@ def autostop(
 
     - The cluster has restarted.
 
-    - An autostop is set when there is no active setting. (Namely, either
-      there's never any autostop setting set, or the previous autostop setting
-      was canceled.) This is useful for restarting the autostop timer.
+    - An autostop idle time is set.
 
-    Example: say a cluster without any autostop set has been idle for 1 hour,
+    Example 1: say a cluster with autostop set to 2 hours has been idle for 1
+    hour, then autostop is reset to 30 minutes. The cluster will not be
+    immediately autostopped. Instead, the idleness timer restarts counting
+    when the second autostop setting of 30 minutes was submitted.
+
+    Example 2: say a cluster without any autostop set has been idle for 1 hour,
     then an autostop of 30 minutes is set. The cluster will not be immediately
     autostopped. Instead, the idleness timer only starts counting after the
     autostop setting was set.
-
-    When multiple autostop settings are specified for the same cluster, the
-    last setting takes precedence.
 
     Typical usage:
 
@@ -2581,9 +2581,8 @@ def autostop(
         # Cancel autostop for a specific cluster.
         sky autostop cluster_name --cancel
         \b
-        # Since autostop was canceled in the last command, idleness will
-        # restart counting after this command.
-        sky autostop cluster_name -i 60
+        # Autodown this cluster after 60 minutes of idleness.
+        sky autostop cluster_name -i 60 --down
     """
     if cancel and idle_minutes is not None:
         raise click.UsageError(
@@ -4448,6 +4447,10 @@ def serve_update(
     yes: bool,
 ):
     """Update a SkyServe service.
+
+    SkyServe will reuse old replicas, if only the service section is changed
+    and no file mounts are specified.
+    Otherwise, SkyServe will terminate the old replicas and start new replicas.
 
     service_yaml must point to a valid YAML file.
 

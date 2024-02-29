@@ -140,6 +140,15 @@ def _get_cluster_name() -> str:
     return f'{test_name}-{test_id}'
 
 
+def _terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
+    cluster_name = serve.generate_replica_cluster_name(name, replica_id)
+    query_cmd = (f'gcloud compute instances list --filter='
+                 f'"(labels.ray-cluster-name:{cluster_name})" '
+                 f'--zones={zone} --format="value(name)"')
+    return (f'gcloud compute instances delete --zone={zone}'
+            f' --quiet $({query_cmd})')
+
+
 def run_one_test(test: Test) -> Tuple[int, str, str]:
     # Fail fast if `sky` CLI somehow errors out.
     subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
@@ -1084,15 +1093,23 @@ def test_job_queue(generic_cloud: str):
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
-def test_job_queue_with_docker(generic_cloud: str):
-    name = _get_cluster_name()
+@pytest.mark.parametrize(
+    "image_id",
+    [
+        "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
+        "docker:ubuntu:18.04",
+        # Test image with python 3.11 installed by default.
+        "docker:continuumio/miniconda3",
+    ])
+def test_job_queue_with_docker(generic_cloud: str, image_id: str):
+    name = _get_cluster_name() + image_id[len('docker:'):][:4]
     test = Test(
         'job_queue_with_docker',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_docker.yaml',
-            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-3 -d examples/job_queue/job_docker.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} examples/job_queue/cluster_docker.yaml',
+            f'sky exec {name} -n {name}-1 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-2 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-3 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
@@ -1721,7 +1738,7 @@ def test_autostop(generic_cloud: str):
             f'sky status | grep {name} | grep "1m"',
 
             # Ensure the cluster is not stopped early.
-            'sleep 20',
+            'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
@@ -1736,12 +1753,11 @@ def test_autostop(generic_cloud: str):
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
 
-            # Test restarting the idleness timer via cancel + reset:
+            # Test restarting the idleness timer via reset:
             f'sky autostop -y {name} -i 1',  # Idleness starts counting.
-            'sleep 30',  # Almost reached the threshold.
-            f'sky autostop -y {name} --cancel',
+            'sleep 40',  # Almost reached the threshold.
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
-            'sleep 30',
+            'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
             f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
@@ -1780,7 +1796,7 @@ def test_autodown(generic_cloud: str):
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
             # Ensure the cluster is not terminated early.
-            'sleep 30',
+            'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
             # Ensure the cluster is terminated.
             f'sleep {autodown_timeout}',
@@ -2647,10 +2663,14 @@ def test_aws_custom_image():
 
 
 @pytest.mark.kubernetes
-@pytest.mark.parametrize("image_id", [
-    "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
-    "docker:ubuntu:18.04",
-])
+@pytest.mark.parametrize(
+    "image_id",
+    [
+        "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
+        "docker:ubuntu:18.04",
+        # Test image with python 3.11 installed by default.
+        "docker:continuumio/miniconda3",
+    ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
     name = _get_cluster_name()
@@ -2987,24 +3007,97 @@ def test_skyserve_spot_recovery():
     name = _get_service_name()
     zone = 'us-central1-a'
 
-    # Reference: test_spot_recovery_gcp
-    def terminate_replica(replica_id: int) -> str:
-        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-        query_cmd = (f'gcloud compute instances list --filter='
-                     f'"(labels.ray-cluster-name:{cluster_name})" '
-                     f'--zones={zone} --format="value(name)"')
-        return (f'gcloud compute instances delete --zone={zone}'
-                f' --quiet $({query_cmd})')
-
     test = Test(
         f'test-skyserve-spot-recovery-gcp',
         [
             f'sky serve up -n {name} -y tests/skyserve/spot/recovery.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            terminate_replica(1),
+            _terminate_gcp_replica(name, zone, 1),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_base_ondemand_fallback():
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-base-ondemand-fallback',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/spot/base_ondemand_fallback.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'output=$(sky serve status {name});'
+            'echo "$output" | grep "GCP(\[Spot\]vCPU=2)" && '
+            'echo "$output" | grep "GCP(vCPU=2)";'
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_dynamic_ondemand_fallback():
+    name = _get_service_name()
+    zone = 'us-central1-a'
+
+    def _check_two_spot_in_status(name: str) -> str:
+        return (
+            f'output=$(sky serve status {name});'
+            'count=$(echo "$output" | grep -o "GCP(\[Spot\]vCPU=2)" | wc -l);'
+            ' if [ $count -ne 2 ]; then exit 1; fi;')
+
+    def _check_two_ondemand_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'count=$(echo "$output" | grep -o "GCP(vCPU=2)" | wc -l);'
+                ' if [ $count -ne 2 ]; then exit 1; fi;')
+
+    def _check_one_ondemand_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'count=$(echo "$output" | grep -o "GCP(vCPU=2)" | wc -l);'
+                ' if [ $count -ne 1 ]; then exit 1; fi;')
+
+    def _check_ondemand_not_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'echo "$output" | grep -v "GCP(vCPU=2)";')
+
+    test = Test(
+        f'test-skyserve-dynamic-ondemand-fallback',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
+            f'sleep 20',
+
+            # 2 on-demand (provisioning) + 2 Spot (provisioning).
+            f'output=$(sky serve status {name});'
+            'echo "$output" | grep -q "0/4" || exit 1',
+            f'sleep 20',
+            _check_two_spot_in_status(name),
+            _check_two_ondemand_in_status(name),
+
+            # Wait until 2 spot instances are ready.
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _check_two_spot_in_status(name),
+            _check_ondemand_not_in_status(name),
+            _terminate_gcp_replica(name, zone, 1),
+            f'sleep 20',
+
+            # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
+            f'output=$(sky serve status {name});'
+            'echo "$output" | grep -q "1/3"',
+            _check_two_spot_in_status(name),
+            _check_one_ondemand_in_status(name),
+
+            # Wait until 2 spot instances are ready.
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _check_two_spot_in_status(name),
+            _check_ondemand_not_in_status(name),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3064,16 +3157,6 @@ def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
     zone = 'us-central1-a'
-
-    # Reference: test_spot_recovery_gcp
-    def terminate_replica(replica_id: int) -> str:
-        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-        query_cmd = (f'gcloud compute instances list --filter='
-                     f'"(labels.ray-cluster-name:{cluster_name})" '
-                     f'--zones={zone} --format="value(name)"')
-        return (f'gcloud compute instances delete --zone={zone}'
-                f' --quiet $({query_cmd})')
-
     test = Test(
         f'test-skyserve-auto-restart',
         [
@@ -3085,7 +3168,7 @@ def test_skyserve_auto_restart():
             # sleep for 20 seconds (initial delay) to make sure it will
             # be restarted
             f'sleep 20',
-            terminate_replica(1),
+            _terminate_gcp_replica(name, zone, 1),
             # Wait for consecutive failure timeout passed.
             # If the cluster is not using spot, it won't check the cluster status
             # on the cloud (since manual shutdown is not a common behavior and such
@@ -3146,6 +3229,44 @@ def test_skyserve_update():
             'sleep 20',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, new SkyPilot here!"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_fast_update():
+    """Test skyserve with fast update (Increment version of old replicas)"""
+    name = _get_service_name()
+
+    def _check_three_ready_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'count=$(echo "$output" | grep -o "READY" | wc -l);'
+                ' if [ $count -ne 3 ]; then exit 1; fi;')
+
+    def _check_one_provisioning_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'count=$(echo "$output" | grep -o "PROVISIONING" | wc -l);'
+                ' if [ $count -ne 1 ]; then exit 1; fi;')
+
+    test = Test(
+        f'test-skyserve-fast-update',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/update/bump_version_before.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} -y tests/skyserve/update/bump_version_after.yaml',
+            # sleep to wait for update to be registered.
+            'sleep 30',
+            # READY for service + two READY replicas.
+            _check_three_ready_in_status(name),
+            # One PROVISIONING replica.
+            _check_one_provisioning_in_status(name),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
