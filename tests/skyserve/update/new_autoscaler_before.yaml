@@ -5,6 +5,7 @@ service:
   replicas: 2
 
 resources:
+  cloud: gcp
   ports: 8081
   cpus: 2+
 
