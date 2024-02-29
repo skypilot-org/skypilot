@@ -76,7 +76,7 @@ class Autoscaler:
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
-        self.update_mode: serve_utils.UpdateMode = serve_utils.UpdateMode.ROLLING
+        self.update_mode = serve_utils.UpdateMode.ROLLING
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
@@ -353,7 +353,8 @@ class RequestRateAutoscaler(Autoscaler):
                 return [info.replica_id for info in old_replicas]
             # If rolling update is in progress, we scale down old replicas
             # based on the number of ready new replicas.
-            num_old_replicas_to_keep = self.target_num_replicas - num_latest_ready_replicas
+            num_old_replicas_to_keep = (self.target_num_replicas -
+                                        num_latest_ready_replicas)
             old_ready_replicas = list(
                 filter(lambda info: info.is_ready, old_replicas))
             num_old_replicas_to_scale_down = (len(old_ready_replicas) -
