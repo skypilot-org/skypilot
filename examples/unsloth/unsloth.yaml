@@ -19,7 +19,7 @@ file_mounts:
   /outputs:
     name: my-unsloth-checkpoints # Ensure this name is unique
 
-workdir: /Users/hriday/sky-unsloth/skypilot/examples/unsloth
+workdir: .
 
 setup: |
   set -ex
