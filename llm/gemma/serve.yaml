@@ -31,7 +31,7 @@ setup: |
     conda activate gemma
   fi
   pip install vllm==0.3.2
-  pip install transformers==4.38.0
+  pip install transformers==4.38.1
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 run: |

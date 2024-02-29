@@ -4449,6 +4449,10 @@ def serve_update(
 ):
     """Update a SkyServe service.
 
+    SkyServe will reuse old replicas, if only the service section is changed
+    and no file mounts are specified.
+    Otherwise, SkyServe will terminate the old replicas and start new replicas.
+
     service_yaml must point to a valid YAML file.
 
     Example:
