@@ -117,7 +117,7 @@ def pytest_collection_modifyitems(config, items):
     skip_marks['managed_spot'] = pytest.mark.skip(
         reason='skipped, because --managed-spot option is set')
     skip_marks['serve'] = pytest.mark.skip(
-        reason='skipped, because --sky-serve option is set')
+        reason='skipped, because --serve option is set')
     skip_marks['tpu'] = pytest.mark.skip(
         reason='skipped, because --tpu option is set')
     for cloud in all_clouds_in_smoke_tests:
@@ -148,8 +148,7 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['managed_spot'])
         if (not 'tpu' in item.keywords) and config.getoption('--tpu'):
             item.add_marker(skip_marks['tpu'])
-        if (not 'serve'
-                in item.keywords) and config.getoption('--sky-serve'):
+        if (not 'serve' in item.keywords) and config.getoption('--serve'):
             item.add_marker(skip_marks['serve'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud

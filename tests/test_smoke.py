@@ -3396,7 +3396,9 @@ def test_skyserve_new_autoscaler_update(mode: str):
     )
     run_one_test(test)
 
+
 # TODO(MaoZiming, cblmemo): Add tests for autoscaling.
+
 
 # ------- Testing user ray cluster --------
 def test_user_ray_cluster(generic_cloud: str):
