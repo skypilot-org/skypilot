@@ -51,9 +51,11 @@ if [ "$start_from" -le 1 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
 which sky
+# Job 1
 sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME} examples/minimal.yaml
 sky autostop -i 10 -y ${CLUSTER_NAME}
-sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 100
+# Job 2
+sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 200
 
 conda activate sky-back-compat-current
 sky status -r ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
@@ -61,11 +63,16 @@ rm -r  ~/.sky/wheels || true
 if [ "$need_launch" -eq "1" ]; then
   sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}
 fi
-sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 30
+# Job 3
+sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 50
+q=$(sky queue ${CLUSTER_NAME})
+echo "$q"
+echo "$q" | grep "RUNNING" | wc -l | grep 2 || exit 1
+# Job 4
 s=$(sky launch --cloud ${CLOUD} -d -c ${CLUSTER_NAME} examples/minimal.yaml)
-echo $s
+sky logs ${CLUSTER_NAME} 2 --status | grep RUNNING || exit 1
 # remove color and find the job id
-echo $s | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 4" || exit 1
+echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 4" || exit 1
 sleep 100
 sky queue ${CLUSTER_NAME} | grep "SUCCEEDED" | wc -l | grep 4 || exit 1
 fi

@@ -1107,9 +1107,9 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
         'job_queue_with_docker',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} examples/job_queue/cluster_docker.yaml',
-            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-3 -d examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-1 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-2 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-3 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
