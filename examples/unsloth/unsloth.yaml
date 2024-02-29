@@ -23,10 +23,20 @@ workdir: /Users/hriday/sky-unsloth/skypilot/examples/unsloth
 
 setup: |
   set -ex
-  pip install --upgrade --force-reinstall --no-cache-dir torch==2.2.0 triton \
-    --index-url https://download.pytorch.org/whl/cu118
-  pip install ipython
-  pip install "unsloth[cu118_torch220] @ git+https://github.com/unslothai/unsloth.git"
+  pip install --upgrade pip
+  cuda_version=$(nvcc --version | grep "release" | awk '{print $6}' | cut -c 2-)
+  
+  if [[ "$cuda_version" == "12.1"* ]]; then
+    pip install --upgrade --force-reinstall --no-cache-dir torch==2.2.0 triton \
+      --index-url https://download.pytorch.org/whl/cu121
+    pip install ipython
+    pip install "unsloth[cu121-torch220] @ git+https://github.com/unslothai/unsloth.git"
+  else
+    pip install --upgrade --force-reinstall --no-cache-dir torch==2.2.0 triton \
+      --index-url https://download.pytorch.org/whl/cu118
+    pip install ipython
+    pip install "unsloth[cu118-torch220] @ git+https://github.com/unslothai/unsloth.git"
+  fi
 
 run: |
   python unsloth_example.py --output-dir /outputs
