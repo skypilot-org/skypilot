@@ -73,7 +73,7 @@ s=$(sky launch --cloud ${CLOUD} -d -c ${CLUSTER_NAME} examples/minimal.yaml)
 sky logs ${CLUSTER_NAME} 2 --status | grep RUNNING || exit 1
 # remove color and find the job id
 echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 4" || exit 1
-sleep 40
+sleep 45
 q=$(sky queue ${CLUSTER_NAME})
 echo "$q"
 echo "$q" | grep "SUCCEEDED" | wc -l | grep 4 || exit 1
@@ -156,6 +156,25 @@ sky exec --cloud ${CLOUD} ${CLUSTER_NAME}-6 examples/multi_hostname.yaml
 sky queue ${CLUSTER_NAME}-6
 sky logs ${CLUSTER_NAME}-6 2 --status
 sky logs ${CLUSTER_NAME}-6 2
+fi
+
+if [ "$start_from" -le 7 ]; then
+conda activate sky-back-compat-master
+rm -r  ~/.sky/wheels || true
+sky spot launch --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-7 "echo hi; sleep 100"
+conda activate sky-back-compat-current
+rm -r  ~/.sky/wheels || true
+s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7)
+echo "$s"
+echo "$s" | grep "hi" || exit 1
+sky spot launch --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7 "echo hi; sleep 10"
+s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
+echo "$s"
+echo "$s" | grep "RUNNING" | wc -l | grep 2 || exit 1
+sleep 50
+s=$(sky spot queue | grep ${CLUSTER_NAME}-7 | grep "SUCCEEDED")
+echo "$s"
+echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
 fi
 
 sky down ${CLUSTER_NAME}* -y

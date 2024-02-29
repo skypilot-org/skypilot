@@ -146,7 +146,7 @@ class Kubernetes(clouds.Cloud):
         # exactly the requested resources.
         instance_cpus = float(
             cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
-        instance_mem = float(memory.strip('+')) if memory is not None else \
+        instance_mem = float(memory.strip('+x')) if memory is not None else \
             instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
         virtual_instance_type = kubernetes_utils.KubernetesInstanceType(
             instance_cpus, instance_mem).name
