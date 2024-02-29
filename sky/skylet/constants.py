@@ -124,8 +124,8 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # for backward compatibility. In this case, we should not patch the ray
     # files.
     f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
-    '&& python3 -c "from sky.skylet.ray_patches import patch; patch()" '
-    '|| exit 1;')
+    '&& { python3 -c "from sky.skylet.ray_patches import patch; patch()" '
+    '|| exit 1; };')
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
