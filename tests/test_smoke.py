@@ -3298,6 +3298,41 @@ def test_skyserve_update_autoscale():
     run_one_test(test)
 
 
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_new_autoscaler_update():
+    """Test skyserve with update that changes autoscaler"""
+    name = _get_service_name()
+
+    def _check_four_spots_in_status(name: str) -> str:
+        return (
+            f'output=$(sky serve status {name});'
+            'count=$(echo "$output" | grep -o "GCP(\[Spot\]vCPU=2)" | wc -l);'
+            ' if [ $count -ne 4 ]; then exit 1; fi;')
+
+    def _check_one_ondemand_in_status(name: str) -> str:
+        return (f'output=$(sky serve status {name});'
+                'count=$(echo "$output" | grep -o "GCP(vCPU=2)" | wc -l);'
+                ' if [ $count -ne 1 ]; then exit 1; fi;')
+
+    test = Test(
+        f'test-skyserve-new-autoscaler-update',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/update/new_autoscaler_before.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} -y tests/skyserve/update/new_autoscaler_after.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            _check_four_spots_in_status(name),
+            _check_one_ondemand_in_status(name),
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
 # ------- Testing user ray cluster --------
 def test_user_ray_cluster(generic_cloud: str):
     name = _get_cluster_name()

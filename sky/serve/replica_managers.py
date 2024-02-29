@@ -436,6 +436,7 @@ class ReplicaInfo:
             'name': self.cluster_name,
             'status': self.status,
             'version': self.version,
+            'is_spot': self.is_spot,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
         }
