@@ -217,7 +217,7 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
 
 def _ray_gpu_options(custom_resource: str) -> str:
     """Return the GPU options for the ray start command.
-    
+
     For some cases (e.g., within docker container), we need to explicitly set
     --num-gpus to have ray clusters recognize the schedulable GPUs.
     """
