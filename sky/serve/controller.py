@@ -110,9 +110,8 @@ class SkyServeController:
             if chosen_version is None:
                 chosen_version = min(info.version for info in ready_replicas)
 
-            chosen_replicas = list(
-                filter(lambda info: info.version == chosen_version,
-                       ready_replicas))
+            chosen_replicas = filter(
+                lambda info: info.version == chosen_version, ready_replicas)
             ready_replica_urls = [info.url for info in chosen_replicas]
             return {'ready_replica_urls': ready_replica_urls}
 
