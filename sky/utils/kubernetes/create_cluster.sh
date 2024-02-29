@@ -172,7 +172,7 @@ wait_for_nginx_ingress_controller_install() {
     SECONDS=0
     TIMEOUT=600  # 10 minutes in seconds
 
-    kubectl apply -f nginx-deploy.yaml
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 
     while true; do
         if kubectl get pod -n ingress-nginx -l app.kubernetes.io/component=controller -o wide | grep 'Running'; then
@@ -185,6 +185,29 @@ wait_for_nginx_ingress_controller_install() {
             echo "Waiting for Nginx Ingress Controller Installation..."
             echo "To check status, check Nginx Ingress Controller pods:"
             echo "kubectl get pod -n ingress-nginx -l app.kubernetes.io/component=controller -o wide"
+            sleep 5
+        fi
+    done
+
+}
+
+wait_for_nginx_ingress_controller_patch() {
+    echo "Starting patch of Nginx Ingress Controller host port..."
+
+    SECONDS=0
+    TIMEOUT=600  # 10 minutes in seconds
+
+    kubectl patch deployment ingress-nginx-controller -n ingress-nginx --type=json -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/ports/0/hostPort", "value": 10000}]'
+
+    while true; do
+        if kubectl get deployment ingress-nginx-controller -n ingress-nginx -o jsonpath='{.spec.template.spec.containers[0].ports[0].hostPort}' | grep 10000; then
+            echo "Nginx Ingress Controller host port patched."
+            break
+        elif [ $SECONDS -ge $TIMEOUT ]; then
+            echo "Timed out waiting for the patch on the host port for Nginx Ingress Controller."
+            exit 1
+        else
+            echo "Waiting to patch the host port for Nginx Ingress Controller..."
             sleep 5
         fi
     done
@@ -222,6 +245,7 @@ wait_for_skypilot_cpu_image_pull
 
 # Install the Nginx Ingress Controller
 wait_for_nginx_ingress_controller_install
+wait_for_nginx_ingress_controller_patch
 
 # Print CPUs available on the local cluster
 NUM_CPUS=$(kubectl get nodes -o jsonpath='{.items[0].status.capacity.cpu}')
