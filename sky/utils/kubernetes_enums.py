@@ -1,6 +1,8 @@
 """Kubernetes enums for SkyPilot."""
 import enum
 
+from sky import skypilot_config
+
 
 class KubernetesNetworkingMode(enum.Enum):
     """Enum for the different types of networking modes for accessing
@@ -21,6 +23,19 @@ class KubernetesNetworkingMode(enum.Enum):
                              f'{mode}. The mode must be either '
                              f'\'{cls.PORTFORWARD.value}\' or '
                              f'\'{cls.NODEPORT.value}\'. ')
+
+    @classmethod
+    def from_skypilot_config(cls) -> 'KubernetesNetworkingMode':
+        """Returns the enum value for the given config."""
+        network_mode_str = skypilot_config.get_nested(
+            ('kubernetes', 'networking'),
+            cls.PORTFORWARD.value)
+        try:
+            return cls.from_str(network_mode_str)
+        except ValueError as e:
+            # Add message saying "Please check: ~/.sky/config.yaml" to the error
+            # message.
+            raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') from None
 
 
 class KubernetesServiceType(enum.Enum):

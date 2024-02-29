@@ -25,16 +25,20 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
         echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
              ' ' * 30)
+        indent = '    '
+        # If reason contains new lines, add indentation to each line. Do not add indentation to the first line.
+        if reason is not None:
+            reason = f'\n{indent}'.join([line for line in reason.split('\n')])
         if ok:
             enabled_clouds.append(cloud_repr)
             if verbose and cloud is not cloudflare:
                 activated_account = cloud.get_current_user_identity_str()
                 if activated_account is not None:
-                    echo(f'    Activated account: {activated_account}')
+                    echo(f'{indent}Activated account: {activated_account}')
             if reason is not None:
-                echo(f'    Hint: {reason}')
+                echo(f'{indent}Hint: {reason}')
         else:
-            echo(f'    Reason: {reason}')
+            echo(f'{indent}Reason: {reason}')
 
     clouds_to_check = [
         (repr(cloud), cloud) for cloud in clouds.CLOUD_REGISTRY.values()

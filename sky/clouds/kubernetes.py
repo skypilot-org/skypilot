@@ -11,7 +11,9 @@ from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
+from sky.utils import kubernetes_enums
 from sky.utils import resources_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -336,6 +338,19 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+        # Check dependencies for port-forward mode.
+        try:
+            networking_mode = kubernetes_enums.KubernetesNetworkingMode.from_skypilot_config()
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise
+        if networking_mode == kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD:
+            try:
+                kubernetes_utils.check_port_forward_mode_dependencies()
+            except RuntimeError as e:
+                return False, str(e)
+
+        # Check credentials are valid
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
             # Test using python API
             try:

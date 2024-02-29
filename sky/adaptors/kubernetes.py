@@ -76,7 +76,7 @@ def _load_config():
                 err_str = ('Failed to load Kubernetes configuration. '
                            'Kubeconfig does not contain any valid context(s).'
                            f'{suffix}\n'
-                           '    If you were running a local Kubernetes '
+                           'If you were running a local Kubernetes '
                            'cluster, run `sky local up` to start the cluster.')
             else:
                 err_str = (

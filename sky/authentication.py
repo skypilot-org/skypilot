@@ -384,19 +384,11 @@ def setup_ibm_authentication(config):
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Default ssh session is established with kubectl port-forwarding with
     # ClusterIP service.
-    nodeport_mode = kubernetes_enums.KubernetesNetworkingMode.NODEPORT
-    port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
-    network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
-                                                  port_forward_mode.value)
     try:
-        network_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
-            network_mode_str)
-    except ValueError as e:
-        # Add message saying "Please check: ~/.sky/config.yaml" to the error
-        # message.
+        network_mode = kubernetes_enums.KubernetesNetworkingMode.from_skypilot_config()
+    except ValueError:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
-                from None
+            raise
     get_or_generate_keys()
 
     # Add the user's public key to the SkyPilot cluster.
@@ -424,18 +416,14 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         kubernetes.core_api().create_namespaced_secret(namespace, secret)
 
     ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    if network_mode == nodeport_mode:
+    if network_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         service_type = kubernetes_enums.KubernetesServiceType.NODEPORT
-    elif network_mode == port_forward_mode:
-        kubernetes_utils.check_port_forward_mode_dependencies()
+    elif network_mode == kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD:
         # Using `kubectl port-forward` creates a direct tunnel to jump pod and
         # does not require opening any ports on Kubernetes nodes. As a result,
         # the service can be a simple ClusterIP service which we access with
         # `kubectl port-forward`.
         service_type = kubernetes_enums.KubernetesServiceType.CLUSTERIP
-    else:
-        # This should never happen because we check for this in from_str above.
-        raise ValueError(f'Unsupported networking mode: {network_mode_str}')
     # Setup service for SSH jump pod. We create the SSH jump service here
     # because we need to know the service IP address and port to set the
     # ssh_proxy_command in the autoscaler config.
