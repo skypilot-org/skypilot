@@ -89,6 +89,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
+        if len(instances) > config.count:
+            raise RuntimeError(
+                f'Cluster {cluster_name_on_cloud} already has '
+                f'{len(instances)} nodes, but {config.count} are '
+                'required. Please try terminate the cluster and retry.')
         if not instances:
             break
         logger.info(f'Waiting for {len(instances)} instances to be ready.')
@@ -96,11 +101,33 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     exist_instances = _filter_instances(cluster_name_on_cloud, ['running'])
     head_instance_id = _get_head_instance_id(exist_instances)
 
+    def rename(instance_id, new_name):
+        try:
+            utils.FluidstackClient().rename(instance_id, new_name)
+        except Exception as e:
+            logger.warning(f'run_instances error: {e}')
+            raise
+
+    for inst_id, inst in exist_instances.items():
+        if head_instance_id is None:
+            head_instance_id = inst_id
+            rename(inst_id, f'{cluster_name_on_cloud}-head')
+            logger.info(f'Rename head node {head_instance_id}.')
+        if inst_id != head_instance_id and inst['hostname'].endswith('-head'):
+            logger.info(f'Rename worker node {inst_id}.')
+            try:
+                utils.FluidstackClient().rename(
+                    inst_id, f'{cluster_name_on_cloud}-worker')
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'run_instances error: {e}')
+                raise
+
     to_start_count = config.count - len(exist_instances)
     if to_start_count < 0:
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} already has '
-            f'{len(exist_instances)} nodes, but {config.count} are required.')
+            f'{len(exist_instances)} nodes, but {config.count} are '
+            'required. Please try terminate the cluster and retry.')
     if to_start_count == 0:
         if head_instance_id is None:
             raise RuntimeError(
@@ -254,6 +281,7 @@ def query_instances(
         'failed to create': status_lib.ClusterStatus.INIT,
         'timeout error': status_lib.ClusterStatus.INIT,
         'out of stock': status_lib.ClusterStatus.INIT,
+        'terminating': None,
         'terminated': None,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
