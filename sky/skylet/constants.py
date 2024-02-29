@@ -95,12 +95,20 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     'source ~/.bashrc;'
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
-    # NOTE: this will only work for the cluster with ray cluster on our latest
-    # ray port 6380, but those existing cluster launched before #1790 that has
-    # ray cluster on the default port 6379 will be upgraded and restarted.
-    f'{RAY_STATUS} || {{ pip3 list | grep "ray " | '
-    f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null || '
-    f'pip3 install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; }};'  # pylint: disable=line-too-long
+    #
+    # We do this guard to avoid any Ray client-server version mismatch.
+    # Specifically: If existing ray cluster is an older version say 2.4, and we
+    # pip install new version say 2.9 wheels here, then subsequent sky exec
+    # (ray job submit) will have v2.9 vs. 2.4 mismatch, similarly this problem
+    # exists for sky status -r (ray status).
+    #
+    # NOTE: RAY_STATUS will only work for the cluster with ray cluster on our
+    # latest ray port 6380, but those existing cluster launched before #1790
+    # that has ray cluster on the default port 6379 will be upgraded and
+    # restarted.
+    f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
+    f'|| {RAY_STATUS} || '
+    f'pip3 install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
     '{ pip3 list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
     '{ pip3 uninstall skypilot -y; '
@@ -108,7 +116,11 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; '
-    f'{RAY_STATUS} || '
+    # Only patch ray when the ray version is the same as the expected version.
+    # The ray installation above can be skipped due to the existing ray cluster
+    # for backward compatibility. In this case, we should not patch the ray
+    # files.
+    f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION}] && '
     'python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;')
 
 # The name for the environment variable that stores SkyPilot user hash, which
