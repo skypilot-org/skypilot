@@ -64,6 +64,7 @@ setup_commands:
     sudo dpkg --configure -a;
     {{ cuda_installation_commands }}
     mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
