@@ -124,8 +124,7 @@ class Autoscaler:
         """Dump dynamic states from autoscaler."""
         raise NotImplementedError
 
-    def load_dynamic_states(self,
-                            dynamic_states: Dict[str, Any],
+    def load_dynamic_states(self, dynamic_states: Dict[str, Any],
                             update_mode: serve_utils.UpdateMode) -> None:
         """Load dynamic states to autoscaler."""
         raise NotImplementedError
@@ -452,8 +451,7 @@ class RequestRateAutoscaler(Autoscaler):
             'latest_version': self.latest_version
         }
 
-    def load_dynamic_states(self,
-                            dynamic_states: Dict[str, Any],
+    def load_dynamic_states(self, dynamic_states: Dict[str, Any],
                             update_mode: serve_utils.UpdateMode) -> None:
         if 'request_timestamps' in dynamic_states:
             self.request_timestamps = dynamic_states.pop('request_timestamps')

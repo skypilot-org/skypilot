@@ -415,8 +415,9 @@ def update(task: 'sky.Task',
                                  {remote_task_yaml_path: service_file.name},
                                  storage_mounts=None)
 
-        code = serve_utils.ServeCodeGen.update_service(
-            service_name, current_version, update_mode=update_mode)
+        code = serve_utils.ServeCodeGen.update_service(service_name,
+                                                       current_version,
+                                                       update_mode=update_mode)
         returncode, _, stderr = backend.run_on_head(handle,
                                                     code,
                                                     require_outputs=True,

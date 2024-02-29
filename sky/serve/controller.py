@@ -126,7 +126,8 @@ class SkyServeController:
                 version = request_data.get('version', None)
                 if version is None:
                     return {'message': 'Error: version is not specified.'}
-                update_mode_str = request_data.get('update_mode', serve_utils.UpdateMode.ROLLING.value)
+                update_mode_str = request_data.get(
+                    'update_mode', serve_utils.UpdateMode.ROLLING.value)
                 update_mode = serve_utils.UpdateMode(update_mode_str)
                 # The yaml with the name latest_task_yaml will be synced
                 # See sky/serve/core.py::update
@@ -146,8 +147,9 @@ class SkyServeController:
                         old_autoscaler.dump_dynamic_states(),
                         update_mode=update_mode)
                 else:
-                    self._autoscaler.update_version(
-                        version, service, update_mode=update_mode)
+                    self._autoscaler.update_version(version,
+                                                    service,
+                                                    update_mode=update_mode)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in update_service: '

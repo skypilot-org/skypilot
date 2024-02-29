@@ -4419,10 +4419,12 @@ def serve_up(
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--update-mode',
               default='rolling',
-              type=click.Choice(['rolling', 'normal']),
+              type=click.Choice([m.value for m in serve_lib.UpdateMode],
+                                case_sensitive=False),
               required=False,
-              help=('Perform rolling update, i.e. incrementally replacing the '
-                    'current replicas with new ones.'))
+              help=('Update mode. If "rolling", SkyServe will update the '
+                    'service with rolling update. If "blue_green", SkyServe '
+                    'will update the service with blue-green update. '))
 @click.option('--yes',
               '-y',
               is_flag=True,
