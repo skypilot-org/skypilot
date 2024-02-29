@@ -177,8 +177,8 @@ echo "$s" | grep " hi" || exit 1
 s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
 echo "$s"
 echo "$s" | grep "RUNNING" | wc -l | grep 3 || exit 1
-sleep 200
 sky spot cancel -y -n ${CLUSTER_NAME}-7-0
+sleep 200
 s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
 echo "$s"
 echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
