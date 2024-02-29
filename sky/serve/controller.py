@@ -115,8 +115,9 @@ class SkyServeController:
                     chosen_version = min(info.version for info in ready_replicas
                                         ) if len(ready_replicas) > 0 else -1
 
-                chosen_replicas = filter(
-                    lambda info: info.version == chosen_version, ready_replicas)
+                chosen_replicas = list(
+                    filter(lambda info: info.version == chosen_version,
+                           ready_replicas))
             ready_replica_urls = [info.url for info in chosen_replicas]
             return {'ready_replica_urls': ready_replica_urls}
 
@@ -150,7 +151,9 @@ class SkyServeController:
                     self._autoscaler = new_autoscaler
                     self._autoscaler.load_dynamic_states(
                         old_autoscaler.dump_dynamic_states())
-                self._autoscaler.update_version(version, service, update_mode=update_mode)
+                self._autoscaler.update_version(version,
+                                                service,
+                                                update_mode=update_mode)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in update_service: '
