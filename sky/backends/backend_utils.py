@@ -62,17 +62,17 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_APP_DIR = '~/sky/sky_app'
+SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 # Exclude subnet mask from IP address regex.
 IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
-SKY_REMOTE_PATH = '~/sky/wheels'
+SKY_REMOTE_PATH = '~/.sky/wheels'
 SKY_USER_FILE_PATH = f'{SKY_HOME}/generated'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
 
 # Do not use /tmp because it gets cleared on VM restart.
-_SKY_REMOTE_FILE_MOUNTS_DIR = '~/sky/file_mounts/'
+_SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
@@ -107,7 +107,7 @@ CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
-_REMOTE_RUNTIME_FILES_DIR = '~/sky/.runtime_files'
+_REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
 # Include the fields that will be used for generating tags that distinguishes
 # the cluster in ray, to avoid the stopped cluster being discarded due to
