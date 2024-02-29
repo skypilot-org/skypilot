@@ -1093,15 +1093,23 @@ def test_job_queue(generic_cloud: str):
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
-def test_job_queue_with_docker(generic_cloud: str):
-    name = _get_cluster_name()
+@pytest.mark.parametrize(
+    "image_id",
+    [
+        "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
+        "docker:ubuntu:18.04",
+        # Test image with python 3.11 installed by default.
+        "docker:continuumio/miniconda3",
+    ])
+def test_job_queue_with_docker(generic_cloud: str, image_id: str):
+    name = _get_cluster_name() + image_id[len('docker:'):][:4]
     test = Test(
         'job_queue_with_docker',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_docker.yaml',
-            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-3 -d examples/job_queue/job_docker.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} examples/job_queue/cluster_docker.yaml',
+            f'sky exec {name} -n {name}-1 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-2 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-3 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
@@ -2655,10 +2663,14 @@ def test_aws_custom_image():
 
 
 @pytest.mark.kubernetes
-@pytest.mark.parametrize("image_id", [
-    "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
-    "docker:ubuntu:18.04",
-])
+@pytest.mark.parametrize(
+    "image_id",
+    [
+        "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
+        "docker:ubuntu:18.04",
+        # Test image with python 3.11 installed by default.
+        "docker:continuumio/miniconda3",
+    ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
     name = _get_cluster_name()
@@ -3064,7 +3076,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 
             # 2 on-demand (provisioning) + 2 Spot (provisioning).
             f'output=$(sky serve status {name});'
-            'echo "$output" | grep -q "0/4" && break;',
+            'echo "$output" | grep -q "0/4" || exit 1',
             f'sleep 20',
             _check_two_spot_in_status(name),
             _check_two_ondemand_in_status(name),
@@ -3078,7 +3090,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 
             # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
             f'output=$(sky serve status {name});'
-            'echo "$output" | grep -q "1/3";',
+            'echo "$output" | grep -q "1/3"',
             _check_two_spot_in_status(name),
             _check_one_ondemand_in_status(name),
 

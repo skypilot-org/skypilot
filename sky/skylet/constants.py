@@ -1,4 +1,7 @@
 """Constants for SkyPilot."""
+from packaging import version
+
+import sky
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
@@ -18,7 +21,7 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
 # i.e. the PORT_DICT_STR above.
 SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
-SKY_REMOTE_RAY_VERSION = '2.4.0'
+SKY_REMOTE_RAY_VERSION = '2.9.3'
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
@@ -66,18 +69,63 @@ DOCKER_LOGIN_ENV_VARS = {
 }
 
 # Install conda on the remote cluster if it is not already installed.
-# We do not install the latest conda with python 3.11 because ray has not
-# officially supported it yet.
+# We use conda with python 3.10 to be consistent across multiple clouds with
+# best effort.
 # https://github.com/ray-project/ray/issues/31606
 # We use python 3.10 to be consistent with the python version of the
 # AWS's Deep Learning AMI's default conda environment.
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
-    '(wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
+    '(wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
     'bash Miniconda3-Linux-x86_64.sh -b && '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     'conda config --set auto_activate_base true); '
     'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;')
+
+_sky_version = str(version.parse(sky.__version__))
+RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} ray status'
+# Install ray and skypilot on the remote cluster if they are not already
+# installed. {var} will be replaced with the actual value in
+# backend_utils.write_cluster_config.
+RAY_SKYPILOT_INSTALLATION_COMMANDS = (
+    '(type -a python | grep -q python3) || '
+    'echo \'alias python=python3\' >> ~/.bashrc;'
+    '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
+    'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
+    'source ~/.bashrc;'
+    # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
+    # ray cluster is already running, to avoid the ray cluster being restarted.
+    #
+    # We do this guard to avoid any Ray client-server version mismatch.
+    # Specifically: If existing ray cluster is an older version say 2.4, and we
+    # pip install new version say 2.9 wheels here, then subsequent sky exec
+    # (ray job submit) will have v2.9 vs. 2.4 mismatch, similarly this problem
+    # exists for sky status -r (ray status).
+    #
+    # NOTE: RAY_STATUS will only work for the cluster with ray cluster on our
+    # latest ray port 6380, but those existing cluster launched before #1790
+    # that has ray cluster on the default port 6379 will be upgraded and
+    # restarted.
+    f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
+    f'|| {RAY_STATUS} || '
+    f'pip3 install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    # END ray package check and installation
+    '{ pip3 list | grep "skypilot " && '
+    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
+    '{ pip3 uninstall skypilot -y; '
+    'pip3 install "$(echo ~/.sky/wheels/{sky_wheel_hash}/'
+    f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
+    'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
+    'exit 1; }; '
+    # END SkyPilot package check and installation
+
+    # Only patch ray when the ray version is the same as the expected version.
+    # The ray installation above can be skipped due to the existing ray cluster
+    # for backward compatibility. In this case, we should not patch the ray
+    # files.
+    f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
+    '&& { python3 -c "from sky.skylet.ray_patches import patch; patch()" '
+    '|| exit 1; };')
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
