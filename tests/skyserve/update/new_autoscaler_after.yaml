@@ -1,0 +1,17 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replica_policy:
+    min_replicas: 5
+    max_replicas: 5
+    base_ondemand_fallback_replicas: 1
+
+resources:
+  ports: 8081
+  use_spot: true
+  cpus: 2+
+
+workdir: examples/serve/http_server
+
+run: python3 server.py

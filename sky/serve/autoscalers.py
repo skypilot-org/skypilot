@@ -401,14 +401,11 @@ class RequestRateAutoscaler(Autoscaler):
     def dump_dynamic_states(self) -> Dict[str, Any]:
         return {
             'request_timestamps': self.request_timestamps,
-            'latest_version': self.latest_version
         }
 
     def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         if 'request_timestamps' in dynamic_states:
             self.request_timestamps = dynamic_states.pop('request_timestamps')
-        if 'latest_version' in dynamic_states:
-            self.latest_version = dynamic_states.pop('latest_version')
         if dynamic_states:
             logger.info(f'Remaining dynamic states: {dynamic_states}')
 
