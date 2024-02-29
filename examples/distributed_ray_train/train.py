@@ -2,27 +2,28 @@ import argparse
 import os
 from typing import Dict
 
-import torch
 from filelock import FileLock
-from torch import nn
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
-from torchvision.transforms import Normalize, ToTensor
-from tqdm import tqdm
-
 import ray.train
 from ray.train import ScalingConfig
 from ray.train.torch import TorchTrainer
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
+from torchvision import datasets
+from torchvision import transforms
+from torchvision.transforms import Normalize
+from torchvision.transforms import ToTensor
+from tqdm import tqdm
 
 
 def get_dataloaders(batch_size):
     # Transform to normalize the input images
     transform = transforms.Compose([ToTensor(), Normalize((0.5,), (0.5,))])
 
-    with FileLock(os.path.expanduser("~/data.lock")):
+    with FileLock(os.path.expanduser('~/data.lock')):
         # Download training data from open datasets
         training_data = datasets.FashionMNIST(
-            root="~/data",
+            root='~/data',
             train=True,
             download=True,
             transform=transform,
@@ -30,7 +31,7 @@ def get_dataloaders(batch_size):
 
         # Download test data from open datasets
         test_data = datasets.FashionMNIST(
-            root="~/data",
+            root='~/data',
             train=False,
             download=True,
             transform=transform,
@@ -45,6 +46,7 @@ def get_dataloaders(batch_size):
 
 # Model Definition
 class NeuralNetwork(nn.Module):
+
     def __init__(self):
         super(NeuralNetwork, self).__init__()
         self.flatten = nn.Flatten()
@@ -66,9 +68,9 @@ class NeuralNetwork(nn.Module):
 
 
 def train_func_per_worker(config: Dict):
-    lr = config["lr"]
-    epochs = config["epochs"]
-    batch_size = config["batch_size_per_worker"]
+    lr = config['lr']
+    epochs = config['epochs']
+    batch_size = config['batch_size_per_worker']
 
     # Get dataloaders inside the worker training function
     train_dataloader, test_dataloader = get_dataloaders(batch_size=batch_size)
@@ -92,7 +94,7 @@ def train_func_per_worker(config: Dict):
     # Model training loop
     for epoch in range(epochs):
         model.train()
-        for X, y in tqdm(train_dataloader, desc=f"Train Epoch {epoch}"):
+        for X, y in tqdm(train_dataloader, desc=f'Train Epoch {epoch}'):
             pred = model(X)
             loss = loss_fn(pred, y)
 
@@ -103,7 +105,7 @@ def train_func_per_worker(config: Dict):
         model.eval()
         test_loss, num_correct, num_total = 0, 0, 0
         with torch.no_grad():
-            for X, y in tqdm(test_dataloader, desc=f"Test Epoch {epoch}"):
+            for X, y in tqdm(test_dataloader, desc=f'Test Epoch {epoch}'):
                 pred = model(X)
                 loss = loss_fn(pred, y)
 
@@ -116,16 +118,16 @@ def train_func_per_worker(config: Dict):
 
         # [3] Report metrics to Ray Train
         # ===============================
-        ray.train.report(metrics={"loss": test_loss, "accuracy": accuracy})
+        ray.train.report(metrics={'loss': test_loss, 'accuracy': accuracy})
 
 
 def train_fashion_mnist(num_workers=2, use_gpu=False):
     global_batch_size = 32
 
     train_config = {
-        "lr": 1e-3,
-        "epochs": 10,
-        "batch_size_per_worker": global_batch_size // num_workers,
+        'lr': 1e-3,
+        'epochs': 10,
+        'batch_size_per_worker': global_batch_size // num_workers,
     }
 
     # Configure computation resources
@@ -142,11 +144,11 @@ def train_fashion_mnist(num_workers=2, use_gpu=False):
     # Run `train_func_per_worker` on all workers
     # =============================================
     result = trainer.fit()
-    print(f"Training result: {result}")
+    print(f'Training result: {result}')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument('--num-workers', type=int, default=2)
     args = parser.parse_args()
     train_fashion_mnist(num_workers=args.num_workers, use_gpu=True)
