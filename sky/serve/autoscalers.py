@@ -301,7 +301,6 @@ class RequestRateAutoscaler(Autoscaler):
         self, replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> Optional[int]:
         # Find the latest version with at least min_replicas replicas.
-
         version2count: DefaultDict[int, int] = collections.defaultdict(int)
         for info in replica_infos:
             if info.is_ready:
