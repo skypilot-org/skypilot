@@ -109,6 +109,7 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
     f'pip3 install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    # END ray package check and installation
     '{ pip3 list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
     '{ pip3 uninstall skypilot -y; '
@@ -116,12 +117,15 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; '
+    # END SkyPilot package check and installation
+
     # Only patch ray when the ray version is the same as the expected version.
     # The ray installation above can be skipped due to the existing ray cluster
     # for backward compatibility. In this case, we should not patch the ray
     # files.
-    f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION}] && '
-    'python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;')
+    f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
+    '&& python3 -c "from sky.skylet.ray_patches import patch; patch()" '
+    '|| exit 1;')
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
