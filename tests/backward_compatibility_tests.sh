@@ -171,11 +171,10 @@ sky spot launch -d --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7-2 "echo hi; sleep 30
 s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-2)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
-sleep 120
 s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
 echo "$s"
 echo "$s" | grep "RUNNING" | wc -l | grep 2 || exit 1
-sleep 60
+sleep 100
 s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
 echo "$s"
 echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
