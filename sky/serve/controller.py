@@ -129,7 +129,7 @@ class SkyServeController:
                 if version is None:
                     return {'message': 'Error: version is not specified.'}
                 update_mode_str = request_data.get(
-                    'update_mode', serve_utils.UpdateMode.ROLLING.value)
+                    'mode', serve_utils.UpdateMode.ROLLING.value)
                 update_mode = serve_utils.UpdateMode(update_mode_str)
                 logger.info(f'Update to new version version {version} with '
                             f'update_mode {update_mode}.')

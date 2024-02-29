@@ -4417,7 +4417,7 @@ def serve_up(
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
-@click.option('--update-mode',
+@click.option('--mode',
               default='rolling',
               type=click.Choice([m.value for m in serve_lib.UpdateMode],
                                 case_sensitive=False),
@@ -4452,7 +4452,7 @@ def serve_update(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
-    update_mode: str,
+    mode: str,
     yes: bool,
 ):
     """Update a SkyServe service.
@@ -4507,7 +4507,7 @@ def serve_update(
                       abort=True,
                       show_default=True)
 
-    serve_lib.update(task, service_name, update_mode=update_mode)
+    serve_lib.update(task, service_name, mode=mode)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)

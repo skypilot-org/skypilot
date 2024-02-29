@@ -268,8 +268,7 @@ def update_service_status() -> None:
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-def update_service_encoded(service_name: str, version: int,
-                           update_mode: str) -> str:
+def update_service_encoded(service_name: str, version: int, mode: str) -> str:
     service_status = _get_service_status(service_name)
     if service_status is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
@@ -279,7 +278,7 @@ def update_service_encoded(service_name: str, version: int,
         '/controller/update_service',
         json={
             'version': version,
-            'update_mode': update_mode,
+            'mode': mode,
         })
     if resp.status_code == 404:
         raise ValueError('The service is up-ed in an old version and does not '
@@ -887,11 +886,10 @@ class ServeCodeGen:
         return f'python3 -u -c {shlex.quote(generated_code)}'
 
     @classmethod
-    def update_service(cls, service_name: str, version: int,
-                       update_mode: str) -> str:
+    def update_service(cls, service_name: str, version: int, mode: str) -> str:
         code = [
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
-            f'{version}, update_mode={update_mode!r})',
+            f'{version}, mode={mode!r})',
             'print(msg, end="", flush=True)',
         ]
         return cls._build(code)

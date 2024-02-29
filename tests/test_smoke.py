@@ -3224,7 +3224,7 @@ def test_skyserve_update():
             f'sky serve up -n {name} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} -y tests/skyserve/update/new.yaml',
+            f'sky serve update {name} --mode blue_green -y tests/skyserve/update/new.yaml',
             # sleep before update is registered.
             'sleep 20',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
@@ -3258,7 +3258,7 @@ def test_skyserve_fast_update():
             f'sky serve up -n {name} -y tests/skyserve/update/bump_version_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} -y tests/skyserve/update/bump_version_after.yaml',
+            f'sky serve update {name} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
             'sleep 30',
             # READY for service + two READY replicas.
@@ -3285,7 +3285,7 @@ def test_skyserve_update_autoscale():
             f'sky serve up -n {name} -y tests/skyserve/update/num_min_two.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} -y tests/skyserve/update/num_min_one.yaml',
+            f'sky serve update {name} --mode blue_green -y tests/skyserve/update/num_min_one.yaml',
             # sleep before update is registered.
             'sleep 20',
             # Timeout will be triggered when update fails.
@@ -3321,7 +3321,7 @@ def test_skyserve_new_autoscaler_update():
             f'sky serve up -n {name} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} -y tests/skyserve/update/new_autoscaler_after.yaml',
+            f'sky serve update {name} --mode blue_green -y tests/skyserve/update/new_autoscaler_after.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             _check_four_spots_in_status(name),
