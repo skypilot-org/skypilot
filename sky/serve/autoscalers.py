@@ -123,7 +123,9 @@ class Autoscaler:
         """Dump dynamic states from autoscaler."""
         raise NotImplementedError
 
-    def load_dynamic_states(self, dynamic_states: Dict[str, Any], rolling_update: bool=False) -> None:
+    def load_dynamic_states(self,
+                            dynamic_states: Dict[str, Any],
+                            rolling_update: bool = False) -> None:
         """Load dynamic states to autoscaler."""
         raise NotImplementedError
 
@@ -333,7 +335,7 @@ class RequestRateAutoscaler(Autoscaler):
             self, replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
         """Select outdated replicas to scale down."""
-        
+
         latest_ready_replicas = []
         old_replicas = []
         for info in replica_infos:
@@ -359,21 +361,20 @@ class RequestRateAutoscaler(Autoscaler):
             # We only scale down old replicas when total number of replicas
             if num_old_replicas_to_scale_down > 0:
                 return self._select_replicas_to_scale_down(
-                        num_old_replicas_to_scale_down, old_ready_replicas)
+                    num_old_replicas_to_scale_down, old_ready_replicas)
             return []
 
-        all_replica_ids_to_scale_down: List[int] = []
         latest_version_with_min_replicas = (
             self.get_latest_version_with_min_replicas(replica_infos))
         # When it is not rolling update, we scale down old replicas when
-        # the number of ready new replicas is greater than or equal to the min 
+        # the number of ready new replicas is greater than or equal to the min
         # replicas instead of the target, to make the update faster.
         all_replica_ids_to_scale_down: List[int] = []
         for info in replica_infos:
             if (latest_version_with_min_replicas is not None and
                     info.version < latest_version_with_min_replicas):
                 all_replica_ids_to_scale_down.append(info.replica_id)
-        
+
         return all_replica_ids_to_scale_down
 
     def evaluate_scaling(
@@ -450,7 +451,9 @@ class RequestRateAutoscaler(Autoscaler):
             'latest_version': self.latest_version
         }
 
-    def load_dynamic_states(self, dynamic_states: Dict[str, Any], rolling_update: bool = False) -> None:
+    def load_dynamic_states(self,
+                            dynamic_states: Dict[str, Any],
+                            rolling_update: bool = False) -> None:
         if 'request_timestamps' in dynamic_states:
             self.request_timestamps = dynamic_states.pop('request_timestamps')
         if 'latest_version' in dynamic_states:

@@ -96,22 +96,26 @@ class SkyServeController:
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
             # TODO(MaoZiming): Check aggregator type.
-            replica_infos = serve_state.get_replica_infos(self._service_name)
             request_aggregator: Dict[str, Any] = request_data.get(
                 'request_aggregator', {})
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
 
+            replica_infos = serve_state.get_replica_infos(self._service_name)
             ready_replicas = filter(lambda info: info.is_ready, replica_infos)
-            chosen_version = (
-                self._autoscaler.get_latest_version_with_min_replicas(
-                    replica_infos))
-            if chosen_version is None:
-                chosen_version = min(info.version for info in ready_replicas)
+            if self._autoscaler.rolling_update:
+                chosen_replicas = ready_replicas
+            else:
+                chosen_version = (
+                    self._autoscaler.get_latest_version_with_min_replicas(
+                        replica_infos))
+                if chosen_version is None:
+                    chosen_version = min(
+                        info.version for info in ready_replicas)
 
-            chosen_replicas = filter(
-                lambda info: info.version == chosen_version, ready_replicas)
+                chosen_replicas = filter(
+                    lambda info: info.version == chosen_version, ready_replicas)
             ready_replica_urls = [info.url for info in chosen_replicas]
             return {'ready_replica_urls': ready_replica_urls}
 
@@ -135,13 +139,11 @@ class SkyServeController:
                 new_autoscaler = autoscalers.Autoscaler.from_spec(
                     self._service_name, service)
                 if not isinstance(self._autoscaler, type(new_autoscaler)):
-                    if rolling_update:
-                        logger.info('Rolling update is not supported for '
-                                    'changing autoscaler type. Ignoring.')
                     old_autoscaler = self._autoscaler
                     self._autoscaler = new_autoscaler
                     self._autoscaler.load_dynamic_states(
-                        old_autoscaler.dump_dynamic_states())
+                        old_autoscaler.dump_dynamic_states(),
+                        rolling_update=rolling_update)
                 else:
                     self._autoscaler.update_version(
                         version, service, rolling_update=rolling_update)
