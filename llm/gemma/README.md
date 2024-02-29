@@ -134,7 +134,6 @@ You will get the following output:
 You can also reduce cost by ~3x by using the same YAML to finetune the model on spot instances (auto-recovery enabled):
 ```bash
 WANDB_API_KEY="xxx" HF_TOKEN="xxx" sky spot launch -n gemma finetune-lora.yaml --env HF_TOKEN --env WANDB_API_KEY --env BUCKET_NAME=your-bucket-name
-```
 
 ## Serve Finetuned Gemma
 
