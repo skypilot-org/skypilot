@@ -2942,7 +2942,7 @@ def _get_skyserve_http_test(name: str, cloud: str,
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_gcp_http():
     """Test skyserve on GCP"""
     name = _get_service_name()
@@ -2951,7 +2951,7 @@ def test_skyserve_gcp_http():
 
 
 @pytest.mark.aws
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_aws_http():
     """Test skyserve on AWS"""
     name = _get_service_name()
@@ -2960,7 +2960,7 @@ def test_skyserve_aws_http():
 
 
 @pytest.mark.azure
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_azure_http():
     """Test skyserve on Azure"""
     name = _get_service_name()
@@ -2969,7 +2969,7 @@ def test_skyserve_azure_http():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_llm():
     """Test skyserve with real LLM usecase"""
     name = _get_service_name()
@@ -3002,7 +3002,7 @@ def test_skyserve_llm():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_spot_recovery():
     name = _get_service_name()
     zone = 'us-central1-a'
@@ -3024,7 +3024,7 @@ def test_skyserve_spot_recovery():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_base_ondemand_fallback():
     name = _get_service_name()
     test = Test(
@@ -3043,7 +3043,7 @@ def test_skyserve_base_ondemand_fallback():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_dynamic_ondemand_fallback():
     name = _get_service_name()
     zone = 'us-central1-a'
@@ -3106,7 +3106,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_spot_user_bug():
     """Tests that spot recovery doesn't occur for non-preemption failures"""
     name = _get_service_name()
@@ -3131,7 +3131,7 @@ def test_skyserve_spot_user_bug():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_load_balancer():
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
@@ -3152,7 +3152,7 @@ def test_skyserve_load_balancer():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
@@ -3192,7 +3192,7 @@ def test_skyserve_auto_restart():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_cancel():
     """Test skyserve with cancel"""
     name = _get_service_name()
@@ -3234,7 +3234,7 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_update():
     """Test skyserve with update"""
     name = _get_service_name()
@@ -3262,7 +3262,7 @@ def test_skyserve_update():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_rolling_update():
     """Test skyserve with update"""
     name = _get_service_name()
@@ -3293,7 +3293,7 @@ def test_skyserve_rolling_update():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_fast_update():
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
@@ -3336,7 +3336,7 @@ def test_skyserve_fast_update():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_update_autoscale():
     """Test skyserve update with autoscale"""
     name = _get_service_name()
@@ -3367,7 +3367,7 @@ def test_skyserve_update_autoscale():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str):
     """Test skyserve with update that changes autoscaler"""
