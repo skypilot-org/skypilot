@@ -161,13 +161,13 @@ fi
 if [ "$start_from" -le 7 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-7-1 "echo hi; sleep 80"
+sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-7-1 "echo hi; sleep 320"
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-1)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
-sky spot launch -d --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7-2 "echo hi; sleep 30"
+sky spot launch -d --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7-2 "echo hi; sleep 10"
 s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-2)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
