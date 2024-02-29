@@ -4,7 +4,7 @@ from typing import Dict, Iterable, Optional, Tuple
 import click
 import rich
 
-from sky import clouds
+from sky import clouds as sky_clouds
 from sky import global_user_state
 from sky.adaptors import cloudflare
 
@@ -13,19 +13,19 @@ from sky.adaptors import cloudflare
 def check(
     quiet: bool = False,
     verbose: bool = False,
-    user_specified_clouds: Optional[Tuple[str]] = None,
+    clouds: Optional[Tuple[str]] = None,
 ) -> None:
-    user_specified_clouds_set = set()
-    if user_specified_clouds is not None:
-        for cloud in user_specified_clouds:
-            clouds.CLOUD_REGISTRY.from_str(cloud)  # verify cloud
-            user_specified_clouds_set.add(cloud.lower())
+    clouds_set = set()
+    if clouds is not None:
+        for cloud in clouds:
+            sky_clouds.CLOUD_REGISTRY.from_str(cloud)  # verify cloud
+            clouds_set.add(cloud.lower())
 
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
     enabled_clouds = []
 
-    def check_one_cloud(cloud_tuple: Tuple[str, clouds.Cloud]) -> None:
+    def check_one_cloud(cloud_tuple: Tuple[str, sky_clouds.Cloud]) -> None:
         cloud_repr, cloud = cloud_tuple
         echo(f'  Checking {cloud_repr}...', nl=False)
         ok, reason = cloud.check_credentials()
@@ -46,19 +46,18 @@ def check(
             echo(f'    Reason: {reason}')
 
     clouds_to_check = [
-        (repr(cloud), cloud) for cloud in clouds.CLOUD_REGISTRY.values()
+        (repr(cloud), cloud) for cloud in sky_clouds.CLOUD_REGISTRY.values()
     ]
     clouds_to_check.append(('Cloudflare, for R2 object store', cloudflare))
 
     for cloud_tuple in sorted(clouds_to_check):
         cloud_repr = cloud_tuple[0].lower()
-        if (user_specified_clouds is None or
-                cloud_repr in user_specified_clouds_set):
+        if clouds is None or cloud_repr in clouds_set:
             check_one_cloud(cloud_tuple)
 
-    # Cloudflare is not a real cloud in clouds.CLOUD_REGISTRY, and should not be
-    # inserted into the DB (otherwise `sky launch` and other code would error
-    # out when it's trying to look it up in the registry).
+    # Cloudflare is not a real cloud in sky_clouds.CLOUD_REGISTRY, and should
+    # not be inserted into the DB (otherwise `sky launch` and other code would
+    # error out when it's trying to look it up in the registry).
     enabled_clouds = [
         cloud for cloud in enabled_clouds if not cloud.startswith('Cloudflare')
     ]
@@ -91,7 +90,8 @@ def check(
 
 
 def get_cloud_credential_file_mounts(
-        excluded_clouds: Optional[Iterable[clouds.Cloud]]) -> Dict[str, str]:
+        excluded_clouds: Optional[Iterable[sky_clouds.Cloud]]
+) -> Dict[str, str]:
     """Returns the files necessary to access all enabled clouds.
 
     Returns a dictionary that will be added to a task's file mounts
@@ -101,7 +101,7 @@ def get_cloud_credential_file_mounts(
     file_mounts = {}
     for cloud in enabled_clouds:
         if (excluded_clouds is not None and
-                clouds.cloud_in_list(cloud, excluded_clouds)):
+                sky_clouds.cloud_in_list(cloud, excluded_clouds)):
             continue
         cloud_file_mounts = cloud.get_credential_file_mounts()
         file_mounts.update(cloud_file_mounts)
