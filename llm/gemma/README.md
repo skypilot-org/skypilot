@@ -35,9 +35,9 @@ HF_TOKEN="xxx" sky launch -c gemma serve.yaml --env HF_TOKEN
 
 After the cluster is launched, we can access the model with the following command:
 ```bash
-IP=$(sky status --ip gemma)
+ENDPOINT=$(sky status --endpoint 8000 gemma)
 
-curl -L http://$IP:8000/v1/completions \
+curl -L http://$ENDPOINT/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "google/gemma-7b-it",
@@ -48,9 +48,9 @@ curl -L http://$IP:8000/v1/completions \
 
 Chat API is also supported:
 ```bash
-IP=$(sky status --ip gemma)
+ENDPOINT=$(sky status --endpoint 8000 gemma)
 
-curl -L http://$IP:8000/v1/chat/completions \
+curl -L http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "google/gemma-7b-it",
@@ -105,7 +105,7 @@ curl -L http://$ENDPOINT/v1/chat/completions \
 
 ## Finetune Gemma on Your Own Data
 
-You can also finetune Gemma on your own data with SkyPilot as well. We have an example LoRA finetuning script in [scripts/finetune-lora.py](scripts/finetune-lora.py), where we finetune the model on `Abirate/english_quotes` dataset.
+You can also finetune Gemma on your own data with SkyPilot. We provide an example LoRA finetuning script in [scripts/finetune-lora.py](scripts/finetune-lora.py), where the model is finetuned on  the `Abirate/english_quotes` dataset.
 
 
 With [finetune.yaml-lora](finetune-lora.yaml) in this directory, you can finetune the model on any cloud with a single command.
@@ -131,8 +131,28 @@ You will get the following output:
 ```
 
 
-You can also save the cost (~3x) by using the same YAML to finetune the model on spot instances:
+You can also reduce cost by ~3x by using the same YAML to finetune the model on spot instances (auto-recovery enabled):
 ```bash
 WANDB_API_KEY="xxx" HF_TOKEN="xxx" sky spot launch -n gemma finetune-lora.yaml --env HF_TOKEN --env WANDB_API_KEY --env BUCKET_NAME=your-bucket-name
 ```
 
+## Serve Finetuned Gemma
+
+After finetuning, you can serve the finetuned model:
+```bash
+HF_TOKEN="xxx" sky launch -c serve-gemma serve-finetuned.yaml --env BUCKET_PATH=your-bucket-name 
+--env HF_TOKEN
+```
+
+You can access the finetuned model with the following command:
+```bash
+ENDPOINT=$(sky status --endpoint 8000 serve-gemma)
+
+curl -L http://$ENDPOINT/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+      "model": "quote",
+      "prompt": "My favourite condiment is",
+      "max_tokens": 25
+  }' | jq .
+```

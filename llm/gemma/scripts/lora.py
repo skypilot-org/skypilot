@@ -109,35 +109,35 @@ def train():
         resume_from_checkpoint = True
 
     bnb_config = BitsAndBytesConfig(load_in_4bit=True,
-                                    bnb_4bit_quant_type="nf4",
+                                    bnb_4bit_quant_type='nf4',
                                     bnb_4bit_compute_dtype=torch.bfloat16)
 
     tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path,
                                               token=os.environ['HF_TOKEN'])
     model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path,
                                                  quantization_config=bnb_config,
-                                                 device_map="auto",
+                                                 device_map='auto',
                                                  token=os.environ['HF_TOKEN'])
 
     lora_config = LoraConfig(
         r=8,
         target_modules=[
-            "q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj",
-            "down_proj"
+            'q_proj', 'o_proj', 'k_proj', 'v_proj', 'gate_proj', 'up_proj',
+            'down_proj'
         ],
-        task_type="CAUSAL_LM",
+        task_type='CAUSAL_LM',
     )
 
-    data = load_dataset("Abirate/english_quotes")
-    data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+    data = load_dataset('Abirate/english_quotes')
+    data = data.map(lambda samples: tokenizer(samples['quote']), batched=True)
 
     def formatting_func(example):
-        text = f"Quote: {example['quote'][0]}\nAuthor: {example['author'][0]}"
+        text = f'Quote: {example["quote"][0]}\nAuthor: {example["author"][0]}'
         return [text]
 
     trainer = SFTTrainer(
         model=model,
-        train_dataset=data["train"],
+        train_dataset=data['train'],
         args=training_args,
         peft_config=lora_config,
         formatting_func=formatting_func,
