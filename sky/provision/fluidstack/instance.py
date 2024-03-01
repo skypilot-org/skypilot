@@ -86,7 +86,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         'reboot',
         'rebooting',
     ]
-
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
         if len(instances) > config.count:
@@ -96,7 +95,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 'required. Please try terminate the cluster and retry.')
         if not instances:
             break
-        logger.info(f'Waiting for {len(instances)} instances to be ready.')
+        instance_statuses = [
+            instance['status'] for instance in instances.values()
+        ]
+        logger.info(f'Waiting for {len(instances)} instances to be ready: '
+                    f'{instance_statuses}')
         time.sleep(POLL_INTERVAL)
     exist_instances = _filter_instances(cluster_name_on_cloud, ['running'])
     head_instance_id = _get_head_instance_id(exist_instances)
@@ -123,6 +126,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             # Multiple head instances exist.
             # This is a rare case when the instance name was manually modified
             # on the cloud or some unexpected behavior happened.
+            # TODO(zhwu): This may not be necessary. An althernative can be
+            # terminating those head instances.
             instance_name = f'{cluster_name_on_cloud}-worker'
             logger.info(f'Renaming worker node {instance_id} to '
                         f'{instance_name}.')
@@ -171,20 +176,40 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     # Wait for instances to be ready.
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, ['running'])
-        ready_instance_cnt = len(instances)
-        logger.info('Waiting for instances to be ready: '
-                    f'({ready_instance_cnt}/{config.count}).')
-        if ready_instance_cnt == config.count:
-            break
-        failed_instances = _filter_instances(
-            cluster_name_on_cloud,
-            ['timeout error', 'failed to create', 'out of stock'])
-        if failed_instances:
-            logger.error(f'Failed to create {len(failed_instances)}'
+        instances = _filter_instances(cluster_name_on_cloud,
+                                      pending_status + ['running'])
+        if len(instances) < config.count:
+            # Some of pending instances have been convert to a state that will
+            # not convert to `running` status. This can be due to resource
+            # availability issue.
+            all_instances = _filter_instances(cluster_name_on_cloud,
+                                              status_filters=None)
+            all_statuses = [
+                instance['status'] for instance in all_instances.values()
+            ]
+            failed_instance_cnt = config.count - len(instances)
+            logger.error(f'Failed to create {failed_instance_cnt} '
                          f'instances for cluster {cluster_name_on_cloud}')
             raise RuntimeError(
-                f'Failed to create {len(failed_instances)} instances.')
+                f'Failed to create {failed_instance_cnt} instances. '
+                f'All instance statuses: {all_statuses}')
+
+        ready_instances = []
+        pending_instances = []
+        for instance in instances.values():
+            if instance['status'] == 'running':
+                ready_instances.append(instance)
+            else:
+                pending_instances.append(instance)
+        ready_instance_cnt = len(ready_instances)
+        pending_statuses = [
+            instance['status'] for instance in pending_instances
+        ]
+        logger.info('Waiting for instances to be ready: '
+                    f'({ready_instance_cnt}/{config.count}).\n'
+                    f'  Pending instance statuses: {pending_statuses}')
+        if ready_instance_cnt == config.count:
+            break
 
         time.sleep(POLL_INTERVAL)
     assert head_instance_id is not None, 'head_instance_id should not be None'
