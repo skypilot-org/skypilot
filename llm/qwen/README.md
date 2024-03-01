@@ -1,6 +1,7 @@
 # Serving Qwen1.5 on Your Own Cloud
 
 [Qwen1.5](https://github.com/QwenLM/Qwen1.5) is one of the top open LLMs.
+As of Feb 2024, Qwen1.5-72B-Chat is ranked higher than Mixtral-8x7b-Instruct-v0.1 on the LMSYS Chatbot Arena Leaderboard.
 
 
 ## References
