@@ -196,10 +196,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             ]
             failed_instance_cnt = config.count - len(instances)
             logger.error(f'Failed to create {failed_instance_cnt} '
-                         f'instances for cluster {cluster_name_on_cloud}.')
+                         f'instances for cluster {cluster_name_on_cloud}, '
+                         f'with statuses: {all_statuses}')
             raise RuntimeError(
-                f'Failed to create {failed_instance_cnt} instances. '
-                f'All instance statuses: {all_statuses}')
+                f'Failed to create {failed_instance_cnt} instances, '
+                f'with statuses: {all_statuses}')
 
         ready_instances = []
         pending_instances = []
