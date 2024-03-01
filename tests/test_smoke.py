@@ -2896,7 +2896,7 @@ _SERVE_WAIT_UNTIL_READY = (
     f' done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS + 2};')
 _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
 _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
-_SERVICE_PENDING_STATUS_REGEX = 'PROVISIONING\|STARTING'
+_SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
 # Since we don't allow terminate the service if the controller is INIT,
 # which is common for simultaneous pytest, we need to wait until the
 # controller is UP before we can terminate the service.
@@ -3089,8 +3089,8 @@ def test_skyserve_dynamic_ondemand_fallback():
             # Wait for the provisioning starts
             f'sleep 40',
             _check_replica_in_status(
-                name, [(2, True, _SERVICE_PENDING_STATUS_REGEX),
-                       (2, False, _SERVICE_PENDING_STATUS_REGEX)]),
+                name, [(2, True, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (2, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
@@ -3104,8 +3104,8 @@ def test_skyserve_dynamic_ondemand_fallback():
             'echo "$s" | grep -q "1/3"',
             _check_replica_in_status(
                 name, [(1, True, 'READY'),
-                       (1, True, _SERVICE_PENDING_STATUS_REGEX),
-                       (1, False, _SERVICE_PENDING_STATUS_REGEX)]),
+                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
@@ -3285,7 +3285,7 @@ def test_skyserve_rolling_update():
             # The latest version should have one READY and the one of the older versions should be shutting down
             _check_replica_in_status(name,
                                      [(2, False, 'READY'),
-                                      (1, False, _SERVICE_PENDING_STATUS_REGEX),
+                                      (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                                       (1, False, 'SHUTTING_DOWN')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
@@ -3313,7 +3313,7 @@ def test_skyserve_fast_update():
             # 2 on-deamnd (ready) + 1 on-demand (provisioning).
             _check_replica_in_status(
                 name, [(2, False, 'READY'),
-                       (1, False, _SERVICE_PENDING_STATUS_REGEX)]),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             # Test rolling update
@@ -3382,7 +3382,7 @@ def test_skyserve_new_autoscaler_update(mode: str):
         rolling_update_check = [
             f'until ({four_spot_up_cmd}); do sleep 5; done',
             _check_replica_in_status(name,
-                                     [(1, False, _SERVICE_PENDING_STATUS_REGEX),
+                                     [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                                       (1, False, 'SHUTTING_DOWN'),
                                       (1, False, 'READY')]),
         ]
@@ -3395,9 +3395,9 @@ def test_skyserve_new_autoscaler_update(mode: str):
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
-            f'sleep 90',
+            f'sleep 120',
             _check_replica_in_status(
-                name, [(4, True, _SERVICE_PENDING_STATUS_REGEX),
+                name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX),
                        (1, False, 'PENDING'), (2, False, 'READY')]),
             *rolling_update_check,
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
