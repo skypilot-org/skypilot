@@ -115,16 +115,17 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             # instance in a previous launch.
             head_instance_id = instance_id
             instance_name = f'{cluster_name_on_cloud}-head'
-            rename(instance_id, instance_name)
-            logger.info(f'Rename head node {head_instance_id} to '
+            logger.info(f'Renaming head node {head_instance_id} to '
                         f'{instance_name}')
+            rename(instance_id, instance_name)
         if (instance_id != head_instance_id and
                 instance['hostname'].endswith('-head')):
             # Multiple head instances exist.
             # This is a rare case when the instance name was manually modified
             # on the cloud or some unexpected behavior happened.
             instance_name = f'{cluster_name_on_cloud}-worker'
-            logger.info(f'Rename worker node {instance_id} to {instance_name}.')
+            logger.info(f'Renaming worker node {instance_id} to '
+                        f'{instance_name}.')
             try:
                 utils.FluidstackClient().rename(instance_id, instance_name)
             except Exception as e:  # pylint: disable=broad-except
