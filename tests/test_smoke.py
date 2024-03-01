@@ -2919,18 +2919,14 @@ _SERVE_ENDPOINT_WAIT = (
 _SERVE_STATUS_WAIT = ('s=$(sky serve status {name}); '
                       'until ! echo "$s" | grep "Controller is initializing."; '
                       'do echo "Waiting for serve status to be ready..."; '
-                      'sleep 5; s=$(sky serve status {name}); done; echo $s')
-
-
-def _get_replica_line(name: str, replica_id: int) -> str:
-    return (f'{_SERVE_STATUS_WAIT.format(name=name)} | '
-            f'awk "{_AWK_ALL_LINES_BELOW_REPLICAS}"'
-            f' | grep -E "{name}\s+{replica_id}"')
+                      'sleep 5; s=$(sky serve status {name}); done; echo "$s"')
 
 
 def _get_replica_ip(name: str, replica_id: int) -> str:
-    return (f'ip{replica_id}=$({_get_replica_line(name, replica_id)}'
-            f' | grep -Eo "{_IP_REGEX}")')
+    return (f'ip{replica_id}=$(echo "$s" | '
+            f'awk "{_AWK_ALL_LINES_BELOW_REPLICAS}" | '
+            f'grep -E "{name}\s+{replica_id}" | '
+            f'grep -Eo "{_IP_REGEX}")')
 
 
 def _get_skyserve_http_test(name: str, cloud: str,
@@ -3154,7 +3150,9 @@ def test_skyserve_load_balancer():
         [
             f'sky serve up -n {name} -y tests/skyserve/load_balancer/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; {_get_replica_ip(name, 1)}; '
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            f'{_get_replica_ip(name, 1)}; '
             f'{_get_replica_ip(name, 2)}; {_get_replica_ip(name, 3)}; '
             'python tests/skyserve/load_balancer/test_round_robin.py '
             '--endpoint $endpoint --replica-num 3 --replica-ips $ip1 $ip2 $ip3',
@@ -3395,7 +3393,7 @@ def test_skyserve_new_autoscaler_update(mode: str):
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
-            f'sleep 40',
+            f'sleep 60',
             _check_replica_in_status(name, [(4, True, 'PROVISIOINING\|PENDING'),
                                             (1, False, 'PENDING'),
                                             (2, False, 'READY')]),
