@@ -212,12 +212,12 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 time.sleep(10)
                 cnt += 1
                 returncode, stdout, stderr = runner.run(cmd,
-                                                stream_logs=False,
-                                                log_path=log_path,
-                                                require_outputs=True)
+                                                        stream_logs=False,
+                                                        log_path=log_path,
+                                                        require_outputs=True)
                 if not returncode:
                     break
-                
+
             if returncode:
                 raise RuntimeError(
                     'Failed to run setup commands on an instance. '
