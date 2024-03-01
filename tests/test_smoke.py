@@ -3283,10 +3283,10 @@ def test_skyserve_rolling_update():
             'until `curl -L http://$endpoint | grep "Hi, new SkyPilot here!"`; do sleep 2; done;'
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             # The latest version should have one READY and the one of the older versions should be shutting down
-            _check_replica_in_status(name,
-                                     [(2, False, 'READY'),
-                                      (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                                      (1, False, 'SHUTTING_DOWN')]),
+            _check_replica_in_status(
+                name, [(2, False, 'READY'),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (1, False, 'SHUTTING_DOWN')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3381,10 +3381,9 @@ def test_skyserve_new_autoscaler_update(mode: str):
         # once there are 4 spot instance ready.
         rolling_update_check = [
             f'until ({four_spot_up_cmd}); do sleep 5; done',
-            _check_replica_in_status(name,
-                                     [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                                      (1, False, 'SHUTTING_DOWN'),
-                                      (1, False, 'READY')]),
+            _check_replica_in_status(
+                name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (1, False, 'SHUTTING_DOWN'), (1, False, 'READY')]),
         ]
     test = Test(
         f'test-skyserve-new-autoscaler-update',
