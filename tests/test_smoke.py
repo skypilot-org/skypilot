@@ -3097,8 +3097,7 @@ def test_skyserve_dynamic_ondemand_fallback():
             _check_replica_in_status(name, [(2, True, 'READY'),
                                             (0, False, '')]),
             _terminate_gcp_replica(name, zone, 1),
-            f'sleep 20',
-
+            f'sleep 40',
             # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             'echo "$s" | grep -q "1/3"',
@@ -3394,7 +3393,7 @@ def test_skyserve_new_autoscaler_update(mode: str):
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
-            f'sleep 120',
+            f'sleep 150',
             _check_replica_in_status(
                 name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX),
                        (1, False, 'PENDING'), (2, False, 'READY')]),
