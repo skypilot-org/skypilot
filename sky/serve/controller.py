@@ -103,12 +103,14 @@ class SkyServeController:
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
 
-            ready_replicas = filter(lambda info: info.is_ready, replica_infos)
+            ready_replicas = list(
+                filter(lambda info: info.is_ready, replica_infos))
             chosen_version = (
                 self._autoscaler.get_latest_version_with_min_replicas(
                     replica_infos))
             if chosen_version is None:
-                chosen_version = min(info.version for info in ready_replicas)
+                chosen_version = min(info.version for info in ready_replicas
+                                    ) if len(ready_replicas) > 0 else -1
 
             chosen_replicas = filter(
                 lambda info: info.version == chosen_version, ready_replicas)
@@ -138,8 +140,7 @@ class SkyServeController:
                     self._autoscaler = new_autoscaler
                     self._autoscaler.load_dynamic_states(
                         old_autoscaler.dump_dynamic_states())
-                else:
-                    self._autoscaler.update_version(version, service)
+                self._autoscaler.update_version(version, service)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in update_service: '
