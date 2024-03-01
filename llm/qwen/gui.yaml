@@ -1,11 +1,14 @@
 # Starts a GUI server that connects to the Qwen OpenAI API server.
-# This works with the endpoint.yaml, please refer to llm/qwen/README.md
-# for more details.
+#
+# Refer to llm/qwen/README.md for more details.
+#
 # Usage:
+#
 #  1. If you have a endpoint started on a cluster (sky launch):
 #     `sky launch -c qwen-gui ./gui.yaml --env ENDPOINT=$(sky status --ip qwen):8000`
 #  2. If you have a SkyPilot Service started (sky serve up) called qwen:
 #     `sky launch -c qwen-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint qwen)`
+#
 # After the GUI server is started, you will see a gradio link in the output and
 # you can click on it to open the GUI.
 
