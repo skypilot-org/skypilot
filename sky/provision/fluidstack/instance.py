@@ -101,25 +101,32 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     exist_instances = _filter_instances(cluster_name_on_cloud, ['running'])
     head_instance_id = _get_head_instance_id(exist_instances)
 
-    def rename(instance_id, new_name):
+    def rename(instance_id: str, new_name: str) -> None:
         try:
             utils.FluidstackClient().rename(instance_id, new_name)
         except Exception as e:
             logger.warning(f'run_instances error: {e}')
             raise
 
-    for inst_id, inst in exist_instances.items():
+    for instance_id, instance in exist_instances.items():
         if head_instance_id is None:
-            head_instance_id = inst_id
+            # It is possible that head instance does not exist because the
+            # worker instance provisioning succeeded, but failed for the head
+            # instance in a previous launch.
+            head_instance_id = instance_id
             instance_name = f'{cluster_name_on_cloud}-head'
-            rename(inst_id, instance_name)
+            rename(instance_id, instance_name)
             logger.info(f'Rename head node {head_instance_id} to '
                         f'{instance_name}')
-        if inst_id != head_instance_id and inst['hostname'].endswith('-head'):
-            logger.info(f'Rename worker node {inst_id}.')
+        if (instance_id != head_instance_id and
+                instance['hostname'].endswith('-head')):
+            # Multiple head instances exist.
+            # This is a rare case when the instance name was manually modified
+            # on the cloud or some unexpected behavior happened.
+            instance_name = f'{cluster_name_on_cloud}-worker'
+            logger.info(f'Rename worker node {instance_id} to {instance_name}.')
             try:
-                utils.FluidstackClient().rename(
-                    inst_id, f'{cluster_name_on_cloud}-worker')
+                utils.FluidstackClient().rename(instance_id, instance_name)
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'run_instances error: {e}')
                 raise

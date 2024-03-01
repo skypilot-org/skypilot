@@ -233,7 +233,7 @@ class FluidstackClient:
         response = self.info(instance_id)
         return response['status']
 
-    def add_tags(self, instance_id: str, tags: Dict[str, str]):
+    def add_tags(self, instance_id: str, tags: Dict[str, str]) -> str:
         response = requests.patch(
             ENDPOINT + f'server/{instance_id}/tag',
             auth=(self.api_key, self.api_token),
@@ -242,7 +242,7 @@ class FluidstackClient:
         raise_fluidstack_error(response)
         return response.json()
 
-    def rename(self, instance_id: str, hostname: str):
+    def rename(self, instance_id: str, hostname: str) -> str:
         response = requests.patch(
             ENDPOINT + f'server/{instance_id}/rename',
             auth=(self.api_key, self.api_token),
