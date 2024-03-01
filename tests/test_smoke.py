@@ -3379,8 +3379,7 @@ def test_skyserve_new_autoscaler_update(mode: str):
         rolling_update_check = [
             f'until ({four_spot_up_cmd}); do sleep 5; done',
             _check_replica_in_status(name,
-                                     [(4, True, 'PROVISIOINING\|PENDING'),
-                                      (1, False, _SERVICE_PENDING_STATUS_REGEX),
+                                     [(1, False, _SERVICE_PENDING_STATUS_REGEX),
                                       (1, False, 'SHUTTING_DOWN'),
                                       (1, False, 'READY')]),
         ]
@@ -3394,7 +3393,7 @@ def test_skyserve_new_autoscaler_update(mode: str):
             f'sky serve update {name} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
             f'sleep 60',
-            _check_replica_in_status(name, [(4, True, 'PROVISIOINING\|PENDING'),
+            _check_replica_in_status(name, [(4, True, _SERVICE_PENDING_STATUS_REGEX),
                                             (1, False, 'PENDING'),
                                             (2, False, 'READY')]),
             *rolling_update_check,
