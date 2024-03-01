@@ -2923,7 +2923,7 @@ _SERVE_STATUS_WAIT = ('s=$(sky serve status {name})'
 
 
 def _get_replica_line(name: str, replica_id: int) -> str:
-    return (f'{_SERVE_STATUS_WAIT.format(name)} | '
+    return (f'{_SERVE_STATUS_WAIT.format(name=name)} | '
             f'awk "{_AWK_ALL_LINES_BELOW_REPLICAS}"'
             f' | grep -E "{name}\s+{replica_id}"')
 
@@ -3101,7 +3101,7 @@ def test_skyserve_dynamic_ondemand_fallback():
             f'sleep 20',
 
             # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
-            f'{_SERVE_STATUS_WAIT.format(name)}; '
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             'echo "$s" | grep -q "1/3"',
             _check_replica_in_status(
                 name, [(1, True, 'READY'),
