@@ -356,12 +356,16 @@ class RequestRateAutoscaler(Autoscaler):
                                         num_latest_ready_replicas)
             old_ready_replicas = list(
                 filter(lambda info: info.is_ready, old_replicas))
-            num_old_replicas_to_scale_down = (len(old_ready_replicas) -
-                                              num_old_replicas_to_keep)
-            # We only scale down old replicas when total number of replicas
-            if num_old_replicas_to_scale_down > 0:
+            if num_old_replicas_to_keep <= len(old_ready_replicas):
+                # Remove old replicas once the target number of repliacs
+                # satisfies, as we want to let the new replicas to take over
+                # the provisioning old replicas.
                 return self._select_replicas_to_scale_down(
-                    num_old_replicas_to_scale_down, old_ready_replicas)
+                    len(old_replicas) - num_old_replicas_to_keep,
+                    old_replicas)
+            # If there are not enough replicas to handle the traffic, we will
+            # keep the provisioning old replicas to make sure the number of
+            # replicas increases as soon as possible.
             return []
 
         latest_version_with_min_replicas = (

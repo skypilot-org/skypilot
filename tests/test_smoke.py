@@ -2957,10 +2957,13 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
     check_cmd = ''
     for check_tuple in check_tuples:
         count, is_spot, status = check_tuple
-        spot_str = ''
-        if is_spot:
-            spot_str = '\[Spot\]'
-        check_cmd += (f' echo "$s" | grep "({spot_str}vCPU=2)" | '
+        resource_str = ''
+        if status != 'PENDING':
+            spot_str = ''
+            if is_spot:
+                spot_str = '\[Spot\]'
+            resource_str = f'({spot_str}vCPU=2)'
+        check_cmd += (f' echo "$s" | grep "{resource_str}" | '
                       f'grep "{status}" | wc -l | grep {count} || exit 1;')
     return (f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s"; ' + check_cmd)
 
@@ -3392,7 +3395,7 @@ def test_skyserve_new_autoscaler_update(mode: str):
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
-            f'sleep 60',
+            f'sleep 90',
             _check_replica_in_status(
                 name, [(4, True, _SERVICE_PENDING_STATUS_REGEX),
                        (1, False, 'PENDING'), (2, False, 'READY')]),
