@@ -2916,7 +2916,7 @@ _SERVE_ENDPOINT_WAIT = (
     'sleep 5; endpoint=$(sky serve status --endpoint {name}); done; '
     'echo "$endpoint"')
 
-_SERVE_STATUS_WAIT = ('s=$(sky serve status {name})'
+_SERVE_STATUS_WAIT = ('s=$(sky serve status {name}); '
                       'until ! echo "$s" | grep "Controller is initializing."; '
                       'do echo "Waiting for serve status to be ready..."; '
                       'sleep 5; s=$(sky serve status {name}); done; echo $s')
