@@ -3215,7 +3215,11 @@ def test_skyserve_cancel():
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; python3 '
             'tests/skyserve/cancel/send_cancel_request.py '
             '--endpoint $endpoint | grep "Request was cancelled"',
-            f's=$(sky serve logs {name} 1 --no-follow); echo "$s"; echo "$s" | grep "Client disconnected, stopping computation"',
+            f's=$(sky serve logs {name} 1 --no-follow); '
+            'until ! echo "$s" | grep "Please wait for the controller to be"; '
+            'do echo "Waiting for serve logs"; sleep 10; '
+            f's=$(sky serve logs {name} 1 --no-follow); done; '
+            'echo "$s"; echo "$s" | grep "Client disconnected, stopping computation"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
