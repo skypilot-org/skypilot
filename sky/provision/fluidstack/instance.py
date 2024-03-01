@@ -43,8 +43,10 @@ def get_internal_ip(node_info: Dict[str, Any]) -> None:
         node_info['internal_ip'] = result[1].strip()
 
 
-def _filter_instances(cluster_name_on_cloud: str,
-                      status_filters: Optional[List[str]]) -> Dict[str, Any]:
+def _filter_instances(
+        cluster_name_on_cloud: str,
+        status_filters: Optional[List[str]],
+        include_instances: Optional[List[str]] = None) -> Dict[str, Any]:
 
     instances = utils.FluidstackClient().list_instances()
     possible_names = [
@@ -55,6 +57,9 @@ def _filter_instances(cluster_name_on_cloud: str,
     for instance in instances:
         if (status_filters is not None and
                 instance['status'] not in status_filters):
+            continue
+        if (include_instances is not None and
+                instance['id'] not in include_instances):
             continue
         if instance.get('hostname') in possible_names:
             filtered_instances[instance['id']] = instance
@@ -182,14 +187,16 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             # Some of pending instances have been convert to a state that will
             # not convert to `running` status. This can be due to resource
             # availability issue.
-            all_instances = _filter_instances(cluster_name_on_cloud,
-                                              status_filters=None)
+            all_instances = _filter_instances(
+                cluster_name_on_cloud,
+                status_filters=None,
+                include_instances=created_instance_ids)
             all_statuses = [
                 instance['status'] for instance in all_instances.values()
             ]
             failed_instance_cnt = config.count - len(instances)
             logger.error(f'Failed to create {failed_instance_cnt} '
-                         f'instances for cluster {cluster_name_on_cloud}')
+                         f'instances for cluster {cluster_name_on_cloud}.')
             raise RuntimeError(
                 f'Failed to create {failed_instance_cnt} instances. '
                 f'All instance statuses: {all_statuses}')
