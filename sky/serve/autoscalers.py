@@ -361,8 +361,7 @@ class RequestRateAutoscaler(Autoscaler):
                 # satisfies, as we want to let the new replicas to take over
                 # the provisioning old replicas.
                 return self._select_replicas_to_scale_down(
-                    len(old_replicas) - num_old_replicas_to_keep,
-                    old_replicas)
+                    len(old_replicas) - num_old_replicas_to_keep, old_replicas)
             # If there are not enough replicas to handle the traffic, we will
             # keep the provisioning old replicas to make sure the number of
             # replicas increases as soon as possible.
