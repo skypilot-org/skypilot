@@ -3393,9 +3393,9 @@ def test_skyserve_new_autoscaler_update(mode: str):
             f'sky serve update {name} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
             f'sleep 60',
-            _check_replica_in_status(name, [(4, True, _SERVICE_PENDING_STATUS_REGEX),
-                                            (1, False, 'PENDING'),
-                                            (2, False, 'READY')]),
+            _check_replica_in_status(
+                name, [(4, True, _SERVICE_PENDING_STATUS_REGEX),
+                       (1, False, 'PENDING'), (2, False, 'READY')]),
             *rolling_update_check,
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
