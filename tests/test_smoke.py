@@ -3395,7 +3395,7 @@ def test_skyserve_new_autoscaler_update(mode: str):
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
-            f'sleep 30',
+            f'sleep 40',
             _check_replica_in_status(name, [(4, True, 'PROVISIOINING\|PENDING'),
                                             (1, False, 'PENDING'),
                                             (2, False, 'READY')]),
