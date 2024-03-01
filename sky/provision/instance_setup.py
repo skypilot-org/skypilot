@@ -24,7 +24,7 @@ logger = sky_logging.init_logger(__name__)
 _START_TITLE = '\n' + '-' * 20 + 'Start: {} ' + '-' * 20
 _END_TITLE = '-' * 20 + 'End:   {} ' + '-' * 20 + '\n'
 
-_MAX_RETRY = 5
+_MAX_RETRY = 6
 
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
@@ -300,7 +300,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                                                 require_outputs=True)
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
-                           f'(exit code {returncode}). Error: '
+                           f'(exit code {returncode}). Error: \n'
                            f'===== stdout ===== \n{stdout}\n'
                            f'===== stderr ====={stderr}')
 
