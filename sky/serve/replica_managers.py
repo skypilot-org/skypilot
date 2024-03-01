@@ -1,5 +1,4 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
-import collections
 import dataclasses
 import enum
 import functools
@@ -437,6 +436,7 @@ class ReplicaInfo:
             'name': self.cluster_name,
             'status': self.status,
             'version': self.version,
+            'is_spot': self.is_spot,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
         }
@@ -524,10 +524,6 @@ class ReplicaManager:
         serve_state.add_or_update_version(self._service_name,
                                           self.latest_version, spec)
 
-    def get_ready_replica_urls(self) -> List[str]:
-        """Get all ready replica's IP addresses."""
-        raise NotImplementedError
-
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
         """Scale up the service by 1 replica with resources_override.
@@ -579,24 +575,6 @@ class SkyPilotReplicaManager(ReplicaManager):
     ################################
     # Replica management functions #
     ################################
-
-    def get_ready_replica_urls(self) -> List[str]:
-        ready_replica_urls = []
-        version2url = collections.defaultdict(list)
-        for info in serve_state.get_replica_infos(self._service_name):
-            if info.status == serve_state.ReplicaStatus.READY:
-                assert info.url is not None
-                version2url[info.version].append(info.url)
-                ready_replica_urls.append(info.url)
-        # Try all version in descending order. There is possibility that
-        # user consecutively update the service several times, and some
-        # version might not have any ready replicas.
-        version = self.latest_version
-        while version >= serve_constants.INITIAL_VERSION:
-            if version in version2url:
-                return version2url[version]
-            version -= 1
-        return []
 
     def _launch_replica(
         self,

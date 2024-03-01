@@ -333,14 +333,18 @@ class AbstractStore:
             # bucket's URL as 'source'.
             if handle is None:
                 with ux_utils.print_exception_no_traceback():
+                    store_prefix = get_store_prefix(StoreType.from_store(self))
                     raise exceptions.StorageSpecError(
                         'Attempted to mount a non-sky managed bucket '
                         f'{self.name!r} without specifying the storage source.'
-                        ' To mount an externally created bucket (e.g., '
+                        f' Bucket {self.name!r} already exists. \n'
+                        '    • To create a new bucket, specify a unique name.\n'
+                        '    • To mount an externally created bucket (e.g., '
                         'created through cloud console or cloud cli), '
                         'specify the bucket URL in the source field '
-                        'instead of its name. E.g., replace `name: external-'
-                        'bucket` with `source: gs://external-bucket`.')
+                        'instead of its name. I.e., replace '
+                        f'`name: {self.name}` with '
+                        f'`source: {store_prefix}{self.name}`.')
 
 
 class Storage(object):

@@ -1,11 +1,12 @@
 """Autoscalers: perform autoscaling by monitoring metrics."""
 import bisect
+import collections
 import dataclasses
 import enum
 import math
 import time
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -56,7 +57,8 @@ class AutoscalerDecision:
 class Autoscaler:
     """Abstract class for autoscalers."""
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the autoscaler.
 
         Variables:
@@ -66,6 +68,7 @@ class Autoscaler:
             target_num_replicas: Target number of replicas output by autoscaler.
             latest_version: latest version of the service.
         """
+        self._service_name: str = service_name
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = (spec.max_replicas if spec.max_replicas
                                   is not None else spec.min_replicas)
@@ -100,12 +103,19 @@ class Autoscaler:
         raise NotImplementedError
 
     @classmethod
-    def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
+    def from_spec(cls, service_name: str,
+                  spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
         if spec.use_ondemand_fallback:
-            return FallbackRequestRateAutoscaler(spec)
+            return FallbackRequestRateAutoscaler(service_name, spec)
         else:
-            return RequestRateAutoscaler(spec)
+            return RequestRateAutoscaler(service_name, spec)
+
+    def get_latest_version_with_min_replicas(
+        self, replica_infos: Iterable['replica_managers.ReplicaInfo']
+    ) -> Optional[int]:
+        """Get the latest version with at least min_replicas replicas."""
+        raise NotImplementedError
 
     def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
@@ -124,7 +134,8 @@ class RequestRateAutoscaler(Autoscaler):
     either spot or on-demand, but not both.
     """
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
@@ -136,7 +147,7 @@ class RequestRateAutoscaler(Autoscaler):
             scale_up_consecutive_periods: period for scaling up.
             scale_down_consecutive_periods: period for scaling down.
         """
-        super().__init__(spec)
+        super().__init__(service_name, spec)
         self.target_qps_per_replica: Optional[
             float] = spec.target_qps_per_replica
         self.qps_window_size: int = constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
@@ -286,22 +297,37 @@ class RequestRateAutoscaler(Autoscaler):
         else:
             return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
 
+    def get_latest_version_with_min_replicas(
+        self, replica_infos: Iterable['replica_managers.ReplicaInfo']
+    ) -> Optional[int]:
+        # Find the latest version with at least min_replicas replicas.
+        version2count: DefaultDict[int, int] = collections.defaultdict(int)
+        for info in replica_infos:
+            if info.is_ready:
+                version2count[info.version] += 1
+
+        version = self.latest_version
+        while version >= constants.INITIAL_VERSION:
+            spec = serve_state.get_spec(self._service_name, version)
+            if (spec is not None and
+                    version2count[version] >= spec.min_replicas):
+                return version
+            version -= 1
+        return None
+
     def select_outdated_replicas_to_scale_down(
             self, replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
 
-        latest_ready_replicas: List['replica_managers.ReplicaInfo'] = []
-        old_replicas: List['replica_managers.ReplicaInfo'] = []
-        for info in replica_infos:
-            if info.version == self.latest_version:
-                if info.is_ready:
-                    latest_ready_replicas.append(info)
-            else:
-                old_replicas.append(info)
+        latest_version_with_min_replicas = (
+            self.get_latest_version_with_min_replicas(replica_infos))
 
+        # Select replicas earlier than latest_version_with_min_replicas to scale
+        # down.
         all_replica_ids_to_scale_down: List[int] = []
-        if len(latest_ready_replicas) >= self.min_replicas:
-            for info in old_replicas:
+        for info in replica_infos:
+            if (latest_version_with_min_replicas is not None and
+                    info.version < latest_version_with_min_replicas):
                 all_replica_ids_to_scale_down.append(info.replica_id)
 
         return all_replica_ids_to_scale_down
@@ -375,14 +401,11 @@ class RequestRateAutoscaler(Autoscaler):
     def dump_dynamic_states(self) -> Dict[str, Any]:
         return {
             'request_timestamps': self.request_timestamps,
-            'latest_version': self.latest_version
         }
 
     def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         if 'request_timestamps' in dynamic_states:
             self.request_timestamps = dynamic_states.pop('request_timestamps')
-        if 'latest_version' in dynamic_states:
-            self.latest_version = dynamic_states.pop('latest_version')
         if dynamic_states:
             logger.info(f'Remaining dynamic states: {dynamic_states}')
 
@@ -402,8 +425,9 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
     on-demand instance are used as dynamic fallback of spot.
     """
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
-        super().__init__(spec)
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
+        super().__init__(service_name, spec)
         self.base_ondemand_fallback_replicas: int = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
