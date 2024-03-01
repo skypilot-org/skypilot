@@ -2,7 +2,7 @@ envs:
   MODEL_NAME: Qwen/Qwen1.5-72B-Chat
 
 service:
-  # Specifying the path to the endpoint to check the readiness of the service.
+  # Specifying the path to the endpoint to check the readiness of the replicas.
   readiness_probe:
     path: /v1/chat/completions
     post_data:
