@@ -86,7 +86,7 @@ As shown, the service is now backed by 2 replicas, one on Azure and one on GCP, 
 type is chosen to be **the cheapest available one** on the clouds. That said, it maximizes the
 availability of the service while minimizing the cost.
 
-3. To access the model, we use the same curl command to send the request to the endpoint:
+3. To access the model, we use a `curl -L` command (`-L` to follow redirect) to send the request to the endpoint:
 ```bash
 ENDPOINT=$(sky serve status --endpoint qwen)
 
