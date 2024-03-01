@@ -199,6 +199,24 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                                                     stream_logs=False,
                                                     log_path=log_path,
                                                     require_outputs=True)
+            max_retry = 3
+            cnt = 0
+            while returncode == 255 and cnt < max_retry:
+                # Network connection issue occur during setup. This could happen
+                # when a setup step requires a reboot, e.g. nvidia-driver
+                # installation (happens for fluidstack). We should retry for it.
+                logger.info('Network connection issue during setup, this is '
+                            'likely due to the reboot of the instance. '
+                            'Retrying setup in 10 seconds.')
+                time.sleep(10)
+                cnt += 1
+                returncode, stdout, stderr = runner.run(cmd,
+                                                stream_logs=False,
+                                                log_path=log_path,
+                                                require_outputs=True)
+                if not returncode:
+                    break
+                
             if returncode:
                 raise RuntimeError(
                     'Failed to run setup commands on an instance. '
