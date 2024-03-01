@@ -2916,9 +2916,15 @@ _SERVE_ENDPOINT_WAIT = (
     'sleep 5; endpoint=$(sky serve status --endpoint {name}); done; '
     'echo "$endpoint"')
 
+_SERVE_STATUS_WAIT = ('s=$(sky serve status {name})'
+                      'until ! echo "$s" | grep "Controller is initializing."; '
+                      'do echo "Waiting for serve status to be ready..."; '
+                      'sleep 5; s=$(sky serve status {name}); done; echo $s')
+
 
 def _get_replica_line(name: str, replica_id: int) -> str:
-    return (f'sky serve status {name} | awk "{_AWK_ALL_LINES_BELOW_REPLICAS}"'
+    return (f'{_SERVE_STATUS_WAIT.format(name)} | '
+            f'awk "{_AWK_ALL_LINES_BELOW_REPLICAS}"'
             f' | grep -E "{name}\s+{replica_id}"')
 
 
@@ -2958,9 +2964,9 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
         spot_str = ''
         if is_spot:
             spot_str = '\[Spot\]'
-        check_cmd += (f' echo "$output" | grep "({spot_str}vCPU=2)" | '
+        check_cmd += (f' echo "$s" | grep "({spot_str}vCPU=2)" | '
                       f'grep "{status}" | wc -l | grep {count} || exit 1;')
-    return (f'output=$(sky serve status {name}); echo "$output"; ' + check_cmd)
+    return (f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s"; ' + check_cmd)
 
 
 @pytest.mark.gcp
@@ -3057,9 +3063,9 @@ def test_skyserve_base_ondemand_fallback():
         [
             f'sky serve up -n {name} -y tests/skyserve/spot/base_ondemand_fallback.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'output=$(sky serve status {name});'
-            'echo "$output" | grep "GCP(\[Spot\]vCPU=2)" && '
-            'echo "$output" | grep "GCP(vCPU=2)";'
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            'echo "$s" | grep "GCP(\[Spot\]vCPU=2)" && '
+            'echo "$s" | grep "GCP(vCPU=2)";'
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3077,10 +3083,10 @@ def test_skyserve_dynamic_ondemand_fallback():
         f'test-skyserve-dynamic-ondemand-fallback',
         [
             f'sky serve up -n {name} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
-            f'sleep 20',
+            f'sleep 40',
             # 2 on-demand (provisioning) + 2 Spot (provisioning).
-            f'output=$(sky serve status {name}); echo $output;'
-            'echo "$output" | grep -q "0/4" || exit 1',
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s";'
+            'echo "$s" | grep -q "0/4" || exit 1',
             # Wait for the provisioning starts
             f'sleep 40',
             _check_replica_in_status(
@@ -3095,8 +3101,8 @@ def test_skyserve_dynamic_ondemand_fallback():
             f'sleep 20',
 
             # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
-            f'output=$(sky serve status {name});'
-            'echo "$output" | grep -q "1/3"',
+            f'{_SERVE_STATUS_WAIT.format(name)}; '
+            'echo "$s" | grep -q "1/3"',
             _check_replica_in_status(
                 name, [(1, True, 'READY'),
                        (1, True, _SERVICE_PENDING_STATUS_REGEX),
