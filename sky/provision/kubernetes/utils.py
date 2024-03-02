@@ -32,7 +32,7 @@ MEMORY_SIZE_UNITS = {
 }
 NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. \
 If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
-(e.g., skypilot.co/accelerators) are setup correctly. \
+(e.g., skypilot.co/accelerator) are setup correctly. \
 To further debug, run: sky check.'
 
 # TODO(romilb): Add links to docs for configuration instructions when ready.
