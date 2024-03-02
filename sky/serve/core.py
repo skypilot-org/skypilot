@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds import service_catalog
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -123,6 +124,8 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
+            'remote_catalog_path': service_catalog.CATALOG_REL_DIR,
+            'local_catalog_path': service_catalog.LOCAL_CATALOG_DIR,
             **controller_utils.shared_controller_vars_to_fill(
                 'serve',
                 remote_user_config_path=remote_config_yaml_path,

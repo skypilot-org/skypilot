@@ -5,6 +5,7 @@ name: {{dag_name}}
 file_mounts:
   {{remote_user_yaml_path}}: {{user_yaml_path}}
   {{remote_user_config_path}}: skypilot:local_skypilot_config_path
+  {{remote_catalog_path}}: {{local_catalog_path}}
 
 setup: |
   {%- for cmd in cloud_dependencies_installation_commands %}
