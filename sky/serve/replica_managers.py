@@ -75,7 +75,7 @@ def launch_cluster(replica_id: int,
                 r.copy(**resources_override) for r in resources
             ]
             task.set_resources(type(resources)(overrided_resources))
-        task.update_envs({serve_constants.REPLICA_ID_ENV_VAR, str(replica_id)})
+        task.update_envs({serve_constants.REPLICA_ID_ENV_VAR: str(replica_id)})
 
         logger.info(f'Launching replica (id: {replica_id}) cluster '
                     f'{cluster_name} with resources: {task.resources}')
