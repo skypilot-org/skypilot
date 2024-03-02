@@ -3274,12 +3274,18 @@ def test_skyserve_rolling_update():
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} -y tests/skyserve/update/new.yaml',
-            # sleep before update is registered.
-            'sleep 20',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            # Make sure the traffic is mixed across two versions
+            # Make sure the traffic is mixed across two versions, the replicas
+            # with even id will sleep 10 seconds before being ready, so we
+            # should be able to get observe the period that the traffic is mixed
+            # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'until `curl -L http://$endpoint | grep "Hi, new SkyPilot here!"`; do sleep 2; done;'
+            # Check the output from the old version, immediately after the
+            # output from the new version appears. This is guaranteed by the
+            # round robin load balancing policy.
+            # TODO(zhwu): we should have a more generalized way for checking the
+            # mixed version of replicas to avoid depending on the specific
+            # round robin load balancing policy.
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             # The latest version should have one READY and the one of the older versions should be shutting down
             _check_replica_in_status(

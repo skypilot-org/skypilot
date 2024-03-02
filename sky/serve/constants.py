@@ -73,3 +73,6 @@ LOAD_BALANCER_PORT_RANGE = '30001-30100'
 
 # Initial version of service.
 INITIAL_VERSION = 1
+
+# Replica ID environment variable name that can be accessed on the replica.
+REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'

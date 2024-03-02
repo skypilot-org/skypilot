@@ -51,7 +51,8 @@ _MAX_NUM_LAUNCH = psutil.cpu_count()
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
-def launch_cluster(task_yaml_path: str,
+def launch_cluster(replica_id: int,
+                   task_yaml_path: str,
                    cluster_name: str,
                    resources_override: Optional[Dict[str, Any]] = None,
                    max_retry: int = 3) -> None:
@@ -74,8 +75,10 @@ def launch_cluster(task_yaml_path: str,
                 r.copy(**resources_override) for r in resources
             ]
             task.set_resources(type(resources)(overrided_resources))
-        logger.info(f'Launching replica cluster {cluster_name} with '
-                    f'resources: {task.resources}')
+        task.update_envs({serve_constants.REPLICA_ID_ENV_VAR, str(replica_id)})
+
+        logger.info(f'Launching replica (id: {replica_id}) cluster '
+                    f'{cluster_name} with resources: {task.resources}')
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to construct task object from yaml file with '
                      f'error {common_utils.format_exception(e)}')
@@ -595,7 +598,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(self._task_yaml_path, cluster_name, resources_override),
+            args=(replica_id, self._task_yaml_path, cluster_name,
+                  resources_override),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _should_use_spot(self._task_yaml_path, resources_override)
