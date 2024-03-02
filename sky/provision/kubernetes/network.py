@@ -57,6 +57,7 @@ def _open_ports_using_ingress(
     ports: List[int],
     provider_config: Dict[str, Any],
 ) -> None:
+    # Check if an ingress controller exists
     if not network_utils.ingress_controller_exists():
         raise Exception(
             'Ingress controller not found. '
@@ -64,31 +65,36 @@ def _open_ports_using_ingress(
             'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
         )
 
-    for port in ports:
-        service_name = f'{cluster_name_on_cloud}-skypilot-service--{port}'
-        ingress_name = f'{cluster_name_on_cloud}-skypilot-ingress--{port}'
-        path_prefix = _PATH_PREFIX.format(
-            cluster_name_on_cloud=cluster_name_on_cloud, port=port)
+    # Prepare service names, ports,  for template rendering
+    service_details = [
+        (f'{cluster_name_on_cloud}-skypilot-service--{port}', port,
+         _PATH_PREFIX.format(cluster_name_on_cloud=cluster_name_on_cloud,
+                             port=port)) for port in ports
+    ]
 
-        content = network_utils.fill_ingress_template(
-            namespace=provider_config.get('namespace', 'default'),
-            path_prefix=path_prefix,
-            service_name=service_name,
-            service_port=port,
-            ingress_name=ingress_name,
-            selector_key='skypilot-cluster',
-            selector_value=cluster_name_on_cloud,
-        )
+    # Generate ingress and services specs
+    content = network_utils.fill_ingress_template(
+        namespace=provider_config.get('namespace', 'default'),
+        service_details=service_details,
+        ingress_name=f'{cluster_name_on_cloud}-skypilot-ingress',
+        selector_key='skypilot-cluster',
+        selector_value=cluster_name_on_cloud,
+    )
+
+    # Create or update services based on the generated specs
+    for service_name, service_spec in content['services_spec'].items():
         network_utils.create_or_replace_namespaced_service(
             namespace=provider_config.get('namespace', 'default'),
             service_name=service_name,
-            service_spec=content['service_spec'],
+            service_spec=service_spec,
         )
-        network_utils.create_or_replace_namespaced_ingress(
-            namespace=provider_config.get('namespace', 'default'),
-            ingress_name=ingress_name,
-            ingress_spec=content['ingress_spec'],
-        )
+
+    # Create or update the single ingress for all services
+    network_utils.create_or_replace_namespaced_ingress(
+        namespace=provider_config.get('namespace', 'default'),
+        ingress_name=f'{cluster_name_on_cloud}-skypilot-ingress',
+        ingress_spec=content['ingress_spec'],
+    )
 
 
 def cleanup_ports(
@@ -128,17 +134,20 @@ def _cleanup_ports_for_ingress(
     ports: List[int],
     provider_config: Dict[str, Any],
 ) -> None:
+    # Delete services for each port
     for port in ports:
         service_name = f'{cluster_name_on_cloud}-skypilot-service--{port}'
-        ingress_name = f'{cluster_name_on_cloud}-skypilot-ingress--{port}'
         network_utils.delete_namespaced_service(
             namespace=provider_config.get('namespace', 'default'),
             service_name=service_name,
         )
-        network_utils.delete_namespaced_ingress(
-            namespace=provider_config.get('namespace', 'default'),
-            ingress_name=ingress_name,
-        )
+
+    # Delete the single ingress used for all ports
+    ingress_name = f'{cluster_name_on_cloud}-skypilot-ingress'
+    network_utils.delete_namespaced_ingress(
+        namespace=provider_config.get('namespace', 'default'),
+        ingress_name=ingress_name,
+    )
 
 
 def query_ports(
