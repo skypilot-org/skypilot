@@ -3270,7 +3270,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             # should be able to get observe the period that the traffic is mixed
             # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until `curl -L http://$endpoint | grep "Hi, new SkyPilot here!"`; do sleep 2; done;'
+            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done;'
             # Check the output from the old version, immediately after the
             # output from the new version appears. This is guaranteed by the
             # round robin load balancing policy.
