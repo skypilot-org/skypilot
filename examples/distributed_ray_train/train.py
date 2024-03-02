@@ -1,81 +1,154 @@
 import argparse
-import tempfile
+import os
+from typing import Dict
 
-import ray
+from filelock import FileLock
 import ray.train
-from ray.train import Checkpoint
 from ray.train import ScalingConfig
 from ray.train.torch import TorchTrainer
 import torch
-from torch.nn import CrossEntropyLoss
-from torch.optim import Adam
+from torch import nn
 from torch.utils.data import DataLoader
-from torchvision.datasets import FashionMNIST
-from torchvision.models import resnet18
-from torchvision.transforms import Compose
+from torchvision import datasets
+from torchvision import transforms
 from torchvision.transforms import Normalize
 from torchvision.transforms import ToTensor
+from tqdm import tqdm
 
 
-def train_func(config):
+def get_dataloaders(batch_size):
+    # Transform to normalize the input images
+    transform = transforms.Compose([ToTensor(), Normalize((0.5,), (0.5,))])
 
-    # Model, Loss, Optimizer
-    model = resnet18(num_classes=10)
-    model.conv1 = torch.nn.Conv2d(1,
-                                  64,
-                                  kernel_size=(7, 7),
-                                  stride=(2, 2),
-                                  padding=(3, 3),
-                                  bias=False)
+    with FileLock(os.path.expanduser('~/data.lock')):
+        # Download training data from open datasets
+        training_data = datasets.FashionMNIST(
+            root='~/data',
+            train=True,
+            download=True,
+            transform=transform,
+        )
 
-    # [1] Prepare model.
+        # Download test data from open datasets
+        test_data = datasets.FashionMNIST(
+            root='~/data',
+            train=False,
+            download=True,
+            transform=transform,
+        )
 
+    # Create data loaders
+    train_dataloader = DataLoader(training_data, batch_size=batch_size)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size)
+
+    return train_dataloader, test_dataloader
+
+
+# Model Definition
+class NeuralNetwork(nn.Module):
+
+    def __init__(self):
+        super(NeuralNetwork, self).__init__()
+        self.flatten = nn.Flatten()
+        self.linear_relu_stack = nn.Sequential(
+            nn.Linear(28 * 28, 512),
+            nn.ReLU(),
+            nn.Dropout(0.25),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Dropout(0.25),
+            nn.Linear(512, 10),
+            nn.ReLU(),
+        )
+
+    def forward(self, x):
+        x = self.flatten(x)
+        logits = self.linear_relu_stack(x)
+        return logits
+
+
+def train_func_per_worker(config: Dict):
+    lr = config['lr']
+    epochs = config['epochs']
+    batch_size = config['batch_size_per_worker']
+
+    # Get dataloaders inside the worker training function
+    train_dataloader, test_dataloader = get_dataloaders(batch_size=batch_size)
+
+    # [1] Prepare Dataloader for distributed training
+    # Shard the datasets among workers and move batches to the correct device
+    # =======================================================================
+    train_dataloader = ray.train.torch.prepare_data_loader(train_dataloader)
+    test_dataloader = ray.train.torch.prepare_data_loader(test_dataloader)
+
+    model = NeuralNetwork()
+
+    # [2] Prepare and wrap your model with DistributedDataParallel
+    # Move the model to the correct GPU/CPU device
+    # ============================================================
     model = ray.train.torch.prepare_model(model)
 
-    criterion = CrossEntropyLoss()
-    optimizer = Adam(model.parameters(), lr=0.001)
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
 
-    # Data
-    transform = Compose([ToTensor(), Normalize((0.5,), (0.5,))])
-    train_data = FashionMNIST(root='./data',
-                              train=True,
-                              download=True,
-                              transform=transform)
-    train_loader = DataLoader(train_data, batch_size=128, shuffle=True)
+    # Model training loop
+    for epoch in range(epochs):
+        model.train()
+        for X, y in tqdm(train_dataloader, desc=f'Train Epoch {epoch}'):
+            pred = model(X)
+            loss = loss_fn(pred, y)
 
-    # [2] Prepare dataloader.
-
-    train_loader = ray.train.torch.prepare_data_loader(train_loader)
-
-    # Training
-    for epoch in range(10):
-        for images, labels in train_loader:
-            outputs = model(images)
-            loss = criterion(outputs, labels)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-        checkpoint_dir = tempfile.gettempdir()
-        checkpoint_path = checkpoint_dir + "/model.checkpoint"
-        torch.save(model.state_dict(), checkpoint_path)
+        model.eval()
+        test_loss, num_correct, num_total = 0, 0, 0
+        with torch.no_grad():
+            for X, y in tqdm(test_dataloader, desc=f'Test Epoch {epoch}'):
+                pred = model(X)
+                loss = loss_fn(pred, y)
 
-        # [3] Report metrics and checkpoint.
+                test_loss += loss.item()
+                num_total += y.shape[0]
+                num_correct += (pred.argmax(1) == y).sum().item()
 
-        ray.train.report({"loss": loss.item()},
-                         checkpoint=Checkpoint.from_directory(checkpoint_dir))
+        test_loss /= len(test_dataloader)
+        accuracy = num_correct / num_total
+
+        # [3] Report metrics to Ray Train
+        # ===============================
+        ray.train.report(metrics={'loss': test_loss, 'accuracy': accuracy})
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--num-workers", type=int, default=2)
-args = parser.parse_args()
+def train_fashion_mnist(num_workers=2, use_gpu=False):
+    global_batch_size = 32
 
-# [4] Configure scaling and resource requirements.
+    train_config = {
+        'lr': 1e-3,
+        'epochs': 10,
+        'batch_size_per_worker': global_batch_size // num_workers,
+    }
 
-scaling_config = ScalingConfig(num_workers=args.num_workers, use_gpu=True)
+    # Configure computation resources
+    scaling_config = ScalingConfig(num_workers=num_workers, use_gpu=use_gpu)
 
-# [5] Launch distributed training job.
+    # Initialize a Ray TorchTrainer
+    trainer = TorchTrainer(
+        train_loop_per_worker=train_func_per_worker,
+        train_loop_config=train_config,
+        scaling_config=scaling_config,
+    )
 
-trainer = TorchTrainer(train_func, scaling_config=scaling_config)
+    # [4] Start distributed training
+    # Run `train_func_per_worker` on all workers
+    # =============================================
+    result = trainer.fit()
+    print(f'Training result: {result}')
 
-result = trainer.fit()
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--num-workers', type=int, default=2)
+    args = parser.parse_args()
+    train_fashion_mnist(num_workers=args.num_workers, use_gpu=True)

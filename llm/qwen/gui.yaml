@@ -1,0 +1,53 @@
+# Starts a GUI server that connects to the Qwen OpenAI API server.
+#
+# Refer to llm/qwen/README.md for more details.
+#
+# Usage:
+#
+#  1. If you have a endpoint started on a cluster (sky launch):
+#     `sky launch -c qwen-gui ./gui.yaml --env ENDPOINT=$(sky status --ip qwen):8000`
+#  2. If you have a SkyPilot Service started (sky serve up) called qwen:
+#     `sky launch -c qwen-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint qwen)`
+#
+# After the GUI server is started, you will see a gradio link in the output and
+# you can click on it to open the GUI.
+
+envs:
+  ENDPOINT: x.x.x.x:3031 # Address of the API server running qwen. 
+
+resources:
+  cpus: 2
+
+setup: |
+  conda activate qwen
+  if [ $? -ne 0 ]; then
+    conda create -n qwen python=3.10 -y
+    conda activate qwen
+  fi
+
+  pip install "fschat[model_worker,webui]"
+  pip install "openai<1"
+
+run: |
+  conda activate qwen
+  export PATH=$PATH:/sbin
+  WORKER_IP=$(hostname -I | cut -d' ' -f1)
+  CONTROLLER_PORT=21001
+  WORKER_PORT=21002
+
+  cat <<EOF > ~/model_info.json
+  {
+    "Qwen/Qwen1.5-72B-Chat": {
+      "model_name": "Qwen/Qwen1.5-72B-Chat",
+      "api_base": "http://${ENDPOINT}/v1",
+      "api_key": "empty",
+      "model_path": "Qwen/Qwen1.5-72B-Chat"
+    }
+  }
+  EOF
+
+  python3 -m fastchat.serve.controller --host 0.0.0.0 --port ${CONTROLLER_PORT} > ~/controller.log 2>&1 &
+
+  echo 'Starting gradio server...'
+  python -u -m fastchat.serve.gradio_web_server --share \
+    --register-openai-compatible-models ~/model_info.json | tee ~/gradio.log
