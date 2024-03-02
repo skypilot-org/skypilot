@@ -5,9 +5,9 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 from sky.clouds.service_catalog.config import fallback_to_default_catalog
+from sky.clouds.service_catalog.constants import CATALOG_REL_DIR
 from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
 from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
-from sky.clouds.service_catalog.constants import CATALOG_REL_DIR
 from sky.clouds.service_catalog.constants import LOCAL_CATALOG_DIR
 from sky.utils import resources_utils
 
