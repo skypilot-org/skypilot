@@ -2995,9 +2995,8 @@ def test_skyserve_azure_http():
     run_one_test(test)
 
 
-@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_llm():
+def test_skyserve_llm(generic_cloud: str):
     """Test skyserve with real LLM usecase"""
     name = _get_service_name()
 
@@ -3016,7 +3015,7 @@ def test_skyserve_llm():
     test = Test(
         f'test-skyserve-llm',
         [
-            f'sky serve up -n {name} -y tests/skyserve/llm/service.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/llm/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             *[
                 generate_llm_test_command(prompt, output)
@@ -3053,14 +3052,13 @@ def test_skyserve_spot_recovery():
     run_one_test(test)
 
 
-@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_base_ondemand_fallback():
+def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = Test(
         f'test-skyserve-base-ondemand-fallback',
         [
-            f'sky serve up -n {name} -y tests/skyserve/spot/base_ondemand_fallback.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/spot/base_ondemand_fallback.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             'echo "$s" | grep "GCP(\[Spot\]vCPU=2)" && '
@@ -3072,16 +3070,15 @@ def test_skyserve_base_ondemand_fallback():
     run_one_test(test)
 
 
-@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_dynamic_ondemand_fallback():
+def test_skyserve_dynamic_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     zone = 'us-central1-a'
 
     test = Test(
         f'test-skyserve-dynamic-ondemand-fallback',
         [
-            f'sky serve up -n {name} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
             f'sleep 40',
             # 2 on-demand (provisioning) + 2 Spot (provisioning).
             f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s";'
@@ -3117,15 +3114,14 @@ def test_skyserve_dynamic_ondemand_fallback():
     run_one_test(test)
 
 
-@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_spot_user_bug():
+def test_skyserve_spot_user_bug(generic_cloud: str):
     """Tests that spot recovery doesn't occur for non-preemption failures"""
     name = _get_service_name()
     test = Test(
         f'test-skyserve-spot-user-bug-gcp',
         [
-            f'sky serve up -n {name} -y tests/skyserve/spot/user_bug.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/spot/user_bug.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             # After failure due to user bug, the service should fail instead of
             # triggering spot recovery.
@@ -3142,15 +3138,14 @@ def test_skyserve_spot_user_bug():
     run_one_test(test)
 
 
-@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_load_balancer():
+def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
     test = Test(
         f'test-skyserve-load-balancer',
         [
-            f'sky serve up -n {name} -y tests/skyserve/load_balancer/service.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/load_balancer/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
@@ -3207,16 +3202,15 @@ def test_skyserve_auto_restart():
     run_one_test(test)
 
 
-@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_cancel():
+def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
 
     test = Test(
         f'test-skyserve-cancel',
         [
-            f'sky serve up -n {name} -y tests/skyserve/cancel/cancel.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/cancel/cancel.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; python3 '
             'tests/skyserve/cancel/send_cancel_request.py '
@@ -3233,18 +3227,17 @@ def test_skyserve_cancel():
     run_one_test(test)
 
 
-@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_update():
+def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
     test = Test(
         f'test-skyserve-update',
         [
-            f'sky serve up -n {name} -y tests/skyserve/update/old.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} --mode blue_green -y tests/skyserve/update/new.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/new.yaml',
             # sleep before update is registered.
             'sleep 20',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
@@ -3261,19 +3254,17 @@ def test_skyserve_update():
     run_one_test(test)
 
 
-@pytest.mark.aws
-@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_rolling_update():
+def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
     test = Test(
         f'test-skyserve-update',
         [
-            f'sky serve up -n {name} -y tests/skyserve/update/old.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} -y tests/skyserve/update/new.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/new.yaml',
             # Make sure the traffic is mixed across two versions, the replicas
             # with even id will sleep 10 seconds before being ready, so we
             # should be able to get observe the period that the traffic is mixed
@@ -3299,20 +3290,18 @@ def test_skyserve_rolling_update():
     run_one_test(test)
 
 
-@pytest.mark.aws
-@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_fast_update():
+def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
 
     test = Test(
         f'test-skyserve-fast-update',
         [
-            f'sky serve up -n {name} -y tests/skyserve/update/bump_version_before.yaml',
+            f'sky serve up -n {name} -y --cloud {generic_cloud} tests/skyserve/update/bump_version_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
             'sleep 30',
             # 2 on-deamnd (ready) + 1 on-demand (provisioning).
@@ -3322,7 +3311,7 @@ def test_skyserve_fast_update():
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             # Test rolling update
-            f'sky serve update {name} -y tests/skyserve/update/bump_version_before.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
             # sleep to wait for update to be registered.
             'sleep 30',
             # 2 on-deamnd (ready) + 1 on-demand (shutting down).
@@ -3337,20 +3326,18 @@ def test_skyserve_fast_update():
     run_one_test(test)
 
 
-@pytest.mark.aws
-@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_update_autoscale():
+def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     name = _get_service_name()
     test = Test(
         f'test-skyserve-update-autoscale',
         [
-            f'sky serve up -n {name} -y tests/skyserve/update/num_min_two.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/num_min_two.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} --mode blue_green -y tests/skyserve/update/num_min_one.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/num_min_one.yaml',
             # sleep before update is registered.
             'sleep 20',
             # Timeout will be triggered when update fails.
@@ -3358,7 +3345,7 @@ def test_skyserve_update_autoscale():
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl -L http://$endpoint | grep "Hi, SkyPilot here!"',
             # Rolling Update
-            f'sky serve update {name} -y tests/skyserve/update/num_min_two.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/num_min_two.yaml',
             # sleep before update is registered.
             'sleep 20',
             # Timeout will be triggered when update fails.
@@ -3372,10 +3359,9 @@ def test_skyserve_update_autoscale():
     run_one_test(test)
 
 
-@pytest.mark.gcp
 @pytest.mark.serve
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
-def test_skyserve_new_autoscaler_update(mode: str):
+def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
     name = _get_service_name() + mode
 
@@ -3393,11 +3379,11 @@ def test_skyserve_new_autoscaler_update(mode: str):
     test = Test(
         f'test-skyserve-new-autoscaler-update',
         [
-            f'sky serve up -n {name} -y tests/skyserve/update/new_autoscaler_before.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
             f'sleep 150',
             _check_replica_in_status(
