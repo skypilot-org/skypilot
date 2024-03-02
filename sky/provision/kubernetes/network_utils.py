@@ -83,7 +83,10 @@ def fill_ingress_template(namespace: str, service_details: List[Tuple[str, int,
     content = yaml.safe_load(cont)
 
     # Return a dictionary containing both specs
-    return {'ingress_spec': content['ingress_spec'], 'services_spec': content['services_spec']}
+    return {
+        'ingress_spec': content['ingress_spec'],
+        'services_spec': content['services_spec']
+    }
 
 
 def create_or_replace_namespaced_ingress(

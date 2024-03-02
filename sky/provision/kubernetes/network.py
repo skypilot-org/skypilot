@@ -69,7 +69,8 @@ def _open_ports_using_ingress(
     service_details = [
         (f'{cluster_name_on_cloud}-skypilot-service--{port}', port,
          _PATH_PREFIX.format(cluster_name_on_cloud=cluster_name_on_cloud,
-                             port=port)) for port in ports
+                             port=port).rstrip('/').lstrip('/'))
+        for port in ports
     ]
 
     # Generate ingress and services specs
