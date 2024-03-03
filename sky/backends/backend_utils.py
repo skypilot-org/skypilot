@@ -891,6 +891,13 @@ def write_cluster_config(
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
+                # We should not use `.format`, as it contains '{}' as the bash
+                # syntax.
+                'ray_skypilot_installation_commands':
+                    (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
+                        '{sky_wheel_hash}',
+                        wheel_hash).replace('{cloud}',
+                                            str(cloud).lower())),
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.

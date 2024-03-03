@@ -153,7 +153,9 @@ class FluidstackClient:
                                  auth=(self.api_key, self.api_token),
                                  json=body)
         raise_fluidstack_error(response)
-        return response.json().get('multiple')
+        instance_ids = response.json().get('multiple')
+        assert all(id is not None for id in instance_ids), instance_ids
+        return instance_ids
 
     def list_ssh_keys(self):
         response = requests.get(ENDPOINT + 'ssh',
@@ -231,11 +233,20 @@ class FluidstackClient:
         response = self.info(instance_id)
         return response['status']
 
-    def add_tags(self, instance_id: str, tags: Dict[str, str]):
+    def add_tags(self, instance_id: str, tags: Dict[str, str]) -> str:
         response = requests.patch(
             ENDPOINT + f'server/{instance_id}/tag',
             auth=(self.api_key, self.api_token),
             json=dict(tags=json.dumps(tags)),
+        )
+        raise_fluidstack_error(response)
+        return response.json()
+
+    def rename(self, instance_id: str, hostname: str) -> str:
+        response = requests.patch(
+            ENDPOINT + f'server/{instance_id}/rename',
+            auth=(self.api_key, self.api_token),
+            json=dict(name=hostname),
         )
         raise_fluidstack_error(response)
         return response.json()

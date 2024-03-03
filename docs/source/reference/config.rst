@@ -286,6 +286,10 @@ Available fields and semantics:
             hostPath:
               path: /tmp
               type: Directory
+          - name: dshm          # Use this to modify the /dev/shm volume mounted by SkyPilot
+            emptyDir:
+              medium: Memory
+              sizeLimit: 3Gi    # Set a size limit for the /dev/shm volume
 
     # Size of the /dev/shm shared memory for the pod (optional).
     #
