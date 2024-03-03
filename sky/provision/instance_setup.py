@@ -24,7 +24,7 @@ logger = sky_logging.init_logger(__name__)
 _START_TITLE = '\n' + '-' * 20 + 'Start: {} ' + '-' * 20
 _END_TITLE = '-' * 20 + 'End:   {} ' + '-' * 20 + '\n'
 
-_MAX_RETRY = 5
+_MAX_RETRY = 6
 
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
@@ -200,6 +200,23 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                                                     stream_logs=False,
                                                     log_path=log_path,
                                                     require_outputs=True)
+            retry_cnt = 0
+            while returncode == 255 and retry_cnt < _MAX_RETRY:
+                # Got network connection issue occur during setup. This could
+                # happen when a setup step requires a reboot, e.g. nvidia-driver
+                # installation (happens for fluidstack). We should retry for it.
+                logger.info('Network connection issue during setup, this is '
+                            'likely due to the reboot of the instance. '
+                            'Retrying setup in 10 seconds.')
+                time.sleep(10)
+                retry_cnt += 1
+                returncode, stdout, stderr = runner.run(cmd,
+                                                        stream_logs=False,
+                                                        log_path=log_path,
+                                                        require_outputs=True)
+                if not returncode:
+                    break
+
             if returncode:
                 raise RuntimeError(
                     'Failed to run setup commands on an instance. '
@@ -283,7 +300,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                                                 require_outputs=True)
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
-                           f'(exit code {returncode}). Error: '
+                           f'(exit code {returncode}). Error: \n'
                            f'===== stdout ===== \n{stdout}\n'
                            f'===== stderr ====={stderr}')
 

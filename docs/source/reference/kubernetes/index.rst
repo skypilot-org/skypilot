@@ -255,3 +255,4 @@ Kubernetes support is under active development. Some features are in progress an
    :hidden:
 
    kubernetes-setup
+   kubernetes-troubleshooting
