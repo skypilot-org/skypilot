@@ -253,6 +253,31 @@ def _run_command_on_pods(node_name, node_namespace, command):
         _request_timeout=kubernetes.API_TIMEOUT)
     return cmd_output
 
+def _run_command_on_pods_with_logs(node_name, node_namespace, command, command_list):
+    cmd_output = kubernetes.stream()(
+        kubernetes.core_api().connect_get_namespaced_pod_exec,
+        node_name,
+        node_namespace,
+        command=command,
+        stderr=True,
+        stdin=True,
+        stdout=True,
+        tty=False,
+        _preload_content=False,
+        _request_timeout=kubernetes.API_TIMEOUT)
+    while cmd_output.is_open():
+        cmd_output.update(timeout=1)
+        if cmd_output.peek_stderr():
+            logger.warning(f"{cmd_output.read_stderr()}")
+        if command_list:
+            c = command_list.pop(0)
+            logger.debug(f"Running: {c}\n")
+            cmd_output.write_stdin(c + "\n")
+        else:
+            break
+    cmd_output.close()
+
+    return cmd_output
 
 def _set_env_vars_in_pods(namespace: str, new_pods: List):
     """Setting environment variables in pods.
@@ -320,38 +345,35 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
 def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
     # Setting up ssh for the pod instance. This is already setup for
     # the jump pod so it does not need to be run for it.
-    set_k8s_ssh_cmd = [
-        '/bin/sh',
-        '-c',
-        (
+    set_k8s_ssh_cmd = ['/bin/sh']
+    command_list = [
             'prefix_cmd() '
-            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
-            'export DEBIAN_FRONTEND=noninteractive;'
-            '$(prefix_cmd) apt-get update;'
-            '$(prefix_cmd) apt install openssh-server rsync -y; '
-            '$(prefix_cmd) mkdir -p /var/run/sshd; '
+            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }',
+            'export DEBIAN_FRONTEND=noninteractive',
+            '$(prefix_cmd) apt-get update',
+            '$(prefix_cmd) apt install openssh-server rsync -y',
+            '$(prefix_cmd) mkdir -p /var/run/sshd',
             '$(prefix_cmd) '
             'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
-            '/etc/ssh/sshd_config; '
+            '/etc/ssh/sshd_config',
             '$(prefix_cmd) sed '
             '"s@session\\s*required\\s*pam_loginuid.so@session optional '
-            'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
-            'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
-            '$(prefix_cmd) mkdir -p ~/.ssh; '
-            '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
-            '$(prefix_cmd) chmod 700 ~/.ssh; '
-            '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
+            'pam_loginuid.so@g" -i /etc/pam.d/sshd'
+            'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A',
+            '$(prefix_cmd) mkdir -p ~/.ssh',
+            '$(prefix_cmd) chown -R $(whoami) ~/.ssh',
+            '$(prefix_cmd) chmod 700 ~/.ssh',
+            '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys',
             '$(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > '
-            '~/.ssh/authorized_keys; '
-            '$(prefix_cmd) service ssh restart; '
+            '~/.ssh/authorized_keys',
+            '$(prefix_cmd) service ssh restart',
             # Eliminate the error
             # `mesg: ttyname failed: inappropriate ioctl for device`.
             # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
-            '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
-    ]
+            '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile']
     # TODO(romilb): We need logging and surface errors here.
     for new_node in new_nodes:
-        _run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd)
+        _run_command_on_pods_with_logs(new_node.metadata.name, namespace, set_k8s_ssh_cmd, command_list)
 
 
 def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
@@ -723,3 +745,4 @@ def query_instances(
             continue
         cluster_status[pod.metadata.name] = pod_status
     return cluster_status
+
