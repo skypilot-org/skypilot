@@ -137,3 +137,14 @@ This allows you directly to SSH into the worker nodes, if required.
   # Worker nodes.
   $ ssh mycluster-worker1
   $ ssh mycluster-worker2
+
+
+Executing a Distributed Ray Program
+------------------------------------
+.. warning:: 
+  **Avoid Installing Ray in Base Environment**
+
+  Before proceeding with the execution of a distributed Ray program, it is crucial to ensure that Ray is **not** installed in the base environment. Installing a different version of Ray in the base environment can lead to compatibility issues, conflicts, and unintended consequences.
+
+  To maintain a clean and stable environment for your distributed Ray program, it is highly recommended to **create a dedicated virtual environment** for Ray and its dependencies. This helps isolate the Ray installation and prevents interference with other packages in your base environment.
+
