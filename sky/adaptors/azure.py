@@ -81,11 +81,19 @@ def get_client(name: str,
         elif name == 'storage':
             return StorageManagementClient(credential, subscription_id)
         elif name == 'container':
-            account_url = (f'https://{storage_account_name}.'
-                           'blob.core.windows.net')
-            return ContainerClient(account_url=account_url,
-                                   container_name=container_name,
-                                   credential=credential)
+            container_url = (f'https://{storage_account_name}.'
+                             f'blob.core.windows.net/{container_name}')
+            try:
+                container_client = ContainerClient.from_container_url(
+                    container_url,
+                    credential)
+            except azure.core_exception().ClientAuthenticationError as e:
+                # Raised when credential is provided to the public
+                # container url. We reattempt without credentials.
+                if 'ERROR: AADSTS50020' in e.message:
+                    container_client = ContainerClient.from_container_url(
+                        container_url)
+            return container_client
         else:
             raise ValueError(f'Client not supported: "{name}"')
 

@@ -9,8 +9,6 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
-from azure.identity import AzureCliCredential
-from azure.storage.blob import ContainerClient
 import colorama
 
 from sky import check
@@ -2183,14 +2181,10 @@ class AzureBlobStore(AbstractStore):
                 'sky storage delete' or 'sky start'
         """
         try:
-            container_url = f'https://{self.storage_account_name}.blob.core.windows.net/{self.name}'
             # When using non-sky-managed public container
-            if self.resource_group_name is None:
-                container = ContainerClient.from_container_url(container_url)
-            else:
-                credential = AzureCliCredential(process_timeout=30)
-                container = ContainerClient.from_container_url(
-                    container_url, credential)
+            container = data_utils.create_az_client('container',
+                                                    self.storage_account_name,
+                                                    self.name)
             # Here, exists() is used to check if the public container
             # exists. exists() will return False only when the credentials
             # are provided for from_container_url() and there is no
