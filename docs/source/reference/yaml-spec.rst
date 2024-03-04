@@ -19,6 +19,9 @@ Available fields:
     #
     # Commands in "setup" and "run" will be executed under it.
     #
+    # If a relative path is used, it's evaluated relative to the location from 
+    # which `sky launch` is called.
+    #
     # If a .gitignore file (or a .git/info/exclude file) exists in the working
     # directory, files and directories listed in it will be excluded from syncing.
     workdir: ~/my-task-code
