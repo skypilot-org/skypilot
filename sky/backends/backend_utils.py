@@ -389,7 +389,7 @@ class FileMountHelper(object):
 class SSHConfigHelper(object):
     """Helper for handling local SSH configuration."""
 
-    ssh_conf_path = '~/.ssh/config'
+    ssh_conf_path = f'{os.environ.get("SKY_HOME", "~/.ssh")}/config'
     ssh_conf_lock_path = os.path.expanduser(f'{SKY_HOME}/ssh_config.lock')
     ssh_cluster_path = SKY_USER_FILE_PATH + '/ssh/{}'
 

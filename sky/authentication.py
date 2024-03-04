@@ -45,6 +45,7 @@ from sky.adaptors import ibm
 from sky.adaptors import kubernetes
 from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
+from sky.constants import SKY_HOME
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
@@ -61,9 +62,11 @@ logger = sky_logging.init_logger(__name__)
 
 MAX_TRIALS = 64
 # TODO(zhwu): Support user specified key pair.
-PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
-PUBLIC_SSH_KEY_PATH = '~/.ssh/sky-key.pub'
-_SSH_KEY_GENERATION_LOCK = '~/.sky/generated/ssh/.__internal-sky-key.lock'
+
+_SSH_KEY_GENERATION_LOCK = f'{SKY_HOME}/generated/ssh/.__internal-sky-key.lock'
+SSH_DIR = os.environ.get('SKY_HOME', '~/.ssh')
+PRIVATE_SSH_KEY_PATH = f'{SSH_DIR}/sky-key'
+PUBLIC_SSH_KEY_PATH = f'{SSH_DIR}/sky-key.pub'
 
 
 def _generate_rsa_key_pair() -> Tuple[str, str]:
