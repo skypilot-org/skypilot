@@ -387,7 +387,6 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             # `mesg: ttyname failed: inappropriate ioctl for device`.
             # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
             '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile']
-    # TODO(romilb): We need logging and surface errors here.
     for new_node in new_nodes:
         _run_command_on_pods(node_name=new_node.metadata.name, 
                              node_namespace=namespace,
