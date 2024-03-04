@@ -239,18 +239,10 @@ def _wait_for_pods_to_run(namespace, new_nodes):
             break
         time.sleep(1)
 
-def _run_command_on_pods(node_name: str, node_namespace: str, command_list: Optional[List[str]], shell_command: List[str] = ['/bin/sh'], stream_logs: bool = False, operation_name: Optional[str] = None):      
-    """Run command on Kubernetes pods.
-
-    There are two options for how `_run_command_on_pods` functions:
-    (1) stream_logs set to False. Here, the entirety of the shell commands are part of
-    `shell_command`, `command_list` is presumably empty, and the logs aren't streamed.
-    (2) stream_logs set to True. Here, we have an initial shell command like `/bin/sh`,
-    but most commands are run sequentially as part of the `command_list` list. In this case,
-    the command being run, as well as any potential error or output messages, are added to 
-    the relevant `provision.log` file.
-    """
+def _run_command_on_pods(node_name: str, node_namespace: str, command_list: Optional[List[str]], shell_command: List[str] = ['/bin/sh'], stream_logs: bool = False, operation_name: Optional[str] = None):
+    print("hahahahah")
     if stream_logs == False:
+        print("successfully here")
         cmd_output = kubernetes.stream()(
             kubernetes.core_api().connect_get_namespaced_pod_exec,
             node_name,
@@ -277,8 +269,6 @@ def _run_command_on_pods(node_name: str, node_namespace: str, command_list: Opti
             _request_timeout=kubernetes.API_TIMEOUT)
         while cmd_output.is_open():
             cmd_output.update(timeout=1)
-            if cmd_output.peek_stdout():
-                logger.debug(f"{cmd_output.read_stdout()}")
             if cmd_output.peek_stderr():
                 logger.warning(f"{cmd_output.read_stderr()}")
             if command_list:
@@ -319,6 +309,7 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     ]
 
     for new_pod in new_pods:
+        print('hello pookie 2')
         _run_command_on_pods(node_name=new_pod.metadata.name,
                              node_namespace=namespace,
                              command_list=None,
@@ -346,10 +337,12 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
     ]
 
     for new_node in new_nodes:
+        print('hello pookie 4')
         privilege_check = _run_command_on_pods(node_name=new_node.metadata.name,
                                                node_namespace=namespace,
                                                command_list=None,
                                                shell_command=check_k8s_user_sudo_cmd)
+        print("does pookie work???")
         if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
@@ -389,6 +382,7 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile']
     # TODO(romilb): We need logging and surface errors here.
     for new_node in new_nodes:
+        print('hello pookie 5')
         _run_command_on_pods(node_name=new_node.metadata.name, 
                              node_namespace=namespace,
                              command_list=command_list,
@@ -703,6 +697,7 @@ def get_cluster_info(
     ssh_user = 'sky'
     get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
     assert head_pod_name is not None
+    print('hello pookie 1')
     ssh_user = _run_command_on_pods(node_name=head_pod_name,
                                     node_namespace=namespace,
                                     command_list=None,
