@@ -1,5 +1,0 @@
-setup: |
-  echo "doing setup"
-
-run: |
-  echo "Hello Sky"
