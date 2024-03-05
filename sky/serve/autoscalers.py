@@ -321,17 +321,18 @@ class RequestRateAutoscaler(Autoscaler):
     ) -> List[int]:
         """Select outdated replicas to scale down."""
 
-        latest_ready_replicas = []
-        old_replicas = []
-        for info in replica_infos:
-            if info.version == self.latest_version:
-                if info.is_ready:
-                    latest_ready_replicas.append(info)
-            else:
-                old_replicas.append(info)
-
-        num_latest_ready_replicas = len(latest_ready_replicas)
         if self.update_mode == serve_utils.UpdateMode.ROLLING:
+            latest_ready_replicas = []
+            old_replicas = []
+            for info in replica_infos:
+                if info.version == self.latest_version:
+                    if info.is_ready:
+                        latest_ready_replicas.append(info)
+                else:
+                    old_replicas.append(info)
+
+            num_latest_ready_replicas = len(latest_ready_replicas)
+
             # We compare to target_num_replicas instead of min_replicas, to
             # guarantee better service quality. Since mixing traffic across
             # old and latest versions are allowed in rolling update, this will
@@ -533,13 +534,9 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         scaling_options: List[AutoscalerDecision] = []
         all_replica_ids_to_scale_down: List[int] = []
 
-        # Once there is min_replicas number of ready new replicas, we will
-        # direct all traffic to them, we can scale down all old replicas.
-        # Or, if rolling update is in progress, we scale down old replicas
-        # based on the number of ready new replicas.
-        # TODO(MaoZiming,zhwu): We should make sure the fallback replicas are
-        # ready before scaling down the old replicas to avoid the situation
-        # that all the ready new replicas are preempted together.
+        # TODO(MaoZiming,zhwu): coner case: We should make sure the fallback
+        # replicas are ready before scaling down the old replicas to avoid the
+        # situation that all the ready new replicas are preempted together.
         all_replica_ids_to_scale_down.extend(
             self.select_outdated_replicas_to_scale_down(replica_infos))
 
