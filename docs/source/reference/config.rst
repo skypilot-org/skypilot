@@ -191,10 +191,22 @@ Available fields and semantics:
 
     # Reserved capacity (optional).
     #
-    # The specific reservation to be considered when provisioning clusters on GCP.
-    # SkyPilot will automatically prioritize this reserved capacity (considered as
-    # zero cost) if the requested resources matches the reservation.
+    # Whether to prioritize reservations when provisioning clusters on GCP. This
+    # is useful when you have `automatically consumed reservation` in your GCP
+    # project and want to prioritize them over on-demand resources.
+    #
+    # Default: false.
+    prioritize_reservations: false
+    #
+    # The `specifically targeted reservation` to be considered when provisioning
+    # clusters on GCP. SkyPilot will automatically prioritize this reserved
+    # capacity (considered as zero cost) if the requested resources matches the
+    # reservation.
+    #
     # Ref: https://cloud.google.com/compute/docs/instances/reservations-overview#consumption-type
+    #
+    # When this field is set, `prioritize_reservations` is automatically set to
+    # true.
     specific_reservations:
       - projects/my-project/reservations/my-reservation1
       - projects/my-project/reservations/my-reservation2
