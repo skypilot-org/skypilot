@@ -299,6 +299,8 @@ def _get_gpus_for_zone(zone: str) -> pd.DataFrame:
             gpu_name = gpu_name.replace('nvidia-', '')
             gpu_name = gpu_name.replace('tesla-', '')
             gpu_name = gpu_name.upper()
+            if 'H100-80GB' in gpu_name:
+                gpu_name = 'H100'
             if 'VWS' in gpu_name:
                 continue
             if gpu_name.startswith('TPU-'):
@@ -345,6 +347,8 @@ def get_gpu_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
             gpu_name = row['AcceleratorName']
             if gpu_name == 'A100-80GB':
                 gpu_name = 'A100 80GB'
+            if gpu_name == 'H100':
+                gpu_name = 'H100 80GB'
             if f'{gpu_name} GPU' not in sku['description']:
                 continue
 
