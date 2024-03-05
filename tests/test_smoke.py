@@ -3276,7 +3276,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; '
             # The latest version should have one READY and the one of the older versions should be shutting down
-            f'{single_new_replica}; '
+            f'{single_new_replica} '
             # Check the output from the old version, immediately after the
             # output from the new version appears. This is guaranteed by the
             # round robin load balancing policy.
@@ -3304,7 +3304,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
-            'sleep 60',
+            'sleep 120',
             # 2 on-deamnd (ready) + 1 on-demand (provisioning).
             _check_replica_in_status(
                 name, [(2, False, 'READY'),
