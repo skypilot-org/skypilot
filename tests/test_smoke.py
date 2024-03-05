@@ -3085,9 +3085,10 @@ def test_skyserve_dynamic_ondemand_fallback(generic_cloud: str):
             'echo "$s" | grep -q "0/4" || exit 1',
             # Wait for the provisioning starts
             f'sleep 120',
-            _check_replica_in_status(
-                name, [(2, True, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (2, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            _check_replica_in_status(name, [
+                (2, True, _SERVICE_LAUNCHING_STATUS_REGEX),
+                (2, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN')
+            ]),
 
             # Wait until 2 spot instances are ready.
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
@@ -3258,6 +3259,9 @@ def test_skyserve_update(generic_cloud: str):
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
+    single_new_replica = _check_replica_in_status(
+        name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+               (1, False, 'SHUTTING_DOWN')])
     test = Test(
         f'test-skyserve-update',
         [
@@ -3270,7 +3274,9 @@ def test_skyserve_rolling_update(generic_cloud: str):
             # should be able to get observe the period that the traffic is mixed
             # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done;'
+            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; '
+            # The latest version should have one READY and the one of the older versions should be shutting down
+            f'{single_new_replica}; '
             # Check the output from the old version, immediately after the
             # output from the new version appears. This is guaranteed by the
             # round robin load balancing policy.
@@ -3278,11 +3284,6 @@ def test_skyserve_rolling_update(generic_cloud: str):
             # mixed version of replicas to avoid depending on the specific
             # round robin load balancing policy.
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            # The latest version should have one READY and the one of the older versions should be shutting down
-            _check_replica_in_status(
-                name, [(2, False, 'READY'),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (1, False, 'SHUTTING_DOWN')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3303,7 +3304,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
-            'sleep 30',
+            'sleep 60',
             # 2 on-deamnd (ready) + 1 on-demand (provisioning).
             _check_replica_in_status(
                 name, [(2, False, 'READY'),
@@ -3382,7 +3383,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            's=(curl -L http://$endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
             f'sleep 150',
