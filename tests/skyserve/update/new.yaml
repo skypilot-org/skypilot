@@ -15,6 +15,6 @@ run: |
   if (( $SKYPILOT_SERVE_REPLICA_ID % 2 == 0 )); then
     # Sleep for replicas with even id, so that we can test the mixing traffic
     # of rolling update
-    sleep 20
+    sleep 60
   fi
   python3 new_server.py --port 8081
