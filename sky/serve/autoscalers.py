@@ -280,9 +280,13 @@ class RequestRateAutoscaler(Autoscaler):
                 # Including: NOT_READY, SHUTTING_DOWN, FAILED,
                 # FAILED_CLEANUP, PREEMPTED, UNKNOWN.
                 if info.status in status_order else -1,
-                # `info.replica_id` is to furhter sort the replicas so that the
-                # older (version) replicas are scaled down first.
-                info.replica_id))
+                # Sort by version in ascending order, so we scale down the older
+                # versions first.
+                info.version,
+                # Sort `info.replica_id` in descending order so that the
+                # replicas in the same version starts to provisioning later are
+                # scaled down first.
+                -info.replica_id))
 
         return [info.replica_id for info in replicas][:num_limit]
 
@@ -346,8 +350,8 @@ class RequestRateAutoscaler(Autoscaler):
             # keep the required number of replicas, as we want to let the new
             # replicas to take over the provisioning old replicas faster.
             # `_select_replicas_to_scale_down` will make sure we scale the
-            # replicas in pending statuses first before scaling down the READY
-            # old replicas.
+            # replicas in initializing statuses first before scaling down the
+            # READY old replicas.
             return self._select_replicas_to_scale_down(
                 len(old_replicas) - num_old_replicas_to_keep, old_replicas)
 
@@ -391,11 +395,12 @@ class RequestRateAutoscaler(Autoscaler):
         scaling_options: List[AutoscalerDecision] = []
         all_replica_ids_to_scale_down: List[int] = []
 
-        # Case 1. Once there is min_replicas number of
-        # ready new replicas, we will direct all traffic to them,
-        # we can scale down all old replicas.
-        # Or, if rolling update is in progress, we scale down old replicas
-        # based on the number of ready new replicas.
+        # Case 1. If rolling update is in progress, we scale down old replicas
+        # based on the number of ready new replicas and the traffic is directed
+        # to both old and new replicas.
+        # Or, for blue_green update, once there is min_replicas number of ready
+        # new replicas, we will direct all traffic to them, we can scale down
+        # all old replicas.
         all_replica_ids_to_scale_down.extend(
             self.select_outdated_replicas_to_scale_down(replica_infos))
 

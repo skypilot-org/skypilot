@@ -131,7 +131,7 @@ class SkyServeController:
                 update_mode_str = request_data.get(
                     'mode', serve_utils.UpdateMode.ROLLING.value)
                 update_mode = serve_utils.UpdateMode(update_mode_str)
-                logger.info(f'Update to new version version {version} with '
+                logger.info(f'Update to new version {version} with '
                             f'update_mode {update_mode}.')
                 # The yaml with the name latest_task_yaml will be synced
                 # See sky/serve/core.py::update

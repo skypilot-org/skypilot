@@ -27,7 +27,7 @@ class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='SkyServe HTTP Test Server')
-    parser.add_argument('--port', type=int, required=False, default=8081)
+    parser.add_argument('--port', type=int, required=False, default=8080)
     args = parser.parse_args()
 
     Handler = MyHttpRequestHandler

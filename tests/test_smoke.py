@@ -2911,7 +2911,7 @@ _TEARDOWN_SERVICE = (
 
 _SERVE_ENDPOINT_WAIT = (
     'endpoint=$(sky serve status --endpoint {name}); '
-    'until ! echo "$endpoint" | grep "Controller"; '
+    'until ! echo "$endpoint" | grep "Controller is initializing"; '
     'do echo "Waiting for serve endpoint to be ready..."; '
     'sleep 5; endpoint=$(sky serve status --endpoint {name}); done; '
     'echo "$endpoint"')
@@ -3060,9 +3060,8 @@ def test_skyserve_base_ondemand_fallback(generic_cloud: str):
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/spot/base_ondemand_fallback.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
-            'echo "$s" | grep "GCP(\[Spot\]vCPU=2)" && '
-            'echo "$s" | grep "GCP(vCPU=2)";'
+            _check_replica_in_status(name, [(1, True, 'READY'),
+                                            (1, False, 'READY')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3257,7 +3256,7 @@ def test_skyserve_update(generic_cloud: str):
 
 @pytest.mark.serve
 def test_skyserve_rolling_update(generic_cloud: str):
-    """Test skyserve with update"""
+    """Test skyserve with rolling update"""
     name = _get_service_name()
     single_new_replica = _check_replica_in_status(
         name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
@@ -3270,7 +3269,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/new.yaml',
             # Make sure the traffic is mixed across two versions, the replicas
-            # with even id will sleep 10 seconds before being ready, so we
+            # with even id will sleep 60 seconds before being ready, so we
             # should be able to get observe the period that the traffic is mixed
             # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
@@ -3403,7 +3402,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     run_one_test(test)
 
 
-# TODO(MaoZiming, cblmemo): Add tests for autoscaling.
+# TODO(Ziming, Tian): Add tests for autoscaling.
 
 
 # ------- Testing user ray cluster --------
