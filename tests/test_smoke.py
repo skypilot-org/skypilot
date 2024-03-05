@@ -3083,7 +3083,7 @@ def test_skyserve_dynamic_ondemand_fallback(generic_cloud: str):
             f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s";'
             'echo "$s" | grep -q "0/4" || exit 1',
             # Wait for the provisioning starts
-            f'sleep 120',
+            f'sleep 90',
             _check_replica_in_status(name, [
                 (2, True, _SERVICE_LAUNCHING_STATUS_REGEX),
                 (2, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN')

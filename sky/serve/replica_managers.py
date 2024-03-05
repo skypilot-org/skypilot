@@ -46,7 +46,7 @@ _DEFAULT_DRAIN_SECONDS = 120
 
 # Since sky.launch is very resource demanding, we limit the number of
 # concurrent sky.launch process to avoid overloading the machine.
-_MAX_NUM_LAUNCH = psutil.cpu_count()
+_MAX_NUM_LAUNCH = psutil.cpu_count() * 2
 
 
 # TODO(tian): Combine this with
