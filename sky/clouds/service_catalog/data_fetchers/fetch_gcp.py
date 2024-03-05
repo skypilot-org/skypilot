@@ -301,6 +301,9 @@ def _get_gpus_for_zone(zone: str) -> pd.DataFrame:
             gpu_name = gpu_name.upper()
             if 'H100-80GB' in gpu_name:
                 gpu_name = 'H100'
+                if count != 8:
+                    # H100 only has 8 cards.
+                    continue
             if 'VWS' in gpu_name:
                 continue
             if gpu_name.startswith('TPU-'):
