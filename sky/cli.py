@@ -2845,13 +2845,18 @@ def start(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@click.option('--purge',
-              '-p',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Ignore cloud provider errors (if any). '
-              'Useful for cleaning up manually deleted cluster(s).')
+@click.option(
+    '--purge',
+    '-p',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('(Advanced) Forcefully remove the cluster(s) from '
+          'SkyPilot\'s cluster table, even if the actual cluster termination '
+          'failed on the cloud. WARNING: This flag should only be set sparingly'
+          ' in certain manual troubleshooting scenarios; with it set, it is the'
+          ' user\'s responsibility to ensure there are no leaked instances and '
+          'related resources.'))
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
