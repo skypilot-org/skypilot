@@ -62,6 +62,7 @@ TPU_V4_HOST_DF = pd.read_csv(
 # Unsupported Series: 'f1', 'm2'
 SERIES_TO_DISCRIPTION = {
     'a2': 'A2 Instance',
+    'a3': 'A3 Instance',
     'c2': 'Compute optimized',
     'c2d': 'C2D AMD Instance',
     'c3': 'C3 Instance',
