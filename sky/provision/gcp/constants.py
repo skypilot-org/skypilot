@@ -174,6 +174,11 @@ VM_MINIMAL_PERMISSIONS = [
     'resourcemanager.projects.getIamPolicy',
 ]
 
+DEFAULT_ROLE_TO_PERMISSIONS = {
+    'roles/iam.serviceAccountUser': ['iam.serviceAccounts.actAs'],
+    'roles/iam.serviceAccountViewer': ['iam.serviceAccounts.get', 'iam.serviceAccounts.getIamPolicy'],
+}
+
 FIREWALL_PERMISSIONS = [
     'compute.firewalls.create',
     'compute.firewalls.delete',
