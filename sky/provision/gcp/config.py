@@ -1,6 +1,5 @@
 """GCP configuration bootstrapping."""
 import copy
-import json
 import logging
 import time
 import typing
@@ -243,9 +242,6 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
         # roles, so only call setIamPolicy if needed.
         return True, policy
 
-    logger.debug('_configure_iam_role: policy '
-                 f'{json.dumps(original_policy, indent=2)}...')
-
     # TODO(zhwu): It is possible that the permission is only granted at the
     # service-account level, not at the project level. We should check the
     # permission at both levels.
@@ -270,7 +266,10 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
                             '_configure_iam_role: fail to check permission '
                             f'for built-in role {role}. Fallback to predefined '
                             'permission list.')
-                        permissions = constants.DEFAULT_ROLE_TO_PERMISSIONS.get(
+                        # Built-in roles cannot be checked for permissions with
+                        # the current API, so we fallback to predefined list
+                        # to find the implied permissions.
+                        permissions = constants.BUILTIN_ROLE_TO_PERMISSIONS.get(
                             role, [])
                     else:
                         raise

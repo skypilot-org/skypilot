@@ -177,7 +177,12 @@ VM_MINIMAL_PERMISSIONS = [
     'resourcemanager.projects.getIamPolicy',
 ]
 
-DEFAULT_ROLE_TO_PERMISSIONS = {
+# Permissions implied by GCP built-in roles. We hardcode these here, as we
+# cannot get the permissions of built-in role from the GCP Python API.
+# The lists are not exhaustive, but should cover the permissions listed in
+# VM_MINIMAL_PERMISSIONS.
+# Check: sky.provision.gcp.config::_is_permission_satisfied
+BUILTIN_ROLE_TO_PERMISSIONS = {
     'roles/iam.serviceAccountUser': ['iam.serviceAccounts.actAs'],
     'roles/iam.serviceAccountViewer': [
         'iam.serviceAccounts.get', 'iam.serviceAccounts.getIamPolicy'
