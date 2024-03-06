@@ -179,7 +179,9 @@ VM_MINIMAL_PERMISSIONS = [
 
 DEFAULT_ROLE_TO_PERMISSIONS = {
     'roles/iam.serviceAccountUser': ['iam.serviceAccounts.actAs'],
-    'roles/iam.serviceAccountViewer': ['iam.serviceAccounts.get', 'iam.serviceAccounts.getIamPolicy'],
+    'roles/iam.serviceAccountViewer': [
+        'iam.serviceAccounts.get', 'iam.serviceAccounts.getIamPolicy'
+    ],
     # TODO(zhwu): Add more default roles to make the permission check more robust.
 }
 
