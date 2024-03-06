@@ -98,6 +98,10 @@ User
     
     For custom VPC users (with :code:`gcp.vpc_name` specified in :code:`~/.sky/config.yaml`, check `here <#_gcp-bring-your-vpc>`_),  :code:`compute.firewalls.create` and :code:`compute.firewalls.delete` are not necessary unless opening ports is needed via `resources.ports` in task yaml.
 
+.. note::
+
+    For users who want extreme minimal permissions, you can also remove ``iam.serviceAccounts.actAs`` from the list above, but you will need to grant the user the ability to use the service account ``skypilot-v1`` created by the admin (see :ref:`Service Account <gcp-service-account-creation>`). That can be done by going to ``IAM & Admin console -> Service Accounts -> skypilot-v1 -> Permissions -> GRANT ACCESS`` and adding the user with the role ``roles/iam.serviceAccountUser``. This only permits the user to use ``skypilot-v1`` service account required by SkyPilot.
+
 4. **Optional**: If the user needs to access GCS buckets, you can additionally add the following permissions:
 
 .. code-block:: text
