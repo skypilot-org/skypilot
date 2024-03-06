@@ -272,8 +272,8 @@ class RequestRateAutoscaler(Autoscaler):
             replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
         status_order = serve_state.ReplicaStatus.scale_down_decision_order()
-        # Get rid of the replicas that has been terminated or failed before,
-        # as we want to keep those replicas for the user to debug.
+        # Get rid of the replicas that has already been failed before, as we
+        # want to keep those replicas for the user to debug.
         replica_infos = filter(lambda info: info.status in status_order,
                                replica_infos)
         replicas = sorted(
