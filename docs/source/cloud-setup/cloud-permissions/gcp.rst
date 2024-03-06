@@ -100,7 +100,7 @@ User
 
 .. note::
 
-    For users who want extreme minimal permissions, you can also remove ``iam.serviceAccounts.actAs`` from the list above, but you will need to grant the user the ability to use the service account ``skypilot-v1`` created by the admin (see :ref:`Service Account <gcp-service-account-creation>`). That can be done by going to ``IAM & Admin console -> Service Accounts -> skypilot-v1 -> Permissions -> GRANT ACCESS`` and adding the user with the role ``roles/iam.serviceAccountUser``. This only permits the user to use ``skypilot-v1`` service account required by SkyPilot.
+     (Advanced) To further limit the ``iam.serviceAccounts.actAs`` permission to access SkyPilot's service account only, you can remove the permission from the list above and additionally grant your organization's users the ability to use the service account ``skypilot-v1`` created by the admin (see :ref:`Service Account <gcp-service-account-creation>`). This can be done by going to ``IAM & Admin console -> Service Accounts -> skypilot-v1 -> Permissions -> GRANT ACCESS`` and adding the users with role ``roles/iam.serviceAccountUser``. This permits the users to use the ``skypilot-v1`` service account required by SkyPilot.
 
 4. **Optional**: If the user needs to access GCS buckets, you can additionally add the following permissions:
 
