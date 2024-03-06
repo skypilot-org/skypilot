@@ -3366,15 +3366,22 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     name = _get_service_name() + mode
 
     four_spot_up_cmd = _check_replica_in_status(name, [(4, True, 'READY')])
-    rolling_update_check = []
+    update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done']
     if mode == 'rolling':
-        # Check rolling update will terminate one of the old on-demand instance,
-        # once there are 4 spot instance ready.
-        rolling_update_check = [
-            f'until ({four_spot_up_cmd}); do sleep 5; done',
+        # Check rolling update, it will terminate one of the old on-demand
+        # instances, once there are 4 spot instance ready.
+        update_check += [
             _check_replica_in_status(
                 name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                        (1, False, 'SHUTTING_DOWN'), (1, False, 'READY')]),
+        ]
+    else:
+        # Check blue green update, it will keep both old on-demand instances
+        # running, once there are 4 spot instance ready.
+        update_check += [
+            _check_replica_in_status(
+                name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (2, False, 'READY')]),
         ]
     test = Test(
         f'test-skyserve-new-autoscaler-update',
@@ -3390,7 +3397,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
                 name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX),
                        (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                        (2, False, 'READY')]),
-            *rolling_update_check,
+            *update_check,
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
