@@ -187,7 +187,8 @@ BUILTIN_ROLE_TO_PERMISSIONS = {
     'roles/iam.serviceAccountViewer': [
         'iam.serviceAccounts.get', 'iam.serviceAccounts.getIamPolicy'
     ],
-    # TODO(zhwu): Add more default roles to make the permission check more robust.
+    # TODO(zhwu): Add more built-in roles to make the permission check more
+    # robust.
 }
 
 FIREWALL_PERMISSIONS = [
