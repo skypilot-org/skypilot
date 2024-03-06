@@ -1,5 +1,6 @@
 """GCP configuration bootstrapping."""
 import copy
+import json
 import logging
 import time
 import typing
@@ -242,11 +243,16 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
         # roles, so only call setIamPolicy if needed.
         return True, policy
 
-    import json
     logger.debug(f'_configure_iam_role: policy {json.dumps(original_policy, indent=2)}...')
-    service_account_policy = iam.projects().serviceAccounts().getIamPolicy(
-        resource=f'projects/{project_id}/serviceAccounts/{email}').execute()
-    logger.debug(f'_configure_iam_role: service account policy {json.dumps(service_account_policy, indent=2)}...')
+    # TODO(zhwu): It is possible that the permission is only granted at the
+    # service-account level, not at the project level. We should check the
+    # permission at both levels.
+    # For example, `roles/iam.serviceAccountUser` can be granted at the
+    # skypilot-v1 service account level, which can be checked with
+    # service_account_policy = iam.projects().serviceAccounts().getIamPolicy(
+    #    resource=f'projects/{project_id}/serviceAcccounts/{email}').execute()
+    # We now skip the check for `iam.serviceAccounts.actAs` permission for
+    # simplicity as it can be granted at the service account level.
     def check_permissions(policy, required_permissions):
         for binding in policy['bindings']:
             if member_id in binding['members']:
@@ -274,7 +280,6 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
         return required_permissions
     # Check the permissions 
     required_permissions = check_permissions(original_policy, required_permissions)
-    required_permissions = check_permissions(service_account_policy, required_permissions)
     if not required_permissions:
         # All required permissions are already granted.
         return True, policy

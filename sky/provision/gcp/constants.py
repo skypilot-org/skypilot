@@ -165,7 +165,10 @@ VM_MINIMAL_PERMISSIONS = [
     'compute.projects.get',
     'compute.zoneOperations.get',
     'iam.roles.get',
-    'iam.serviceAccounts.actAs',
+    # We now skip the check for `iam.serviceAccounts.actAs` permission for
+    # simplicity as it can be granted at the service-account level.
+    # Check: sky.provision.gcp.config::_is_permission_satisfied
+    # 'iam.serviceAccounts.actAs',
     'iam.serviceAccounts.get',
     'serviceusage.services.enable',
     'serviceusage.services.list',
@@ -177,6 +180,7 @@ VM_MINIMAL_PERMISSIONS = [
 DEFAULT_ROLE_TO_PERMISSIONS = {
     'roles/iam.serviceAccountUser': ['iam.serviceAccounts.actAs'],
     'roles/iam.serviceAccountViewer': ['iam.serviceAccounts.get', 'iam.serviceAccounts.getIamPolicy'],
+    # TODO(zhwu): Add more default roles to make the permission check more robust.
 }
 
 FIREWALL_PERMISSIONS = [
