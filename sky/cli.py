@@ -4457,13 +4457,20 @@ def serve_update(
 ):
     """Update a SkyServe service.
 
+    service_yaml must point to a valid YAML file.
+
     SkyServe will reuse old replicas, if only the service section is changed
     and no file mounts are specified.
     Otherwise, SkyServe will terminate the old replicas and start new replicas.
 
-    service_yaml must point to a valid YAML file.
-
-    TODO: Explain rolling update and normal update
+    Two update modes are supported:
+    - "rolling": (default) SkyServe will update the service with rolling update,
+        i.e., it will terminate old replicas and start new replicas one by one.
+        Traffic can be mixed on old and new replicas.
+    - "blue_green": SkyServe will update the service with blue-green update,
+        i.e., it will wait for new replicas to be ready and then terminate old
+        replicas. Traffic will only be switched from old to new replicas after
+        all new replicas are ready.
 
     Example:
 
