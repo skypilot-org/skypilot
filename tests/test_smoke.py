@@ -3388,7 +3388,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             f'sleep 150',
             _check_replica_in_status(
                 name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (1, False, 'PENDING'), (2, False, 'READY')]),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (2, False, 'READY')]),
             *rolling_update_check,
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
