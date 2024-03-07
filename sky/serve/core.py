@@ -300,9 +300,10 @@ def up(
 
 
 @usage_lib.entrypoint
-def update(task: 'sky.Task',
-           service_name: str,
-           mode: str = serve_utils.UpdateMode.ROLLING.value) -> None:
+def update(
+        task: 'sky.Task',
+        service_name: str,
+        mode: serve_utils.UpdateMode = serve_utils.UpdateMode.ROLLING) -> None:
     """Update an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -417,7 +418,7 @@ def update(task: 'sky.Task',
 
         code = serve_utils.ServeCodeGen.update_service(service_name,
                                                        current_version,
-                                                       mode=mode)
+                                                       mode=mode.value)
         returncode, _, stderr = backend.run_on_head(handle,
                                                     code,
                                                     require_outputs=True,

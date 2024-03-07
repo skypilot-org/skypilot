@@ -4470,7 +4470,7 @@ def serve_update(
     - "blue_green": SkyServe will update the service with blue-green update,
         i.e., it will wait for new replicas to be ready and then terminate old
         replicas. Traffic will only be switched from old to new replicas after
-        all new replicas are ready.
+        enough new replicas are ready.
 
     Example:
 
@@ -4514,7 +4514,7 @@ def serve_update(
                       abort=True,
                       show_default=True)
 
-    serve_lib.update(task, service_name, mode=mode)
+    serve_lib.update(task, service_name, mode=serve_lib.UpdateMode(mode))
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)

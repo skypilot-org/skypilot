@@ -76,3 +76,9 @@ INITIAL_VERSION = 1
 
 # Replica ID environment variable name that can be accessed on the replica.
 REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
+
+# The version of the lib files that serve use. Whenever there is an API
+# change for the serve_utils.ServeCodeGen, we need to bump this version, so that
+# the user can be notified to update their SkyPilot serve version on the remote
+# cluster.
+SERVE_VERSION = 1
