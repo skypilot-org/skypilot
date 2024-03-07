@@ -192,7 +192,7 @@ Available fields and semantics:
     # Reserved capacity (optional).
     #
     # Whether to prioritize reservations when provisioning clusters on GCP. This
-    # is useful when you have `automatically consumed reservation` in your GCP
+    # is useful when you have "automatically consumed" reservations in your GCP
     # project and want to prioritize them over on-demand resources.
     #
     # Default: false.
