@@ -272,7 +272,7 @@ class RequestRateAutoscaler(Autoscaler):
             replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
         status_order = serve_state.ReplicaStatus.scale_down_decision_order()
-        assert all(info.status in status_order  for info in replica_infos), (
+        assert all(info.status in status_order for info in replica_infos), (
             'All replicas to scale down should be in provisioning or launched '
             'status.', replica_infos)
         replicas = sorted(
