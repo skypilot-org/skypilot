@@ -80,6 +80,25 @@ provider:
             name: skypilot-service-account-role
             apiGroup: rbac.authorization.k8s.io
 
+
+    # In addition to a role binding, we also need a cluster role binding to give
+    # the SkyPilot access to the cluster-wide resources such as nodes to get
+    # node resources.
+    autoscaler_cluster_role_binding:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+            labels:
+                parent: skypilot
+            name: skypilot-service-account-cluster-role-binding
+        subjects:
+        - kind: ServiceAccount
+          name: skypilot-service-account
+        roleRef:
+            kind: ClusterRole
+            name: skypilot-service-account-role
+            apiGroup: rbac.authorization.k8s.io
+
     services:
       # Service to expose the head node pod's SSH port.
       - apiVersion: v1

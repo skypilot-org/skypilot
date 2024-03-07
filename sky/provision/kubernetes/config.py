@@ -24,12 +24,18 @@ def bootstrap_instances(
 
     config = _configure_ssh_jump(namespace, config)
 
-    if not config.provider_config.get('_operator'):
-        # These steps are unecessary when using the Operator.
+    requested_service_account = config.node_config['metadata']['spec']['serviceAccountName']
+    if requested_service_account == 'skypilot-service-account':
+        # If the user has requested a different service account, we assume they
+        # have already set up the necessary roles and role bindings. For
+        # skypilot-service-account, we set up the roles and role bindings here.
         _configure_autoscaler_service_account(namespace, config.provider_config)
         _configure_autoscaler_role(namespace, config.provider_config)
         _configure_autoscaler_role_binding(namespace, config.provider_config)
-
+        _configure_autoscaler_cluster_role_binding(namespace, config.provider_config)
+    else:
+        logger.info(f'Using service account {requested_service_account!r}, '
+                    'skipping role and role binding setup.')
     return config
 
 
@@ -275,6 +281,42 @@ def _configure_autoscaler_role_binding(namespace: str,
     logger.info('_configure_autoscaler_role_binding: '
                 f'{created_msg(binding_field, name)}')
 
+def _configure_autoscaler_cluster_role_binding(namespace: str,
+                                               provider_config: Dict[str, Any]) -> None:
+    binding_field = 'autoscaler_cluster_role_binding'
+    if binding_field not in provider_config:
+        logger.info('_configure_autoscaler_cluster_role_binding: '
+                    f'{not_provided_msg(binding_field)}')
+        return
+
+    binding = provider_config[binding_field]
+    if 'namespace' not in binding['metadata']:
+        binding['metadata']['namespace'] = namespace
+    elif binding['metadata']['namespace'] != namespace:
+        raise InvalidNamespaceError(binding_field, namespace)
+    for subject in binding['subjects']:
+        if 'namespace' not in subject:
+            subject['namespace'] = namespace
+        elif subject['namespace'] != namespace:
+            subject_name = subject['name']
+            raise InvalidNamespaceError(
+                binding_field + f' subject {subject_name}', namespace)
+
+    name = binding['metadata']['name']
+    field_selector = f'metadata.name={name}'
+    accounts = (kubernetes.auth_api().list_cluster_role_binding(
+        field_selector=field_selector).items)
+    if len(accounts) > 0:
+        assert len(accounts) == 1
+        logger.info('_configure_autoscaler_cluster_role_binding: '
+                    f'{using_existing_msg(binding_field, name)}')
+        return
+
+    logger.info('_configure_autoscaler_cluster_role_binding: '
+                f'{not_found_msg(binding_field, name)}')
+    kubernetes.auth_api().create_cluster_role_binding(binding)
+    logger.info('_configure_autoscaler_cluster_role_binding: '
+                f'{created_msg(binding_field, name)}')
 
 def _configure_ssh_jump(namespace, config: common.ProvisionConfig):
     """Creates a SSH jump pod to connect to the cluster.
