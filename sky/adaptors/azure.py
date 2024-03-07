@@ -83,10 +83,11 @@ def get_client(name: str,
         elif name == 'container':
             container_url = (f'https://{storage_account_name}.'
                              f'blob.core.windows.net/{container_name}')
+            container_client = ContainerClient.from_container_url(
+                container_url,
+                credential)
             try:
-                container_client = ContainerClient.from_container_url(
-                    container_url,
-                    credential)
+                container_client.exists()
             except azure.core_exception().ClientAuthenticationError as e:
                 # Raised when credential is provided to the public
                 # container url. We reattempt without credentials.
