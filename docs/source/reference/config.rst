@@ -198,7 +198,7 @@ Available fields and semantics:
     # Default: false.
     prioritize_reservations: false
     #
-    # The `specifically targeted reservation` to be considered when provisioning
+    # The "specifically targeted" reservations to be considered when provisioning
     # clusters on GCP. SkyPilot will automatically prioritize this reserved
     # capacity (considered as zero cost) if the requested resources matches the
     # reservation.
