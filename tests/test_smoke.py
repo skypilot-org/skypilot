@@ -2889,7 +2889,7 @@ def _get_service_name() -> str:
 # enough time to sync with the controller and get all ready replica IPs.
 _SERVE_WAIT_UNTIL_READY = (
     '(while true; do'
-    '     output=$(sky serve status {name});'
+    '     output=$(sky serve status {name}); echo "$output";'
     '     echo "$output" | grep -q "{replica_num}/{replica_num}" && break;'
     '     echo "$output" | grep -q "FAILED" && exit 1;'
     '     sleep 10;'
@@ -3110,7 +3110,7 @@ def test_skyserve_dynamic_ondemand_fallback(generic_cloud: str):
                                             (0, False, '')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        timeout=30 * 60,
+        timeout=20 * 60,
     )
     run_one_test(test)
 
