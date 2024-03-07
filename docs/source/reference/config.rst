@@ -191,12 +191,13 @@ Available fields and semantics:
 
     # Reserved capacity (optional).
     #
-    # Whether to prioritize reservations when provisioning clusters on GCP. This
-    # is useful when you have "automatically consumed" reservations in your GCP
-    # project and want to prioritize them over on-demand resources.
+    # Whether to prioritize locations with reservations when provisioning
+    # clusters on GCP. This is useful when you have "automatically consumed"
+    # reservations in your GCP project and want to prioritize them over
+    # on-demand resources.
     #
     # Default: false.
-    prioritize_reservations: false
+    prioritize_reservation_locations: false
     #
     # The "specifically targeted" reservations to be considered when provisioning
     # clusters on GCP. SkyPilot will automatically prioritize this reserved
@@ -205,8 +206,8 @@ Available fields and semantics:
     #
     # Ref: https://cloud.google.com/compute/docs/instances/reservations-overview#consumption-type
     #
-    # When this field is set, `prioritize_reservations` is automatically set to
-    # true.
+    # When this field is set, `prioritize_reservation_locations` is automatically
+    # set to true.
     specific_reservations:
       - projects/my-project/reservations/my-reservation1
       - projects/my-project/reservations/my-reservation2

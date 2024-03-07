@@ -579,7 +579,7 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
-                'prioritize_reservations': {
+                'prioritize_reservation_locations': {
                     'type': 'boolean',
                 },
                 'specific_reservations': {
