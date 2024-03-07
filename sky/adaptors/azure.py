@@ -88,7 +88,7 @@ def get_client(name: str,
                 credential)
             try:
                 container_client.exists()
-            except azure.core_exception().ClientAuthenticationError as e:
+            except core_exception().ClientAuthenticationError as e:
                 # Raised when credential is provided to the public
                 # container url. We reattempt without credentials.
                 if 'ERROR: AADSTS50020' in e.message:
