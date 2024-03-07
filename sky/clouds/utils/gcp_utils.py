@@ -139,6 +139,12 @@ def _list_reservations_for_instance_type(
     For example, if we have a specific reservation with n1-highmem-8
     in us-central1-c. `sky launch --gpus V100` will fail.
     """
+    prioritize_reservations = skypilot_config.get_nested(
+        ('gcp', 'prioritize_reservations'), False)
+    specific_reservations = skypilot_config.get_nested(
+        ('gcp', 'specific_reservations'), [])
+    if not prioritize_reservations and not specific_reservations:
+        return []
     logger.debug(f'Querying GCP reservations for instance {instance_type!r}')
     list_reservations_cmd = (
         'gcloud compute reservations list '
