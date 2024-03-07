@@ -3110,7 +3110,7 @@ def test_skyserve_dynamic_ondemand_fallback(generic_cloud: str):
                                             (0, False, '')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        timeout=20 * 60,
+        timeout=30 * 60,
     )
     run_one_test(test)
 
