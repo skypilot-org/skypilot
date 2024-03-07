@@ -407,10 +407,8 @@ class ReplicaInfo:
         return handle
 
     @property
-    def is_provisioning_or_launched(self) -> bool:
-        return (
-            self.status
-            in serve_state.ReplicaStatus.provisioning_or_launched_statuses())
+    def is_terminal(self) -> bool:
+        return self.status in serve_state.ReplicaStatus.terminal_statuses()
 
     @property
     def is_ready(self) -> bool:
@@ -1108,7 +1106,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             new_config.pop(key)
         replica_infos = serve_state.get_replica_infos(self._service_name)
         for info in replica_infos:
-            if info.version < version and info.is_provisioning_or_launched:
+            if info.version < version and not info.is_terminal:
                 # Assume user does not change the yaml file on the controller.
                 old_task_yaml_path = serve_utils.generate_task_yaml_file_name(
                     self._service_name, info.version)

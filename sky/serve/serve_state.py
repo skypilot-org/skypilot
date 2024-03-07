@@ -110,13 +110,19 @@ class ReplicaStatus(enum.Enum):
         return [cls.FAILED, cls.FAILED_CLEANUP, cls.UNKNOWN]
 
     @classmethod
-    def provisioning_or_launched_statuses(cls) -> List['ReplicaStatus']:
-        return [cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.READY]
+    def terminal_statuses(cls) -> List['ReplicaStatus']:
+        return [
+            cls.SHUTTING_DOWN, cls.FAILED, cls.FAILED_CLEANUP, cls.PREEMPTED,
+            cls.UNKNOWN
+        ]
 
     @classmethod
     def scale_down_decision_order(cls) -> List['ReplicaStatus']:
         # Scale down replicas in the order of replica initialization
-        return [cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.READY]
+        return [
+            cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.NOT_READY,
+            cls.READY
+        ]
 
     def colored_str(self) -> str:
         color = _REPLICA_STATUS_TO_COLOR[self]

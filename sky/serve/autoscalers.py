@@ -267,15 +267,14 @@ class RequestRateAutoscaler(Autoscaler):
             f'{self.scale_down_consecutive_periods}')
 
     @classmethod
-    def _select_replicas_to_scale_down(
+    def _select_nonterminal_replicas_to_scale_down(
             cls, num_limit: int,
             replica_infos: Iterable['replica_managers.ReplicaInfo']
     ) -> List[int]:
         status_order = serve_state.ReplicaStatus.scale_down_decision_order()
-        # Get rid of the replicas that has already been failed before, as we
-        # want to keep those replicas for the user to debug.
-        replica_infos = filter(lambda info: info.status in status_order,
-                               replica_infos)
+        assert all(info.status in status_order  for info in replica_infos), (
+            'All replicas to scale down should be in provisioning or launched '
+            'status.', replica_infos)
         replicas = sorted(
             replica_infos,
             key=lambda info: (
@@ -323,13 +322,13 @@ class RequestRateAutoscaler(Autoscaler):
 
         if self.update_mode == serve_utils.UpdateMode.ROLLING:
             latest_ready_replicas = []
-            old_replicas = []
+            old_nonterminal_replicas = []
             for info in replica_infos:
                 if info.version == self.latest_version:
                     if info.is_ready:
                         latest_ready_replicas.append(info)
-                else:
-                    old_replicas.append(info)
+                elif not info.is_terminal:
+                    old_nonterminal_replicas.append(info)
 
             num_latest_ready_replicas = len(latest_ready_replicas)
 
@@ -341,20 +340,22 @@ class RequestRateAutoscaler(Autoscaler):
             if num_latest_ready_replicas >= self.target_num_replicas:
                 # Once the number of ready new replicas is greater than or equal
                 # to the target, we can scale down all old replicas.
-                return [info.replica_id for info in old_replicas]
+                return [info.replica_id for info in old_nonterminal_replicas]
             # If rolling update is in progress, we scale down old replicas
             # based on the number of ready new replicas.
             num_old_replicas_to_keep = (self.target_num_replicas -
                                         num_latest_ready_replicas)
-
             # Remove old replicas (especially old launching replicas) and only
             # keep the required number of replicas, as we want to let the new
             # replicas to take over the provisioning old replicas faster.
             # `_select_replicas_to_scale_down` will make sure we scale the
             # replicas in initializing statuses first before scaling down the
             # READY old replicas.
-            return self._select_replicas_to_scale_down(
-                len(old_replicas) - num_old_replicas_to_keep, old_replicas)
+            return self._select_nonterminal_replicas_to_scale_down(
+                max(0,
+                    len(old_nonterminal_replicas) - num_old_replicas_to_keep),
+                old_nonterminal_replicas,
+            )
 
         latest_version_with_min_replicas = (
             self.get_latest_version_with_min_replicas(replica_infos))
@@ -383,13 +384,12 @@ class RequestRateAutoscaler(Autoscaler):
         override dict. Active migration could require returning both SCALE_UP
         and SCALE_DOWN.
         """
-        latest_provisioning_and_launched_replicas: List[
-            'replica_managers.ReplicaInfo'] = []
+        latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
 
         for info in replica_infos:
             if info.version == self.latest_version:
-                if info.is_provisioning_or_launched:
-                    latest_provisioning_and_launched_replicas.append(info)
+                if not info.is_terminal:
+                    latest_nonterminal_replicas.append(info)
 
         self._set_target_num_replica_with_hysteresis()
 
@@ -405,30 +405,27 @@ class RequestRateAutoscaler(Autoscaler):
         all_replica_ids_to_scale_down.extend(
             self.select_outdated_replicas_to_scale_down(replica_infos))
 
-        # Case 2. when latest_provisioning_and_launched_replicas is less
+        # Case 2. when latest_nonterminal_replicas is less
         # than num_to_provision, we always scale up new replicas.
-        if len(latest_provisioning_and_launched_replicas
-              ) < self.target_num_replicas:
-            num_replicas_to_scale_up = (
-                self.target_num_replicas -
-                len(latest_provisioning_and_launched_replicas))
+        if len(latest_nonterminal_replicas) < self.target_num_replicas:
+            num_replicas_to_scale_up = (self.target_num_replicas -
+                                        len(latest_nonterminal_replicas))
 
             for _ in range(num_replicas_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=None))
 
-        # Case 3: when latest_provisioning_and_launched_replicas is more
+        # Case 3: when latest_nonterminal_replicas is more
         # than self.target_num_replicas, we scale down new replicas.
-        if len(latest_provisioning_and_launched_replicas
-              ) > self.target_num_replicas:
-            num_replicas_to_scale_down = (
-                len(latest_provisioning_and_launched_replicas) -
-                self.target_num_replicas)
+        if len(latest_nonterminal_replicas) > self.target_num_replicas:
+            num_replicas_to_scale_down = (len(latest_nonterminal_replicas) -
+                                          self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
-                RequestRateAutoscaler._select_replicas_to_scale_down(
+                RequestRateAutoscaler.
+                _select_nonterminal_replicas_to_scale_down(
                     num_limit=num_replicas_to_scale_down,
-                    replica_infos=latest_provisioning_and_launched_replicas))
+                    replica_infos=latest_nonterminal_replicas))
 
         for replica_id in all_replica_ids_to_scale_down:
             scaling_options.append(
@@ -504,31 +501,31 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
-        latest_provisioning_and_launched_replicas = list(
+        latest_nonterminal_replicas = list(
             filter(
-                lambda info: info.is_provisioning_or_launched and info.version
-                == self.latest_version, replica_infos))
+                lambda info: not info.is_terminal and info.version == self.
+                latest_version, replica_infos))
 
         self._set_target_num_replica_with_hysteresis()
-        num_provisioning_and_launched_spot, num_ready_spot = 0, 0
-        num_provisioning_and_launched_ondemand, num_ready_ondemand = 0, 0
+        num_nonterminal_spot, num_ready_spot = 0, 0
+        num_nonterminal_ondemand, num_ready_ondemand = 0, 0
 
-        for info in latest_provisioning_and_launched_replicas:
+        for info in latest_nonterminal_replicas:
             if info.is_spot:
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_spot += 1
-                num_provisioning_and_launched_spot += 1
+                num_nonterminal_spot += 1
             else:
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_ondemand += 1
-                num_provisioning_and_launched_ondemand += 1
+                num_nonterminal_ondemand += 1
 
         logger.info(
             'Number of alive spot instances: '
-            f'{num_provisioning_and_launched_spot}, '
+            f'{num_nonterminal_spot}, '
             f'Number of ready spot instances: {num_ready_spot}, '
             'Number of alive on-demand instances: '
-            f' {num_provisioning_and_launched_ondemand}, '
+            f' {num_nonterminal_ondemand}, '
             f'Number of ready on-demand instances: {num_ready_ondemand}')
 
         scaling_options: List[AutoscalerDecision] = []
@@ -543,50 +540,51 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         # Decide how many spot instances to launch.
         num_spot_to_provision = (self.target_num_replicas -
                                  self.base_ondemand_fallback_replicas)
-        if num_provisioning_and_launched_spot < num_spot_to_provision:
+        if num_nonterminal_spot < num_spot_to_provision:
             # Not enough spot instances, scale up.
             num_spot_to_scale_up = (num_spot_to_provision -
-                                    num_provisioning_and_launched_spot)
+                                    num_nonterminal_spot)
             for _ in range(num_spot_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(
                         AutoscalerDecisionOperator.SCALE_UP,
                         target=self._get_spot_resources_override_dict()))
-        elif num_provisioning_and_launched_spot > num_spot_to_provision:
+        elif num_nonterminal_spot > num_spot_to_provision:
             # Too many spot instances, scale down.
             # Get the replica to scale down with _select_replicas_to_scale_down
-            num_spot_to_scale_down = (num_provisioning_and_launched_spot -
+            num_spot_to_scale_down = (num_nonterminal_spot -
                                       num_spot_to_provision)
             all_replica_ids_to_scale_down.extend(
-                RequestRateAutoscaler._select_replicas_to_scale_down(
+                RequestRateAutoscaler.
+                _select_nonterminal_replicas_to_scale_down(
                     num_spot_to_scale_down,
                     filter(lambda info: info.is_spot,
-                           latest_provisioning_and_launched_replicas)))
+                           latest_nonterminal_replicas)))
 
         # Decide how many on-demand instances to launch.
         num_ondemand_to_provision = self.base_ondemand_fallback_replicas
         if self.dynamic_ondemand_fallback:
-            # `num_ready_spot` instead of `num_provisioning_and_launched_spot`
+            # `num_ready_spot` instead of `num_nonterminal_spot`
             # because the provisioning spot can fail to UP due to the capacity
             # issue, and on-demand should fill the gap between the required
             # number of spot and ready spot.
             num_ondemand_to_provision += (num_spot_to_provision -
                                           num_ready_spot)
 
-        if num_ondemand_to_provision > num_provisioning_and_launched_ondemand:
+        if num_ondemand_to_provision > num_nonterminal_ondemand:
             for _ in range(num_ondemand_to_provision -
-                           num_provisioning_and_launched_ondemand):
+                           num_nonterminal_ondemand):
                 scaling_options.append(
                     AutoscalerDecision(
                         AutoscalerDecisionOperator.SCALE_UP,
                         target=self._get_ondemand_resources_override_dict()))
         else:
             all_replica_ids_to_scale_down.extend(
-                RequestRateAutoscaler._select_replicas_to_scale_down(
-                    num_provisioning_and_launched_ondemand -
-                    num_ondemand_to_provision,
+                RequestRateAutoscaler.
+                _select_nonterminal_replicas_to_scale_down(
+                    num_nonterminal_ondemand - num_ondemand_to_provision,
                     filter(lambda info: not info.is_spot,
-                           latest_provisioning_and_launched_replicas)))
+                           latest_nonterminal_replicas)))
 
         for replica_id in all_replica_ids_to_scale_down:
             scaling_options.append(

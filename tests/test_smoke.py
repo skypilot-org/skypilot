@@ -2910,11 +2910,12 @@ _TEARDOWN_SERVICE = (
     'done)')
 
 _SERVE_ENDPOINT_WAIT = (
+    'export ORIGIN_SKYPILOT_DEBUG=$SKYPILOT_DEBUG; export SKYPILOT_DEBUG=0; '
     'endpoint=$(sky serve status --endpoint {name}); '
     'until ! echo "$endpoint" | grep "Controller is initializing"; '
     'do echo "Waiting for serve endpoint to be ready..."; '
     'sleep 5; endpoint=$(sky serve status --endpoint {name}); done; '
-    'echo "$endpoint"')
+    'export SKYPILOT_DEBUG=$ORIGIN_SKYPILOT_DEBUG; echo "$endpoint"')
 
 _SERVE_STATUS_WAIT = ('s=$(sky serve status {name}); '
                       'until ! echo "$s" | grep "Controller is initializing."; '
@@ -3262,7 +3263,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
         name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                (1, False, 'SHUTTING_DOWN')])
     test = Test(
-        f'test-skyserve-update',
+        f'test-skyserve-rolling-update',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
