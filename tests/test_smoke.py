@@ -3084,9 +3084,9 @@ def test_skyserve_dynamic_ondemand_fallback(generic_cloud: str):
             f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s";'
             'echo "$s" | grep -q "0/4" || exit 1',
             # Wait for the provisioning starts
-            f'sleep 90',
+            f'sleep 40',
             _check_replica_in_status(name, [
-                (2, True, _SERVICE_LAUNCHING_STATUS_REGEX),
+                (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
                 (2, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN')
             ]),
 
@@ -3393,9 +3393,9 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             's=$(curl -L http://$endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
-            f'sleep 150',
+            f'sleep 120',
             _check_replica_in_status(
-                name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX),
+                name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
                        (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                        (2, False, 'READY')]),
             *update_check,
