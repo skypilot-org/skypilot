@@ -62,6 +62,7 @@ TPU_V4_HOST_DF = pd.read_csv(
 # Unsupported Series: 'f1', 'm2'
 SERIES_TO_DISCRIPTION = {
     'a2': 'A2 Instance',
+    'a3': 'A3 Instance',
     'c2': 'Compute optimized',
     'c2d': 'C2D AMD Instance',
     'c3': 'C3 Instance',
@@ -298,6 +299,11 @@ def _get_gpus_for_zone(zone: str) -> pd.DataFrame:
             gpu_name = gpu_name.replace('nvidia-', '')
             gpu_name = gpu_name.replace('tesla-', '')
             gpu_name = gpu_name.upper()
+            if 'H100-80GB' in gpu_name:
+                gpu_name = 'H100'
+                if count != 8:
+                    # H100 only has 8 cards.
+                    continue
             if 'VWS' in gpu_name:
                 continue
             if gpu_name.startswith('TPU-'):
@@ -344,6 +350,8 @@ def get_gpu_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
             gpu_name = row['AcceleratorName']
             if gpu_name == 'A100-80GB':
                 gpu_name = 'A100 80GB'
+            if gpu_name == 'H100':
+                gpu_name = 'H100 80GB'
             if f'{gpu_name} GPU' not in sku['description']:
                 continue
 

@@ -304,7 +304,7 @@ class Fluidstack(clouds.Cloud):
     @classmethod
     def default_username(cls, region: str) -> str:
         return {
-            'norway_2_eu': 'fsuser',
+            'norway_2_eu': 'ubuntu',
             'calgary_1_canada': 'ubuntu',
             'norway_3_eu': 'ubuntu',
             'norway_4_eu': 'ubuntu',
