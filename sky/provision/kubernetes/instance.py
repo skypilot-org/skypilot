@@ -239,6 +239,7 @@ def _wait_for_pods_to_run(namespace, new_nodes):
             break
         time.sleep(1)
 
+
 def _run_command_on_pods(node_name, node_namespace, command, stream_logs):
     cmd_output = kubernetes.stream()(
         kubernetes.core_api().connect_get_namespaced_pod_exec,
@@ -260,6 +261,7 @@ def _run_command_on_pods(node_name, node_namespace, command, stream_logs):
                 logger.warning(f"{cmd_output.read_stderr()}") 
         cmd_output.close()
     return cmd_output
+
 
 def _set_env_vars_in_pods(namespace: str, new_pods: List):
     """Setting environment variables in pods.
@@ -357,7 +359,6 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
             '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
     ]
-    # TODO(romilb): We need logging and surface errors here.
     for new_node in new_nodes:
         _run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd, True)
 
