@@ -310,7 +310,12 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 
     Args:
         cluster_name: name of the cluster to stop.
-        purge: whether to ignore cloud provider errors (if any).
+        purge: (Advanced) Forcefully mark the cluster as stopped in SkyPilot's
+            cluster table, even if the actual cluster stop operation failed on
+            the cloud. WARNING: This flag should only be set sparingly in
+            certain manual troubleshooting scenarios; with it set, it is the
+            user's responsibility to ensure there are no leaked instances and
+            related resources.
 
     Raises:
         ValueError: the specified cluster does not exist.
@@ -360,7 +365,12 @@ def down(cluster_name: str, purge: bool = False) -> None:
 
     Args:
         cluster_name: name of the cluster to down.
-        purge: whether to ignore cloud provider errors (if any).
+        purge: (Advanced) Forcefully remove the cluster from SkyPilot's cluster
+            table, even if the actual cluster termination failed on the cloud.
+            WARNING: This flag should only be set sparingly in certain manual
+            troubleshooting scenarios; with it set, it is the user's
+            responsibility to ensure there are no leaked instances and related
+            resources.
 
     Raises:
         ValueError: the specified cluster does not exist.
