@@ -5558,8 +5558,6 @@ def local_down():
         click.echo(f'{style.BRIGHT}Local cluster removed.{style.RESET_ALL}')
 
 
-# TODO(skypilot): remove the below in v0.5.
-_add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 _deprecate_and_hide_command(group=None,
                             command_to_deprecate=cpunode,
                             alternative_command='sky launch')

@@ -70,7 +70,6 @@ class SpotController:
 
         for i, task in enumerate(self._dag.tasks):
             task_envs = task.envs or {}
-            task_envs[constants.TASK_ID_ENV_VAR_DEPRECATED] = job_id_env_vars[i]
             task_envs[constants.TASK_ID_ENV_VAR] = job_id_env_vars[i]
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)

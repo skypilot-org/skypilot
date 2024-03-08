@@ -759,16 +759,6 @@ def job_status(cluster_name: str,
 
 
 @usage_lib.entrypoint
-def spot_status(refresh: bool) -> List[Dict[str, Any]]:
-    """[Deprecated] (alias of spot_queue) Get statuses of managed spot jobs."""
-    sky_logging.print(
-        f'{colorama.Fore.YELLOW}WARNING: `spot_status()` is deprecated. '
-        f'Instead, use: spot_queue(){colorama.Style.RESET_ALL}',
-        file=sys.stderr)
-    return spot_queue(refresh=refresh)
-
-
-@usage_lib.entrypoint
 def spot_queue(refresh: bool,
                skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
