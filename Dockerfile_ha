@@ -1,0 +1,9 @@
+FROM us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:20240221
+
+COPY --chown=sky . /skypilot/sky/
+
+# Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
+ENV PYTHONUNBUFFERED=1
+
+# Install SkyPilot
+RUN cd /skypilot/sky && pip install -e .[kubernetes] && pip install uvicorn fastapi

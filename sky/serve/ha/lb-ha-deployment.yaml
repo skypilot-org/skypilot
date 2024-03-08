@@ -1,0 +1,68 @@
+# Creates a deployment YAML that runs multiple load balancer replicas and a service to expose them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sky-lb-ha-deployment
+  labels:
+    app: sky-lb-ha
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sky-lb-ha
+  template:
+    metadata:
+      labels:
+        app: sky-lb-ha
+    spec:
+      containers:
+      - name: sky-lb-ha
+        image: berkeleyskypilot/skypilot-ha:v1
+        imagePullPolicy: Always
+        command:
+          - /bin/sh
+          - -c
+          - |
+            IP=$(env | grep 'SKYPILOT_SERVICE__20001_PORT_20001_TCP_ADDR' | cut -d'=' -f2) # This parsing is quite brittle. Instead use a better name for controller svc.
+            echo "Controller Service IP: ${IP}"
+            python -m sky.serve.load_balancer --controller-addr http://${IP}:20001 --load-balancer-port 8890
+        ports:
+        - containerPort: 8890
+---
+# Create a service to expose the load balancer
+apiVersion: v1
+kind: Service
+metadata:
+  name: sky-lb-ha-service
+  labels:
+    app: skypilot-lb
+spec:
+  selector:
+    app: sky-lb-ha
+  ports:
+  - protocol: TCP
+    port: 8890
+    targetPort: 8890
+  type: ClusterIP
+---
+# Create an ingress rule
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+  name: sky-lb-ha-ingress
+  namespace: default
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /sky-lb-ha(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: sky-lb-ha-service
+            port:
+              number: 8890
