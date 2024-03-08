@@ -2889,9 +2889,9 @@ def _get_service_name() -> str:
 # enough time to sync with the controller and get all ready replica IPs.
 _SERVE_WAIT_UNTIL_READY = (
     '(while true; do'
-    '     output=$(sky serve status {name}); echo "$output";'
-    '     echo "$output" | grep -q "{replica_num}/{replica_num}" && break;'
-    '     echo "$output" | grep -q "FAILED" && exit 1;'
+    '     s=$(sky serve status {name}); echo "$s";'
+    '     echo "$s" | grep -q "{replica_num}/{replica_num}" && break;'
+    '     echo "$s" | grep -q "FAILED" && exit 1;'
     '     sleep 10;'
     f' done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS + 2};')
 _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
@@ -2904,8 +2904,8 @@ _SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
 # the timeout here. See implementation of run_one_test() for details.
 _TEARDOWN_SERVICE = (
     '(while true; do'
-    '     output=$(sky serve down -y {name});'
-    '     echo "$output" | grep -q "scheduled to be terminated" && break;'
+    '     s=$(sky serve down -y {name});'
+    '     echo "$s" | grep -q "scheduled to be terminated" && break;'
     '     sleep 10;'
     'done)')
 
@@ -3228,6 +3228,14 @@ def test_skyserve_cancel(generic_cloud: str):
     run_one_test(test)
 
 
+def _check_service_version(service_name: str, version: int) -> str:
+    # Grep the lines before 'Service Replicas' and check if the service version
+    # is correct.
+    return (f'echo "$s" | grep -B1000 "Service Replicas" | '
+            f'grep "{service_name} " | awk "{{print $2}}" | '
+            f'grep {version} || exit 1')
+
+
 @pytest.mark.serve
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
@@ -3246,8 +3254,9 @@ def test_skyserve_update(generic_cloud: str):
             # Make sure the traffic is not mixed
             'curl -L http://$endpoint | grep "Hi, new SkyPilot here"',
             # The latest 2 version should be READY and the older versions should be shutting down
-            _check_replica_in_status(name, [(2, False, 'READY'),
-                                            (2, False, 'SHUTTING_DOWN')]),
+            (_check_replica_in_status(name, [(2, False, 'READY'),
+                                             (2, False, 'SHUTTING_DOWN')]) +
+             _check_service_version(name, "2")),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3276,7 +3285,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; '
             # The latest version should have one READY and the one of the older versions should be shutting down
-            f'{single_new_replica} '
+            f'{single_new_replica} {_check_service_version(name, "1,2")} '
             # Check the output from the old version, immediately after the
             # output from the new version appears. This is guaranteed by the
             # round robin load balancing policy.
@@ -3308,8 +3317,8 @@ def test_skyserve_fast_update(generic_cloud: str):
             # 2 on-deamnd (ready) + 1 on-demand (provisioning).
             _check_replica_in_status(
                 name, [(2, False, 'READY'),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]) + _check_service_version(name, "1"),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3) + _check_service_version(name, "2"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             # Test rolling update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
@@ -3318,7 +3327,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             # 2 on-deamnd (ready) + 1 on-demand (shutting down).
             _check_replica_in_status(name, [(2, False, 'READY'),
                                             (1, False, 'SHUTTING_DOWN')]),
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) + _check_service_version(name, "3"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
@@ -3335,14 +3344,14 @@ def test_skyserve_update_autoscale(generic_cloud: str):
         f'test-skyserve-update-autoscale',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/num_min_two.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) + _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/num_min_one.yaml',
             # sleep before update is registered.
             'sleep 20',
             # Timeout will be triggered when update fails.
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1) + _check_service_version(name, "2"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl -L http://$endpoint | grep "Hi, SkyPilot here!"',
             # Rolling Update
@@ -3350,7 +3359,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
             # sleep before update is registered.
             'sleep 20',
             # Timeout will be triggered when update fails.
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) + _check_service_version(name, "3"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl -L http://$endpoint | grep "Hi, SkyPilot here!"',
         ],
@@ -3374,7 +3383,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         update_check += [
             _check_replica_in_status(
                 name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (1, False, 'SHUTTING_DOWN'), (1, False, 'READY')]),
+                       (1, False, 'SHUTTING_DOWN'), (1, False, 'READY')]) + _check_service_version(name, "1,2"),
         ]
     else:
         # Check blue green update, it will keep both old on-demand instances
@@ -3382,13 +3391,13 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         update_check += [
             _check_replica_in_status(
                 name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                       (2, False, 'READY')]),
+                       (2, False, 'READY')]) + _check_service_version(name, "2"),
         ]
     test = Test(
         f'test-skyserve-new-autoscaler-update',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) + _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             's=$(curl -L http://$endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
