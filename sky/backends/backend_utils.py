@@ -2285,12 +2285,8 @@ def is_controller_up(
 
     if controller_status is None:
         sky_logging.print(non_existent_message)
-    elif controller_status != status_lib.ClusterStatus.UP:
-        msg = (f'{controller_name.capitalize()} controller {cluster_name} '
-               f'is {controller_status.value}.')
-        if controller_status == status_lib.ClusterStatus.STOPPED:
-            msg += f'\n{stopped_message}'
-        sky_logging.print(msg)
+    elif controller_status == status_lib.ClusterStatus.STOPPED:
+        sky_logging.print(stopped_message)
     return controller_status, handle
 
 
