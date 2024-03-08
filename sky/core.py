@@ -841,10 +841,10 @@ def spot_queue(refresh: bool,
         subprocess_utils.handle_returncode(returncode,
                                            code,
                                            'Failed to fetch managed spot jobs',
-                                           stderr,
+                                           job_table_payload + stderr,
                                            stream_logs=False)
     except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+        raise RuntimeError(str(e)) from e
 
     jobs = spot.load_spot_job_queue(job_table_payload)
     if skip_finished:

@@ -1737,6 +1737,7 @@ def _update_cluster_status_no_lock(
     all_nodes_up = (all(
         status == status_lib.ClusterStatus.UP for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
+
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
         try:
             # TODO(zhwu): This function cannot distinguish transient network
@@ -1951,9 +1952,10 @@ def _update_cluster_status_no_lock(
 
 
 def _update_cluster_status(
-        cluster_name: str,
-        acquire_per_cluster_status_lock: bool,
-        acquire_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS) -> Optional[Dict[str, Any]]:
+    cluster_name: str,
+    acquire_per_cluster_status_lock: bool,
+    acquire_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
+) -> Optional[Dict[str, Any]]:
     """Update the cluster status.
 
     The cluster status is updated by checking ray cluster and real status from
@@ -1998,11 +2000,11 @@ def _update_cluster_status(
 
 
 def refresh_cluster_record(
-        cluster_name: str,
-        *,
-        force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
-        acquire_per_cluster_status_lock: bool = True,
-        acquire_lock_timeout: Optional[int] = None
+    cluster_name: str,
+    *,
+    force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
+    acquire_per_cluster_status_lock: bool = True,
+    acquire_lock_timeout: int = CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS
 ) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
 
@@ -2264,10 +2266,9 @@ def is_controller_up(
         # start the controller manually from the cloud console.
         # The acquire_lock_timeout is set to 1 second to avoid hanging the
         # command when multiple spot_launch commands are running at the same
-        # time. It should be safe to set it to a small value as the controller
-        # will not be autostopped in that cases.
+        # time. It should be safe to set it to 0 (try once to get the lock).
         controller_status, handle = refresh_cluster_status_handle(
-            cluster_name, force_refresh_statuses=None, acquire_lock_timeout=1)
+            cluster_name, force_refresh_statuses=None, acquire_lock_timeout=0)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in

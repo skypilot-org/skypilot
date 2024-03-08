@@ -4081,10 +4081,10 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed spot jobs with IDs 1, 2, 3
       $ sky spot cancel 1 2 3
     """
-    _, handle = backend_utils.is_controller_up(
+    controller_status, _ = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
         stopped_message='All managed spot jobs should have finished.')
-    if handle is None:
+    if controller_status in [status_lib.ClusterStatus.STOPPED, None]:
         # Hint messages already printed by the call above.
         sys.exit(1)
 
@@ -4166,11 +4166,11 @@ def spot_dashboard(port: Optional[int]):
     hint = (
         'Dashboard is not available if spot controller is not up. Run a spot '
         'job first.')
-    _, handle = backend_utils.is_controller_up(
+    controller_status, _ = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
         stopped_message=hint,
         non_existent_message=hint)
-    if handle is None:
+    if controller_status in [status_lib.ClusterStatus.STOPPED, None]:
         sys.exit(1)
     # SSH forward a free local port to remote's dashboard port.
     remote_port = constants.SPOT_DASHBOARD_REMOTE_PORT
@@ -4674,10 +4674,10 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
             'Can only specify one of SERVICE_NAMES or --all. '
             f'Provided {argument_str!r}.')
 
-    _, handle = backend_utils.is_controller_up(
+    controller_status, _ = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have been terminated.')
-    if handle is None:
+    if controller_status in [status_lib.ClusterStatus.STOPPED, None]:
         # Hint messages already printed by the call above.
         sys.exit(1)
 
