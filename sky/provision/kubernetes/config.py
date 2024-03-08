@@ -38,8 +38,16 @@ def bootstrap_instances(
         _configure_autoscaler_cluster_role_binding(namespace, config.provider_config)
         if config.provider_config.get('port_mode', 'loadbalancer') == 'ingress':
             logger.info('Port mode is set to ingress, setting up ingress role and role binding')
-            _configure_autoscaler_role(namespace, config.provider_config, role_field='autoscaler_ingress_role')
-            _configure_autoscaler_role_binding(namespace, config.provider_config, binding_field='autoscaler_ingress_role_binding')
+            try:
+                _configure_autoscaler_role(namespace, config.provider_config, role_field='autoscaler_ingress_role')
+                _configure_autoscaler_role_binding(namespace, config.provider_config, binding_field='autoscaler_ingress_role_binding')
+            except kubernetes.api_exception() as e:
+                # If namespace is not found, we will ignore the error
+                if e.status == 404:
+                    logger.info(f'Namespace not found - is your nginx ingress installed? Skipping ingress role and role binding setup.')
+                else:
+                    raise e
+
 
     elif requested_service_account != 'default':
         logger.info(f'Using service account {requested_service_account!r}, '
