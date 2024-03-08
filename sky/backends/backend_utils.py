@@ -2290,8 +2290,6 @@ def is_controller_up(
                f'is {controller_status.value}.')
         if controller_status == status_lib.ClusterStatus.STOPPED:
             msg += f'\n{stopped_message}'
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg += '\nPlease wait for the controller to be ready.'
         sky_logging.print(msg)
     return controller_status, handle
 
