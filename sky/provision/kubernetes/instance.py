@@ -256,9 +256,9 @@ def _run_command_on_pods(node_name, node_namespace, command, stream_logs):
         while cmd_output.is_open():
             cmd_output.update(timeout=1)
             if cmd_output.peek_stdout():
-                logger.debug(f"{cmd_output.read_stdout()}")
+                logger.debug(f'{cmd_output.read_stdout()}')
             if cmd_output.peek_stderr():
-                logger.warning(f"{cmd_output.read_stderr()}") 
+                logger.warning(f'{cmd_output.read_stderr()}')
         cmd_output.close()
     return cmd_output
 
@@ -317,8 +317,7 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
     for new_node in new_nodes:
         privilege_check = _run_command_on_pods(new_node.metadata.name,
                                                namespace,
-                                               check_k8s_user_sudo_cmd,
-                                               False)
+                                               check_k8s_user_sudo_cmd, False)
         if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
@@ -360,7 +359,8 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
     ]
     for new_node in new_nodes:
-        _run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd, True)
+        _run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd,
+                             True)
 
 
 def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
