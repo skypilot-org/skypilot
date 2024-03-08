@@ -1737,7 +1737,6 @@ def _update_cluster_status_no_lock(
     all_nodes_up = (all(
         status == status_lib.ClusterStatus.UP for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
-
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
         try:
             # TODO(zhwu): This function cannot distinguish transient network
@@ -1832,7 +1831,6 @@ def _update_cluster_status_no_lock(
         return record
 
     # All cases below are transitioning the cluster to non-UP states.
-
     if len(node_statuses) > handle.launched_nodes:
         # Unexpected: in the queried region more than 1 cluster with the same
         # constructed name tag returned. This will typically not happen unless
@@ -1954,7 +1952,8 @@ def _update_cluster_status_no_lock(
 
 def _update_cluster_status(
         cluster_name: str,
-        acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
+        acquire_per_cluster_status_lock: bool,
+        acquire_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS) -> Optional[Dict[str, Any]]:
     """Update the cluster status.
 
     The cluster status is updated by checking ray cluster and real status from
@@ -1988,23 +1987,22 @@ def _update_cluster_status(
         return _update_cluster_status_no_lock(cluster_name)
 
     try:
-        # TODO(mraheja): remove pylint disabling when filelock
-        # version updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
-                               CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
+                               timeout=acquire_lock_timeout):
             return _update_cluster_status_no_lock(cluster_name)
     except filelock.Timeout:
         logger.debug('Refreshing status: Failed get the lock for cluster '
                      f'{cluster_name!r}. Using the cached status.')
-        return global_user_state.get_cluster_from_name(cluster_name)
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        return record
 
 
 def refresh_cluster_record(
         cluster_name: str,
         *,
         force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
-        acquire_per_cluster_status_lock: bool = True
+        acquire_per_cluster_status_lock: bool = True,
+        acquire_lock_timeout: Optional[int] = None
 ) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
 
@@ -2052,7 +2050,8 @@ def refresh_cluster_record(
         if force_refresh_for_cluster or has_autostop or use_spot:
             record = _update_cluster_status(
                 cluster_name,
-                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
+                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
+                acquire_lock_timeout=acquire_lock_timeout)
     return record
 
 
@@ -2062,6 +2061,7 @@ def refresh_cluster_status_handle(
     *,
     force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
     acquire_per_cluster_status_lock: bool = True,
+    acquire_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
     """Refresh the cluster, and return the possibly updated status and handle.
@@ -2073,7 +2073,8 @@ def refresh_cluster_status_handle(
     record = refresh_cluster_record(
         cluster_name,
         force_refresh_statuses=force_refresh_statuses,
-        acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
+        acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
+        acquire_lock_timeout=acquire_lock_timeout)
     if record is None:
         return None, None
     return record['status'], record['handle']
@@ -2261,8 +2262,12 @@ def is_controller_up(
         # unnecessary costly refresh when the controller is already stopped.
         # This optimization is based on the assumption that the user will not
         # start the controller manually from the cloud console.
+        # The acquire_lock_timeout is set to 1 second to avoid hanging the
+        # command when multiple spot_launch commands are running at the same
+        # time. It should be safe to set it to a small value as the controller
+        # will not be autostopped in that cases.
         controller_status, handle = refresh_cluster_status_handle(
-            cluster_name, force_refresh_statuses=None)
+            cluster_name, force_refresh_statuses=None, acquire_lock_timeout=1)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
@@ -2287,7 +2292,6 @@ def is_controller_up(
         if controller_status == status_lib.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
         sky_logging.print(msg)
-        handle = None
     return controller_status, handle
 
 
