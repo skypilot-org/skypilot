@@ -379,9 +379,6 @@ class Kubernetes(clouds.Cloud):
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
             return {
-                # TODO(romilb): Fix before merging.
-                '~/.ssh/sky-key': '~/.ssh/sky-key',
-                '~/.ssh/sky-key.pub': '~/.ssh/sky-key.pub',
                 DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH
             }
         else:

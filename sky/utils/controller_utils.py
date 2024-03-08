@@ -134,26 +134,30 @@ class Controllers(enum.Enum):
 # TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
         controller_type: str) -> List[str]:
-    commands = [
-        # aws
-        'pip list | grep boto3 > /dev/null 2>&1 || '
-        'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
-        'boto3>=1.26.1 > /dev/null 2>&1',
-        # gcp
-        'pip list | grep google-api-python-client > /dev/null 2>&1 || '
-        'pip install google-api-python-client>=2.69.0 google-cloud-storage '
-        '> /dev/null 2>&1',
-        f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}',
-    ]
-    # k8s and ibm doesn't support open port and spot instance yet, so we don't
-    # install them for either controller.
-    if controller_type == 'spot':
-        # oci doesn't support open port yet, so we don't install oci
-        # dependencies for sky serve controller.
-        commands.append('pip list | grep oci > /dev/null 2>&1 || '
-                        'pip install oci > /dev/null 2>&1')
+    commands = []
+    enabled_clouds = global_user_state.get_enabled_clouds()
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
+    # AWS
+    if any(
+            cloud.is_same_cloud(clouds.AWS())
+            for cloud in enabled_clouds):
+        commands.append(
+            'pip list | grep boto3 > /dev/null 2>&1 || '
+            'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
+            'boto3>=1.26.1 > /dev/null 2>&1'
+        )
+    # GCP
+    if any(
+            cloud.is_same_cloud(clouds.GCP())
+            for cloud in enabled_clouds):
+        commands.extend(
+            ['pip list | grep google-api-python-client > /dev/null 2>&1 || '
+            'pip install google-api-python-client>=2.69.0 google-cloud-storage '
+            '> /dev/null 2>&1',
+            f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}']
+        )
+    # Azure
     if any(
             cloud.is_same_cloud(clouds.Azure())
             for cloud in global_user_state.get_enabled_clouds()):
@@ -161,6 +165,7 @@ def _get_cloud_dependencies_installation_commands(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
             'azure-mgmt-network > /dev/null 2>&1')
+    # Kubernetes
     if any(
             cloud.is_same_cloud(clouds.Kubernetes())
             for cloud in global_user_state.get_enabled_clouds()):
@@ -173,7 +178,21 @@ def _get_cloud_dependencies_installation_commands(
             'then apt update && apt install curl socat netcat -y; '
             'fi" && '
             # Install kubectl
-            '(command -v kubectl &>/dev/null || (curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl)) && ')
+            '(command -v kubectl &>/dev/null || (curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl)) && '
+        )
+    # OCI
+    if controller_type == 'spot':
+        # oci doesn't support open port yet, so we don't install oci
+        # dependencies for sky serve controller.
+        if any(
+                cloud.is_same_cloud(clouds.OCI())
+                for cloud in enabled_clouds):
+            commands.append(
+                'pip list | grep oci > /dev/null 2>&1 || '
+                'pip install oci > /dev/null 2>&1'
+            )
+    # ibm doesn't support open port and spot instance yet, so we don't
+    # install them for either controller.
     return commands
 
 
