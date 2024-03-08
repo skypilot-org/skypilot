@@ -51,6 +51,7 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import schemas
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -800,8 +801,10 @@ def write_cluster_config(
     assert cluster_name is not None
     excluded_clouds = []
     remote_identity = skypilot_config.get_nested(
-        (str(cloud).lower(), 'remote_identity'), 'LOCAL_CREDENTIALS')
-    if remote_identity == 'SERVICE_ACCOUNT':
+        (str(cloud).lower(), 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+    # For Kubernetes, remote_identity can be 'SERVICE_ACCOUNT',
+    # 'LOCAL_CREDENTIALS' or a string for the service account to use.
+    if remote_identity != 'LOCAL_CREDENTIALS':
         if not cloud.supports_service_account_on_remote():
             raise exceptions.InvalidCloudConfigs(
                 'remote_identity: SERVICE_ACCOUNT is specified in '

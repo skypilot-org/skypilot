@@ -13,6 +13,8 @@ from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import schemas
+
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -33,6 +35,7 @@ class Kubernetes(clouds.Cloud):
     SKY_SSH_KEY_SECRET_FIELD_NAME = \
         f'ssh-publickey-{common_utils.get_user_hash()}'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
+    SKY_DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
         'kubernetes-port-forward-proxy-command.sh.j2'
     PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
@@ -45,6 +48,8 @@ class Kubernetes(clouds.Cloud):
     # For non-autoscaling clusters, we conservatively set this to 10s.
     # TODO(romilb): Make the timeout configurable.
     TIMEOUT = 10
+
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
@@ -259,6 +264,20 @@ class Kubernetes(clouds.Cloud):
         port_mode = network_utils.get_port_mode(None)
 
         dshm_size_limit = skypilot_config.get_nested(('kubernetes', 'dshm_size_limit'), None)
+        remote_identity = skypilot_config.get_nested(('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+        if remote_identity == 'LOCAL_CREDENTIALS':
+            # SA name doesn't matter since automounting credentials will be turned off
+            k8s_service_account_name = 'default'
+            k8s_automount_service_account_token = 'false'
+        elif remote_identity == 'SERVICE_ACCOUNT':
+            # Use the default service account
+            k8s_service_account_name = self.SKY_DEFAULT_SERVICE_ACCOUNT_NAME
+            k8s_automount_service_account_token = 'true'
+        else:
+            # User specified a custom service account
+            k8s_service_account_name = remote_identity
+            k8s_automount_service_account_token = 'true'
+
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -277,7 +296,8 @@ class Kubernetes(clouds.Cloud):
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_dshm_size_limit': dshm_size_limit,
-            # TODO(romilb): Allow user to specify custom images
+            'k8s_service_account_name': k8s_service_account_name,
+            'k8s_automount_service_account_token': k8s_automount_service_account_token,
             'image_id': image_id,
         }
 
@@ -347,16 +367,12 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
-            # Test using python API
-            try:
-                return kubernetes_utils.check_credentials()
-            except Exception as e:  # pylint: disable=broad-except
-                return (False, 'Credential check failed: '
-                        f'{common_utils.format_exception(e)}')
-        else:
-            return (False, 'Credentials not found - '
-                    f'check if {CREDENTIAL_PATH} exists.')
+        # Test using python API
+        try:
+            return kubernetes_utils.check_credentials()
+        except Exception as e:  # pylint: disable=broad-except
+            return (False, 'Credential check failed: '
+                    f'{common_utils.format_exception(e)}')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):

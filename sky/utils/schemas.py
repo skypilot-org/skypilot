@@ -534,6 +534,7 @@ _REMOTE_IDENTITY_SCHEMA = {
     }
 }
 
+REMOTE_IDENTITY_DEFAULT = 'LOCAL_CREDENTIALS'
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
@@ -616,6 +617,9 @@ def get_config_schema():
                 },
                 'dshm_size_limit': {
                     'type': 'string'
+                },
+                'remote_identity': {
+                    'type': 'string'
                 }
             }
         },
@@ -647,7 +651,10 @@ def get_config_schema():
     }
 
     for config in cloud_configs.values():
-        config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
+        for key in _REMOTE_IDENTITY_SCHEMA:
+            if key not in config['properties']:  # Add if not already present
+                config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
+                break
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
