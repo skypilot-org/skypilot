@@ -1,6 +1,5 @@
 """SDK functions for cluster/job management."""
 import getpass
-import sys
 import typing
 from typing import Any, Dict, List, Optional, Union
 
