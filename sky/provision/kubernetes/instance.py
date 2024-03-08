@@ -239,58 +239,27 @@ def _wait_for_pods_to_run(namespace, new_nodes):
             break
         time.sleep(1)
 
-def _run_command_on_pods(node_name: str, node_namespace: str, command_list: Optional[List[str]], shell_command: List[str] = ['/bin/sh'], stream_logs: bool = False, operation_name: Optional[str] = None):      
-    """Run command on Kubernetes pods.
-
-    There are two options for how `_run_command_on_pods` functions:
-    (1) stream_logs set to False. Here, the entirety of the shell commands are part of
-    `shell_command`, `command_list` is presumably empty, and the logs aren't streamed.
-    (2) stream_logs set to True. Here, we have an initial shell command like `/bin/sh`,
-    but most commands are run sequentially as part of the `command_list` list. In this case,
-    the command being run, as well as any potential error or output messages, are added to 
-    the relevant `provision.log` file.
-    """
-    if stream_logs == False:
-        cmd_output = kubernetes.stream()(
-            kubernetes.core_api().connect_get_namespaced_pod_exec,
-            node_name,
-            node_namespace,
-            command=shell_command,
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-            _request_timeout=kubernetes.API_TIMEOUT)
-        return cmd_output
-    
-    else:
-        cmd_output = kubernetes.stream()(
-            kubernetes.core_api().connect_get_namespaced_pod_exec,
-            node_name,
-            node_namespace,
-            command=shell_command,
-            stderr=True,
-            stdin=True,
-            stdout=True,
-            tty=False,
-            _preload_content=False,
-            _request_timeout=kubernetes.API_TIMEOUT)
+def _run_command_on_pods(node_name, node_namespace, command, stream_logs):
+    cmd_output = kubernetes.stream()(
+        kubernetes.core_api().connect_get_namespaced_pod_exec,
+        node_name,
+        node_namespace,
+        command=command,
+        stderr=True,
+        stdin=False,
+        stdout=True,
+        tty=False,
+        _preload_content=(not stream_logs),
+        _request_timeout=kubernetes.API_TIMEOUT)
+    if stream_logs:
         while cmd_output.is_open():
             cmd_output.update(timeout=1)
             if cmd_output.peek_stdout():
                 logger.debug(f"{cmd_output.read_stdout()}")
             if cmd_output.peek_stderr():
-                logger.warning(f"{cmd_output.read_stderr()}")
-            if command_list:
-                c = command_list.pop(0)
-                log_text = operation_name + ': ' if operation_name else ''
-                log_text += f"Running: {c}"
-                logger.info(log_text)
-                cmd_output.write_stdin(c + "\n")
-            else:
-                break
+                logger.warning(f"{cmd_output.read_stderr()}") 
         cmd_output.close()
-        return cmd_output    
+    return cmd_output
 
 def _set_env_vars_in_pods(namespace: str, new_pods: List):
     """Setting environment variables in pods.
@@ -319,10 +288,8 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     ]
 
     for new_pod in new_pods:
-        _run_command_on_pods(node_name=new_pod.metadata.name,
-                             node_namespace=namespace,
-                             command_list=None,
-                             shell_command=set_k8s_env_var_cmd)
+        _run_command_on_pods(new_pod.metadata.name, namespace,
+                             set_k8s_env_var_cmd, False)
 
 
 def _check_user_privilege(namespace: str, new_nodes: List) -> None:
@@ -346,10 +313,10 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
     ]
 
     for new_node in new_nodes:
-        privilege_check = _run_command_on_pods(node_name=new_node.metadata.name,
-                                               node_namespace=namespace,
-                                               command_list=None,
-                                               shell_command=check_k8s_user_sudo_cmd)
+        privilege_check = _run_command_on_pods(new_node.metadata.name,
+                                               namespace,
+                                               check_k8s_user_sudo_cmd,
+                                               False)
         if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
@@ -361,39 +328,38 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
 def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
     # Setting up ssh for the pod instance. This is already setup for
     # the jump pod so it does not need to be run for it.
-    set_k8s_ssh_cmd = ['/bin/sh']
-    command_list = [
+    set_k8s_ssh_cmd = [
+        '/bin/sh',
+        '-c',
+        (
             'prefix_cmd() '
-            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }',
-            'export DEBIAN_FRONTEND=noninteractive',
-            '$(prefix_cmd) apt-get update',
-            '$(prefix_cmd) apt install openssh-server rsync -y',
-            '$(prefix_cmd) mkdir -p /var/run/sshd',
+            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+            'export DEBIAN_FRONTEND=noninteractive;'
+            '$(prefix_cmd) apt-get update;'
+            '$(prefix_cmd) apt install openssh-server rsync -y; '
+            '$(prefix_cmd) mkdir -p /var/run/sshd; '
             '$(prefix_cmd) '
             'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
-            '/etc/ssh/sshd_config',
+            '/etc/ssh/sshd_config; '
             '$(prefix_cmd) sed '
             '"s@session\\s*required\\s*pam_loginuid.so@session optional '
-            'pam_loginuid.so@g" -i /etc/pam.d/sshd'
-            'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A',
-            '$(prefix_cmd) mkdir -p ~/.ssh',
-            '$(prefix_cmd) chown -R $(whoami) ~/.ssh',
-            '$(prefix_cmd) chmod 700 ~/.ssh',
-            '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys',
+            'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
+            'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
+            '$(prefix_cmd) mkdir -p ~/.ssh; '
+            '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
+            '$(prefix_cmd) chmod 700 ~/.ssh; '
+            '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
             '$(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > '
-            '~/.ssh/authorized_keys',
-            '$(prefix_cmd) service ssh restart',
+            '~/.ssh/authorized_keys; '
+            '$(prefix_cmd) service ssh restart; '
             # Eliminate the error
             # `mesg: ttyname failed: inappropriate ioctl for device`.
             # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
-            '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile']
+            '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
+    ]
+    # TODO(romilb): We need logging and surface errors here.
     for new_node in new_nodes:
-        _run_command_on_pods(node_name=new_node.metadata.name, 
-                             node_namespace=namespace,
-                             command_list=command_list,
-                             shell_command=set_k8s_ssh_cmd,
-                             stream_logs=True,
-                             operation_name="Setup SSH")
+        _run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd, True)
 
 
 def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
@@ -702,10 +668,8 @@ def get_cluster_info(
     ssh_user = 'sky'
     get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
     assert head_pod_name is not None
-    ssh_user = _run_command_on_pods(node_name=head_pod_name,
-                                    node_namespace=namespace,
-                                    command_list=None,
-                                    shell_command=get_k8s_ssh_user_cmd)
+    ssh_user = _run_command_on_pods(head_pod_name, namespace,
+                                    get_k8s_ssh_user_cmd, False)
     ssh_user = ssh_user.strip()
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
