@@ -4480,8 +4480,12 @@ def serve_update(
     Example:
 
     .. code-block:: bash
-
+        
+        # Update an existing service with rolling update
         sky serve update sky-service-16aa new_service.yaml
+        # Use blue-green update
+        sky serve update --mode blue_green sky-service-16aa new_service.yaml
+        
     """
     task = _generate_task_with_service(
         service_name=service_name,
