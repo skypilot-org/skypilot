@@ -107,17 +107,23 @@ class SkyServeController:
                 filter(lambda info: info.is_ready, replica_infos))
             if self._autoscaler.update_mode == serve_utils.UpdateMode.ROLLING:
                 chosen_replicas = ready_replicas
+                service_versions = sorted(
+                    list(set(info.version for info in ready_replicas)))
             else:
-                chosen_version = (
+                service_version = (
                     self._autoscaler.get_latest_version_with_min_replicas(
                         replica_infos))
-                if chosen_version is None:
-                    chosen_version = min(info.version for info in ready_replicas
-                                        ) if len(ready_replicas) > 0 else -1
+                if service_version is None:
+                    service_version = min(
+                        info.version for info in ready_replicas
+                    ) if len(ready_replicas) > 0 else -1
+                service_versions = [service_version]
 
                 chosen_replicas = list(
-                    filter(lambda info: info.version == chosen_version,
+                    filter(lambda info: info.version == service_version,
                            ready_replicas))
+            serve_state.update_service_version(self._service_name,
+                                               service_versions)
             ready_replica_urls = [info.url for info in chosen_replicas]
             return {'ready_replica_urls': ready_replica_urls}
 
