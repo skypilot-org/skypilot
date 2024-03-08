@@ -3014,7 +3014,7 @@ def _down_or_stop_clusters(
                 hint_or_raise = _CONTROLLER_TO_HINT_OR_RAISE[controller]
                 try:
                     hint_or_raise(controller_name)
-                except exceptions.ClusterOwnerIdentityMismatchError as e:
+                except (exceptions.ClusterOwnerIdentityMismatchError, RuntimeError) as e:
                     if purge:
                         click.echo(common_utils.format_exception(e))
                     else:
