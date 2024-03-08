@@ -2968,12 +2968,14 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
                       f'grep "{status}" | wc -l | grep {count} || exit 1;')
     return (f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s"; ' + check_cmd)
 
+
 def _check_service_version(service_name: str, version: int) -> str:
     # Grep the lines before 'Service Replicas' and check if the service version
     # is correct.
     return (f'echo "$s" | grep -B1000 "Service Replicas" | '
             f'grep "{service_name} " | awk "{{print $2}}" | '
             f'grep {version} || exit 1; ')
+
 
 @pytest.mark.gcp
 @pytest.mark.serve
@@ -3232,7 +3234,6 @@ def test_skyserve_cancel(generic_cloud: str):
         timeout=20 * 60,
     )
     run_one_test(test)
-
 
 
 @pytest.mark.serve
