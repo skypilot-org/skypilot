@@ -343,8 +343,10 @@ class RequestRateAutoscaler(Autoscaler):
         active_versions = record['active_versions']
         if not active_versions:
             return []
-        assert len(active_versions) == 1, (record, active_versions)
-        latest_version_with_min_replicas = active_versions[0]
+        # The active_versions should supposedly only having one version, but
+        # we use min() here to make sure this works when rolling update and
+        # blue-green update are mixed, which may cause some corner case.
+        latest_version_with_min_replicas = min(active_versions)
         # When it is blue green update, we scale down old replicas when the
         # number of ready new replicas is greater than or equal to the min
         # replicas instead of the target, to ensure the service being updated
