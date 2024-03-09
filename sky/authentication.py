@@ -63,7 +63,7 @@ MAX_TRIALS = 64
 # TODO(zhwu): Support user specified key pair.
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 PUBLIC_SSH_KEY_PATH = '~/.ssh/sky-key.pub'
-_SSH_KEY_GENERATION_LOCK = '~/.ssh/.sky-key.lock'
+_SSH_KEY_GENERATION_LOCK = '~/.sky/generated/ssh/.__internal-sky-key.lock'
 
 
 def _generate_rsa_key_pair() -> Tuple[str, str]:
@@ -86,6 +86,9 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
 
 def _save_key_pair(private_key_path: str, public_key_path: str,
                    private_key: str, public_key: str) -> None:
+    key_dir = os.path.dirname(private_key_path)
+    os.makedirs(key_dir, exist_ok=True, mode=0o700)
+
     with open(
             private_key_path,
             'w',
@@ -106,9 +109,10 @@ def get_or_generate_keys() -> Tuple[str, str]:
     private_key_path = os.path.expanduser(PRIVATE_SSH_KEY_PATH)
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
 
-    key_dir = os.path.dirname(private_key_path)
-    os.makedirs(key_dir, exist_ok=True)
-    with filelock.FileLock(_SSH_KEY_GENERATION_LOCK, timeout=10):
+    key_file_lock = os.path.expanduser(_SSH_KEY_GENERATION_LOCK)
+    lock_dir = os.path.dirname(key_file_lock)
+    os.makedirs(lock_dir, exist_ok=True)
+    with filelock.FileLock(key_file_lock, timeout=10):
         if not os.path.exists(private_key_path):
             public_key, private_key = _generate_rsa_key_pair()
             _save_key_pair(private_key_path, public_key_path, private_key,
