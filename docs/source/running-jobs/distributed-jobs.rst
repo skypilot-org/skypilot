@@ -141,6 +141,40 @@ This allows you directly to SSH into the worker nodes, if required.
 
 Executing a Distributed Ray Program
 ------------------------------------
+To execute a distributed Ray program on many VMs, you can use the following example:
+
+.. code-block:: console
+
+  $ sky launch ray_train.yaml
+
+.. code-block:: yaml
+    :emphasize-lines: 6-6,21-22,24-25
+  
+    resources:
+      accelerators: L4:2
+      memory: 64+
+  
+    num_nodes: 2
+  
+    setup: |
+      pip install "ray[train]"
+      pip install tqdm
+      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+  
+    run: |
+      sudo chmod 777 -R /var/tmp
+      head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+      num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+      ray start --head  --disable-usage-stats --port 6379
+      if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+        ps aux | grep ray | grep 6379 &> /dev/null || ray start --head  --disable-usage-stats --port 6379
+        sleep 5
+        python train.py --num-workers $num_nodes
+      else
+        sleep 5
+        ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $head_ip:6379 --disable-usage-stats
+      fi
+
 .. warning:: 
   **Avoid Installing Ray in Base Environment**
 
