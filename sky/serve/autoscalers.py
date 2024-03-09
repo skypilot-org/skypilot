@@ -1,12 +1,11 @@
 """Autoscalers: perform autoscaling by monitoring metrics."""
 import bisect
-import collections
 import dataclasses
 import enum
 import math
 import time
 import typing
-from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -113,12 +112,6 @@ class Autoscaler:
             return FallbackRequestRateAutoscaler(service_name, spec)
         else:
             return RequestRateAutoscaler(service_name, spec)
-
-    def get_latest_version_with_min_replicas(
-        self, replica_infos: Iterable['replica_managers.ReplicaInfo']
-    ) -> Optional[int]:
-        """Get the latest version with at least min_replicas replicas."""
-        raise NotImplementedError
 
     def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
@@ -299,27 +292,9 @@ class RequestRateAutoscaler(Autoscaler):
         else:
             return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
 
-    def get_latest_version_with_min_replicas(
-        self, replica_infos: Iterable['replica_managers.ReplicaInfo']
-    ) -> Optional[int]:
-        # Find the latest version with at least min_replicas replicas.
-        version2count: DefaultDict[int, int] = collections.defaultdict(int)
-        for info in replica_infos:
-            if info.is_ready:
-                version2count[info.version] += 1
-
-        version = self.latest_version
-        while version >= constants.INITIAL_VERSION:
-            spec = serve_state.get_spec(self._service_name, version)
-            if (spec is not None and
-                    version2count[version] >= spec.min_replicas):
-                return version
-            version -= 1
-        return None
-
     def select_outdated_replicas_to_scale_down(
-            self, replica_infos: Iterable['replica_managers.ReplicaInfo']
-    ) -> List[int]:
+            self,
+            replica_infos: List['replica_managers.ReplicaInfo']) -> List[int]:
         """Select outdated replicas to scale down."""
 
         if self.update_mode == serve_utils.UpdateMode.ROLLING:
@@ -359,16 +334,24 @@ class RequestRateAutoscaler(Autoscaler):
                 old_nonterminal_replicas,
             )
 
-        latest_version_with_min_replicas = (
-            self.get_latest_version_with_min_replicas(replica_infos))
+        # Use the active versions set by replica manager to make sure we only
+        # scale down the outdated replicas that are not used by the load
+        # balancer.
+        record = serve_state.get_service_from_name(self._service_name)
+        assert record is not None, (f'No service record found for '
+                                    f'{self._service_name}')
+        active_versions = record['version']
+        if not active_versions:
+            return []
+        assert len(active_versions) == 1, (record, active_versions)
+        latest_version_with_min_replicas = active_versions[0]
         # When it is blue green update, we scale down old replicas when the
         # number of ready new replicas is greater than or equal to the min
         # replicas instead of the target, to ensure the service being updated
         # to the latest version faster.
         all_replica_ids_to_scale_down: List[int] = []
         for info in replica_infos:
-            if (latest_version_with_min_replicas is not None and
-                    info.version < latest_version_with_min_replicas):
+            if info.version < latest_version_with_min_replicas:
                 all_replica_ids_to_scale_down.append(info.replica_id)
 
         return all_replica_ids_to_scale_down

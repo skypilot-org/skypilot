@@ -3319,7 +3319,7 @@ def test_skyserve_fast_update(generic_cloud: str):
                 (2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)
             ]) + _check_service_version(name, "1"),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3) +
-            _check_service_version(name, "2"),
+            _check_service_version(name, "2", wait=20),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             # Test rolling update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',

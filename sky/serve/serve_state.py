@@ -6,7 +6,7 @@ import pathlib
 import pickle
 import sqlite3
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 
@@ -65,7 +65,7 @@ db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
 # The versions that is activated for the service. This is a list of integers in
 # json format.
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
-                             'service_version',
+                             'active_versions',
                              f'TEXT DEFAULT {json.dumps([])}')
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
@@ -258,12 +258,20 @@ def set_service_uptime(service_name: str, uptime: int) -> None:
     _DB.conn.commit()
 
 
-def set_service_status(service_name: str, status: ServiceStatus) -> None:
+def set_service_status_versions(
+        service_name: str,
+        status: ServiceStatus,
+        active_versions: Optional[List[int]] = None) -> None:
     """Sets the service status."""
+    vars_to_set = 'status=(?)'
+    values: Tuple[str, ...] = (status.value, service_name)
+    if active_versions is not None:
+        vars_to_set = 'status=(?), active_versions=(?)'
+        values = (status.value, json.dumps(active_versions), service_name)
     _DB.cursor.execute(
-        """\
+        f"""\
         UPDATE services SET
-        status=(?) WHERE name=(?)""", (status.value, service_name))
+        {vars_to_set} WHERE name=(?)""", values)
     _DB.conn.commit()
 
 
@@ -291,7 +299,7 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
      uptime, policy, _, requested_resources, requested_resources_str, _,
-     service_version) = row[:12]
+     active_versions) = row[:12]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -300,7 +308,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'status': ServiceStatus[status],
         'uptime': uptime,
         'policy': policy,
-        'version': json.loads(service_version),
+        'version': json.loads(active_versions),
         # TODO(tian): Backward compatibility.
         # Remove after 2 minor release, 0.6.0.
         'requested_resources': pickle.loads(requested_resources)
@@ -443,15 +451,6 @@ def add_or_update_version(service_name: str, version: int,
         INSERT or REPLACE INTO version_specs
         (service_name, version, spec)
         VALUES (?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
-    _DB.conn.commit()
-
-
-def update_service_version(service_name: str, versions: List[int]) -> None:
-    _DB.cursor.execute(
-        """\
-        UPDATE services SET
-        service_version=(?) WHERE name=(?)""",
-        (json.dumps(versions), service_name))
     _DB.conn.commit()
 
 

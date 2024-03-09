@@ -212,8 +212,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             _handle_signal(service_name)
             time.sleep(1)
     except exceptions.ServeUserTerminatedError:
-        serve_state.set_service_status(service_name,
-                                       serve_state.ServiceStatus.SHUTTING_DOWN)
+        serve_state.set_service_status_versions(
+            service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
     finally:
         process_to_kill: List[multiprocessing.Process] = []
         if load_balancer_process is not None:
@@ -228,7 +228,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             process.join()
         failed = _cleanup(service_name)
         if failed:
-            serve_state.set_service_status(
+            serve_state.set_service_status_versions(
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
             logger.error(f'Service {service_name} failed to clean up.')
         else:

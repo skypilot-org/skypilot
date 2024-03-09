@@ -514,6 +514,7 @@ class ReplicaManager:
         self._next_replica_id: int = 1
         self._service_name: str = service_name
         self._uptime: Optional[float] = None
+        self._update_mode = serve_utils.UpdateMode.ROLLING
         logger.info(f'Readiness probe path: {spec.readiness_path}\n'
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
                     f'Post data: {spec.post_data}')
@@ -537,8 +538,12 @@ class ReplicaManager:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       update_mode: serve_utils.UpdateMode) -> None:
+        raise NotImplementedError
+
+    def get_active_replica_urls(self) -> List[str]:
+        """Get the urls of the active replicas."""
         raise NotImplementedError
 
 
@@ -1059,12 +1064,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.debug('Running replica prober.')
             try:
                 self._probe_all_replicas()
-                replica_statuses = [
-                    info.status for info in serve_state.get_replica_infos(
-                        self._service_name)
-                ]
-                serve_utils.set_service_status_from_replica_statuses(
-                    self._service_name, replica_statuses)
+                replica_infos = serve_state.get_replica_infos(
+                    self._service_name)
+                serve_utils.set_service_status_and_versions(
+                    self._service_name, replica_infos, self._update_mode)
 
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
@@ -1076,12 +1079,25 @@ class SkyPilotReplicaManager(ReplicaManager):
             # TODO(MaoZiming): Probe cloud for early preemption warning.
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
 
+    def get_active_replica_urls(self) -> List[str]:
+        """Get the urls of all active replicas."""
+        record = serve_state.get_service_from_name(self._service_name)
+        assert record is not None, self._service_name
+        ready_replica_urls = []
+        active_versions = set(record['active_versions'])
+        for info in serve_state.get_replica_infos(self._service_name):
+            if (info.status == serve_state.ReplicaStatus.READY and
+                    info.version in active_versions):
+                assert info.url is not None, info
+                ready_replica_urls.append(info.url)
+        return ready_replica_urls
+
     ###########################################
     # SkyServe Update and replica versioning. #
     ###########################################
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       update_mode: serve_utils.UpdateMode) -> None:
         if version <= self.latest_version:
             logger.error(f'Invalid version: {version}, '
                          f'latest version: {self.latest_version}')
@@ -1091,6 +1107,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_version(self._service_name, version, spec)
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
+        self._update_mode = update_mode
 
         # Reuse all replicas that have the same config as the new version
         # (except for the `service` field) by directly setting the version to be

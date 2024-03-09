@@ -101,31 +101,10 @@ class SkyServeController:
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
-
-            replica_infos = serve_state.get_replica_infos(self._service_name)
-            ready_replicas = list(
-                filter(lambda info: info.is_ready, replica_infos))
-            if self._autoscaler.update_mode == serve_utils.UpdateMode.ROLLING:
-                chosen_replicas = ready_replicas
-                service_versions = sorted(
-                    list(set(info.version for info in ready_replicas)))
-            else:
-                service_version = (
-                    self._autoscaler.get_latest_version_with_min_replicas(
-                        replica_infos))
-                if service_version is None:
-                    service_version = min(
-                        info.version for info in ready_replicas
-                    ) if len(ready_replicas) > 0 else -1
-                service_versions = [service_version]
-
-                chosen_replicas = list(
-                    filter(lambda info: info.version == service_version,
-                           ready_replicas))
-            serve_state.update_service_version(self._service_name,
-                                               service_versions)
-            ready_replica_urls = [info.url for info in chosen_replicas]
-            return {'ready_replica_urls': ready_replica_urls}
+            return {
+                'ready_replica_urls':
+                    self._replica_manager.get_active_replica_urls()
+            }
 
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request):
@@ -147,7 +126,9 @@ class SkyServeController:
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
-                self._replica_manager.update_version(version, service)
+                self._replica_manager.update_version(version,
+                                                     service,
+                                                     update_mode=update_mode)
                 new_autoscaler = autoscalers.Autoscaler.from_spec(
                     self._service_name, service)
                 if not isinstance(self._autoscaler, type(new_autoscaler)):

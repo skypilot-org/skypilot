@@ -1,5 +1,6 @@
 """User interface with the SkyServe."""
 import base64
+import collections
 import enum
 import os
 import pathlib
@@ -10,8 +11,8 @@ import shutil
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
-                    TextIO, Type, TypeVar)
+from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
+                    Optional, TextIO, Type, TypeVar)
 import uuid
 
 import colorama
@@ -33,6 +34,8 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
+
+    from sky.serve import replica_managers
 
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
@@ -234,9 +237,9 @@ def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
 
-def set_service_status_from_replica_statuses(
-        service_name: str,
-        replica_statuses: List[serve_state.ReplicaStatus]) -> None:
+def set_service_status_and_versions(
+        service_name: str, replica_infos: List['replica_managers.ReplicaInfo'],
+        update_mode: UpdateMode) -> None:
     record = serve_state.get_service_from_name(service_name)
     if record is None:
         raise ValueError('The service is up-ed in an old version and does not '
@@ -248,9 +251,20 @@ def set_service_status_from_replica_statuses(
         # terminated, the service status will still be READY, but we don't want
         # change service status to READY.
         return
-    serve_state.set_service_status(
+
+    ready_replicas = list(filter(lambda info: info.is_ready, replica_infos))
+    if update_mode == UpdateMode.ROLLING:
+        active_versions = sorted(
+            list(set(info.version for info in ready_replicas)))
+    else:
+        chosen_version = get_latest_version_with_min_replicas(
+            service_name, replica_infos)
+        active_versions = [chosen_version] if chosen_version is not None else []
+    serve_state.set_service_status_versions(
         service_name,
-        serve_state.ServiceStatus.from_replica_statuses(replica_statuses))
+        serve_state.ServiceStatus.from_replica_statuses(
+            [info.status for info in ready_replicas]),
+        active_versions=active_versions)
 
 
 def update_service_status() -> None:
@@ -264,7 +278,7 @@ def update_service_status() -> None:
         controller_status = job_lib.get_status(controller_job_id)
         if controller_status is None or controller_status.is_terminal():
             # If controller job is not running, set it as controller failed.
-            serve_state.set_service_status(
+            serve_state.set_service_status_versions(
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
@@ -500,6 +514,23 @@ def check_service_status_healthy(service_name: str) -> Optional[str]:
     if service_record['status'] == serve_state.ServiceStatus.CONTROLLER_INIT:
         return (f'Service {service_name!r} is still initializing its '
                 'controller. Please try again later.')
+    return None
+
+
+def get_latest_version_with_min_replicas(
+        service_name: str,
+        replica_infos: List['replica_managers.ReplicaInfo']) -> Optional[int]:
+    # Find the latest version with at least min_replicas replicas.
+    version2count: DefaultDict[int, int] = collections.defaultdict(int)
+    for info in replica_infos:
+        if info.is_ready:
+            version2count[info.version] += 1
+
+    service_versions = sorted(version2count.keys(), reverse=True)
+    for version in service_versions:
+        spec = serve_state.get_spec(service_name, version)
+        if (spec is not None and version2count[version] >= spec.min_replicas):
+            return version
     return None
 
 
