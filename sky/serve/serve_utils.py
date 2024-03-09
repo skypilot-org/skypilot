@@ -749,8 +749,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
 
         service_name = record['name']
         version = ','.join(
-            str(v) for v in record['version']
-        ) if 'version' in record and record['version'] else '-'
+            str(v) for v in record['active_versions']
+        ) if 'active_versions' in record and record['active_versions'] else '-'
         uptime = log_utils.readable_time_duration(record['uptime'],
                                                   absolute=True)
         service_status = record['status']

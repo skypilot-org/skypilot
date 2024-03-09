@@ -525,7 +525,7 @@ def status(
 
         {
             'name': (str) service name,
-            'version': (List[int]) a list of versions that is active,
+            'active_versions': (List[int]) a list of versions that is active,
             'controller_job_id': (int) the job id of the controller,
             'uptime': (int) uptime in seconds,
             'status': (sky.ServiceStatus) service status,

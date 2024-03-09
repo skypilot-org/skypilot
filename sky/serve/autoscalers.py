@@ -340,7 +340,7 @@ class RequestRateAutoscaler(Autoscaler):
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'No service record found for '
                                     f'{self._service_name}')
-        active_versions = record['version']
+        active_versions = record['active_versions']
         if not active_versions:
             return []
         assert len(active_versions) == 1, (record, active_versions)

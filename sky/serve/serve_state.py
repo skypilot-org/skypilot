@@ -14,7 +14,6 @@ from sky.serve import constants
 from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
-    import sky
     from sky.serve import replica_managers
     from sky.serve import service_spec
 
@@ -66,7 +65,7 @@ db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
 # json format.
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              'active_versions',
-                             f'TEXT DEFAULT {json.dumps([])}')
+                             f'TEXT DEFAULT {json.dumps([])!r}')
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 
@@ -308,7 +307,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'status': ServiceStatus[status],
         'uptime': uptime,
         'policy': policy,
-        'version': json.loads(active_versions),
+        'active_versions': json.loads(active_versions),
         # TODO(tian): Backward compatibility.
         # Remove after 2 minor release, 0.6.0.
         'requested_resources': pickle.loads(requested_resources)
