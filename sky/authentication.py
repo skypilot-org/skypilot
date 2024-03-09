@@ -34,6 +34,7 @@ import colorama
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+import filelock
 import yaml
 
 from sky import clouds
@@ -62,6 +63,7 @@ MAX_TRIALS = 64
 # TODO(zhwu): Support user specified key pair.
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 PUBLIC_SSH_KEY_PATH = '~/.ssh/sky-key.pub'
+_SSH_KEY_GENERATION_LOCK = '~/.ssh/.sky-key.lock'
 
 
 def _generate_rsa_key_pair() -> Tuple[str, str]:
@@ -84,9 +86,6 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
 
 def _save_key_pair(private_key_path: str, public_key_path: str,
                    private_key: str, public_key: str) -> None:
-    private_key_dir = os.path.dirname(private_key_path)
-    os.makedirs(private_key_dir, exist_ok=True)
-
     with open(
             private_key_path,
             'w',
@@ -106,17 +105,17 @@ def get_or_generate_keys() -> Tuple[str, str]:
     """Returns the aboslute private and public key paths."""
     private_key_path = os.path.expanduser(PRIVATE_SSH_KEY_PATH)
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-    if not os.path.exists(private_key_path):
-        public_key, private_key = _generate_rsa_key_pair()
-        _save_key_pair(private_key_path, public_key_path, private_key,
-                       public_key)
-    else:
-        # FIXME(skypilot): ran into failing this assert once, but forgot the
-        # reproduction (has private key; but has not generated public key).
-        #   AssertionError: /home/ubuntu/.ssh/sky-key.pub
-        assert os.path.exists(public_key_path), (
-            'Private key found, but associated public key '
-            f'{public_key_path} does not exist.')
+
+    key_dir = os.path.dirname(private_key_path)
+    os.makedirs(key_dir, exist_ok=True)
+    with filelock.FileLock(_SSH_KEY_GENERATION_LOCK, timeout=10):
+        if not os.path.exists(private_key_path):
+            public_key, private_key = _generate_rsa_key_pair()
+            _save_key_pair(private_key_path, public_key_path, private_key,
+                           public_key)
+    assert os.path.exists(public_key_path), (
+        'Private key found, but associated public key '
+        f'{public_key_path} does not exist.')
     return private_key_path, public_key_path
 
 
