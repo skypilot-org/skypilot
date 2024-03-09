@@ -3315,9 +3315,11 @@ def test_skyserve_fast_update(generic_cloud: str):
             # sleep to wait for update to be registered.
             'sleep 120',
             # 2 on-deamnd (ready) + 1 on-demand (provisioning).
-            _check_replica_in_status(name, [
+            (_check_replica_in_status(name, [
                 (2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)
-            ]) + _check_service_version(name, "1"),
+            ]) + 
+            # Fast update will directly have the latest version ready.
+            _check_service_version(name, "2")),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3) +
             _check_service_version(name, "2"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
@@ -3381,7 +3383,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     name = _get_service_name() + mode
 
     four_spot_up_cmd = _check_replica_in_status(name, [(4, True, 'READY')])
-    update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done']
+    update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done; sleep 10;']
     if mode == 'rolling':
         # Check rolling update, it will terminate one of the old on-demand
         # instances, once there are 4 spot instance ready.
@@ -3398,7 +3400,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             _check_replica_in_status(
                 name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                        (2, False, 'READY')]) +
-            _check_service_version(name, "2"),
+            _check_service_version(name, "1"),
         ]
     test = Test(
         f'test-skyserve-new-autoscaler-update',
