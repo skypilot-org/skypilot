@@ -2888,12 +2888,13 @@ def _get_service_name() -> str:
 # serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS to make sure load balancer have
 # enough time to sync with the controller and get all ready replica IPs.
 _SERVE_WAIT_UNTIL_READY = (
-    '(while true; do'
+    '{{ while true; do'
     '     s=$(sky serve status {name}); echo "$s";'
     '     echo "$s" | grep -q "{replica_num}/{replica_num}" && break;'
     '     echo "$s" | grep -q "FAILED" && exit 1;'
     '     sleep 10;'
-    f' done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS + 2};')
+    ' done; }}; echo "Got service status $s";'
+    f'sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS + 2};')
 _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
 _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
 _SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
@@ -2969,12 +2970,11 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
     return (f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s"; ' + check_cmd)
 
 
-def _check_service_version(service_name: str, version: int) -> str:
+def _check_service_version(service_name: str, version: str) -> str:
     # Grep the lines before 'Service Replicas' and check if the service version
     # is correct.
     return (f'echo "$s" | grep -B1000 "Service Replicas" | '
-            f'grep "{service_name} " | awk "{{print \$2}}" | '
-            f'grep {version} || exit 1; ')
+            f'grep -E "{service_name}\s+{version}" || exit 1; ')
 
 
 @pytest.mark.gcp
@@ -3139,7 +3139,7 @@ def test_skyserve_spot_user_bug(generic_cloud: str):
             '     echo "$output" | grep -q "FAILED" && break;'
             '     echo "$output" | grep -q "PROVISIONING" && exit 1;'
             '     sleep 10;'
-            f'done)',
+            'done)',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3319,7 +3319,7 @@ def test_skyserve_fast_update(generic_cloud: str):
                 (2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)
             ]) + _check_service_version(name, "1"),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3) +
-            _check_service_version(name, "2", wait=20),
+            _check_service_version(name, "2"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             # Test rolling update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',

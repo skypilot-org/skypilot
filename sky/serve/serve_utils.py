@@ -531,7 +531,8 @@ def get_latest_version_with_min_replicas(
         spec = serve_state.get_spec(service_name, version)
         if (spec is not None and version2count[version] >= spec.min_replicas):
             return version
-    return None
+    # Use the oldest version if no version has enough replicas.
+    return service_versions[-1] if service_versions else None
 
 
 def _follow_replica_logs(
