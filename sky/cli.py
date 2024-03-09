@@ -2368,7 +2368,7 @@ def start(
             #
             #  INIT - ok to restart:
             #    1. It can be a failed-to-provision cluster, so it isn't up
-            #      (Ex: gpunode --gpus=A100:8).  Running `sky start` enables
+            #      (Ex: launch --gpus=A100:8).  Running `sky start` enables
             #      retrying the provisioning - without setup steps being
             #      completed. (Arguably the original command that failed should
             #      be used instead; but using start isn't harmful - after it
