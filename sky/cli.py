@@ -4084,6 +4084,9 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     controller_status, _ = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
         stopped_message='All managed spot jobs should have finished.')
+    # Allow the access to the spot controller even if it is INIT, as the
+    # controller can be temporarily in INIT mode when submitting multiple spot
+    # jobs.
     if controller_status in [status_lib.ClusterStatus.STOPPED, None]:
         # Hint messages already printed by the call above.
         sys.exit(1)
@@ -4170,6 +4173,9 @@ def spot_dashboard(port: Optional[int]):
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
         stopped_message=hint,
         non_existent_message=hint)
+    # Allow the access to the spot controller even if it is INIT, as the
+    # controller can be temporarily in INIT mode when submitting multiple spot
+    # jobs.
     if controller_status in [status_lib.ClusterStatus.STOPPED, None]:
         sys.exit(1)
     # SSH forward a free local port to remote's dashboard port.
@@ -4677,6 +4683,9 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
     controller_status, _ = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have been terminated.')
+    # Allow the access to the spot controller even if it is INIT, as the
+    # controller can be temporarily in INIT mode when submitting multiple spot
+    # jobs.
     if controller_status in [status_lib.ClusterStatus.STOPPED, None]:
         # Hint messages already printed by the call above.
         sys.exit(1)

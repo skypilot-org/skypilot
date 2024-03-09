@@ -2004,7 +2004,7 @@ def refresh_cluster_record(
     *,
     force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
     acquire_per_cluster_status_lock: bool = True,
-    acquire_lock_timeout: int = CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS
+    acquire_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
 ) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
 
@@ -2264,9 +2264,10 @@ def is_controller_up(
         # unnecessary costly refresh when the controller is already stopped.
         # This optimization is based on the assumption that the user will not
         # start the controller manually from the cloud console.
-        # The acquire_lock_timeout is set to 1 second to avoid hanging the
-        # command when multiple spot_launch commands are running at the same
-        # time. It should be safe to set it to 0 (try once to get the lock).
+        #
+        # The acquire_lock_timeout is set to 0 to avoid hanging the command when
+        # multiple spot_launch commands are running at the same time. It should
+        # be safe to set it to 0 (try once to get the lock).
         controller_status, handle = refresh_cluster_status_handle(
             cluster_name, force_refresh_statuses=None, acquire_lock_timeout=0)
     except exceptions.ClusterStatusFetchingError as e:
@@ -2287,6 +2288,7 @@ def is_controller_up(
         sky_logging.print(non_existent_message)
     elif controller_status == status_lib.ClusterStatus.STOPPED:
         sky_logging.print(stopped_message)
+        handle = None
     return controller_status, handle
 
 
