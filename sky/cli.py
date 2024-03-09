@@ -607,22 +607,21 @@ def _launch_with_confirm(
     if not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
-    if maybe_status != status_lib.ClusterStatus.UP:
-        # No need to sky.launch again when interactive node is already up.
-        sky.launch(
-            dag,
-            dryrun=dryrun,
-            stream_logs=True,
-            cluster_name=cluster,
-            detach_setup=detach_setup,
-            detach_run=detach_run,
-            backend=backend,
-            idle_minutes_to_autostop=idle_minutes_to_autostop,
-            down=down,
-            retry_until_up=retry_until_up,
-            no_setup=no_setup,
-            clone_disk_from=clone_disk_from,
-        )
+    # No need to sky.launch again when interactive node is already up.
+    sky.launch(
+        dag,
+        dryrun=dryrun,
+        stream_logs=True,
+        cluster_name=cluster,
+        detach_setup=detach_setup,
+        detach_run=detach_run,
+        backend=backend,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
+        no_setup=no_setup,
+        clone_disk_from=clone_disk_from,
+    )
 
 
 def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
