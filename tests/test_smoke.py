@@ -3315,11 +3315,12 @@ def test_skyserve_fast_update(generic_cloud: str):
             # sleep to wait for update to be registered.
             'sleep 120',
             # 2 on-deamnd (ready) + 1 on-demand (provisioning).
-            (_check_replica_in_status(name, [
-                (2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)
-            ]) + 
-            # Fast update will directly have the latest version ready.
-            _check_service_version(name, "2")),
+            (
+                _check_replica_in_status(
+                    name, [(2, False, 'READY'),
+                           (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]) +
+                # Fast update will directly have the latest version ready.
+                _check_service_version(name, "2")),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3) +
             _check_service_version(name, "2"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
