@@ -2973,7 +2973,7 @@ def _check_service_version(service_name: str, version: int) -> str:
     # Grep the lines before 'Service Replicas' and check if the service version
     # is correct.
     return (f'echo "$s" | grep -B1000 "Service Replicas" | '
-            f'grep "{service_name} " | awk "{{print $2}}" | '
+            f'grep "{service_name} " | awk "{{print \$2}}" | '
             f'grep {version} || exit 1; ')
 
 
