@@ -111,7 +111,10 @@ def get_or_generate_keys() -> Tuple[str, str]:
 
     key_file_lock = os.path.expanduser(_SSH_KEY_GENERATION_LOCK)
     lock_dir = os.path.dirname(key_file_lock)
-    os.makedirs(lock_dir, exist_ok=True)
+    # We should have the folder ~/.sky/generated/ssh to have 0o700 permission,
+    # as the ssh configs will be written to this folder as well in
+    # backend_utils.SSHConfigHelper
+    os.makedirs(lock_dir, exist_ok=True, mode=0o700)
     with filelock.FileLock(key_file_lock, timeout=10):
         if not os.path.exists(private_key_path):
             public_key, private_key = _generate_rsa_key_pair()
