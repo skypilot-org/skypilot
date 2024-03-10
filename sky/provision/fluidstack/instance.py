@@ -353,6 +353,6 @@ def open_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    del cluster_name_on_cloud, ports, provider_config
+    del cluster_name_on_cloud, provider_config
     logger.debug(f'Skip opening ports {ports} for Fluidstack instances, as all '
-                  'ports are open by default.')
+                 'ports are open by default.')
