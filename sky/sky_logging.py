@@ -111,12 +111,13 @@ def silent():
     _root_logger.setLevel(logging.ERROR)
     _logging_config.is_silent = True
     print = lambda *args, **kwargs: None
-    yield
-
-    # Restore logger
-    print = previous_print
-    _root_logger.setLevel(previous_level)
-    _logging_config.is_silent = previous_is_silent
+    try:
+        yield
+    finally:
+        # Restore logger
+        print = previous_print
+        _root_logger.setLevel(previous_level)
+        _logging_config.is_silent = previous_is_silent
 
 
 def is_silent():

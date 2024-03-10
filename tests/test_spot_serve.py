@@ -1,3 +1,5 @@
+import base64
+import pickle
 import tempfile
 import textwrap
 import time
@@ -12,8 +14,8 @@ from sky import backends
 from sky import cli
 from sky import exceptions
 from sky import global_user_state
+from sky import serve
 from sky import spot
-from sky.spot import spot_state
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import db_utils
@@ -110,22 +112,41 @@ def _mock_spot_controller(_mock_db_conn):
         ready=True)
 
 
-class TestControllerOperations:
-    """Test operations on controllers."""
+@pytest.fixture
+def _mock_serve_controller(_mock_db_conn):
+    handle = backends.CloudVmRayResourceHandle(
+        cluster_name=serve.SKY_SERVE_CONTROLLER_NAME,
+        cluster_name_on_cloud=serve.SKY_SERVE_CONTROLLER_NAME,
+        cluster_yaml='/tmp/serve_controller.yaml',
+        launched_nodes=1,
+        launched_resources=sky.Resources(sky.AWS(),
+                                         instance_type='m4.2xlarge',
+                                         region='us-west-1'),
+    )
+    global_user_state.add_or_update_cluster(
+        serve.SKY_SERVE_CONTROLLER_NAME,
+        handle,
+        requested_resources={handle.launched_resources},
+        ready=True)
+
+
+def mock_is_controller_accessible(
+    controller_type: controller_utils.Controllers,
+    stopped_message: str,
+    non_existent_message: Optional[str] = None,
+    exit_on_error: bool = False,
+):
+    record = global_user_state.get_cluster_from_name(
+        controller_type.value.cluster_name)
+    return record['handle']
+
+
+class TestSpotOperations:
+    """Test operations for managed spot."""
 
     @pytest.mark.timeout(60)
     def test_down_spot_controller(self, _mock_cluster_state,
                                   _mock_spot_controller, monkeypatch):
-
-        def mock_is_controller_accessible(
-            controller_type: controller_utils.Controllers,
-            stopped_message: str,
-            non_existent_message: Optional[str] = None,
-            exit_on_error: bool = False,
-        ):
-            record = global_user_state.get_cluster_from_name(
-                spot.SPOT_CONTROLLER_NAME)
-            return record['handle']
 
         def mock_get_job_table_no_job(cls, handle, code, require_outputs,
                                       stream_logs,
@@ -238,31 +259,168 @@ class TestControllerOperations:
         assert 'Cancelling the spot controller\'s jobs is not allowed.' in str(
             result.output)
 
-
-class TestSpotJobOperationsWithoutController:
-
     @pytest.mark.timeout(60)
-    def test_cancel(self):
+    def test_cancel(self, _mock_db_conn):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.spot_cancel, ['-a'])
         assert result.exit_code == 1
-        assert 'All managed spot jobs should have finished.' in str(
+        assert controller_utils.Controllers.SPOT_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
 
     @pytest.mark.timeout(60)
-    def test_logs(self):
+    def test_logs(self, _mock_db_conn):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.spot_logs, ['1'])
         assert result.exit_code == 1
-        assert 'Please restart the spot controller with' in str(
+        assert controller_utils.Controllers.SPOT_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
 
     @pytest.mark.timeout(60)
-    def test_queue(self):
+    def test_queue(self, _mock_db_conn):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.spot_queue)
         assert result.exit_code == 0
         assert controller_utils.Controllers.SPOT_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
-        assert 'To view the latest job table' in str(
+
+
+class TestServeOperations:
+    """Test operations for services."""
+
+    @pytest.mark.timeout(60)
+    def test_down_spot_controller(self, _mock_cluster_state,
+                                  _mock_serve_controller, monkeypatch):
+
+        def mock_get_services_no_service(
+                cls, handle, code, require_outputs, stream_logs,
+                separate_stderr) -> Tuple[int, str, str]:
+            return 0, common_utils.encode_payload([]), ''
+
+        def mock_get_services_one_service(
+                cls, handle, code, require_outputs, stream_logs,
+                separate_stderr) -> Tuple[int, str, str]:
+            service = {
+                'name': 'test_service',
+                'controller_job_id': 1,
+                'uptime': 20,
+                'status': 'RUNNING',
+                'controller_port': 30001,
+                'load_balancer_port': 30000,
+                'policy': None,
+                'requested_resources': sky.Resources(),
+                'requested_resources_str': '',
+                'replica_info': [],
+            }
+            return 0, common_utils.encode_payload([{
+                k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+                for k, v in service.items()
+            }]), ''
+
+        monkeypatch.setattr(
+            'sky.backends.backend_utils.is_controller_accessible',
+            mock_is_controller_accessible)
+
+        monkeypatch.setattr(
+            'sky.backends.cloud_vm_ray_backend.CloudVmRayBackend.run_on_head',
+            mock_get_services_no_service)
+
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(cli.down, [serve.SKY_SERVE_CONTROLLER_NAME],
+                                   input='n')
+        assert 'Terminate sky serve controller:' in result.output, (
+            result.exception, result.output, result.exc_info)
+        assert isinstance(result.exception,
+                          SystemExit), (result.exception, result.output)
+
+        monkeypatch.setattr(
+            'sky.backends.cloud_vm_ray_backend.CloudVmRayBackend.run_on_head',
+            mock_get_services_one_service)
+        result = cli_runner.invoke(cli.down, [serve.SKY_SERVE_CONTROLLER_NAME],
+                                   input='n')
+        assert isinstance(result.exception, exceptions.NotSupportedError)
+
+        result = cli_runner.invoke(cli.down, ['sky-serve-con*'])
+        assert not result.exception
+        assert 'Cluster(s) not found' in result.output
+
+        result = cli_runner.invoke(cli.down, ['sky-serve-con*', '-p'])
+        assert not result.exception
+        assert 'Cluster(s) not found' in result.output
+
+        result = cli_runner.invoke(cli.down, ['-a'], input='n\n')
+        assert isinstance(result.exception, SystemExit), result.exception
+        assert 'Aborted' in result.output
+
+        result = cli_runner.invoke(cli.down, ['-ap'], input='n\n')
+        assert isinstance(result.exception, SystemExit)
+        assert 'Aborted' in result.output
+
+    @pytest.mark.timeout(60)
+    def test_stop_serve_controller(self, _mock_cluster_state,
+                                   _mock_serve_controller):
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(cli.stop, [serve.SKY_SERVE_CONTROLLER_NAME])
+        assert result.exit_code == click.UsageError.exit_code
+        assert (
+            f'Stopping controller(s) \'{serve.SKY_SERVE_CONTROLLER_NAME}\' is '
+            'currently not supported' in result.output)
+
+        result = cli_runner.invoke(cli.stop, ['sky-serve-con*'])
+        assert not result.exception
+        assert 'Cluster(s) not found' in result.output
+
+        result = cli_runner.invoke(cli.stop, ['-a'], input='n\n')
+        assert isinstance(result.exception, SystemExit)
+        assert 'Aborted' in result.output
+
+    @pytest.mark.timeout(60)
+    def test_autostop_serve_controller(self, _mock_cluster_state,
+                                       _mock_serve_controller):
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(cli.autostop,
+                                   [serve.SKY_SERVE_CONTROLLER_NAME])
+        assert result.exit_code == click.UsageError.exit_code
+        assert (
+            'Scheduling autostop on controller(s) '
+            f'\'{serve.SKY_SERVE_CONTROLLER_NAME}\' is currently not supported'
+            in result.output)
+
+        result = cli_runner.invoke(cli.autostop, ['sky-serve-con*'])
+        assert not result.exception
+        assert 'Cluster(s) not found' in result.output
+
+        result = cli_runner.invoke(cli.autostop, ['-a'], input='n\n')
+        assert isinstance(result.exception, SystemExit)
+        assert 'Aborted' in result.output
+
+    def test_cancel_on_serve_controller(self, _mock_cluster_state,
+                                        _mock_serve_controller):
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(cli.cancel,
+                                   [serve.SKY_SERVE_CONTROLLER_NAME, '-a'])
+        assert result.exit_code == 1
+        assert 'Cancelling the sky serve controller\'s jobs is not allowed.' in str(
+            result.output)
+
+    @pytest.mark.timeout(60)
+    def test_down(self, _mock_db_conn):
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(cli.serve_down, ['-a'])
+        assert result.exit_code == 1
+        assert (controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.default_hint_if_non_existent in str(
+            result.output)), (result.exception, result.output, result.exc_info)
+
+    @pytest.mark.timeout(60)
+    def test_logs(self, _mock_db_conn):
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(cli.serve_logs, ['test', '--controller'])
+        assert controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.default_hint_if_non_existent in str(
+            result.output), (result.exception, result.output, result.exc_info)
+
+    @pytest.mark.timeout(60)
+    def test_status(self, _mock_db_conn):
+        cli_runner = cli_testing.CliRunner()
+        result = cli_runner.invoke(cli.serve_status)
+        assert result.exit_code == 0
+        assert controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
