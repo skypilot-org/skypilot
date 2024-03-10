@@ -1,7 +1,6 @@
 """SkyServe core APIs."""
 import re
 import tempfile
-import typing
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -11,7 +10,6 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
@@ -25,9 +23,6 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    from sky import clouds
 
 logger = sky_logging.init_logger(__name__)
 
@@ -310,7 +305,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
         service_name: Name of the service.
     """
     _validate_service_task(task)
-    cluster_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'Service controller is stopped. There is no service to update. '
@@ -320,14 +315,6 @@ def update(task: 'sky.Task', service_name: str) -> None:
         'To spin up a new service, '
         f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
-
-    if handle is None or handle.head_ip is None:
-        # The error message is already printed in
-        # backend_utils.is_controller_up
-        # TODO(zhwu): Move the error message into the exception.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(message='',
-                                               cluster_status=cluster_status)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -461,16 +448,9 @@ def down(
         service_names = []
     if isinstance(service_names, str):
         service_names = [service_names]
-    cluster_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have terminated.')
-    if handle is None or handle.head_ip is None:
-        # The error message is already printed in
-        # backend_utils.is_controller_up
-        # TODO(zhwu): Move the error message into the exception.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(message='',
-                                               cluster_status=cluster_status)
 
     service_names_str = ','.join(service_names)
     if sum([len(service_names) > 0, all]) != 1:
@@ -573,21 +553,9 @@ def status(
             raise RuntimeError(
                 'Failed to refresh service status due to network error.') from e
 
-    # TODO(tian): This is so slow... It will take ~10s to refresh the status
-    # of controller. Can we optimize this?
-    controller_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
-
-    if handle is None or handle.head_ip is None:
-        # When the controller is STOPPED, the head_ip will be None, as
-        # it will be set in global_user_state.remove_cluster().
-        # We do not directly check for UP because the controller may be
-        # in INIT state during another `sky serve up`, but still have
-        # head_ip available. In this case, we can still try to ssh
-        # into the controller and fetch the job table.
-        raise exceptions.ClusterNotUpError('Sky serve controller is not up.',
-                                           cluster_status=controller_status)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -669,15 +637,10 @@ def tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
-    controller_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_up(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
-    if handle is None or handle.head_ip is None:
-        msg = 'No service is found.'
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg = ''
-        raise exceptions.ClusterNotUpError(msg,
-                                           cluster_status=controller_status)
+
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     backend.tail_serve_logs(handle,

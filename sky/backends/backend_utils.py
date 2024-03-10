@@ -8,6 +8,7 @@ import pprint
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -2226,13 +2227,15 @@ def is_controller_up(
     controller_type: controller_utils.Controllers,
     stopped_message: str,
     non_existent_message: Optional[str] = None,
-) -> Tuple[Optional[status_lib.ClusterStatus],
-           Optional['backends.CloudVmRayResourceHandle']]:
+    exit_on_error: bool = False,
+) -> 'backends.CloudVmRayResourceHandle':
     """Check if the spot/serve controller is up.
 
     It can be used to check the actual controller status (since the autostop is
     set for the controller) before the spot/serve commands interact with the
     controller.
+
+    ClusterNotUpError will be raised whenever the controller cannot be accessed.
 
     Args:
         type: Type of the controller.
@@ -2240,17 +2243,15 @@ def is_controller_up(
         non_existent_message: Message to show if the controller does not exist.
 
     Returns:
-        controller_status: The status of the controller. If it fails during
-          refreshing the status, it will be the cached status. None if the
-          controller does not exist.
-        handle: The ResourceHandle of the controller. None if the
-          controller is not UP or does not exist.
+        handle: The ResourceHandle of the controller.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not
           the same as the user who created the cluster.
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
+        exceptions.ClusterNotUpError: if the controller is not UP, or failed to
+          be connected.
     """
     if non_existent_message is None:
         non_existent_message = (
@@ -2284,12 +2285,32 @@ def is_controller_up(
         if record is not None:
             controller_status, handle = record['status'], record['handle']
 
-    if controller_status is None:
-        sky_logging.print(non_existent_message)
+    error_msg = None
+    if controller_status is None or handle.head_ip is None:
+        error_msg = non_existent_message
     elif controller_status == status_lib.ClusterStatus.STOPPED:
-        sky_logging.print(stopped_message)
-        handle = None
-    return controller_status, handle
+        error_msg = stopped_message
+    elif controller_status == status_lib.ClusterStatus.INIT:
+        ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
+                                                   handle.docker_user,
+                                                   handle.ssh_user)
+
+        runner = command_runner.SSHCommandRunner(handle.head_ip,
+                                                 **ssh_credentials,
+                                                 port=handle.head_ssh_port)
+        if not runner.check_connection():
+            error_msg = controller_type.value.hint_for_connection_error
+
+    if error_msg is not None:
+        if exit_on_error:
+            sky_logging.print(error_msg)
+            sys.exit(1)
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(error_msg,
+                                               cluster_status=controller_status,
+                                               handle=handle)
+
+    return handle
 
 
 class CloudFilter(enum.Enum):

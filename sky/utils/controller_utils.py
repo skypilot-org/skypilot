@@ -55,6 +55,7 @@ class _ControllerSpec:
     decline_down_for_dirty_controller_hint: str
     check_cluster_name_hint: str
     default_hint_if_non_existent: str
+    hint_for_connection_error: str
 
 
 class Controllers(enum.Enum):
@@ -86,7 +87,9 @@ class Controllers(enum.Enum):
         check_cluster_name_hint=(
             f'Cluster {spot_utils.SPOT_CONTROLLER_NAME} is reserved for '
             'managed spot controller. '),
-        default_hint_if_non_existent='No managed spot jobs are found.')
+        default_hint_if_non_existent='No managed spot jobs are found.',
+        hint_for_connection_error=(
+            'Failed to connect to spot controller, please try again later'))
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         name='sky serve controller',
         cluster_name=serve_utils.SKY_SERVE_CONTROLLER_NAME,
@@ -113,7 +116,9 @@ class Controllers(enum.Enum):
         check_cluster_name_hint=(
             f'Cluster {serve_utils.SKY_SERVE_CONTROLLER_NAME} is reserved for '
             'sky serve controller. '),
-        default_hint_if_non_existent='No service is found.')
+        default_hint_if_non_existent='No service is found.',
+        hint_for_connection_error=(
+            'Failed to connect to spot controller, please try again later'))
 
     @classmethod
     def from_name(cls, name: Optional[str]) -> Optional['Controllers']:

@@ -218,7 +218,8 @@ class SSHCommandRunner:
         ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,
-                          port_forward: Optional[List[int]]) -> List[str]:
+                          port_forward: Optional[List[int]],
+                          connection_timeout: int) -> List[str]:
         ssh = ['ssh']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
@@ -243,6 +244,7 @@ class SSHCommandRunner:
             ssh_proxy_command=self._ssh_proxy_command,
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
+            timeout=connection_timeout,
             disable_control_master=self.disable_control_master) + [
                 f'{self.ssh_user}@{self.ip}'
             ]
@@ -260,6 +262,7 @@ class SSHCommandRunner:
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
+            connection_timeout: int = 30,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -285,8 +288,10 @@ class SSHCommandRunner:
             or
             A tuple of (returncode, stdout, stderr).
         """
-        base_ssh_command = self._ssh_base_command(ssh_mode=ssh_mode,
-                                                  port_forward=port_forward)
+        base_ssh_command = self._ssh_base_command(
+            ssh_mode=ssh_mode,
+            port_forward=port_forward,
+            connection_timeout=connection_timeout)
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             command = base_ssh_command + cmd
@@ -449,3 +454,10 @@ class SSHCommandRunner:
                                            error_msg,
                                            stderr=stderr,
                                            stream_logs=stream_logs)
+
+    def check_connection(self) -> bool:
+        """Check if the connection to the remote machine is successful."""
+        returncode = self.run('true', connection_timeout=5)
+        if returncode:
+            return False
+        return True
