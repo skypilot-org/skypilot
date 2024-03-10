@@ -110,7 +110,7 @@ class ReplicaStatus(enum.Enum):
         return [cls.FAILED, cls.FAILED_CLEANUP, cls.UNKNOWN]
 
     @classmethod
-    def launched_statuses(cls) -> List['ReplicaStatus']:
+    def provisioning_or_launched_statuses(cls) -> List['ReplicaStatus']:
         return [cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.READY]
 
     @classmethod
@@ -315,12 +315,13 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_service_version(service_name: str) -> Optional[int]:
-    """Get the version of a service."""
-    service = get_service_from_name(service_name)
-    if service is None:
-        return None
-    return service['version']
+def get_service_versions(service_name: str) -> List[int]:
+    """Gets all versions of a service."""
+    rows = _DB.cursor.execute(
+        """\
+        SELECT DISTINCT version FROM version_specs
+        WHERE service_name=(?)""", (service_name,)).fetchall()
+    return [row[0] for row in rows]
 
 
 def get_glob_service_names(

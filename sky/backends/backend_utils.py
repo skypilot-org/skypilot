@@ -887,6 +887,13 @@ def write_cluster_config(
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
+                # We should not use `.format`, as it contains '{}' as the bash
+                # syntax.
+                'ray_skypilot_installation_commands':
+                    (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
+                        '{sky_wheel_hash}',
+                        wheel_hash).replace('{cloud}',
+                                            str(cloud).lower())),
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
@@ -940,11 +947,7 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
-    # Read the cluster name from the tmp yaml file, to take the backward
-    # compatbility restortion above into account.
-    # TODO: remove this after 2 minor releases, 0.5.0.
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
-    config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
+    config_dict['cluster_name_on_cloud'] = cluster_name_on_cloud
 
     # Optimization: copy the contents of source files in file_mounts to a
     # special dir, and upload that as the only file_mount instead. Delay

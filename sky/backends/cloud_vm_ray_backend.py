@@ -286,9 +286,8 @@ class RayCodeGen:
                 # next job can be scheduled on the released resources immediately.
                 ray_util.remove_placement_group(pg)
                 sys.stdout.flush()
-                sys.stderr.flush()
                 return returncodes
-            
+
             run_fn = None
             futures = []
             """),
@@ -373,14 +372,12 @@ class RayCodeGen:
                 message = {_CTRL_C_TIP_MESSAGE!r} + '\\n'
                 message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
                 print(message,
-                      file=sys.stderr,
                       flush=True)
                 # FIXME: This will print the error message from autoscaler if
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
                 print('INFO: All task resources reserved.',
-                      file=sys.stderr,
                       flush=True)
                 """)
         ]
@@ -428,7 +425,6 @@ class RayCodeGen:
                     print('ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with '
                         'return code list:{colorama.Style.RESET_ALL}',
                         setup_returncodes,
-                        file=sys.stderr,
                         flush=True)
                     # Need this to set the job status in ray job to be FAILED.
                     sys.exit(1)
@@ -544,10 +540,6 @@ class RayCodeGen:
             sky_env_vars_dict_str += [
                 f'sky_env_vars_dict[{constants.TASK_ID_ENV_VAR!r}]'
                 f' = {job_run_id!r}',
-                # TODO(zhwu): remove this deprecated env var in later release
-                # (after 0.5).
-                f'sky_env_vars_dict[{constants.TASK_ID_ENV_VAR_DEPRECATED!r}]'
-                f' = {job_run_id!r}'
             ]
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
@@ -624,7 +616,6 @@ class RayCodeGen:
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
                       reason,
-                      file=sys.stderr,
                       flush=True)
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
@@ -3140,7 +3131,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{cd} && ray job submit '
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
-            f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
+            # Redirect stderr to /dev/null to avoid distracting error from ray.
+            f'"{executable} -u {script_path} > {remote_log_path} 2> /dev/null"')
 
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
@@ -3276,7 +3268,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Handle multiple resources exec case.
         task_copy.set_resources(valid_resource)
         if len(task.resources) > 1:
-            logger.info('Multiple resources are specified'
+            logger.info('Multiple resources are specified '
                         f'for the task, using: {valid_resource}')
         task_copy.best_resources = None
         resources_str = backend_utils.get_task_resources_str(task_copy)
@@ -3335,7 +3327,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   handle: CloudVmRayResourceHandle,
                   terminate: bool,
                   purge: bool = False):
-        """Tear down/ Stop the cluster.
+        """Tear down or stop the cluster.
 
         Args:
             handle: The handle to the cluster.
@@ -3438,13 +3430,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.cancel_jobs(jobs, cancel_all)
 
         # All error messages should have been redirected to stdout.
-        returncode, stdout, stderr = self.run_on_head(handle,
-                                                      code,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
-        # TODO(zongheng): remove after >=0.5.0, 2 minor versions after.
-        backend_utils.check_stale_runtime_on_remote(returncode, stdout + stderr,
-                                                    handle.cluster_name)
+        returncode, stdout, _ = self.run_on_head(handle,
+                                                 code,
+                                                 stream_logs=False,
+                                                 require_outputs=True)
         subprocess_utils.handle_returncode(
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)

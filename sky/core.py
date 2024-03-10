@@ -1,6 +1,5 @@
 """SDK functions for cluster/job management."""
 import getpass
-import sys
 import typing
 from typing import Any, Dict, List, Optional, Union
 
@@ -310,7 +309,12 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 
     Args:
         cluster_name: name of the cluster to stop.
-        purge: whether to ignore cloud provider errors (if any).
+        purge: (Advanced) Forcefully mark the cluster as stopped in SkyPilot's
+            cluster table, even if the actual cluster stop operation failed on
+            the cloud. WARNING: This flag should only be set sparingly in
+            certain manual troubleshooting scenarios; with it set, it is the
+            user's responsibility to ensure there are no leaked instances and
+            related resources.
 
     Raises:
         ValueError: the specified cluster does not exist.
@@ -360,7 +364,12 @@ def down(cluster_name: str, purge: bool = False) -> None:
 
     Args:
         cluster_name: name of the cluster to down.
-        purge: whether to ignore cloud provider errors (if any).
+        purge: (Advanced) Forcefully remove the cluster from SkyPilot's cluster
+            table, even if the actual cluster termination failed on the cloud.
+            WARNING: This flag should only be set sparingly in certain manual
+            troubleshooting scenarios; with it set, it is the user's
+            responsibility to ensure there are no leaked instances and related
+            resources.
 
     Raises:
         ValueError: the specified cluster does not exist.
@@ -756,16 +765,6 @@ def job_status(cluster_name: str,
 # =======================
 # = Spot Job Management =
 # =======================
-
-
-@usage_lib.entrypoint
-def spot_status(refresh: bool) -> List[Dict[str, Any]]:
-    """[Deprecated] (alias of spot_queue) Get statuses of managed spot jobs."""
-    sky_logging.print(
-        f'{colorama.Fore.YELLOW}WARNING: `spot_status()` is deprecated. '
-        f'Instead, use: spot_queue(){colorama.Style.RESET_ALL}',
-        file=sys.stderr)
-    return spot_queue(refresh=refresh)
 
 
 @usage_lib.entrypoint
