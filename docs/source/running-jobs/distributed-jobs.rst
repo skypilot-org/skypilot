@@ -145,6 +145,7 @@ To execute a distributed Ray program on many VMs, you can download the `training
 
 .. code-block:: console
 
+  $ wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/distributed_ray_train/train.py
   $ sky launch ray_train.yaml
 
 .. code-block:: yaml
