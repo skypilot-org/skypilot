@@ -796,10 +796,10 @@ def spot_queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the spot jobs with ssh.
     """
-
     stop_msg = ''
     if not refresh:
-        stop_msg = 'To view the latest job table: sky spot queue --refresh'
+        stop_msg = ('No in-progress spot jobs.\nTo view the latest job table: '
+                    'sky spot queue --refresh')
     try:
         handle = backend_utils.is_controller_accessible(
             controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
@@ -833,6 +833,7 @@ def spot_queue(refresh: bool,
         require_outputs=True,
         stream_logs=False,
         separate_stderr=True)
+
     try:
         subprocess_utils.handle_returncode(returncode,
                                            code,

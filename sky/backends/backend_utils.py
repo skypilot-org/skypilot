@@ -2068,7 +2068,8 @@ def refresh_cluster_status_handle(
     *,
     force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
     acquire_per_cluster_status_lock: bool = True,
-    acquire_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
+    acquire_per_cluster_status_lock_timeout:
+    int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
 ) -> Tuple[Optional[status_lib.ClusterStatus],
            Optional[backends.ResourceHandle]]:
     """Refresh the cluster, and return the possibly updated status and handle.
@@ -2081,7 +2082,8 @@ def refresh_cluster_status_handle(
         cluster_name,
         force_refresh_statuses=force_refresh_statuses,
         acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
-        acquire_per_cluster_status_lock_timeout=acquire_lock_timeout)
+        acquire_per_cluster_status_lock_timeout=
+        acquire_per_cluster_status_lock_timeout)
     if record is None:
         return None, None
     return record['status'], record['handle']
