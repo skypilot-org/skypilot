@@ -305,7 +305,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
         service_name: Name of the service.
     """
     _validate_service_task(task)
-    handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'Service controller is stopped. There is no service to update. '
@@ -448,7 +448,7 @@ def down(
         service_names = []
     if isinstance(service_names, str):
         service_names = [service_names]
-    handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have terminated.')
 
@@ -553,7 +553,7 @@ def status(
             raise RuntimeError(
                 'Failed to refresh service status due to network error.') from e
 
-    handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
 
@@ -637,7 +637,7 @@ def tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
-    handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
 

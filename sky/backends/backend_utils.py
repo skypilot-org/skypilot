@@ -2223,7 +2223,7 @@ def check_cluster_available(
 
 
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
-def is_controller_up(
+def is_controller_accessible(
     controller_type: controller_utils.Controllers,
     stopped_message: str,
     non_existent_message: Optional[str] = None,
@@ -2231,9 +2231,12 @@ def is_controller_up(
 ) -> 'backends.CloudVmRayResourceHandle':
     """Check if the spot/serve controller is up.
 
-    It can be used to check the actual controller status (since the autostop is
-    set for the controller) before the spot/serve commands interact with the
+    It can be used to check if the controller is accessible (since the autostop
+    is set for the controller) before the spot/serve commands interact with the
     controller.
+
+    The controller can be accessed when it is in UP or INIT state, and the ssh
+    connection is successful.
 
     ClusterNotUpError will be raised whenever the controller cannot be accessed.
 
@@ -2241,6 +2244,8 @@ def is_controller_up(
         type: Type of the controller.
         stopped_message: Message to print if the controller is STOPPED.
         non_existent_message: Message to show if the controller does not exist.
+        exit_on_error: Whether to exit directly if the controller is not UP. If
+          False, the function will raise ClusterNotUpError.
 
     Returns:
         handle: The ResourceHandle of the controller.
@@ -2258,6 +2263,7 @@ def is_controller_up(
             controller_type.value.default_hint_if_non_existent)
     cluster_name = controller_type.value.cluster_name
     controller_name = controller_type.value.name.replace(' controller', '')
+    need_connection_check = False
     try:
         # Set force_refresh_statuses=None to make sure the refresh only happens
         # when the controller is INIT/UP (triggered in these statuses as the
@@ -2268,7 +2274,9 @@ def is_controller_up(
         #
         # The acquire_lock_timeout is set to 0 to avoid hanging the command when
         # multiple spot_launch commands are running at the same time. It should
-        # be safe to set it to 0 (try once to get the lock).
+        # be safe to set it to 0 (try once to get the lock), as in all the all
+        # callers will get the requested information from the controller by ssh
+        # with best effort.
         controller_status, handle = refresh_cluster_status_handle(
             cluster_name, force_refresh_statuses=None, acquire_lock_timeout=0)
     except exceptions.ClusterStatusFetchingError as e:
@@ -2284,13 +2292,18 @@ def is_controller_up(
         controller_status, handle = None, None
         if record is not None:
             controller_status, handle = record['status'], record['handle']
+            # We check the connection even if the cluster has a cached status UP
+            # to make sure the controller is actually accessible, as the cached
+            # status might be stale.
+            need_connection_check = True
 
     error_msg = None
-    if controller_status is None or handle.head_ip is None:
-        error_msg = non_existent_message
-    elif controller_status == status_lib.ClusterStatus.STOPPED:
+    if controller_status == status_lib.ClusterStatus.STOPPED:
         error_msg = stopped_message
-    elif controller_status == status_lib.ClusterStatus.INIT:
+    elif controller_status is None or handle.head_ip is None:
+        error_msg = non_existent_message
+    elif (controller_status == status_lib.ClusterStatus.INIT or
+          need_connection_check):
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                    handle.docker_user,
                                                    handle.ssh_user)
@@ -2300,6 +2313,9 @@ def is_controller_up(
                                                  port=handle.head_ssh_port)
         if not runner.check_connection():
             error_msg = controller_type.value.hint_for_connection_error
+    else:
+        assert (controller_status == status_lib.ClusterStatus.UP and
+                handle.head_ip is not None), (controller_status, handle)
 
     if error_msg is not None:
         if exit_on_error:
