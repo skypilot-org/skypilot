@@ -155,7 +155,9 @@ To execute a distributed Ray program on many VMs, you can download the `training
       memory: 64+
   
     num_nodes: 2
-  
+
+    workdir: .
+
     setup: |
       pip install "ray[train]"
       pip install tqdm
