@@ -6,8 +6,7 @@ from typing import Any, Dict, List, Optional
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
-from sky.provision.paperspace.utils import PaperspaceCloudClient
-from sky.provision.paperspace.utils import PaperspaceCloudError
+from sky.provision.paperspace import utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -15,14 +14,14 @@ from sky.utils import ux_utils
 POLL_INTERVAL = 5
 MAX_POLLS = 60 // POLL_INTERVAL
 # Stopping instances can take several minutes, so we increase the timeout
-MAX_POLLS_STOP = MAX_POLLS * 8
+MAX_POLLS_FOR_STOP = MAX_POLLS * 8
 
 logger = sky_logging.init_logger(__name__)
 
 
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]]) -> Dict[str, Any]:
-    client = PaperspaceCloudClient()
+    client = utils.PaperspaceCloudClient()
     instances = client.list_instances()
     possible_names = [
         f'{cluster_name_on_cloud}-head',
@@ -56,7 +55,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     pending_status = [
         'starting', 'restarting', 'upgrading', 'provisioning', 'off'
     ]
-    client = PaperspaceCloudClient()
+    client = utils.PaperspaceCloudClient()
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
         if not instances:
@@ -65,7 +64,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             if instance_meta['state'] == 'off':
                 try:
                     client.start(instance_id=instance_id)
-                except PaperspaceCloudError as e:
+                except utils.PaperspaceCloudError as e:
                     if 'This machine is currently starting.' in str(e):
                         continue
                     raise e
@@ -147,7 +146,7 @@ def stop_instances(
     worker_only: bool = False,
 ) -> None:
     del provider_config, worker_only  # unused
-    client = PaperspaceCloudClient()
+    client = utils.PaperspaceCloudClient()
     all_instances = _filter_instances(
         cluster_name_on_cloud,
         ['ready', 'serviceready', 'upgrading', 'provisioning', 'starting'])
@@ -158,14 +157,14 @@ def stop_instances(
         client.stop(instance_id=instance_id)
 
     # Wait for instances to stop
-    for _ in range(MAX_POLLS_STOP):
+    for _ in range(MAX_POLLS_FOR_STOP):
         all_instances = _filter_instances(cluster_name_on_cloud, ['off'])
         if len(all_instances) < num_instances:
             break
         time.sleep(POLL_INTERVAL)
     else:
         raise RuntimeError(f'Maximum number of polls: '
-                           f'{MAX_POLLS_STOP} reached. '
+                           f'{MAX_POLLS_FOR_STOP} reached. '
                            f'Instance {all_instances} is still not in '
                            'STOPPED status.')
 
@@ -177,7 +176,7 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     del provider_config  # unused
-    client = PaperspaceCloudClient()
+    client = utils.PaperspaceCloudClient()
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
         logger.info(f'Terminating instance {inst_id}')

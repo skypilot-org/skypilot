@@ -2,8 +2,8 @@
 
 from sky import sky_logging
 from sky.provision import common
-import sky.provision.paperspace.constants as constants
-from sky.provision.paperspace.utils import PaperspaceCloudClient
+from sky.provision.paperspace import constants
+from sky.provision.paperspace import utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -29,7 +29,14 @@ def bootstrap_instances(
                 config.node_config['DiskSize'] = possible_size
                 break
 
-    client = PaperspaceCloudClient()
+    client = utils.PaperspaceCloudClient()
     network_id = client.setup_network(cluster_name, region)['id']
     config.node_config['NetworkId'] = network_id
+    
+    # Add pubkey to machines via startup script
+    public_key_path = config.authentication_config['ssh_public_key']
+    with open(public_key_path, 'r', encoding='utf-8') as pub_key_file:
+        public_key = pub_key_file.read().strip()
+    client.set_sky_key_script(public_key)
+    
     return config

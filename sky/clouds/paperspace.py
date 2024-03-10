@@ -8,9 +8,8 @@ import requests
 
 from sky import clouds
 from sky.clouds import service_catalog
-from sky.provision.paperspace.utils import PaperspaceCloudClient
-from sky.provision.paperspace.utils import PaperspaceCloudError
-from sky.utils.resources_utils import DiskTier
+from sky.provision.paperspace import utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -160,7 +159,7 @@ class Paperspace(clouds.Cloud):
         cls,
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
-        disk_tier: Optional[DiskTier] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
     ) -> Optional[str]:
         """Returns the default instance type for Paperspace."""
         return service_catalog.get_default_instance_type(cpus=cpus,
@@ -254,23 +253,21 @@ class Paperspace(clouds.Cloud):
         """Verify that the user has valid credentials for Paperspace."""
         try:
             # attempt to make a CURL request for listing instances
-            PaperspaceCloudClient().list_instances()
-        except (AssertionError, KeyError, PaperspaceCloudError):
+            utils.PaperspaceCloudClient().list_instances()
+        except (AssertionError, KeyError, PaperspaceCloudError) as e:
             return False, (
                 'Failed to access Paperspace Cloud with credentials.\n    '
-                'To configure credentials, follow the instructions at:\n    '
-                'docs.digitalocean.com/reference/paperspace/api-keys/\n    '
-                'to generate API key and create a json with \n     '
-                '```\n     '
-                '{\n       '
-                '   "apiKey": [YOUR API KEY] \n     '
-                '}\n     '
-                '```\n     '
-                'at `~/.paperspace/config.json`')
+                'To configure credentials, follow the instructions at: '
+                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#paperspace\n    '
+                'Generate API key and create a json at `~/.paperspace/config.json` with \n     '
+                '    {"apiKey": "[YOUR API KEY]"}\n     '
+                'Reason: {e}')
         except requests.exceptions.ConnectionError:
             return False, ('Failed to verify Paperspace Cloud credentials. '
-                           'Check your network connection '
-                           'and try again.')
+                            'Check your network connection '
+                            'and try again.')
+        except Exception as e:
+            return False, str(e)
 
         return True, None
 

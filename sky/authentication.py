@@ -46,7 +46,7 @@ from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.provision.paperspace.utils import PaperspaceCloudClient
+from sky.provision.paperspace import utils as paperspace_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
@@ -484,11 +484,7 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 def setup_paperspace_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     """Sets up SSH authentication for Paperspace.
     - Generates a new SSH key pair if one does not exist.
-    - Sets startup script to add SSH pubkey
     """
     _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
-        public_key = pub_key_file.read().strip()
-        PaperspaceCloudClient().set_sky_key_script(public_key)
-
+    config['auth']['ssh_public_key'] = public_key_path
     return configure_ssh_info(config)

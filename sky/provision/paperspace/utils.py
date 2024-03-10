@@ -132,7 +132,7 @@ class PaperspaceCloudClient:
             'apt-get update \n'
             'apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \n'  # pylint: disable=line-too-long
             'fi \n'
-            'docker run hello-world \n'
+            'docker run --rm hello-world \n'
             'usermod -aG docker paperspace \n'
             f'echo "{public_key}" >> /home/paperspace/.ssh/authorized_keys \n')
         try:

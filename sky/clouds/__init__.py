@@ -30,12 +30,14 @@ __all__ = [
     'AWS',
     'Azure',
     'Cloud',
+    'Cudo',
     'GCP',
     'Lambda',
     'Paperspace',
     'SCP',
     'RunPod',
     'OCI',
+    'Vsphere'
     'Kubernetes',
     'CloudImplementationFeatures',
     'Region',
@@ -43,4 +45,7 @@ __all__ = [
     'CLOUD_REGISTRY',
     'ProvisionerVersion',
     'StatusVersion',
+    'Fluidstack',
+    # Utility functions
+    'cloud_in_list',
 ]
