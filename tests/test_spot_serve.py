@@ -407,8 +407,10 @@ class TestServeOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.serve_down, ['-a'])
         assert result.exit_code == 1
-        assert (controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.default_hint_if_non_existent in str(
-            result.output)), (result.exception, result.output, result.exc_info)
+        assert (controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.
+                default_hint_if_non_existent
+                in str(result.output)), (result.exception, result.output,
+                                         result.exc_info)
 
     @pytest.mark.timeout(60)
     def test_logs(self, _mock_db_conn):
