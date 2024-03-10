@@ -179,7 +179,6 @@ To execute a distributed Ray program on many VMs, you can download the `training
       sudo chmod 777 -R /var/tmp
       head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
       num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
-      ray start --head  --disable-usage-stats --port 6379
       if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
         ps aux | grep ray | grep 6379 &> /dev/null || ray start --head  --disable-usage-stats --port 6379
         sleep 5
