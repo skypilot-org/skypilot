@@ -81,7 +81,8 @@ def _load_config():
             else:
                 err_str = (
                     'Failed to load Kubernetes configuration. '
-                    f'Please check if your kubeconfig file is valid.{suffix}')
+                    'Please check if your kubeconfig file exists at '
+                    f'~/.kube/config and is valid.{suffix}')
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None

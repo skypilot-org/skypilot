@@ -276,6 +276,30 @@ Available fields and semantics:
     # for details on deploying the NGINX ingress controller.
     ports: loadbalancer
 
+    # Identity to use for all Kubernetes pods (optional).
+    #
+    # LOCAL_CREDENTIALS: The user's local ~/.kube/config will be uploaded to the
+    # Kubernetes pods created by SkyPilot. They are used for authenticating with
+    # the Kubernetes API server and launching new pods (e.g., for
+    # spot/serve controllers).
+    #
+    # SERVICE_ACCOUNT: Local ~/.kube/config is not uploaded to Kubernetes pods.
+    # SkyPilot will auto-create and reuse a service account with necessary roles
+    # in the user's namespace.
+    #
+    # <string>: The name of a service account to use for all Kubernetes pods.
+    # This service account must exist in the user's namespace and have all
+    # necessary permissions. Refer to https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/kubernetes.html
+    # for details on the roles required by the service account.
+    #
+    # Using SERVICE_ACCOUNT or a custom service account only affects Kubernetes
+    # instances. Local ~/.kube/config will still be uploaded to non-Kubernetes
+    # instances (e.g., a serve controller on GCP or AWS may need to provision
+    # Kubernetes resources).
+    #
+    # Default: 'LOCAL_CREDENTIALS'.
+    remote_identity: my-k8s-service-account
+
     # Additional fields to override the pod fields used by SkyPilot (optional)
     #
     # Any key:value pairs added here would get added to the pod spec used to
@@ -309,6 +333,13 @@ Available fields and semantics:
             emptyDir:
               medium: Memory
               sizeLimit: 3Gi    # Set a size limit for the /dev/shm volume
+
+    # Size of the /dev/shm shared memory for the pod (optional).
+    #
+    # Defaults to None, which means no size limits are set. If set, the value
+    # must be a string that is a valid Kubernetes quantity, e.g., "3Gi".
+    # https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/
+    dshm_size_limit: 3Gi
 
   # Advanced OCI configurations (optional).
   oci:
