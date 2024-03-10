@@ -555,7 +555,7 @@ def status(
 
     handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No service is found.')
+        stopped_message='No in-progress services.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -639,7 +639,7 @@ def tail_logs(
                                  'target=CONTROLLER/LOAD_BALANCER.')
     handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No service is found.')
+        stopped_message='No in-progress services.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend

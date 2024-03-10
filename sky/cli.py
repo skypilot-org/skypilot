@@ -2888,6 +2888,7 @@ def down(
 def _hint_or_raise_for_down_spot_controller(controller_name: str):
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
+
     with rich_utils.safe_status('[bold cyan]Checking for in-progress '
                                 f'{controller.value.managing_name}[/]'):
         try:
@@ -2898,23 +2899,33 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                     raise exceptions.NotSupportedError(
                         controller.value.
                         decline_down_in_when_failed_to_fetch_hint)
+            if e.cluster_status is None:
+                click.echo(
+                    'Managed spot controller has already been torn down.')
+                sys.exit(0)
             # At this point, the spot jobs are failed to be fetched due to the
             # controller being STOPPED or being firstly launched, i.e., there is
             # no in-prgress spot jobs.
             spot_jobs = []
 
-        if spot_jobs:
-            job_table = spot_lib.format_job_table(spot_jobs, show_all=False)
-            msg = controller.value.decline_down_for_dirty_controller_hint
-            # Add prefix to each line to align with the bullet point.
-            msg += '\n'.join(
-                ['   ' + line for line in job_table.split('\n') if line != ''])
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.NotSupportedError(msg)
-        else:
-            click.echo(
-                f' * No in-progress {controller.value.managing_name} found. It '
-                'should be safe to terminate (see caveats above).')
+    msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
+           'spot controller. Please be aware of the following:'
+           f'{colorama.Style.RESET_ALL}'
+           '\n * All logs and status information of the spot '
+           'jobs (output of `sky spot queue`) will be lost.')
+    click.echo(msg)
+    if spot_jobs:
+        job_table = spot_lib.format_job_table(spot_jobs, show_all=False)
+        msg = controller.value.decline_down_for_dirty_controller_hint
+        # Add prefix to each line to align with the bullet point.
+        msg += '\n'.join(
+            ['   ' + line for line in job_table.split('\n') if line != ''])
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(msg)
+    else:
+        click.echo(
+            f' * No in-progress {controller.value.managing_name} found. It '
+            'should be safe to terminate (see caveats above).')
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
@@ -2930,17 +2941,21 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
                     raise exceptions.NotSupportedError(
                         controller.value.
                         decline_down_in_when_failed_to_fetch_hint)
+            if e.cluster_status is None:
+                click.echo('Serve controller has already been torn down.')
+                sys.exit(0)
             # At this point, the services are failed to be fetched due to the
             # controller being STOPPED or being firstly launched, i.e., there is
             # no in-prgress services.
             services = []
 
-        if services:
-            service_names = [service['name'] for service in services]
-            with ux_utils.print_exception_no_traceback():
-                msg = (controller.value.decline_down_for_dirty_controller_hint.
-                       format(service_names=', '.join(service_names)))
-                raise exceptions.NotSupportedError(msg)
+    if services:
+        service_names = [service['name'] for service in services]
+        with ux_utils.print_exception_no_traceback():
+            msg = (
+                controller.value.decline_down_for_dirty_controller_hint.format(
+                    service_names=', '.join(service_names)))
+            raise exceptions.NotSupportedError(msg)
     # Do nothing for STOPPED state, as it is safe to terminate the cluster.
     click.echo(f'Terminate sky serve controller: {controller_name}.')
 

@@ -122,7 +122,7 @@ class TestControllerOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.down, [spot.SPOT_CONTROLLER_NAME],
                                    input='n')
-        assert 'WARNING: Tearing down the managed spot controller (UP).' in result.output
+        assert 'WARNING: Tearing down the managed spot controller.' in result.output
         assert isinstance(result.exception,
                           SystemExit), (result.exception, result.output)
 

@@ -2005,7 +2005,8 @@ def refresh_cluster_record(
     *,
     force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]] = None,
     acquire_per_cluster_status_lock: bool = True,
-    acquire_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
+    acquire_per_cluster_status_lock_timeout:
+    int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
 ) -> Optional[Dict[str, Any]]:
     """Refresh the cluster, and return the possibly updated record.
 
@@ -2023,6 +2024,9 @@ def refresh_cluster_record(
                 2. is a non-spot cluster, is not STOPPED, and autostop is set.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
             before updating the status.
+        acquire_per_cluster_status_lock_timeout: The timeout to acquire the
+            per-cluster lock. If timeout, the function will use the cached
+            status.
 
     Returns:
         If the cluster is terminated or does not exist, return None.
@@ -2054,7 +2058,7 @@ def refresh_cluster_record(
             record = _update_cluster_status(
                 cluster_name,
                 acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
-                acquire_lock_timeout=acquire_lock_timeout)
+                acquire_lock_timeout=acquire_per_cluster_status_lock_timeout)
     return record
 
 
@@ -2077,7 +2081,7 @@ def refresh_cluster_status_handle(
         cluster_name,
         force_refresh_statuses=force_refresh_statuses,
         acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
-        acquire_lock_timeout=acquire_lock_timeout)
+        acquire_per_cluster_status_lock_timeout=acquire_lock_timeout)
     if record is None:
         return None, None
     return record['status'], record['handle']
@@ -2304,6 +2308,10 @@ def is_controller_accessible(
         error_msg = non_existent_message
     elif (controller_status == status_lib.ClusterStatus.INIT or
           need_connection_check):
+        # We do not directly check for UP because the controller may be in INIT
+        # state during another `sky spot launch` or `sky serve up`, but still
+        # have head_ip available. In this case, we can still try to ssh into the
+        # controller and fetch the status.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                    handle.docker_user,
                                                    handle.ssh_user)
