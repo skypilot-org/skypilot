@@ -148,7 +148,6 @@ To execute a distributed Ray program on many VMs, you can use the following exam
   $ sky launch ray_train.yaml
 
 .. code-block:: yaml
-    :emphasize-lines: 6-6,21-22,24-25
   
     resources:
       accelerators: L4:2
