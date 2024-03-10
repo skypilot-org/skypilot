@@ -184,9 +184,7 @@ To execute a distributed Ray program on many VMs, you can download the `training
       fi
 
 .. warning:: 
-  **Avoid Installing Ray in Base Environment**
+  **Avoid Installing Ray in Base Environment**: Before proceeding with the execution of a distributed Ray program, it is crucial to ensure that Ray is **not** installed in the *base* environment. Installing a different version of Ray in the base environment can lead to abnormal cluster status.
 
-  Before proceeding with the execution of a distributed Ray program, it is crucial to ensure that Ray is **not** installed in the base environment. Installing a different version of Ray in the base environment can lead to compatibility issues, conflicts, and unintended consequences.
-
-  To maintain a clean and stable environment for your distributed Ray program, it is highly recommended to **create a dedicated virtual environment** for Ray and its dependencies. This helps isolate the Ray installation and prevents interference with other packages in your base environment.
+  It is highly recommended to **create a dedicated virtual environment** (as above) for Ray and its dependencies, and avoid calling `ray stop` as that will also cause issue with the cluster.
 
