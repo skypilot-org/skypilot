@@ -2282,7 +2282,7 @@ def is_controller_accessible(
         # callers will get the requested information from the controller by ssh
         # with best effort.
         controller_status, handle = refresh_cluster_status_handle(
-            cluster_name, force_refresh_statuses=None, acquire_lock_timeout=0)
+            cluster_name, force_refresh_statuses=None, acquire_per_cluster_status_lock_timeout=0)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
