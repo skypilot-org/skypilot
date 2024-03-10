@@ -144,6 +144,7 @@ def _get_cloud_dependencies_installation_commands(
         'pip install google-api-python-client>=2.69.0 google-cloud-storage '
         '> /dev/null 2>&1',
         f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}',
+        # fluidstack does not need to install any cloud dependencies.
     ]
     # k8s and ibm doesn't support open port and spot instance yet, so we don't
     # install them for either controller.
