@@ -5449,9 +5449,9 @@ def local_up(gpus: bool):
     if returncode == 0:
         cluster_created = True
     elif returncode == 100:
-        click.echo(f'{style.BRIGHT}Local cluster already '
-                   f'exists.{style.RESET_ALL} '
-                   'Run `sky local down` to delete it.')
+        click.echo(f'{colorama.Fore.GREEN}Local cluster already '
+                   f'exists.{style.RESET_ALL}\n'
+                   'If you want to delete it instead, run: sky local down')
     else:
         click.echo('Failed to create local cluster. '
                    f'Full log: {log_path}'
@@ -5509,9 +5509,10 @@ def local_up(gpus: bool):
             click.echo('Warning: Local cluster has less than 2 CPUs. '
                        'This may cause issues with running tasks.')
         click.echo(
-            f'{style.BRIGHT}Local Kubernetes cluster created successfully with '
-            f'{num_cpus} CPUs{gpu_message}. `sky launch` can now run tasks '
-            f'locally.{style.RESET_ALL}'
+            f'\n{colorama.Fore.GREEN}Local Kubernetes cluster created '
+            'successfully with '
+            f'{num_cpus} CPUs{gpu_message}.{style.RESET_ALL}\n`sky launch` can '
+            'now run tasks locally.'
             '\nHint: To change the number of CPUs, change your docker '
             'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
             f'{gpu_hint}')
@@ -5560,7 +5561,8 @@ def local_down():
         # Run sky check
         with rich_utils.safe_status('[bold cyan]Running sky check...'):
             sky_check.check(quiet=True)
-        click.echo(f'{style.BRIGHT}Local cluster removed.{style.RESET_ALL}')
+        click.echo(
+            f'{colorama.Fore.GREEN}Local cluster removed.{style.RESET_ALL}')
 
 
 # TODO(skypilot): remove the below in v0.5.
