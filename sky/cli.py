@@ -528,23 +528,6 @@ def _parse_override_params(
     return override_params
 
 
-def _check_resources_match(backend: backends.Backend, cluster_name: str,
-                           task: 'sky.Task') -> None:
-    """Check matching resources when reusing an existing cluster.
-
-    The only exception is when [cpu|tpu|gpu]node -c cluster_name is used with no
-    additional arguments, then login succeeds.
-
-    Args:
-        cluster_name: The name of the cluster.
-        task: The task requested to be run on the cluster.
-    """
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    if handle is None:
-        return
-    backend.check_resources_fit_cluster(handle, task)
-
-
 def _launch_with_confirm(
     task: sky.Task,
     backend: backends.Backend,
@@ -573,7 +556,7 @@ def _launch_with_confirm(
     with sky.Dag() as dag:
         dag.add(task)
 
-    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
+    maybe_status, handle = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
         try:
@@ -586,7 +569,8 @@ def _launch_with_confirm(
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
-    _check_resources_match(backend, cluster, task)
+    if handle is not None:
+        backend.check_resources_fit_cluster(handle, task)
 
     confirm_shown = False
     if not no_confirm:
@@ -607,7 +591,6 @@ def _launch_with_confirm(
     if not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
-    # No need to sky.launch again when interactive node is already up.
     sky.launch(
         dag,
         dryrun=dryrun,
