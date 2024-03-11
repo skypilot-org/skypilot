@@ -1700,7 +1700,7 @@ def _get_services(service_names: Optional[List[str]],
         controller_status = e.cluster_status
         msg = str(e)
         if controller_status is None:
-            msg += (f'(See: {colorama.Style.BRIGHT}sky serve -h'
+            msg += (f' (See: {colorama.Style.BRIGHT}sky serve -h'
                     f'{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
         msg = ('Failed to fetch service statuses due to connection issues. '
