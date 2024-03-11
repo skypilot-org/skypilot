@@ -4,6 +4,7 @@ import threading
 import time
 
 import fastapi
+import httpx
 import requests
 import uvicorn
 
@@ -11,6 +12,8 @@ from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
+
+_HTTP_METHODS_WITH_CONTENT = ['POST', 'PUT']
 
 logger = sky_logging.init_logger(__name__)
 
@@ -77,7 +80,7 @@ class SkyServeLoadBalancer:
                         ready_replica_urls)
             time.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
 
-    async def _redirect_handler(self, request: fastapi.Request):
+    async def _proxy_handler(self, request: fastapi.Request):
         self._request_aggregator.add(request)
         ready_replica_url = self._load_balancing_policy.select_replica(request)
 
@@ -88,12 +91,36 @@ class SkyServeLoadBalancer:
                                         'to check the replica status.')
 
         path = f'http://{ready_replica_url}{request.url.path}'
-        logger.info(f'Redirecting request to {path}')
-        return fastapi.responses.RedirectResponse(url=path)
+        logger.info(f'Forwarding request to {path}')
+
+        async with httpx.AsyncClient() as client:
+            headers = {k: v for k, v in request.headers.items()}
+            name2method = {
+                'GET': client.get,
+                'POST': client.post,
+                'PUT': client.put,
+                'DELETE': client.delete,
+            }
+            kwargs = {'headers': headers}
+            if request.method in _HTTP_METHODS_WITH_CONTENT:
+                kwargs['content'] = await request.body()
+            forwarded_resp = await name2method[request.method](path, **kwargs)
+        content_type = forwarded_resp.headers.get('content-type', '')
+        if 'application/json' in content_type:
+            return fastapi.responses.JSONResponse(
+                content=forwarded_resp.json(),
+                status_code=forwarded_resp.status_code,
+                headers=dict(forwarded_resp.headers))
+        else:
+            return fastapi.responses.Response(
+                content=forwarded_resp.content,
+                status_code=forwarded_resp.status_code,
+                media_type=content_type,
+                headers=dict(forwarded_resp.headers))
 
     def run(self):
         self._app.add_api_route('/{path:path}',
-                                self._redirect_handler,
+                                self._proxy_handler,
                                 methods=['GET', 'POST', 'PUT', 'DELETE'])
 
         @self._app.on_event('startup')

@@ -27,6 +27,8 @@ class SkyServiceSpec:
         base_ondemand_fallback_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
+        auth_username: Optional[str] = None,
+        auth_password: Optional[str] = None,
         # The following arguments are deprecated.
         # TODO(ziming): remove this after 2 minor release, i.e. 0.6.0.
         # Deprecated: Always be True
@@ -50,6 +52,14 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
+
+        if (auth_password is None) != (auth_username is None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'auth_username and auth_password must be both set or '
+                    'both unset to enable or disable authentication. Got: '
+                    f'auth_username={auth_username}, '
+                    f'auth_password={auth_password}')
 
         if qps_upper_threshold is not None or qps_lower_threshold is not None:
             with ux_utils.print_exception_no_traceback():
@@ -79,6 +89,9 @@ class SkyServiceSpec:
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
 
+        self._auth_username: Optional[str] = auth_username
+        self._auth_password: Optional[str] = auth_password
+
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
             self.dynamic_ondemand_fallback) or (
@@ -102,11 +115,16 @@ class SkyServiceSpec:
             service_config['readiness_path'] = readiness_section
             initial_delay_seconds = None
             post_data = None
+            auth_username = None
+            auth_password = None
         else:
             service_config['readiness_path'] = readiness_section['path']
             initial_delay_seconds = readiness_section.get(
                 'initial_delay_seconds', None)
             post_data = readiness_section.get('post_data', None)
+            auth_section = readiness_section.get('authentication', {})
+            auth_username = auth_section.get('username', None)
+            auth_password = auth_section.get('password', None)
         if initial_delay_seconds is None:
             initial_delay_seconds = constants.DEFAULT_INITIAL_DELAY_SECONDS
         service_config['initial_delay_seconds'] = initial_delay_seconds
@@ -120,6 +138,8 @@ class SkyServiceSpec:
                         '`readiness_probe` section of your service YAML.'
                     ) from e
         service_config['post_data'] = post_data
+        service_config['auth_username'] = auth_username
+        service_config['auth_password'] = auth_password
 
         policy_section = config.get('replica_policy', None)
         simplified_policy_section = config.get('replicas', None)
@@ -195,6 +215,13 @@ class SkyServiceSpec:
         add_if_not_none('readiness_probe', 'initial_delay_seconds',
                         self.initial_delay_seconds)
         add_if_not_none('readiness_probe', 'post_data', self.post_data)
+        auth_section = None
+        if self.has_auth_section:
+            auth_section = {
+                'username': self.auth_username,
+                'password': self.auth_password,
+            }
+        add_if_not_none('readiness_probe', 'authentication', auth_section)
         add_if_not_none('replica_policy', 'min_replicas', self.min_replicas)
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
@@ -210,9 +237,13 @@ class SkyServiceSpec:
         return config
 
     def probe_str(self):
+        auth_str = '' if self.auth_username is None else '[AUTH] '
         if self.post_data is None:
-            return f'GET {self.readiness_path}'
-        return f'POST {self.readiness_path} {json.dumps(self.post_data)}'
+            method_str = f'GET {self.readiness_path}'
+        else:
+            data_str = json.dumps(self.post_data)
+            method_str = f'POST {self.readiness_path} {data_str}'
+        return f'{auth_str}{method_str}'
 
     def spot_policy_str(self):
         policy_strs = []
@@ -294,3 +325,18 @@ class SkyServiceSpec:
     @property
     def use_ondemand_fallback(self) -> bool:
         return self._use_ondemand_fallback
+
+    @property
+    def has_auth_section(self) -> bool:
+        if self._auth_username is not None:
+            assert self._auth_password is not None
+            return True
+        return False
+
+    @property
+    def auth_username(self) -> Optional[str]:
+        return self._auth_username
+
+    @property
+    def auth_password(self) -> Optional[str]:
+        return self._auth_password

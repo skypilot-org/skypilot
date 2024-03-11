@@ -17,3 +17,4 @@ include sky/spot/dashboard/templates/*
 include sky/spot/dashboard/static/*
 include sky/templates/*
 include sky/utils/kubernetes/*
+include sky/utils/serve/*
