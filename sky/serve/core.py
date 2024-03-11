@@ -640,7 +640,7 @@ def tail_logs(
                                  'target=CONTROLLER/LOAD_BALANCER.')
     handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No live services.')
+   stopped_message=controller_utils.Controllers.SKY_SERVE_CONTROLLER.default_hint_if_non_existent)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
