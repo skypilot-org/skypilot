@@ -796,14 +796,15 @@ def spot_queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the spot jobs with ssh.
     """
-    stop_msg = ''
+    stopped_message = ''
     if not refresh:
-        stop_msg = ('No in-progress spot jobs.\nTo view the latest job table: '
-                    'sky spot queue --refresh')
+        stopped_message = (
+            'No in-progress spot jobs.\nTo view the latest job table: '
+            'sky spot queue --refresh')
     try:
         handle = backend_utils.is_controller_accessible(
             controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
-            stopped_message=stop_msg)
+            stopped_message=stopped_message)
     except exceptions.ClusterNotUpError as e:
         if not refresh:
             raise
