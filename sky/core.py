@@ -798,9 +798,7 @@ def spot_queue(refresh: bool,
     """
     stopped_message = ''
     if not refresh:
-        stopped_message = (
-            'No in-progress spot jobs.\nTo view the latest job table: '
-            'sky spot queue --refresh')
+        stopped_message = ('No in-progress spot jobs.')
     try:
         handle = backend_utils.is_controller_accessible(
             controller_type=controller_utils.Controllers.SPOT_CONTROLLER,

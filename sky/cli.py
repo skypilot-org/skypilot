@@ -1652,6 +1652,10 @@ def _get_spot_jobs(
         if controller_status is None:
             msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
                     f'{colorama.Style.RESET_ALL})')
+        elif (controller_status == status_lib.ClusterStatus.STOPPED and
+              is_called_by_user):
+            msg += (f' (See finished jobs: {colorama.Style.BRIGHT}'
+                    f'sky spot queue --refresh{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
         msg = ('Failed to query spot jobs due to connection '
                'issues. Try again later. '
