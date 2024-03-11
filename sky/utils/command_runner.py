@@ -459,7 +459,7 @@ class SSHCommandRunner:
 
     def check_connection(self) -> bool:
         """Check if the connection to the remote machine is successful."""
-        returncode = self.run('true', connect_timeout=5)
+        returncode = self.run('true', connect_timeout=5, stream_logs=False)
         if returncode:
             return False
         return True
