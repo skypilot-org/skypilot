@@ -250,7 +250,7 @@ Once the total number of new replicas satisfies the requirements, traffics will 
     http-server   4   2        18.206.226.82   1 min ago    1x AWS(vCPU=4)  READY          us-east-1
     http-server   5   2        3.26.232.31     1 min ago    1x AWS(vCPU=4)  READY          us-east-1
 
-Eventually, we will only have new replicas ready to serve user requests.
+Eventually, same as rolling update, we will only have new replicas ready to serve user requests.
 
 .. code-block:: console
 
