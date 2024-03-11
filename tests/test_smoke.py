@@ -1091,7 +1091,7 @@ def test_job_queue(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support docker for now
 @pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
-@pytest.mark.no_paperspace  # Doesn't support Paperspace for now
+@pytest.mark.no_paperspace  # Paperspace doesn't have T4 GPUs
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
@@ -4304,6 +4304,7 @@ class TestYamlSpecs:
 
 # ---------- Testing Multiple Accelerators ----------
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
+@pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
 def test_multiple_accelerators_ordered():
     name = _get_cluster_name()
     test = Test(
@@ -4319,6 +4320,7 @@ def test_multiple_accelerators_ordered():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
+@pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 def test_multiple_accelerators_ordered_with_default():
     name = _get_cluster_name()
     test = Test(
@@ -4334,6 +4336,7 @@ def test_multiple_accelerators_ordered_with_default():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
+@pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 def test_multiple_accelerators_unordered():
     name = _get_cluster_name()
     test = Test(
@@ -4348,6 +4351,7 @@ def test_multiple_accelerators_unordered():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
+@pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 def test_multiple_accelerators_unordered_with_default():
     name = _get_cluster_name()
     test = Test(

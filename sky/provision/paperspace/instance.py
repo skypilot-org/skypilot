@@ -53,26 +53,52 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     """Runs instances for the given cluster."""
 
     pending_status = [
-        'starting', 'restarting', 'upgrading', 'provisioning', 'off'
+        'starting', 'restarting', 'upgrading', 'provisioning', 'stopping'
     ]
+    newly_started_instances = _filter_instances(cluster_name_on_cloud,
+                                                pending_status + ['off'])
     client = utils.PaperspaceCloudClient()
+
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
         if not instances:
             break
-        for instance_id, instance_meta in instances.items():
-            if instance_meta['state'] == 'off':
-                try:
-                    client.start(instance_id=instance_id)
-                except utils.PaperspaceCloudError as e:
-                    if 'This machine is currently starting.' in str(e):
-                        continue
-                    raise e
-        logger.info(f'Waiting for {len(instances)} instances to be ready.')
+        instance_statuses = [
+            instance['state'] for instance in instances.values()
+        ]
+        logger.info(f'Waiting for {len(instances)} instances to be ready: '
+                    f'{instance_statuses}')
         time.sleep(POLL_INTERVAL)
-    exist_instances = _filter_instances(cluster_name_on_cloud, ['ready'])
-    head_instance_id = _get_head_instance_id(exist_instances)
 
+    exist_instances = _filter_instances(cluster_name_on_cloud,
+                                        status_filters=pending_status +
+                                        ['ready', 'off'])
+    if len(exist_instances) > config.count:
+        raise RuntimeError(
+            f'Cluster {cluster_name_on_cloud} already has '
+            f'{len(exist_instances)} nodes, but {config.count} are required.')
+
+    stopped_instances = _filter_instances(cluster_name_on_cloud,
+                                          status_filters=['off'])
+    for instance_id in stopped_instances:
+        try:
+            client.start(instance_id=instance_id)
+        except utils.PaperspaceCloudError as e:
+            if 'This machine is currently starting.' in str(e):
+                continue
+            raise e
+    while True:
+        instances = _filter_instances(cluster_name_on_cloud,
+                                      pending_status + ['off'])
+        if not instances:
+            break
+        logger.info(f'Waiting for {len(instances)}/{len(stopped_instances)} '
+                    'stopped instances to be restarted.')
+        time.sleep(POLL_INTERVAL)
+
+    exist_instances = _filter_instances(cluster_name_on_cloud,
+                                        status_filters=['ready'])
+    head_instance_id = _get_head_instance_id(exist_instances)
     to_start_count = config.count - len(exist_instances)
     if to_start_count < 0:
         raise RuntimeError(
@@ -80,8 +106,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             f'{len(exist_instances)} nodes, but {config.count} are required.')
     if to_start_count == 0:
         if head_instance_id is None:
-            raise RuntimeError(
-                f'Cluster {cluster_name_on_cloud} has no head node.')
+            head_instance_id = list(exist_instances.keys())[0]
+            client.rename(
+                instance_id=head_instance_id,
+                name=f'{cluster_name_on_cloud}-head',
+            )
+        assert head_instance_id is not None, (
+            'head_instance_id should not be None')
         logger.info(f'Cluster {cluster_name_on_cloud} already has '
                     f'{len(exist_instances)} nodes, no need to start more.')
         return common.ProvisionRecord(
@@ -90,7 +121,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             region=region,
             zone=None,
             head_instance_id=head_instance_id,
-            resumed_instance_ids=[],
+            resumed_instance_ids=list(newly_started_instances.keys()),
             created_instance_ids=[],
         )
 
@@ -129,7 +160,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         region=region,
         zone=None,
         head_instance_id=head_instance_id,
-        resumed_instance_ids=[],
+        resumed_instance_ids=list(stopped_instances.keys()),
         created_instance_ids=created_instance_ids,
     )
 
@@ -147,9 +178,10 @@ def stop_instances(
 ) -> None:
     del provider_config, worker_only  # unused
     client = utils.PaperspaceCloudClient()
-    all_instances = _filter_instances(
-        cluster_name_on_cloud,
-        ['ready', 'serviceready', 'upgrading', 'provisioning', 'starting'])
+    all_instances = _filter_instances(cluster_name_on_cloud, [
+        'ready', 'serviceready', 'upgrading', 'provisioning', 'starting',
+        'restarting'
+    ])
     num_instances = len(all_instances)
 
     # Request a stop on all instances
@@ -243,6 +275,8 @@ def query_instances(
         'restarting': status_lib.ClusterStatus.INIT,
         'upgrading': status_lib.ClusterStatus.INIT,
         'provisioning': status_lib.ClusterStatus.INIT,
+        'stopping': status_lib.ClusterStatus.INIT,
+        'serviceready': status_lib.ClusterStatus.INIT,
         'ready': status_lib.ClusterStatus.UP,
         'off': status_lib.ClusterStatus.STOPPED,
     }

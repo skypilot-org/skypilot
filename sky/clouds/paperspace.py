@@ -254,19 +254,20 @@ class Paperspace(clouds.Cloud):
         try:
             # attempt to make a CURL request for listing instances
             utils.PaperspaceCloudClient().list_instances()
-        except (AssertionError, KeyError, PaperspaceCloudError) as e:
+        except (AssertionError, KeyError, utils.PaperspaceCloudError) as e:
+            # pylint: disable=line-too-long
             return False, (
                 'Failed to access Paperspace Cloud with credentials.\n    '
                 'To configure credentials, follow the instructions at: '
                 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#paperspace\n    '
                 'Generate API key and create a json at `~/.paperspace/config.json` with \n     '
                 '    {"apiKey": "[YOUR API KEY]"}\n     '
-                'Reason: {e}')
+                f'Reason: {str(e)}')
         except requests.exceptions.ConnectionError:
             return False, ('Failed to verify Paperspace Cloud credentials. '
-                            'Check your network connection '
-                            'and try again.')
-        except Exception as e:
+                           'Check your network connection '
+                           'and try again.')
+        except Exception as e:  # pylint: disable=broad-except
             return False, str(e)
 
         return True, None

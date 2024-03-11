@@ -32,11 +32,11 @@ def bootstrap_instances(
     client = utils.PaperspaceCloudClient()
     network_id = client.setup_network(cluster_name, region)['id']
     config.node_config['NetworkId'] = network_id
-    
+
     # Add pubkey to machines via startup script
     public_key_path = config.authentication_config['ssh_public_key']
     with open(public_key_path, 'r', encoding='utf-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
     client.set_sky_key_script(public_key)
-    
+
     return config

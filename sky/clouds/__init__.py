@@ -37,7 +37,7 @@ __all__ = [
     'SCP',
     'RunPod',
     'OCI',
-    'Vsphere'
+    'Vsphere',
     'Kubernetes',
     'CloudImplementationFeatures',
     'Region',

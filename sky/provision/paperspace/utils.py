@@ -132,7 +132,6 @@ class PaperspaceCloudClient:
             'apt-get update \n'
             'apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \n'  # pylint: disable=line-too-long
             'fi \n'
-            'docker run --rm hello-world \n'
             'usermod -aG docker paperspace \n'
             f'echo "{public_key}" >> /home/paperspace/.ssh/authorized_keys \n')
         try:
@@ -231,3 +230,12 @@ class PaperspaceCloudClient:
             f'{API_ENDPOINT}/machines/{instance_id}',
             headers=self.headers,
         )
+
+    def rename(self, instance_id: str, name: str) -> Dict[str, Any]:
+        return _try_request_with_backoff(
+            'put',
+            f'{API_ENDPOINT}/machines/{instance_id}',
+            headers=self.headers,
+            data=json.dumps({
+                'name': name,
+            }))
