@@ -48,15 +48,14 @@ LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 class _ControllerSpec:
     """Spec for skypilot controllers."""
     name: str
-    managing_name: str
     cluster_name: str
     in_progress_hint: str
     decline_cancel_hint: str
-    decline_down_in_when_failed_to_fetch_hint: str
+    decline_down_when_failed_to_fetch_status_hint: str
     decline_down_for_dirty_controller_hint: str
     check_cluster_name_hint: str
     default_hint_if_non_existent: str
-    hint_for_connection_error: str
+    connection_error_hint: str
 
 
 class Controllers(enum.Enum):
@@ -65,7 +64,6 @@ class Controllers(enum.Enum):
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
     SPOT_CONTROLLER = _ControllerSpec(
         name='managed spot controller',
-        managing_name='spot jobs',
         cluster_name=spot_utils.SPOT_CONTROLLER_NAME,
         in_progress_hint=(
             '* {job_info}To see all spot jobs: '
@@ -74,7 +72,7 @@ class Controllers(enum.Enum):
             'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
             f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
             f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
-        decline_down_in_when_failed_to_fetch_hint=(
+        decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the spot controller while '
             'it is in INIT state is not supported (this means a spot launch '
             'is in progress or the previous launch failed), as we cannot '
@@ -90,18 +88,17 @@ class Controllers(enum.Enum):
             f'Cluster {spot_utils.SPOT_CONTROLLER_NAME} is reserved for '
             'managed spot controller.'),
         default_hint_if_non_existent='No in-progress spot jobs.',
-        hint_for_connection_error=(
+        connection_error_hint=(
             'Failed to connect to spot controller, please try again later.'))
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         name='serve controller',
-        managing_name='services',
         cluster_name=serve_utils.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status -a{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
-        decline_down_in_when_failed_to_fetch_hint=(
+        decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the sky serve controller '
             'while it is in INIT state is not supported (this means a sky '
             'serve up is in progress or the previous launch failed), as we '
@@ -119,8 +116,8 @@ class Controllers(enum.Enum):
         check_cluster_name_hint=(
             f'Cluster {serve_utils.SKY_SERVE_CONTROLLER_NAME} is reserved for '
             'sky serve controller.'),
-        default_hint_if_non_existent='No in-progress services.',
-        hint_for_connection_error=(
+        default_hint_if_non_existent='No live services.',
+        connection_error_hint=(
             'Failed to connect to serve controller, please try again later.'))
 
     @classmethod

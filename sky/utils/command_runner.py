@@ -47,7 +47,7 @@ def ssh_options_list(
     *,
     ssh_proxy_command: Optional[str] = None,
     docker_ssh_proxy_command: Optional[str] = None,
-    connect_timeout: Optional[int] = 30,
+    connect_timeout: Optional[int] = None,
     port: int = 22,
     disable_control_master: Optional[bool] = False,
 ) -> List[str]:

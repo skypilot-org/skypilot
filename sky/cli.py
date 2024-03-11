@@ -2889,16 +2889,16 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
-    with rich_utils.safe_status('[bold cyan]Checking for in-progress '
-                                f'{controller.value.managing_name}[/]'):
+    with rich_utils.safe_status(
+            '[bold cyan]Checking for in-progress spot jobs[/]'):
         try:
             spot_jobs = core.spot_queue(refresh=False, skip_finished=True)
         except exceptions.ClusterNotUpError as e:
-            if controller.value.hint_for_connection_error in str(e):
+            if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         controller.value.
-                        decline_down_in_when_failed_to_fetch_hint)
+                        decline_down_when_failed_to_fetch_status_hint)
             if e.cluster_status is None:
                 click.echo(
                     'Managed spot controller has already been torn down.')
@@ -2923,24 +2923,22 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(msg)
     else:
-        click.echo(
-            f' * No in-progress {controller.value.managing_name} found. It '
-            'should be safe to terminate (see caveats above).')
+        click.echo(' * No in-progress spot jobs found. It should be safe to '
+                   'terminate (see caveats above).')
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
-    with rich_utils.safe_status('[bold cyan]Checking for in-progress '
-                                f'{controller.value.managing_name}[/]'):
+    with rich_utils.safe_status('[bold cyan]Checking for live services[/]'):
         try:
             services = serve_lib.status()
         except exceptions.ClusterNotUpError as e:
-            if controller.value.hint_for_connection_error in str(e):
+            if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.NotSupportedError(
                         controller.value.
-                        decline_down_in_when_failed_to_fetch_hint)
+                        decline_down_when_failed_to_fetch_status_hint)
             if e.cluster_status is None:
                 click.echo('Serve controller has already been torn down.')
                 sys.exit(0)
@@ -4072,7 +4070,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
         stopped_message='All managed spot jobs should have finished.',
-        exit_on_error=True)
+        exit_if_not_accessible=True)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
@@ -4156,7 +4154,7 @@ def spot_dashboard(port: Optional[int]):
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
         stopped_message=hint,
         non_existent_message=hint,
-        exit_on_error=True)
+        exit_if_not_accessible=True)
 
     # SSH forward a free local port to remote's dashboard port.
     remote_port = constants.SPOT_DASHBOARD_REMOTE_PORT
@@ -4663,7 +4661,7 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
     backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have been terminated.',
-        exit_on_error=True)
+        exit_if_not_accessible=True)
 
     if not yes:
         quoted_service_names = [f'{name!r}' for name in service_names]

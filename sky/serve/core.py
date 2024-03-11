@@ -553,9 +553,10 @@ def status(
             raise RuntimeError(
                 'Failed to refresh service status due to network error.') from e
 
+    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
     handle = backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No in-progress services.')
+        controller_type=controller_type,
+        stopped_message=controller_type.value.default_hint_if_non_existent)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -639,7 +640,7 @@ def tail_logs(
                                  'target=CONTROLLER/LOAD_BALANCER.')
     handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No in-progress services.')
+        stopped_message='No live services.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
