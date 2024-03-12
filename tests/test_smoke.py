@@ -3131,7 +3131,7 @@ def test_skyserve_spot_user_bug(generic_cloud: str):
     """Tests that spot recovery doesn't occur for non-preemption failures"""
     name = _get_service_name()
     test = Test(
-        f'test-skyserve-spot-user-bug-gcp',
+        f'test-skyserve-spot-user-bug',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/spot/user_bug.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
