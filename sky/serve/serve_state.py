@@ -300,7 +300,7 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, requested_resources,
-     requested_resources_str, _, active_versions) = row[:12]
+     requested_resources_str, _, active_versions) = row[:13]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -341,11 +341,11 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     """Get all existing service records."""
     rows = _DB.cursor.execute(
         'SELECT v.max_version, s.* FROM services s '
-        'WHERE name=(?) JOIN ('
-        'SELECT service_name, MAX(version) as max_version'
-        ' FROM version_specs GROUP BY service_name '
-        'WHERE service_name=(?)) v '
-        'ON s.name=v.service_name', (service_name, service_name)).fetchall()
+        'JOIN ('
+        'SELECT service_name, MAX(version) as max_version '
+        'FROM version_specs WHERE service_name=(?)) v '
+        'ON s.name=v.service_name WHERE name=(?)',
+        (service_name, service_name)).fetchall()
     for row in rows:
         return _get_service_from_row(row)
     return None
