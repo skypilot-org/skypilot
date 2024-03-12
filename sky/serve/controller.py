@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 import fastapi
 import uvicorn
+import yaml
 
 from sky import serve
 from sky import sky_logging
@@ -131,7 +132,9 @@ class SkyServeController:
                 service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
                 logger.info(
                     f'Update to new version version {version}: {service}')
-
+                with open(latest_task_yaml, 'r', encoding='utf-8') as f:
+                    data = yaml.safe_load(f)
+                    logger.info(yaml.dump(data, sort_keys=False))
                 self._replica_manager.update_version(version, service)
                 new_autoscaler = autoscalers.Autoscaler.from_spec(
                     self._service_name, service)
