@@ -198,11 +198,16 @@ class AzureCloudStorage(CloudStorage):
             source)
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
-        storage_account_key = data_utils.get_az_storage_account_key(
-            storage_account_name, resource_group_name)
+        account_key_option = ''
+        # resource_group_name is None when using a public container or
+        # a private containers not belonging to the user.
+        if resource_group_name is not None:
+            storage_account_key = data_utils.get_az_storage_account_key(
+                storage_account_name, resource_group_name)
+            account_key_option = f'--account-key {storage_account_key}'
         download_command = ('az storage blob download-batch '
                             f'--account-name {storage_account_name} '
-                            f'--account-key {storage_account_key} '
+                            f'{account_key_option} '
                             f'--source {container_name} '
                             f'--destination {destination}')
 
@@ -216,11 +221,16 @@ class AzureCloudStorage(CloudStorage):
             source)
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
-        storage_account_key = data_utils.get_az_storage_account_key(
-            storage_account_name, resource_group_name)
+        account_key_option = ''
+        # resource_group_name is None when using a public container or
+        # a private containers not belonging to the user.
+        if resource_group_name is not None:
+            storage_account_key = data_utils.get_az_storage_account_key(
+                storage_account_name, resource_group_name)
+            account_key_option = f'--account-key {storage_account_key}'
         download_command = ('az storage blob download '
                             f'--account-name {storage_account_name} '
-                            f'--account-key {storage_account_key} '
+                            f'{account_key_option} '
                             f'--name {path} --file {destination} '
                             f'--container-name {container_name}')
 
