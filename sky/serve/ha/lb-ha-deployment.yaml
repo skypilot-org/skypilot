@@ -15,6 +15,18 @@ spec:
       labels:
         app: sky-lb-ha
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - sky-lb-ha
+                topologyKey: kubernetes.io/hostname
       containers:
       - name: sky-lb-ha
         image: berkeleyskypilot/skypilot-ha:v1
@@ -28,6 +40,14 @@ spec:
             python -m sky.serve.load_balancer --controller-addr http://${IP}:20001 --load-balancer-port 8890
         ports:
         - containerPort: 8890
+        readinessProbe:
+          exec:
+            command:
+              - python
+              - -c
+              - "import http.client; conn = http.client.HTTPConnection('localhost', 8890); conn.request('GET', '/'); response = conn.getresponse(); import sys; sys.exit(0 if response.status == 307 else 1)"
+          initialDelaySeconds: 10
+          periodSeconds: 5
 ---
 # Create a service to expose the load balancer
 apiVersion: v1

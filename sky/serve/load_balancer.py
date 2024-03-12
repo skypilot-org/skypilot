@@ -119,6 +119,7 @@ def run_load_balancer(controller_addr: str, load_balancer_port: int):
                                          load_balancer_port=load_balancer_port)
     load_balancer.run()
 
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()

@@ -72,3 +72,4 @@ kubectl scale deployment sky-lb-ha --replicas=3
 
 ## Caveats
 * Stateful load balancer policies are tricky. Some of them may work in an approximate manner - need to test.
+* If possible, it is suggested to randomly pick a replica from the list of candidate replica in your policy to prevent all replicas from returning the same endpoint. 
