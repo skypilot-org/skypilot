@@ -228,14 +228,16 @@ def add_service(name: str, controller_job_id: int, policy: str,
         exists.
     """
     try:
-        _DB.cursor.execute(
-            """\
-            INSERT INTO services
-            (name, controller_job_id, status, policy,
-            requested_resources_str)
-            VALUES (?, ?, ?, ?, ?)""", (name, controller_job_id, status.value,
-                                        policy, requested_resources_str))
-        _DB.conn.commit()
+        with db_utils.safe_cursor(_DB_PATH) as cursor:
+            cursor.execute(
+                """\
+                INSERT INTO services
+                (name, controller_job_id, status, policy,
+                requested_resources_str)
+                VALUES (?, ?, ?, ?, ?)""",
+                (name, controller_job_id, status.value, policy,
+                 requested_resources_str))
+
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
             raise RuntimeError('Unexpected database error') from e
@@ -245,18 +247,18 @@ def add_service(name: str, controller_job_id: int, policy: str,
 
 def remove_service(service_name: str) -> None:
     """Removes a service from the database."""
-    _DB.cursor.execute("""\
-        DELETE FROM services WHERE name=(?)""", (service_name,))
-    _DB.conn.commit()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute("""\
+            DELETE FROM services WHERE name=(?)""", (service_name,))
 
 
 def set_service_uptime(service_name: str, uptime: int) -> None:
     """Sets the uptime of a service."""
-    _DB.cursor.execute(
-        """\
-        UPDATE services SET
-        uptime=(?) WHERE name=(?)""", (uptime, service_name))
-    _DB.conn.commit()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            uptime=(?) WHERE name=(?)""", (uptime, service_name))
 
 
 def set_service_status_and_active_versions(
@@ -269,32 +271,33 @@ def set_service_status_and_active_versions(
     if active_versions is not None:
         vars_to_set = 'status=(?), active_versions=(?)'
         values = (status.value, json.dumps(active_versions), service_name)
-    _DB.cursor.execute(
-        f"""\
-        UPDATE services SET
-        {vars_to_set} WHERE name=(?)""", values)
-    _DB.conn.commit()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            f"""\
+            UPDATE services SET
+            {vars_to_set} WHERE name=(?)""", values)
 
 
 def set_service_controller_port(service_name: str,
                                 controller_port: int) -> None:
     """Sets the controller port of a service."""
-    _DB.cursor.execute(
-        """\
-        UPDATE services SET
-        controller_port=(?) WHERE name=(?)""", (controller_port, service_name))
-    _DB.conn.commit()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            controller_port=(?) WHERE name=(?)""",
+            (controller_port, service_name))
 
 
 def set_service_load_balancer_port(service_name: str,
                                    load_balancer_port: int) -> None:
     """Sets the load balancer port of a service."""
-    _DB.cursor.execute(
-        """\
-        UPDATE services SET
-        load_balancer_port=(?) WHERE name=(?)""",
-        (load_balancer_port, service_name))
-    _DB.conn.commit()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            load_balancer_port=(?) WHERE name=(?)""",
+            (load_balancer_port, service_name))
 
 
 def _get_service_from_row(row) -> Dict[str, Any]:
@@ -326,7 +329,8 @@ def _get_service_from_row(row) -> Dict[str, Any]:
 
 def get_services() -> List[Dict[str, Any]]:
     """Get all existing service records."""
-    rows = _DB.cursor.execute('SELECT v.max_version, s.* FROM services s '
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute('SELECT v.max_version, s.* FROM services s '
                               'JOIN ('
                               'SELECT service_name, MAX(version) as max_version'
                               ' FROM version_specs GROUP BY service_name) v '
@@ -339,13 +343,14 @@ def get_services() -> List[Dict[str, Any]]:
 
 def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     """Get all existing service records."""
-    rows = _DB.cursor.execute(
-        'SELECT v.max_version, s.* FROM services s '
-        'JOIN ('
-        'SELECT service_name, MAX(version) as max_version '
-        'FROM version_specs WHERE service_name=(?)) v '
-        'ON s.name=v.service_name WHERE name=(?)',
-        (service_name, service_name)).fetchall()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            'SELECT v.max_version, s.* FROM services s '
+            'JOIN ('
+            'SELECT service_name, MAX(version) as max_version '
+            'FROM version_specs WHERE service_name=(?)) v '
+            'ON s.name=v.service_name WHERE name=(?)',
+            (service_name, service_name)).fetchall()
     for row in rows:
         return _get_service_from_row(row)
     return None
@@ -353,10 +358,11 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
 
 def get_service_versions(service_name: str) -> List[int]:
     """Gets all versions of a service."""
-    rows = _DB.cursor.execute(
-        """\
-        SELECT DISTINCT version FROM version_specs
-        WHERE service_name=(?)""", (service_name,)).fetchall()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT DISTINCT version FROM version_specs
+            WHERE service_name=(?)""", (service_name,)).fetchall()
     return [row[0] for row in rows]
 
 
@@ -371,15 +377,16 @@ def get_glob_service_names(
     Returns:
         A list of non-duplicated service names.
     """
-    if service_names is None:
-        rows = _DB.cursor.execute('SELECT name FROM services').fetchall()
-    else:
-        rows = []
-        for service_name in service_names:
-            rows.extend(
-                _DB.cursor.execute(
-                    'SELECT name FROM services WHERE name GLOB (?)',
-                    (service_name,)).fetchall())
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        if service_names is None:
+            rows = cursor.execute('SELECT name FROM services').fetchall()
+        else:
+            rows = []
+            for service_name in service_names:
+                rows.extend(
+                    cursor.execute(
+                        'SELECT name FROM services WHERE name GLOB (?)',
+                        (service_name,)).fetchall())
     return list({row[0] for row in rows})
 
 
@@ -387,34 +394,35 @@ def get_glob_service_names(
 def add_or_update_replica(service_name: str, replica_id: int,
                           replica_info: 'replica_managers.ReplicaInfo') -> None:
     """Adds a replica to the database."""
-    _DB.cursor.execute(
-        """\
-        INSERT OR REPLACE INTO replicas
-        (service_name, replica_id, replica_info)
-        VALUES (?, ?, ?)""",
-        (service_name, replica_id, pickle.dumps(replica_info)))
-    _DB.conn.commit()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            INSERT OR REPLACE INTO replicas
+            (service_name, replica_id, replica_info)
+            VALUES (?, ?, ?)""",
+            (service_name, replica_id, pickle.dumps(replica_info)))
 
 
 def remove_replica(service_name: str, replica_id: int) -> None:
     """Removes a replica from the database."""
-    _DB.cursor.execute(
-        """\
-        DELETE FROM replicas
-        WHERE service_name=(?)
-        AND replica_id=(?)""", (service_name, replica_id))
-    _DB.conn.commit()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            DELETE FROM replicas
+            WHERE service_name=(?)
+            AND replica_id=(?)""", (service_name, replica_id))
 
 
 def get_replica_info_from_id(
         service_name: str,
         replica_id: int) -> Optional['replica_managers.ReplicaInfo']:
     """Gets a replica info from the database."""
-    rows = _DB.cursor.execute(
-        """\
-        SELECT replica_info FROM replicas
-        WHERE service_name=(?)
-        AND replica_id=(?)""", (service_name, replica_id)).fetchall()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT replica_info FROM replicas
+            WHERE service_name=(?)
+            AND replica_id=(?)""", (service_name, replica_id)).fetchall()
     for row in rows:
         return pickle.loads(row[0])
     return None
@@ -423,16 +431,18 @@ def get_replica_info_from_id(
 def get_replica_infos(
         service_name: str) -> List['replica_managers.ReplicaInfo']:
     """Gets all replica infos of a service."""
-    rows = _DB.cursor.execute(
-        """\
-        SELECT replica_info FROM replicas
-        WHERE service_name=(?)""", (service_name,)).fetchall()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT replica_info FROM replicas
+            WHERE service_name=(?)""", (service_name,)).fetchall()
     return [pickle.loads(row[0]) for row in rows]
 
 
 def total_number_provisioning_replicas() -> int:
     """Returns the total number of provisioning replicas."""
-    rows = _DB.cursor.execute('SELECT replica_info FROM replicas').fetchall()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute('SELECT replica_info FROM replicas').fetchall()
     provisioning_count = 0
     for row in rows:
         replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
@@ -445,48 +455,50 @@ def total_number_provisioning_replicas() -> int:
 def add_version(service_name: str) -> int:
     """Adds a version to the database."""
 
-    _DB.cursor.execute(
-        """\
-        INSERT INTO version_specs
-        (version, service_name, spec)
-        VALUES (
-            (SELECT COALESCE(MAX(version), 0) + 1 FROM
-            version_specs WHERE service_name = ?), ?, ?)
-        RETURNING version""", (service_name, service_name, pickle.dumps(None)))
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            INSERT INTO version_specs
+            (version, service_name, spec)
+            VALUES (
+                (SELECT COALESCE(MAX(version), 0) + 1 FROM
+                version_specs WHERE service_name = ?), ?, ?)
+            RETURNING version""",
+            (service_name, service_name, pickle.dumps(None)))
 
-    inserted_version = _DB.cursor.fetchone()[0]
-    _DB.conn.commit()
+        inserted_version = cursor.fetchone()[0]
 
     return inserted_version
 
 
 def add_or_update_version(service_name: str, version: int,
                           spec: 'service_spec.SkyServiceSpec') -> None:
-    _DB.cursor.execute(
-        """\
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
         INSERT or REPLACE INTO version_specs
         (service_name, version, spec)
         VALUES (?, ?, ?)""", (service_name, version, pickle.dumps(spec)))
-    _DB.conn.commit()
 
 
 def remove_service_versions(service_name: str) -> None:
     """Removes a replica from the database."""
-    _DB.cursor.execute(
-        """\
-        DELETE FROM version_specs
-        WHERE service_name=(?)""", (service_name,))
-    _DB.conn.commit()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            DELETE FROM version_specs
+            WHERE service_name=(?)""", (service_name,))
 
 
 def get_spec(service_name: str,
              version: int) -> Optional['service_spec.SkyServiceSpec']:
     """Gets spec from the database."""
-    rows = _DB.cursor.execute(
-        """\
-        SELECT spec FROM version_specs
-        WHERE service_name=(?)
-        AND version=(?)""", (service_name, version)).fetchall()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT spec FROM version_specs
+            WHERE service_name=(?)
+            AND version=(?)""", (service_name, version)).fetchall()
     for row in rows:
         return pickle.loads(row[0])
     return None
@@ -494,9 +506,9 @@ def get_spec(service_name: str,
 
 def delete_version(service_name: str, version: int) -> None:
     """Deletes a version from the database."""
-    _DB.cursor.execute(
-        """\
-        DELETE FROM version_specs
-        WHERE service_name=(?)
-        AND version=(?)""", (service_name, version))
-    _DB.conn.commit()
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            DELETE FROM version_specs
+            WHERE service_name=(?)
+            AND version=(?)""", (service_name, version))
