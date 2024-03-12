@@ -8,6 +8,7 @@ TODO:
 * Better implementation (e.g., fsspec, smart_open, using each cloud's SDK).
 """
 import subprocess
+import shlex
 import urllib.parse
 
 from sky.adaptors import aws
@@ -159,7 +160,7 @@ class AzureCloudStorage(CloudStorage):
     # List of commands to install AWS CLI
     _GET_AZCLI = [
         'az --version >/dev/null 2>&1 || '
-        '(sudo apt-get update --allow-releaseinfo-change && '
+        '(sudo apt-get update --allow-releaseinfo-change; '
         'sudo apt-get install azure-cli -y)'
     ]
 
@@ -198,16 +199,15 @@ class AzureCloudStorage(CloudStorage):
             source)
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
-        account_key_option = ''
         # resource_group_name is None when using a public container or
         # a private containers not belonging to the user.
-        if resource_group_name is not None:
-            storage_account_key = data_utils.get_az_storage_account_key(
-                storage_account_name, resource_group_name)
-            account_key_option = f'--account-key {storage_account_key}'
+        storage_account_key = data_utils.get_az_storage_account_key(
+            storage_account_name, resource_group_name)
+        if storage_account_key is None:
+            storage_account_key = ' '
         download_command = ('az storage blob download-batch '
                             f'--account-name {storage_account_name} '
-                            f'{account_key_option} '
+                            f'--account-key {shlex.quote(storage_account_key)} '
                             f'--source {container_name} '
                             f'--destination {destination}')
 
@@ -221,16 +221,15 @@ class AzureCloudStorage(CloudStorage):
             source)
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
-        account_key_option = ''
         # resource_group_name is None when using a public container or
         # a private containers not belonging to the user.
-        if resource_group_name is not None:
-            storage_account_key = data_utils.get_az_storage_account_key(
-                storage_account_name, resource_group_name)
-            account_key_option = f'--account-key {storage_account_key}'
+        storage_account_key = data_utils.get_az_storage_account_key(
+            storage_account_name, resource_group_name)
+        if storage_account_key is None:
+            storage_account_key = ' '
         download_command = ('az storage blob download '
                             f'--account-name {storage_account_name} '
-                            f'{account_key_option} '
+                            f'--account-key {shlex.quote(storage_account_key)} '
                             f'--name {path} --file {destination} '
                             f'--container-name {container_name}')
 
