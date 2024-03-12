@@ -240,7 +240,17 @@ def _wait_for_pods_to_run(namespace, new_nodes):
         time.sleep(1)
 
 
-def _run_command_on_pods(node_name, node_namespace, command, stream_logs):
+def _run_command_on_pods(node_name: str,
+                         node_namespace: str,
+                         command: List[str],
+                         stream_logs: bool = False):
+    """Run command on Kubernetes pods.
+
+    If `stream_logs` is False (default), then the command will execute without
+    streaming logs. However, if `stream_logs` is set to True, then we will be
+    polling for output and error messages while the command is executing, and
+    adding these messages to the relevant `provision.log` file.
+    """
     cmd_output = kubernetes.stream()(
         kubernetes.core_api().connect_get_namespaced_pod_exec,
         node_name,
@@ -291,7 +301,7 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
 
     for new_pod in new_pods:
         _run_command_on_pods(new_pod.metadata.name, namespace,
-                             set_k8s_env_var_cmd, False)
+                             set_k8s_env_var_cmd)
 
 
 def _check_user_privilege(namespace: str, new_nodes: List) -> None:
@@ -317,7 +327,7 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
     for new_node in new_nodes:
         privilege_check = _run_command_on_pods(new_node.metadata.name,
                                                namespace,
-                                               check_k8s_user_sudo_cmd, False)
+                                               check_k8s_user_sudo_cmd)
         if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
@@ -359,8 +369,10 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
     ]
     for new_node in new_nodes:
-        _run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd,
-                             True)
+        _run_command_on_pods(new_node.metadata.name,
+                             namespace,
+                             set_k8s_ssh_cmd,
+                             stream_logs=True)
 
 
 def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
@@ -670,7 +682,7 @@ def get_cluster_info(
     get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
     assert head_pod_name is not None
     ssh_user = _run_command_on_pods(head_pod_name, namespace,
-                                    get_k8s_ssh_user_cmd, False)
+                                    get_k8s_ssh_user_cmd)
     ssh_user = ssh_user.strip()
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
