@@ -3080,15 +3080,16 @@ def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.gcp
 @pytest.mark.serve
-def test_skyserve_dynamic_ondemand_fallback(generic_cloud: str):
+def test_skyserve_dynamic_ondemand_fallback():
     name = _get_service_name()
     zone = 'us-central1-a'
 
     test = Test(
         f'test-skyserve-dynamic-ondemand-fallback',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
+            f'sky serve up -n {name} --cloud gcp -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
             f'sleep 40',
             # 2 on-demand (provisioning) + 2 Spot (provisioning).
             f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s";'
