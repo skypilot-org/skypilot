@@ -2,6 +2,7 @@
 
 # pylint: disable=import-outside-toplevel
 import functools
+import logging
 import threading
 from typing import Optional
 
@@ -81,6 +82,12 @@ def get_client(name: str,
         elif name == 'storage':
             return StorageManagementClient(credential, subscription_id)
         elif name == 'container':
+            # Suppress noisy logs from Azure SDK when attempting to run 
+            # exists() on public container with credentials. Reference:
+            # https://github.com/Azure/azure-sdk-for-python/issues/9422
+            azure_logger = logging.getLogger('azure')
+            azure_logger.setLevel(logging.CRITICAL)
+
             container_url = (f'https://{storage_account_name}.'
                              f'blob.core.windows.net/{container_name}')
             container_client = ContainerClient.from_container_url(
