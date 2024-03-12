@@ -2962,7 +2962,7 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
     for check_tuple in check_tuples:
         count, is_spot, status = check_tuple
         resource_str = ''
-        if status != 'PENDING':
+        if status not in ['PENDING', 'SHUTTING_DOWN', 'FAILED']:
             spot_str = ''
             if is_spot:
                 spot_str = '\[Spot\]'
@@ -3127,22 +3127,29 @@ def test_skyserve_dynamic_ondemand_fallback():
 
 
 @pytest.mark.serve
-def test_skyserve_spot_user_bug(generic_cloud: str):
-    """Tests that spot recovery doesn't occur for non-preemption failures"""
+def test_skyserve_user_bug_restart(generic_cloud: str):
+    """Tests that we restart the service after user bug."""
+    # TODO(zhwu): this behavior needs some rethinking.
     name = _get_service_name()
     test = Test(
-        f'test-skyserve-spot-user-bug',
+        f'test-skyserve-user-bug-restart',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/spot/user_bug.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            # After failure due to user bug, the service should fail instead of
-            # triggering spot recovery.
-            '(while true; do'
-            f'    output=$(sky serve status {name});'
-            '     echo "$output" | grep -q "FAILED" && break;'
-            '     echo "$output" | grep -q "PROVISIONING" && exit 1;'
-            '     sleep 10;'
-            'done)',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/restart/user_bug.yaml',
+            f's=$(sky serve status {name}); echo "$s";'
+            'until echo "$s" | grep -A2 "Service Replicas" | grep "SHUTTING_DOWN"; '
+            'do echo "Waiting for first service to be SHUTTING DOWN..."; '
+            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; sleep 20; ' + 
+            _SERVE_STATUS_WAIT.format(name=name) +
+            # When the first replica is detected failed, the controller will
+            # start to provision a new replica, and shut down the first one.
+            _check_replica_in_status(name, [(1, True, 'SHUTTING_DOWN'),
+                                            (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            f's=$(sky serve status {name}); echo "$s";'
+            'until echo "$s" | grep -A2 "Service Replicas" | grep "FAILED"; '
+            'do echo "Waiting for first service to be FAILED..."; '
+            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
+            + _check_replica_in_status(name, [(1, True, 'FAILED'),
+                                              (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
