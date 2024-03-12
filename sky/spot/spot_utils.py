@@ -654,7 +654,7 @@ def format_job_table(
     if status_str:
         status_str = f'In progress tasks: {status_str}'
     else:
-        status_str = 'No in progress tasks.'
+        status_str = 'No in-progress spot jobs.'
     output = status_str
     if str(job_table):
         output += f'\n{job_table}'

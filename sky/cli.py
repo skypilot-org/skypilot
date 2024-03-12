@@ -1252,15 +1252,14 @@ def _get_spot_jobs(
         num_in_progress_jobs = len(spot_jobs)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg = ('Controller\'s latest status is INIT; jobs '
-                   'will not be shown until it becomes UP.')
-        else:
-            assert controller_status in [None, status_lib.ClusterStatus.STOPPED]
-            msg = 'No in progress jobs.'
-            if controller_status is None:
-                msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
-                        f'{colorama.Style.RESET_ALL})')
+        msg = str(e)
+        if controller_status is None:
+            msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
+                    f'{colorama.Style.RESET_ALL})')
+        elif (controller_status == status_lib.ClusterStatus.STOPPED and
+              is_called_by_user):
+            msg += (f' (See finished jobs: {colorama.Style.BRIGHT}'
+                    f'sky spot queue --refresh{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
         msg = ('Failed to query spot jobs due to connection '
                'issues. Try again later. '
@@ -1307,14 +1306,10 @@ def _get_services(service_names: Optional[List[str]],
             num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg = 'Controller is initializing. Please wait for a while.'
-        else:
-            assert controller_status in [None, status_lib.ClusterStatus.STOPPED]
-            msg = 'No existing services. '
-            if controller_status is None:
-                msg += (f'(See: {colorama.Style.BRIGHT}sky serve -h'
-                        f'{colorama.Style.RESET_ALL})')
+        msg = str(e)
+        if controller_status is None:
+            msg += (f' (See: {colorama.Style.BRIGHT}sky serve -h'
+                    f'{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
         msg = ('Failed to fetch service statuses due to connection issues. '
                'Please try again later. Details: '
@@ -2504,86 +2499,74 @@ def down(
 
 
 def _hint_or_raise_for_down_spot_controller(controller_name: str):
-    # spot_jobs will be empty when the spot cluster is not running.
-    cluster_status, _ = backend_utils.refresh_cluster_status_handle(
-        controller_name)
-    if cluster_status is None:
-        click.echo('Managed spot controller has already been torn down.')
-        return
-
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
-    if cluster_status == status_lib.ClusterStatus.INIT:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                controller.value.decline_down_in_init_status_hint)
+
+    with rich_utils.safe_status(
+            '[bold cyan]Checking for in-progress spot jobs[/]'):
+        try:
+            spot_jobs = core.spot_queue(refresh=False, skip_finished=True)
+        except exceptions.ClusterNotUpError as e:
+            if controller.value.connection_error_hint in str(e):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        controller.value.
+                        decline_down_when_failed_to_fetch_status_hint)
+            if e.cluster_status is None:
+                click.echo(
+                    'Managed spot controller has already been torn down.')
+                sys.exit(0)
+            # At this point, the spot jobs are failed to be fetched due to the
+            # controller being STOPPED or being firstly launched, i.e., there is
+            # no in-prgress spot jobs.
+            spot_jobs = []
+
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
-           f'spot controller ({cluster_status.value}). Please be '
-           f'aware of the following:{colorama.Style.RESET_ALL}'
+           'spot controller. Please be aware of the following:'
+           f'{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
            'jobs (output of `sky spot queue`) will be lost.')
     click.echo(msg)
-    if cluster_status == status_lib.ClusterStatus.UP:
-        with rich_utils.safe_status(
-                '[bold cyan]Checking for in-progress spot jobs[/]'):
-            try:
-                spot_jobs = core.spot_queue(refresh=False)
-            except exceptions.ClusterNotUpError:
-                # The spot controller cluster status changed during querying
-                # the spot jobs, use the latest cluster status, so that the
-                # message for INIT and STOPPED states will be correctly
-                # added to the message.
-                cluster_status = backend_utils.refresh_cluster_status_handle(
-                    controller_name)
-                spot_jobs = []
-
-        # Find in-progress spot jobs, and hint users to cancel them.
-        non_terminal_jobs = [
-            job for job in spot_jobs if not job['status'].is_terminal()
-        ]
-        if (cluster_status == status_lib.ClusterStatus.UP and
-                non_terminal_jobs):
-            job_table = spot_lib.format_job_table(non_terminal_jobs,
-                                                  show_all=False)
-            msg = controller.value.decline_down_for_dirty_controller_hint
-            # Add prefix to each line to align with the bullet point.
-            msg += '\n'.join(
-                ['   ' + line for line in job_table.split('\n') if line != ''])
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.NotSupportedError(msg)
-        else:
-            click.echo(' * No in-progress spot jobs found. It should be safe '
-                       'to terminate (see caveats above).')
+    if spot_jobs:
+        job_table = spot_lib.format_job_table(spot_jobs, show_all=False)
+        msg = controller.value.decline_down_for_dirty_controller_hint
+        # Add prefix to each line to align with the bullet point.
+        msg += '\n'.join(
+            ['   ' + line for line in job_table.split('\n') if line != ''])
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(msg)
+    else:
+        click.echo(' * No in-progress spot jobs found. It should be safe to '
+                   'terminate (see caveats above).')
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
-    cluster_status, _ = backend_utils.refresh_cluster_status_handle(
-        controller_name)
-    if cluster_status is None:
-        click.echo('Sky serve controller has already been torn down.')
-        return
-
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
-    if cluster_status == status_lib.ClusterStatus.INIT:
+    with rich_utils.safe_status('[bold cyan]Checking for live services[/]'):
+        try:
+            services = serve_lib.status()
+        except exceptions.ClusterNotUpError as e:
+            if controller.value.connection_error_hint in str(e):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        controller.value.
+                        decline_down_when_failed_to_fetch_status_hint)
+            if e.cluster_status is None:
+                click.echo('Serve controller has already been torn down.')
+                sys.exit(0)
+            # At this point, the services are failed to be fetched due to the
+            # controller being STOPPED or being firstly launched, i.e., there is
+            # no in-prgress services.
+            services = []
+
+    if services:
+        service_names = [service['name'] for service in services]
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                controller.value.decline_down_in_init_status_hint)
-    elif cluster_status == status_lib.ClusterStatus.UP:
-        with rich_utils.safe_status(
-                '[bold cyan]Checking for running services[/]'):
-            try:
-                services = serve_lib.status()
-            except exceptions.ClusterNotUpError:
-                cluster_status = backend_utils.refresh_cluster_status_handle(
-                    controller_name)
-                services = []
-        if services:
-            service_names = [service['name'] for service in services]
-            with ux_utils.print_exception_no_traceback():
-                msg = (controller.value.decline_down_for_dirty_controller_hint.
-                       format(service_names=', '.join(service_names)))
-                raise exceptions.NotSupportedError(msg)
+            msg = (
+                controller.value.decline_down_for_dirty_controller_hint.format(
+                    service_names=', '.join(service_names)))
+            raise exceptions.NotSupportedError(msg)
     # Do nothing for STOPPED state, as it is safe to terminate the cluster.
     click.echo(f'Terminate sky serve controller: {controller_name}.')
 
@@ -2673,6 +2656,13 @@ def _down_or_stop_clusters(
                 assert controller is not None
                 hint_or_raise = _CONTROLLER_TO_HINT_OR_RAISE[controller]
                 try:
+                    # TODO(zhwu): This hint or raise is not transactional, which
+                    # means even if it passed the check with no in-progress spot
+                    # or service and prompt the confirmation for termination,
+                    # a user could still do a `sky spot launch` or a
+                    # `sky serve up` before typing the delete, causing a leaked
+                    # spot job or service. We should make this check atomic with
+                    # the termination.
                     hint_or_raise(controller_name)
                 except exceptions.ClusterOwnerIdentityMismatchError as e:
                     if purge:
@@ -3432,12 +3422,10 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed spot jobs with IDs 1, 2, 3
       $ sky spot cancel 1 2 3
     """
-    _, handle = backend_utils.is_controller_up(
+    backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
-        stopped_message='All managed spot jobs should have finished.')
-    if handle is None:
-        # Hint messages already printed by the call above.
-        sys.exit(1)
+        stopped_message='All managed spot jobs should have finished.',
+        exit_if_not_accessible=True)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
@@ -3491,8 +3479,8 @@ def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                            follow=follow)
         else:
             core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
-    except exceptions.ClusterNotUpError:
-        # Hint messages already printed by the call above.
+    except exceptions.ClusterNotUpError as e:
+        click.echo(e)
         sys.exit(1)
 
 
@@ -3517,12 +3505,12 @@ def spot_dashboard(port: Optional[int]):
     hint = (
         'Dashboard is not available if spot controller is not up. Run a spot '
         'job first.')
-    _, handle = backend_utils.is_controller_up(
+    backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
         stopped_message=hint,
-        non_existent_message=hint)
-    if handle is None:
-        sys.exit(1)
+        non_existent_message=hint,
+        exit_if_not_accessible=True)
+
     # SSH forward a free local port to remote's dashboard port.
     remote_port = constants.SPOT_DASHBOARD_REMOTE_PORT
     if port is None:
@@ -4025,12 +4013,10 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
             'Can only specify one of SERVICE_NAMES or --all. '
             f'Provided {argument_str!r}.')
 
-    _, handle = backend_utils.is_controller_up(
+    backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='All services should have been terminated.')
-    if handle is None:
-        # Hint messages already printed by the call above.
-        sys.exit(1)
+        stopped_message='All services should have been terminated.',
+        exit_if_not_accessible=True)
 
     if not yes:
         quoted_service_names = [f'{name!r}' for name in service_names]
@@ -4110,8 +4096,8 @@ def serve_logs(
                             target=target_component,
                             replica_id=replica_id,
                             follow=follow)
-    except exceptions.ClusterNotUpError:
-        # Hint messages already printed by the call above.
+    except exceptions.ClusterNotUpError as e:
+        click.echo(e)
         sys.exit(1)
 
 
