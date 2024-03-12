@@ -26,8 +26,6 @@ SKY_REMOTE_RAY_VERSION = '2.9.3'
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
 # same spot task.
-# TODO(zhwu): Remove SKYPILOT_JOB_ID after 0.5.0.
-TASK_ID_ENV_VAR_DEPRECATED = 'SKYPILOT_JOB_ID'
 TASK_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
 # This environment variable stores a '\n'-separated list of task IDs that
 # are within the same spot job (DAG). This can be used by the user to

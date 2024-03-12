@@ -223,7 +223,7 @@ FAQs
   You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
   The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#pod-v1-core>`_.
 
-  For example, to set custom environment variables in the pod, you can add the following to your :code:`~/.sky/config.yaml` file:
+  For example, to set custom environment variables and attach a volume on your pods, you can add the following to your :code:`~/.sky/config.yaml` file:
 
   .. code-block:: yaml
 
@@ -234,6 +234,14 @@ FAQs
               - env:
                 - name: MY_ENV_VAR
                   value: MY_ENV_VALUE
+                volumeMounts:       # Custom volume mounts for the pod
+                  - mountPath: /foo
+                    name: example-volume
+            volumes:
+              - name: example-volume
+                hostPath:
+                  path: /tmp
+                  type: Directory
 
   For more details refer to :ref:`config-yaml`.
 
