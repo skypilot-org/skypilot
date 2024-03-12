@@ -4470,8 +4470,8 @@ def serve_update(
 
     Two update modes are supported:
     - "rolling": (default) SkyServe will update the service with rolling update,
-        i.e., it will terminate old replicas and start new replicas one by one.
-        Traffic can be mixed on old and new replicas.
+        i.e., it will terminate one old replica whenever one new replica is
+        ready. Traffic can be mixed on old and new replicas.
     - "blue_green": SkyServe will update the service with blue-green update,
         i.e., it will wait for new replicas to be ready and then terminate old
         replicas. Traffic will only be switched from old to new replicas after

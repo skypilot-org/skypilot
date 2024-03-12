@@ -18,7 +18,6 @@ from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.utils import common_utils
-from sky.utils import env_options
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -57,12 +56,7 @@ class SkyServeController:
             try:
                 replica_infos = serve_state.get_replica_infos(
                     self._service_name)
-                replica_info_dicts = [
-                    info.to_info_dict(
-                        with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
-                    for info in replica_infos
-                ]
-                logger.info(f'All replica info: {replica_info_dicts}')
+                logger.info(f'All replica info: {replica_infos}')
                 scaling_options = self._autoscaler.evaluate_scaling(
                     replica_infos)
                 for scaling_option in scaling_options:

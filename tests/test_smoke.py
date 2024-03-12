@@ -2950,6 +2950,8 @@ def _get_skyserve_http_test(name: str, cloud: str,
 def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
                                                                  str]]) -> str:
     """Check replicas' status and count in sky serve status
+
+    We will check vCPU=2, as all our tests use vCPU=2.
     
     Args:
         name: the name of the service

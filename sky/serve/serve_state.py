@@ -57,7 +57,9 @@ _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
 # Backward compatibility.
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              'requested_resources_str', 'TEXT')
-# Deprecated: switched to service_version below
+# Deprecated: switched to `active_versions` below for the version considered
+# active by the load balancer. The authscaler/replica_manager version can be
+# found in the version_specs table.
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              'current_version',
                              f'INTEGER DEFAULT {constants.INITIAL_VERSION}')
@@ -257,7 +259,7 @@ def set_service_uptime(service_name: str, uptime: int) -> None:
     _DB.conn.commit()
 
 
-def set_service_status_versions(
+def set_service_status_and_active_versions(
         service_name: str,
         status: ServiceStatus,
         active_versions: Optional[List[int]] = None) -> None:
@@ -296,9 +298,9 @@ def set_service_load_balancer_port(service_name: str,
 
 
 def _get_service_from_row(row) -> Dict[str, Any]:
-    (name, controller_job_id, controller_port, load_balancer_port, status,
-     uptime, policy, _, requested_resources, requested_resources_str, _,
-     active_versions) = row[:12]
+    (current_version, name, controller_job_id, controller_port,
+     load_balancer_port, status, uptime, policy, _, requested_resources,
+     requested_resources_str, _, active_versions) = row[:12]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -307,6 +309,12 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'status': ServiceStatus[status],
         'uptime': uptime,
         'policy': policy,
+        # The version of the autoscaler/replica manager are on. It can be larger
+        # than the active versions as the load balancer may not consider the
+        # latest version to be active for serving traffic.
+        'version': current_version,
+        # The versions that is active for the load balancer. This is a list of
+        # integers in json format. This is mainly for display purpose.
         'active_versions': json.loads(active_versions),
         # TODO(tian): Backward compatibility.
         # Remove after 2 minor release, 0.6.0.
@@ -318,7 +326,11 @@ def _get_service_from_row(row) -> Dict[str, Any]:
 
 def get_services() -> List[Dict[str, Any]]:
     """Get all existing service records."""
-    rows = _DB.cursor.execute('SELECT * FROM services').fetchall()
+    rows = _DB.cursor.execute('SELECT v.max_version, s.* FROM services s '
+                              'JOIN ('
+                              'SELECT service_name, MAX(version) as max_version'
+                              ' FROM version_specs GROUP BY service_name) v '
+                              'ON s.name=v.service_name').fetchall()
     records = []
     for row in rows:
         records.append(_get_service_from_row(row))
@@ -327,8 +339,13 @@ def get_services() -> List[Dict[str, Any]]:
 
 def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     """Get all existing service records."""
-    rows = _DB.cursor.execute('SELECT * FROM services WHERE name=(?)',
-                              (service_name,)).fetchall()
+    rows = _DB.cursor.execute(
+        'SELECT v.max_version, s.* FROM services s '
+        'WHERE name=(?) JOIN ('
+        'SELECT service_name, MAX(version) as max_version'
+        ' FROM version_specs GROUP BY service_name '
+        'WHERE service_name=(?)) v '
+        'ON s.name=v.service_name', (service_name, service_name)).fetchall()
     for row in rows:
         return _get_service_from_row(row)
     return None

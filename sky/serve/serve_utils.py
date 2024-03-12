@@ -237,7 +237,7 @@ def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
 
-def set_service_status_and_versions(
+def set_service_status_and_active_versions_from_replica(
         service_name: str, replica_infos: List['replica_managers.ReplicaInfo'],
         update_mode: UpdateMode) -> None:
     record = serve_state.get_service_from_name(service_name)
@@ -260,7 +260,7 @@ def set_service_status_and_versions(
         chosen_version = get_latest_version_with_min_replicas(
             service_name, replica_infos)
         active_versions = [chosen_version] if chosen_version is not None else []
-    serve_state.set_service_status_versions(
+    serve_state.set_service_status_and_active_versions(
         service_name,
         serve_state.ServiceStatus.from_replica_statuses(
             [info.status for info in ready_replicas]),
@@ -278,7 +278,7 @@ def update_service_status() -> None:
         controller_status = job_lib.get_status(controller_job_id)
         if controller_status is None or controller_status.is_terminal():
             # If controller job is not running, set it as controller failed.
-            serve_state.set_service_status_versions(
+            serve_state.set_service_status_and_active_versions(
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
@@ -856,6 +856,9 @@ class ServeCodeGen:
     Usage:
       >> code = ServeCodeGen.get_service_status(service_name)
     """
+
+    # TODO(zhwu): When any API is changed, we should update the
+    # constants.SERVE_VERSION.
     _PREFIX = [
         'from sky.serve import serve_state',
         'from sky.serve import serve_utils',

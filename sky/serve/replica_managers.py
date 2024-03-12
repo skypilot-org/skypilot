@@ -30,6 +30,7 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -444,6 +445,21 @@ class ReplicaInfo:
         if with_handle:
             info_dict['handle'] = self.handle(cluster_record)
         return info_dict
+
+    def __repr__(self) -> str:
+        info_dict = self.to_info_dict(
+            with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+        handle_str = ''
+        if 'handle' in info_dict:
+            handle_str = f', handle={info_dict["handle"]}'
+        info = (f'ReplicaInfo(replica_id={self.replica_id}, '
+                f'cluster_name={self.cluster_name}, '
+                f'version={self.version}, '
+                f'replica_port={self.replica_port}, '
+                f'is_spot={self.is_spot}, '
+                f'status={self.status}, '
+                f'launched_at={info_dict["launched_at"]}{handle_str})')
+        return info
 
     def probe(
         self,
@@ -1066,7 +1082,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                 self._probe_all_replicas()
                 replica_infos = serve_state.get_replica_infos(
                     self._service_name)
-                serve_utils.set_service_status_and_versions(
+                # TODO(zhwu): when there are multiple load balancers, we need
+                # to make sure the active_versions are the union of all
+                # versions of all load balancers.
+                serve_utils.set_service_status_and_active_versions_from_replica(
                     self._service_name, replica_infos, self._update_mode)
 
             except Exception as e:  # pylint: disable=broad-except
@@ -1082,7 +1101,8 @@ class SkyPilotReplicaManager(ReplicaManager):
     def get_active_replica_urls(self) -> List[str]:
         """Get the urls of all active replicas."""
         record = serve_state.get_service_from_name(self._service_name)
-        assert record is not None, self._service_name
+        assert record is not None, (f'{self._service_name} not found on '
+                                    'controller records.')
         ready_replica_urls = []
         active_versions = set(record['active_versions'])
         for info in serve_state.get_replica_infos(self._service_name):

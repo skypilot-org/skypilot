@@ -10,8 +10,9 @@ SkyServe supports *updating* a deployed service, which can be used to change:
 * Service spec in ``service`` (e.g., number of replicas or autoscaling spec)
 
 During an update, the service will remain accessible with no downtime and its
-endpoint will remain the same. By default, rolling updates are applied, while
-you can also specify a blue-green update.
+endpoint will remain the same. By default, `rolling update <rolling-update>`__
+is applied, while you can also specify a `blue-green update <blue-green-update>`__.
+.. _rolling-update:
 
 Rolling Update
 ---------------
@@ -31,8 +32,9 @@ SkyServe will launch new replicas described by ``new_service.yaml`` with the fol
 
 .. hint::
 
-  When only the ``service`` field is updated and no ``workdir`` or ``file_mounts`` is specified in the service task, SkyServe will apply reuse the old replicas
-  by applying the new service spec and bumping its version. This will significantly reduce the time to update the service.
+  When only the ``service`` field is updated and no ``workdir`` or ``file_mounts`` is specified in the service task, SkyServe will reuse the old replicas
+  by applying the new service spec and bumping its version (See :code:`sky serve status` for the versions). This will significantly reduce the time to
+  update the service.
 
 Example
 ~~~~~~~~
@@ -121,12 +123,12 @@ Whenever a new replica is ready, the traffic will be redirected to both old and 
     SERVICE_NAME  ID  VERSION  IP              LAUNCHED     RESOURCES       STATUS         REGION
     http-server   1   1        54.173.203.169  10 mins ago  1x AWS(vCPU=2)  READY          us-east-1
     http-server   2   1        52.87.241.103   10 mins ago  1x AWS(vCPU=2)  READY          us-east-1
-    http-server   3   2        3.93.241.163    1 min ago    1x AWS(vCPU=4)  READY          us-east-1
-    http-server   4   2        -               1 min ago    1x AWS(vCPU=4)  PROVISIONING   us-east-1
-    http-server   5   2        -               1 min ago    1x AWS(vCPU=4)  PROVISIONING   us-east-1
+    http-server   3   2        3.93.241.163    1 min ago    1x AWS(vCPU=2)  READY          us-east-1
+    http-server   4   2        -               1 min ago    1x AWS(vCPU=2)  PROVISIONING   us-east-1
+    http-server   5   2        -               1 min ago    1x AWS(vCPU=2)  PROVISIONING   us-east-1
 
 
-Once the total number of both old and new replicas exceeds the requested number. Old replicas will be scaled down.
+Once the total number of both old and new replicas exceeds the requested number, old replicas will be scaled down.
 
 .. code-block:: console
 
@@ -140,9 +142,9 @@ Once the total number of both old and new replicas exceeds the requested number.
     SERVICE_NAME  ID  VERSION  IP              LAUNCHED     RESOURCES       STATUS         REGION
     http-server   1   1        54.173.203.169  10 mins ago  1x AWS(vCPU=2)  SHUTTING_DOWN  us-east-1
     http-server   2   1        52.87.241.103   10 mins ago  1x AWS(vCPU=2)  READY          us-east-1
-    http-server   3   2        3.93.241.163    1 min ago    1x AWS(vCPU=4)  READY          us-east-1
-    http-server   4   2        18.206.226.82   1 min ago    1x AWS(vCPU=4)  READY          us-east-1
-    http-server   5   2        -               1 min ago    1x AWS(vCPU=4)  PROVISIONING   us-east-1
+    http-server   3   2        3.93.241.163    1 min ago    1x AWS(vCPU=2)  READY          us-east-1
+    http-server   4   2        18.206.226.82   1 min ago    1x AWS(vCPU=2)  READY          us-east-1
+    http-server   5   2        -               1 min ago    1x AWS(vCPU=2)  PROVISIONING   us-east-1
 
 Eventually, we will only have new replicas ready to serve user requests.
 
@@ -156,11 +158,13 @@ Eventually, we will only have new replicas ready to serve user requests.
 
     Service Replicas
     SERVICE_NAME  ID  VERSION  IP             LAUNCHED    RESOURCES       STATUS  REGION
-    http-server   3   2        3.93.241.163   3 mins ago  1x AWS(vCPU=4)  READY   us-east-1
-    http-server   4   2        18.206.226.82  3 mins ago  1x AWS(vCPU=4)  READY   us-east-1
-    http-server   5   2        3.26.232.31    1 min ago   1x AWS(vCPU=4)  READY   us-east-1
+    http-server   3   2        3.93.241.163   3 mins ago  1x AWS(vCPU=2)  READY   us-east-1
+    http-server   4   2        18.206.226.82  3 mins ago  1x AWS(vCPU=2)  READY   us-east-1
+    http-server   5   2        3.26.232.31    1 min ago   1x AWS(vCPU=2)  READY   us-east-1
 
 
+
+.. _blue-green-update:
 
 Blue-Green Update
 ------------------
@@ -187,7 +191,7 @@ version and each replica's version.
 Example
 ~~~~~~~
 
-We use the same service ``http-server`` as an example. When we can then use :code:`sky serve update` to update the service:
+We use the same service ``http-server`` as an example. We can then use :code:`sky serve update --mode blue_green` to update the service:
 
 .. code-block:: console
 
@@ -250,7 +254,7 @@ Once the total number of new replicas satisfies the requirements, traffics will 
     http-server   4   2        18.206.226.82   1 min ago    1x AWS(vCPU=4)  READY          us-east-1
     http-server   5   2        3.26.232.31     1 min ago    1x AWS(vCPU=4)  READY          us-east-1
 
-Eventually, we will only have new replicas ready to serve user requests.
+Eventually, same as rolling update, we will only have new replicas ready to serve user requests.
 
 .. code-block:: console
 

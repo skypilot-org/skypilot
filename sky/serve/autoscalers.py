@@ -342,10 +342,13 @@ class RequestRateAutoscaler(Autoscaler):
                                     f'{self._service_name}')
         active_versions = record['active_versions']
         if not active_versions:
+            # active_versions can be empty when none of the replicas are ready
+            # when the load balancer sync with the controller.
             return []
         # The active_versions should supposedly only having one version, but
         # we use min() here to make sure this works when rolling update and
-        # blue-green update are mixed, which may cause some corner case.
+        # blue-green update are mixed. min is used as we will scale down all old
+        # replicas with version smaller than `latest_version_with_min_replicas`.
         latest_version_with_min_replicas = min(active_versions)
         # When it is blue green update, we scale down old replicas when the
         # number of ready new replicas is greater than or equal to the min
@@ -569,12 +572,11 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                                           num_ready_spot)
 
         if num_ondemand_to_provision > num_nonterminal_ondemand:
-            num_ondemand_toscale_up = (num_ondemand_to_provision -
-                                       num_nonterminal_ondemand)
+            num_ondemand_to_scale_up = (num_ondemand_to_provision -
+                                        num_nonterminal_ondemand)
             logger.info('Number of on-demand instances to scale up: '
-                        f'{num_ondemand_toscale_up}')
-            for _ in range(num_ondemand_to_provision -
-                           num_nonterminal_ondemand):
+                        f'{num_ondemand_to_scale_up}')
+            for _ in range(num_ondemand_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(
                         AutoscalerDecisionOperator.SCALE_UP,
