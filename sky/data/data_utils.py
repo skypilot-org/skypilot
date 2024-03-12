@@ -205,7 +205,8 @@ def get_az_resource_group(
             resource_group_name = account.id.split('/')[4]
             return resource_group_name
     # resource group cannot be found when using container not created
-    # under the user's subscription id, i.e. public container.
+    # under the user's subscription id, i.e. public container or
+    # private containers not belonging to the user.
     return None
 
 
@@ -227,6 +228,8 @@ def get_az_storage_account_key(
     Returns:
         One of the few access keys to the given storage account
     """
+    if resource_group_name is None:
+        return None
     if resource_client is None:
         resource_client = create_az_client('resource')
     if storage_client is None:
