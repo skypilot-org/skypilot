@@ -38,9 +38,6 @@ class Paperspace(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
             f' is not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.OPEN_PORTS:
-            'Opening ports'
-            f'is not supported in {_REPR}.',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
