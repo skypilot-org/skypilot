@@ -285,7 +285,7 @@ def query_instances(
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
     for inst_id, inst in instances.items():
         status = status_map[inst['state']]
-        if non_terminated_only and status is None:
+        if non_terminated_only:
             continue
         statuses[inst_id] = status
     return statuses
