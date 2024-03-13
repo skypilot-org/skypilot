@@ -38,7 +38,6 @@ import yaml
 
 from sky import clouds
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
@@ -385,7 +384,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Default ssh session is established with kubectl port-forwarding with
     # ClusterIP service.
     try:
-        network_mode = kubernetes_enums.KubernetesNetworkingMode.from_skypilot_config()
+        network_mode = (
+            kubernetes_enums.KubernetesNetworkingMode.from_skypilot_config())
     except ValueError:
         with ux_utils.print_exception_no_traceback():
             raise

@@ -26,7 +26,8 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
              ' ' * 30)
         indent = '    '
-        # If reason contains new lines, add indentation to each line. Do not add indentation to the first line.
+        # If reason contains new lines, add indentation to each line.
+        # Do not add indentation to the first line.
         if reason is not None:
             reason = f'\n{indent}'.join([line for line in reason.split('\n')])
         if ok:

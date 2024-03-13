@@ -184,12 +184,12 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
     if hints:
         hints += ' Run the following commands:'
         if not r2_profile_in_aws_cred():
-            hints += f'\n  $ pip install boto3'
+            hints += '\n  $ pip install boto3'
             hints += f'\n  $ AWS_SHARED_CREDENTIALS_FILE={R2_CREDENTIALS_PATH} aws configure --profile r2'  # pylint: disable=line-too-long
         if not os.path.exists(accountid_path):
-            hints += f'\n  $ mkdir -p ~/.cloudflare'
-            hints += f'\n  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'  # pylint: disable=line-too-long
-        hints += f'\nFor more info: '
+            hints += '\n  $ mkdir -p ~/.cloudflare'
+            hints += '\n  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'  # pylint: disable=line-too-long
+        hints += '\nFor more info: '
         hints += 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloudflare-r2'  # pylint: disable=line-too-long
 
     return (False, hints) if hints else (True, hints)

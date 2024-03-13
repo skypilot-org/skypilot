@@ -28,14 +28,14 @@ class KubernetesNetworkingMode(enum.Enum):
     def from_skypilot_config(cls) -> 'KubernetesNetworkingMode':
         """Returns the enum value for the given config."""
         network_mode_str = skypilot_config.get_nested(
-            ('kubernetes', 'networking'),
-            cls.PORTFORWARD.value)
+            ('kubernetes', 'networking'), cls.PORTFORWARD.value)
         try:
             return cls.from_str(network_mode_str)
         except ValueError as e:
             # Add message saying "Please check: ~/.sky/config.yaml" to the error
             # message.
-            raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') from None
+            raise ValueError(str(e) +
+                             ' Please check: ~/.sky/config.yaml.') from None
 
 
 class KubernetesServiceType(enum.Enum):

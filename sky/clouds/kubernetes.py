@@ -340,11 +340,13 @@ class Kubernetes(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         # Check dependencies for port-forward mode.
         try:
-            networking_mode = kubernetes_enums.KubernetesNetworkingMode.from_skypilot_config()
+            networking_mode = (kubernetes_enums.KubernetesNetworkingMode.
+                               from_skypilot_config())
         except ValueError:
             with ux_utils.print_exception_no_traceback():
                 raise
-        if networking_mode == kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD:
+        if (networking_mode ==
+                kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD):
             try:
                 kubernetes_utils.check_port_forward_mode_dependencies()
             except RuntimeError as e:
