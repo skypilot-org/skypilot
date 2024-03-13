@@ -25,6 +25,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
+from sky.serve import spot_placer
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -369,10 +370,11 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    _VERSION = 0
+    _VERSION = 1
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
-                 is_spot: bool, version: int) -> None:
+                 is_spot: bool, version: int,
+                 location: spot_placer.Location) -> None:
         self._version = self._VERSION
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
@@ -382,6 +384,7 @@ class ReplicaInfo:
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
         self.is_spot: bool = is_spot
+        self.location: spot_placer.Location = location
 
     def handle(
         self,
@@ -501,6 +504,9 @@ class ReplicaInfo:
             # Treated similar to on-demand instances.
             self.is_spot = False
 
+        if version == 0:
+            self.location = None
+
         self.__dict__.update(state)
 
 
@@ -523,6 +529,8 @@ class ReplicaManager:
         self.least_recent_version: int = serve_constants.INITIAL_VERSION
         serve_state.add_or_update_version(self._service_name,
                                           self.latest_version, spec)
+        self.spot_placer: spot_placer.SpotPlacer = spot_placer.SpotPlacer.from_spec(
+            spec)
 
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
@@ -590,6 +598,12 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
+        use_spot = _should_use_spot(self._task_yaml_path, resources_override)
+        location = self.spot_placer.select(
+            serve_state.get_replica_infos(
+                self._service_name)) if use_spot else None
+        if location:
+            resources_override.update(location.to_dict())
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
@@ -598,10 +612,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             args=(self._task_yaml_path, cluster_name, resources_override),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
-        use_spot = _should_use_spot(self._task_yaml_path, resources_override)
-
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
-                           self.latest_version)
+                           self.latest_version, location)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -740,6 +752,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                               f' (status: {cluster_status.value})')
         logger.info(
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
+        self.spot_placer.set_preemption(info.location)
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
@@ -792,6 +805,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                             ProcessStatus.FAILED)
                         error_in_sky_launch = True
                     else:
+                        if info.is_spot:
+                            self.spot_placer.set_active(info.location)
+                        else:
+                            self.spot_placer.set_preemption(info.location)
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
                 serve_state.add_or_update_replica(self._service_name,
