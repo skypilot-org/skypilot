@@ -187,7 +187,10 @@ def stop_instances(
     num_instances = len(all_instances)
 
     # Request a stop on all instances
-    for instance_id in all_instances:
+    for instance_id, instance in all_instances.items():
+        if worker_only and instance['name'].endswith('-head'):
+            num_instances -= 1
+            continue
         client.stop(instance_id=instance_id)
 
     # Wait for instances to stop
