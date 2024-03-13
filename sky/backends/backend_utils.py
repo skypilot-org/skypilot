@@ -1904,7 +1904,7 @@ def _update_cluster_status_no_lock(
                 except exceptions.CommandError as e:
                     success = False
                     if e.returncode == 255:
-                        logger.debug(f'The cluster is likely {noun}.')
+                        logger.debug(f'The cluster is likely {noun}ed.')
                         reset_local_autostop = False
                 except (Exception, SystemExit) as e:  # pylint: disable=broad-except
                     success = False
