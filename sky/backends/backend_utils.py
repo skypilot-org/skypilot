@@ -974,7 +974,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     # Check the availability of the cloud type.
     if isinstance(
             cloud,
-        (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere, clouds.Cudo)):
+        (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere, clouds.Cudo, clouds.Paperspace)):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)

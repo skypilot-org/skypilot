@@ -483,14 +483,4 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     client.get_or_add_ssh_key(public_key)
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
     return configure_ssh_info(config)
-
-
-# ----------------------------- Paperspace --------------------------- #
-def setup_paperspace_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Sets up SSH authentication for Paperspace.
-
-    - Generates a new SSH key pair if one does not exist.
-    """
-    _, public_key_path = get_or_generate_keys()
-    config['auth']['ssh_public_key'] = public_key_path
-    return configure_ssh_info(config)
+    
