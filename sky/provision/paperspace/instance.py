@@ -92,7 +92,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                       pending_status + ['off'])
         if not instances:
             break
-        logger.info(f'Waiting for {len(instances)}/{len(stopped_instances)} '
+        num_stopped_instances = len(stopped_instances)
+        num_restarted_instances = num_stopped_instances - len(instances)
+        logger.info(f'Waiting for {num_restarted_instances}/{num_stopped_instances} '
                     'stopped instances to be restarted.')
         time.sleep(POLL_INTERVAL)
 
