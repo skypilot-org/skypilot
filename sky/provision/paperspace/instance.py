@@ -191,7 +191,7 @@ def stop_instances(
     # Wait for instances to stop
     for _ in range(MAX_POLLS_FOR_STOP):
         all_instances = _filter_instances(cluster_name_on_cloud, ['off'])
-        if len(all_instances) < num_instances:
+        if len(all_instances) >= num_instances:
             break
         time.sleep(POLL_INTERVAL)
     else:
