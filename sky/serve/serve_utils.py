@@ -7,11 +7,12 @@ import pickle
 import re
 import shlex
 import shutil
+import sys
 import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
-                    TextIO, Type, TypeVar)
+                    TextIO, Tuple, Type, TypeVar)
 import uuid
 
 import colorama
@@ -744,10 +745,25 @@ def format_service_table(service_records: List[Dict[str, Any]],
             f'{replica_table}')
 
 
+def _sort_replica_records(
+        replica_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+
+    def _sort_key(record: Dict[str, Any]) -> Tuple[int, int, int]:
+        # If no version, then position replica at the end.
+        version = int(record.get('version', -sys.maxsize))
+        status_priority = 0 if record['status'] == 'READY' else 1
+        replica_id = int(record['replica_id'])
+        return -version, status_priority, replica_id
+
+    sorted_records = sorted(replica_records, key=_sort_key)
+    return sorted_records
+
+
 def _format_replica_table(replica_records: List[Dict[str, Any]],
                           show_all: bool) -> str:
     if not replica_records:
         return 'No existing replicas.'
+    replica_records = _sort_replica_records(replica_records)
 
     replica_columns = [
         'SERVICE_NAME', 'ID', 'VERSION', 'IP', 'LAUNCHED', 'RESOURCES',
