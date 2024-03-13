@@ -529,8 +529,6 @@ class ReplicaManager:
         self.least_recent_version: int = serve_constants.INITIAL_VERSION
         serve_state.add_or_update_version(self._service_name,
                                           self.latest_version, spec)
-        self.spot_placer: spot_placer.SpotPlacer = spot_placer.SpotPlacer.from_spec(
-            spec)
 
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
@@ -575,7 +573,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self._down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
-
+        self.spot_placer: spot_placer.SpotPlacer = spot_placer.SpotPlacer.from_spec(
+            spec, task_yaml_path)
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
@@ -602,7 +601,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         location = self.spot_placer.select(
             serve_state.get_replica_infos(
                 self._service_name)) if use_spot else None
-        if location:
+        if location and resources_override:
             resources_override.update(location.to_dict())
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(

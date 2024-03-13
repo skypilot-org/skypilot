@@ -212,31 +212,8 @@ class Resources:
     # if it fails to fetch some account specific catalog information (e.g., AWS
     # zone mapping). It is fine to use the default catalog as this function is
     # only for display purposes.
-    @service_catalog.fallback_to_default_catalog
-    def __repr__(self) -> str:
-        """Returns a string representation for display.
 
-        Examples:
-
-            >>> sky.Resources(accelerators='V100')
-            <Cloud>({'V100': 1})
-
-            >>> sky.Resources(accelerators='V100', use_spot=True)
-            <Cloud>([Spot], {'V100': 1})
-
-            >>> sky.Resources(accelerators='V100',
-            ...     use_spot=True, instance_type='p3.2xlarge')
-            AWS(p3.2xlarge[Spot], {'V100': 1})
-
-            >>> sky.Resources(accelerators='V100', instance_type='p3.2xlarge')
-            AWS(p3.2xlarge, {'V100': 1})
-
-            >>> sky.Resources(instance_type='p3.2xlarge')
-            AWS(p3.2xlarge, {'V100': 1})
-
-            >>> sky.Resources(disk_size=100)
-            <Cloud>(disk_size=100)
-        """
+    def hardware_str(self) -> str:
         accelerators = ''
         accelerator_args = ''
         if self.accelerators is not None:
@@ -280,23 +257,52 @@ class Resources:
         else:
             instance_type = ''
 
-        # Do not show region/zone here as `sky status -a` would show them as
-        # separate columns. Also, Resources repr will be printed during
-        # failover, and the region may be dynamically determined.
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
             f'{disk_tier}{disk_size}{ports}')
+
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
             hardware_str = hardware_str[1:]
 
+        return hardware_str
+
+    @service_catalog.fallback_to_default_catalog
+    def __repr__(self) -> str:
+        """Returns a string representation for display.
+
+        Examples:
+
+            >>> sky.Resources(accelerators='V100')
+            <Cloud>({'V100': 1})
+
+            >>> sky.Resources(accelerators='V100', use_spot=True)
+            <Cloud>([Spot], {'V100': 1})
+
+            >>> sky.Resources(accelerators='V100',
+            ...     use_spot=True, instance_type='p3.2xlarge')
+            AWS(p3.2xlarge[Spot], {'V100': 1})
+
+            >>> sky.Resources(accelerators='V100', instance_type='p3.2xlarge')
+            AWS(p3.2xlarge, {'V100': 1})
+
+            >>> sky.Resources(instance_type='p3.2xlarge')
+            AWS(p3.2xlarge, {'V100': 1})
+
+            >>> sky.Resources(disk_size=100)
+            <Cloud>(disk_size=100)
+        """
+
+        # Do not show region/zone here as `sky status -a` would show them as
+        # separate columns. Also, Resources repr will be printed during
+        # failover, and the region may be dynamically determined.
         cloud_str = '<Cloud>'
         if self.cloud is not None:
             cloud_str = f'{self.cloud}'
 
-        return f'{cloud_str}({hardware_str})'
+        return f'{cloud_str}({self.hardware_str()})'
 
     @property
     def repr_with_region_zone(self) -> str:

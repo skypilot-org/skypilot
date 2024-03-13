@@ -2,10 +2,14 @@
 
 import collections
 import enum
+import os
 import typing
 from typing import Dict, List, Optional
 
+import sky
+from sky import global_user_state
 from sky import sky_logging
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
@@ -33,63 +37,103 @@ class Location:
 
     def to_dict(self) -> Dict[str, str]:
         return {'cloud': self.cloud, 'region': self.region, 'zone': self.zone}
-    
+
+
 class LocationStatus(enum.Enum):
     """Location Spot Status."""
     ACTIVE = 'ACTIVE'
     PREEMPTED = 'PREEMPTED'
-    
+
+
 class SpotPlacer:
     """Spot Placement specification."""
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
-        assert spec.spot_locations is not None
-        self.location2type: Dict[Location, LocationStatus] = {
-            location: LocationStatus.ACTIVE for location in spec.spot_locations
-        }
+    def __init__(self, spec: 'service_spec.SkyServiceSpec',
+                 task_yaml_path: str) -> None:
+        self.task_yaml_path = task_yaml_path
+        config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
+        task = sky.Task.from_yaml_config(config)
 
-    def select(self, existing_replicas: List['replica_managers.ReplicaInfo']) -> Location:
+        enabled_clouds = global_user_state.get_enabled_clouds()
+        self.resources2locations: Dict[str, Dict[Location, LocationStatus]]
+
+        for resources in task.resources:
+            resources_str = resources.hardware_str()
+            self.resources2locations[resources_str] = {}
+            clouds_list = ([resources.cloud]
+                           if resources.cloud is not None else enabled_clouds)
+            for cloud in clouds_list:
+                feasible_resources, _ = (
+                    cloud.get_feasible_launchable_resources(
+                        resources, num_nodes=task.num_nodes))
+
+                for feasible_resource in feasible_resources:
+                    regions = (
+                        feasible_resource.get_valid_regions_for_launchable())
+                    for region in regions:
+                        if region is None:
+                            continue
+                        # Some clouds, such as Azure, does not support zones.
+                        if region.zones is None:
+                            self.resources2locations[resources_str][Location(
+                                str(cloud), region.name,
+                                None)] = LocationStatus.ACTIVE
+
+                        else:
+                            for zone in region.zones:
+                                self.resources2locations[resources_str][
+                                    Location(str(cloud), region.name,
+                                             zone.name)] = LocationStatus.ACTIVE
+
+    def select(
+            self, resources: sky.Resources,
+            existing_replicas: List['replica_managers.ReplicaInfo']
+    ) -> Location:
         """Select next location to place spot instance."""
         raise NotImplementedError
 
-    def set_active(self, location: Location) -> None:
-        assert location in self.location2type
-        self.location2type[location] = LocationStatus.ACTIVE
+    def set_active(self, resources: sky.Resources, location: Location) -> None:
+        self.resources2locations[resources][location] = LocationStatus.ACTIVE
 
-    def set_preemption(self, location: Location) -> None:
-        assert location in self.location2type
-        self.location2type[location] = LocationStatus.PREEMPTED
+    def set_preemption(self, resources: sky.Resources,
+                       location: Location) -> None:
+        self.resources2locations[resources][location] = LocationStatus.PREEMPTED
 
-    def clear_preemptive_locations(self) -> None:
-        for location in self.location2type:
-            self.set_active(location)
+    def clear_preemptive_locations(self, resources: sky.Resources) -> None:
+        for location in self.resources2locations[resources]:
+            self.set_active(resources, location)
 
-    def active_locations(self) -> List[Location]:
+    def active_locations(self, resources: sky.Resources) -> List[Location]:
         return [
-            location for location, location_type in self.location2type.items()
+            location for location, location_type in
+            self.resources2locations[resources].items()
             if location_type == LocationStatus.ACTIVE
         ]
 
-    def preemptive_locations(self) -> List[Location]:
+    def preemptive_locations(self, resources: sky.Resources) -> List[Location]:
         return [
-            location for location, location_type in self.location2type.items()
+            location for location, location_type in
+            self.resources2locations[resources].items()
             if location_type == LocationStatus.PREEMPTED
         ]
 
     @classmethod
-    def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'SpotPlacer':
-        # TODO(MaoZiming): Support more spot placers.
-        return DynamicFailoverSpotPlacer(spec)
+    def from_spec(cls, spec: 'service_spec.SkyServiceSpec',
+                  task_yaml_path: str) -> 'SpotPlacer':
+        return DynamicFailoverSpotPlacer(spec, task_yaml_path)
 
 
 class DynamicFailoverSpotPlacer(SpotPlacer):
     """Dynamic failover to an active location when preempted."""
 
-    def select(self, existing_replicas: List['replica_managers.ReplicaInfo']) -> Location:
+    def select(
+            self, resources: sky.Resources,
+            existing_replicas: List['replica_managers.ReplicaInfo']
+    ) -> Location:
         # Prevent the case with only one active location.
-        if len(self.active_locations()) <= 1 and len(
-                self.preemptive_locations()) > 0:
-            self.clear_preemptive_locations()
+        if len(self.active_locations(resources)) <= 1 and len(
+                self.preemptive_locations(resources)) > 0:
+            self.clear_preemptive_locations(resources)
 
         existing_locations_to_count: Dict[Location,
                                           int] = collections.defaultdict(int)
@@ -97,6 +141,5 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
             if replica.is_spot and replica.location is not None:
                 existing_locations_to_count[replica.location] += 1
 
-        return min(
-            self.active_locations(),
-            key=lambda location: existing_locations_to_count[location])
+        return min(self.active_locations(resources),
+                   key=lambda location: existing_locations_to_count[location])
