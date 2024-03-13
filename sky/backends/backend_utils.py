@@ -2278,7 +2278,8 @@ def is_controller_accessible(
         # following cases:
         # * (UP, autostop set): it will be refreshed without force_refresh set.
         # * (UP, no autostop): very rare (a user ctrl-c when the controller is
-        #   launching), does not matter if refresh or not, since no autostop.
+        #   launching), does not matter if refresh or not, since no autostop. We
+        #   don't include UP in force_refresh_statuses to avoid overheads.
         # * (INIT, autostop set)
         # * (INIT, no autostop): very rare (_update_cluster_status_no_lock may
         #   reset local autostop config), but force_refresh will make sure
