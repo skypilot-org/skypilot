@@ -254,7 +254,9 @@ def _run_command_on_pods(node_name, node_namespace, command):
     return cmd_output
 
 
-def _set_env_vars_in_pods(namespace: str, new_pods: List):
+def _set_env_vars_in_pods(namespace: str,
+                          new_pods: List,
+                          env_vars: Optional[Dict[str, str]] = None):
     """Setting environment variables in pods.
 
     Once all containers are ready, we can exec into them and set env vars.
@@ -269,15 +271,35 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     To do so, we capture env vars from the pod's runtime and write them to
     /etc/profile.d/, making them available for all users in future
     shell sessions.
+
+    Custom environment variables are optionally specified via the `env_vars`
+    parameter.
     """
+    # Command to capture and set k8s environment variables
+    capture_and_set_k8s_env_vars_cmd = (
+        'prefix_cmd() '
+        '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+        'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > '
+        '~/k8s_env_var.sh && ')
+
+    # Initialize the command to append custom environment variables if any
+    append_custom_env_vars_cmd = ''
+    if env_vars:
+        env_var_list = ' '.join(
+            [f'"{key}={value}"' for key, value in env_vars.items()])
+        append_custom_env_vars_cmd = (
+            'for var in ' + env_var_list + ';'
+            'do echo "export ${var}" >> ~/k8s_env_var.sh; done && ')
+
+    # Command to move the script to /etc/profile.d/
+    move_script_cmd = (
+        'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
+        '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+
+    # Combine the commands
     set_k8s_env_var_cmd = [
-        '/bin/sh', '-c',
-        ('prefix_cmd() '
-         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-         'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > '
-         '~/k8s_env_var.sh && '
-         'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-         '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+        '/bin/sh', '-c', capture_and_set_k8s_env_vars_cmd +
+        append_custom_env_vars_cmd + move_script_cmd
     ]
 
     for new_pod in new_pods:
@@ -509,10 +531,12 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     if len(uninitialized_pods) > 0:
         logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
                      f'pods: {list(uninitialized_pods.keys())}')
+        cuda_env_vars = kubernetes_utils.get_cuda_visible_devices_env_var(
+            pod_spec)
         uninitialized_pods_list = list(uninitialized_pods.values())
         _check_user_privilege(namespace, uninitialized_pods_list)
         _setup_ssh_in_pods(namespace, uninitialized_pods_list)
-        _set_env_vars_in_pods(namespace, uninitialized_pods_list)
+        _set_env_vars_in_pods(namespace, uninitialized_pods_list, cuda_env_vars)
         for pod in uninitialized_pods.values():
             _label_pod(namespace,
                        pod.metadata.name,
