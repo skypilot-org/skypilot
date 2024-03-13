@@ -33,7 +33,7 @@ def bootstrap_instances(
     network_id = client.setup_network(cluster_name, region)['id']
     config.node_config['NetworkId'] = network_id
 
-    # Add pubkey to machines via startup 
+    # Add pubkey to machines via startup
     public_key = config.authentication_config['ssh_public_key']
     client.set_sky_key_script(public_key)
 

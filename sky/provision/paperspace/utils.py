@@ -141,7 +141,7 @@ class PaperspaceCloudClient:
                 f'{API_ENDPOINT}/startup-scripts/{script_id}',
                 headers=self.headers,
                 data=json.dumps({
-                    'name': ADD_KEY_SCRIPT+f'-{common_utils.get_user_hash()}',
+                    'name': ADD_KEY_SCRIPT + f'-{common_utils.get_user_hash()}',
                     'script': script,
                     'isRunOnce': True,
                     'isEnabled': True

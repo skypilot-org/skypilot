@@ -483,4 +483,3 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     client.get_or_add_ssh_key(public_key)
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
     return configure_ssh_info(config)
-    

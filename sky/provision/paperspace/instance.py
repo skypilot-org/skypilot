@@ -94,8 +94,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             break
         num_stopped_instances = len(stopped_instances)
         num_restarted_instances = num_stopped_instances - len(instances)
-        logger.info(f'Waiting for {num_restarted_instances}/{num_stopped_instances} '
-                    'stopped instances to be restarted.')
+        logger.info(
+            f'Waiting for {num_restarted_instances}/{num_stopped_instances} '
+            'stopped instances to be restarted.')
         time.sleep(POLL_INTERVAL)
 
     exist_instances = _filter_instances(cluster_name_on_cloud,
@@ -228,6 +229,7 @@ def terminate_instances(
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
 
+    # TODO(asaiacai): Possible private network resource leakage for autodown
     if not worker_only:
         try:
             time.sleep(POLL_INTERVAL)
