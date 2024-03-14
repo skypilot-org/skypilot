@@ -29,7 +29,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
       - name: sky-lb-ha
-        image: berkeleyskypilot/skypilot-ha:v1
+        image: berkeleyskypilot/skypilot-ha:v2
         imagePullPolicy: Always
         command:
           - /bin/sh
