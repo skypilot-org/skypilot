@@ -3800,9 +3800,11 @@ def serve_update(
 
     SkyServe will reuse old replicas, if only the service section is changed
     and no file mounts are specified.
+
     Otherwise, SkyServe will terminate the old replicas and start new replicas.
 
     Two update modes are supported:
+
     - "rolling": (default) SkyServe will update the service with rolling update,
         i.e., it will terminate one old replica whenever one new replica is
         ready. Traffic can be mixed on old and new replicas.
