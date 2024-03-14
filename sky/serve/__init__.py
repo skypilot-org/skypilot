@@ -20,6 +20,7 @@ from sky.serve.serve_utils import ServeCodeGen
 from sky.serve.serve_utils import ServiceComponent
 from sky.serve.serve_utils import SKY_SERVE_CONTROLLER_NAME
 from sky.serve.serve_utils import UpdateMode
+from sky.serve.serve_utils import DEFAULT_UPDATE_MODE
 from sky.serve.service_spec import SkyServiceSpec
 
 os.makedirs(os.path.expanduser(SKYSERVE_METADATA_DIR), exist_ok=True)
@@ -45,4 +46,5 @@ __all__ = [
     'up',
     'update',
     'UpdateMode',
+    'DEFAULT_UPDATE_MODE',
 ]

@@ -75,7 +75,7 @@ class Autoscaler:
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
-        self.update_mode = serve_utils.UpdateMode.ROLLING
+        self.update_mode = serve_utils.DEFAULT_UPDATE_MODE
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:

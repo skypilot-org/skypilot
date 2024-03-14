@@ -530,7 +530,7 @@ class ReplicaManager:
         self._next_replica_id: int = 1
         self._service_name: str = service_name
         self._uptime: Optional[float] = None
-        self._update_mode = serve_utils.UpdateMode.ROLLING
+        self._update_mode = serve_utils.DEFAULT_UPDATE_MODE
         logger.info(f'Readiness probe path: {spec.readiness_path}\n'
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
                     f'Post data: {spec.post_data}')

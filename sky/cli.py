@@ -3757,7 +3757,7 @@ def serve_up(
                 **_get_shell_complete_args(_complete_file_name))
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--mode',
-              default=serve_lib.UpdateMode.ROLLING.value,
+              default=serve_lib.DEFAULT_UPDATE_MODE,
               type=click.Choice([m.value for m in serve_lib.UpdateMode],
                                 case_sensitive=False),
               required=False,

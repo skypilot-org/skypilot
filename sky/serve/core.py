@@ -298,7 +298,7 @@ def up(
 def update(
         task: 'sky.Task',
         service_name: str,
-        mode: serve_utils.UpdateMode = serve_utils.UpdateMode.ROLLING) -> None:
+        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
     """Update an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
