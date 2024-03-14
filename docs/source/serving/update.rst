@@ -34,7 +34,7 @@ SkyServe will launch new replicas described by ``new_service.yaml`` with the fol
 
   When only the ``service`` field is updated and no ``workdir`` or ``file_mounts`` is specified in the service task, SkyServe will reuse the old replicas
   by applying the new service spec and bumping its version (See :code:`sky serve status` for the versions). This will significantly reduce the time to
-  update the service.
+  update the service and avoid potential quota issues.
 
 Example
 ~~~~~~~~
