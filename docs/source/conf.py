@@ -105,4 +105,5 @@ html_static_path = ['_static']
 html_js_files = ['custom.js']
 html_css_files = ['custom.css']
 
+# Allowing cross references in markdown files to be parsed
 myst_heading_anchors = 3
