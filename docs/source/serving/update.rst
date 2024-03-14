@@ -10,8 +10,10 @@ SkyServe supports *updating* a deployed service, which can be used to change:
 * Service spec in ``service`` (e.g., number of replicas or autoscaling spec)
 
 During an update, the service will remain accessible with no downtime and its
-endpoint will remain the same. By default, `rolling update <rolling-update>`__
-is applied, while you can also specify a `blue-green update <blue-green-update>`__.
+endpoint will remain the same. By default, :ref:`rolling update <rolling-update>`
+is applied, while you can also specify a :ref:`blue-green update <blue-green-update>`.
+
+
 .. _rolling-update:
 
 Rolling Update
