@@ -267,7 +267,7 @@ class Azure(clouds.Cloud):
         acc_count = None
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-            acc_count = sum(acc_dict.values())
+            acc_count = str(sum(acc_dict.values()))
         else:
             custom_resources = None
         # pylint: disable=import-outside-toplevel
