@@ -34,7 +34,7 @@ SkyServe will launch new replicas described by ``new_service.yaml`` with the fol
 
   When only the ``service`` field is updated and no ``workdir`` or ``file_mounts`` is specified in the service task, SkyServe will reuse the old replicas
   by applying the new service spec and bumping its version (See :code:`sky serve status` for the versions). This will significantly reduce the time to
-  update the service.
+  update the service and avoid potential quota issues.
 
 Example
 ~~~~~~~~
@@ -62,7 +62,7 @@ We can use :code:`sky serve status http-server` to check the status of the servi
 
 Service ``http-server`` has an initial version of 1.
 
-Suppose we want to update the service to have at least 3 replicas instead of 2. We can update
+Suppose we want to update the service to have 3 replicas instead of 2. We can update
 the task yaml ``examples/serve/http_server/task.yaml``, by changing the ``replicas``
 field:
 
@@ -254,7 +254,7 @@ Once the total number of new replicas satisfies the requirements, traffics will 
     http-server   4   2        18.206.226.82   1 min ago    1x AWS(vCPU=4)  READY          us-east-1
     http-server   5   2        3.26.232.31     1 min ago    1x AWS(vCPU=4)  READY          us-east-1
 
-Eventually, same as rolling update, we will only have new replicas ready to serve user requests.
+Eventually, same as the rolling update, we will only have new replicas ready to serve user requests.
 
 .. code-block:: console
 
