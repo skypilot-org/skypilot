@@ -165,12 +165,6 @@ To execute a distributed Ray program on many VMs, you can download the `training
         conda activate ray
       fi
       
-      conda activate ray
-      if [ $? -ne 0 ]; then
-        conda create -n ray python=3.10 -y
-        conda activate ray
-      fi
-      
       pip install "ray[train]"
       pip install tqdm
       pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
