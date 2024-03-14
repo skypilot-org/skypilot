@@ -1,8 +1,8 @@
 """ Sky Spot Placer for SkyServe """
 
-import collections
 import enum
 import os
+import random
 import typing
 from typing import Dict, List, Optional
 
@@ -50,6 +50,7 @@ class SpotPlacer:
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec',
                  task_yaml_path: str) -> None:
+        del spec
         self.task_yaml_path = task_yaml_path
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         task = sky.Task.from_yaml_config(config)
@@ -59,7 +60,8 @@ class SpotPlacer:
 
         for resources in task.resources:
             resources_str = resources.hardware_str()
-            self.resources2locations[resources_str] = {}
+            if resources_str not in self.resources2locations:
+                self.resources2locations[resources_str] = {}
             clouds_list = ([resources.cloud]
                            if resources.cloud is not None else enabled_clouds)
             for cloud in clouds_list:
@@ -86,18 +88,35 @@ class SpotPlacer:
                                              zone.name)] = LocationStatus.ACTIVE
 
     def select(
-            self, resources: sky.Resources,
-            existing_replicas: List['replica_managers.ReplicaInfo']
+        self,
+        resources: sky.Resources,
     ) -> Location:
         """Select next location to place spot instance."""
         raise NotImplementedError
 
-    def set_active(self, resources: sky.Resources, location: Location) -> None:
-        self.resources2locations[resources][location] = LocationStatus.ACTIVE
+    def _get_location_from_resources(self,
+                                     resources: sky.Resources) -> Location:
+        return Location(resources.cloud, resources.region, resources.zone)
 
-    def set_preemption(self, resources: sky.Resources,
-                       location: Location) -> None:
-        self.resources2locations[resources][location] = LocationStatus.PREEMPTED
+    def set_active(self,
+                   resources: Optional[sky.Resources],
+                   location: Optional[Location] = None) -> None:
+        if resources is None:
+            return
+        if location is None:
+            location = self._get_location_from_resources(resources)
+        self.resources2locations[
+            resources.hardware_str()][location] = LocationStatus.ACTIVE
+
+    def set_preemption(self,
+                       resources: Optional[sky.Resources],
+                       location: Optional[Location] = None) -> None:
+        if resources is None:
+            return
+        if location is None:
+            location = self._get_location_from_resources(resources)
+        self.resources2locations[
+            resources.hardware_str()][location] = LocationStatus.PREEMPTED
 
     def clear_preemptive_locations(self, resources: sky.Resources) -> None:
         for location in self.resources2locations[resources]:
@@ -127,19 +146,12 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
     """Dynamic failover to an active location when preempted."""
 
     def select(
-            self, resources: sky.Resources,
-            existing_replicas: List['replica_managers.ReplicaInfo']
+        self,
+        resources: sky.Resources,
     ) -> Location:
         # Prevent the case with only one active location.
         if len(self.active_locations(resources)) <= 1 and len(
                 self.preemptive_locations(resources)) > 0:
             self.clear_preemptive_locations(resources)
 
-        existing_locations_to_count: Dict[Location,
-                                          int] = collections.defaultdict(int)
-        for replica in existing_replicas:
-            if replica.is_spot and replica.location is not None:
-                existing_locations_to_count[replica.location] += 1
-
-        return min(self.active_locations(resources),
-                   key=lambda location: existing_locations_to_count[location])
+        return random.choice(self.active_locations(resources))

@@ -2,12 +2,11 @@
 import json
 import os
 import textwrap
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import yaml
 
 from sky.serve import constants
-from sky.serve import spot_placer
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
