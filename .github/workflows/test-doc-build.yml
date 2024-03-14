@@ -31,4 +31,5 @@ jobs:
         pip install -r ./requirements-docs.txt
     - name: Build documentation
       run: |
+        cd ./docs
         ./build.sh
