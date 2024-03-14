@@ -72,6 +72,7 @@ SERIES_TO_DISCRIPTION = {
     'g2': 'G2 Instance',
     'm1': 'Memory-optimized Instance',
     # FIXME(woosuk): Support M2 series.
+    'm2': 'M2 Memory-optimized Instance',
     'm3': 'M3 Memory-optimized Instance',
     'n1': 'N1 Predefined Instance',
     'n2': 'N2 Instance',
@@ -239,6 +240,9 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
             if series == 'm1' and 'M3' in description:
                 continue
 
+            if series == 'm2':
+                continue
+
             resource_group = sku['category']['resourceGroup']
             # Skip GPU SKUs.
             if resource_group == 'GPU':
@@ -265,6 +269,12 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
             elif is_memory:
                 memory_price = unit_price * row['MemoryGiB']
 
+        # Print debugging information
+        print(f"InstanceType: {row['InstanceType']}")
+        print(f"Spot: {spot}")
+        print(f"CPU Price: {cpu_price}")
+        print(f"Memory Price: {memory_price}")
+
         # Special case for F1 and G1 instances.
         # Memory is not charged for these instances.
         if series in ['f1', 'g1']:
@@ -273,6 +283,7 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
         assert cpu_price is not None, row
         assert memory_price is not None, row
         return cpu_price + memory_price
+
 
     df['Price'] = df.apply(lambda row: get_vm_price(row, spot=False), axis=1)
     df['SpotPrice'] = df.apply(lambda row: get_vm_price(row, spot=True), axis=1)
