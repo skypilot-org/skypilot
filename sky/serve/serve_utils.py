@@ -83,8 +83,8 @@ class UpdateMode(enum.Enum):
     ROLLING = 'rolling'
     BLUE_GREEN = 'blue_green'
 
-DEFAULT_UPDATE_MODE = UpdateMode.ROLLING
 
+DEFAULT_UPDATE_MODE = UpdateMode.ROLLING
 
 _SIGNAL_TO_ERROR = {
     UserSignal.TERMINATE: exceptions.ServeUserTerminatedError,
