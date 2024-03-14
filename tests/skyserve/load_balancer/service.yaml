@@ -8,8 +8,6 @@ service:
 
 resources:
   ports: 8080
-  cloud: gcp
-  zone: us-central1-a
   cpus: 2+
 
 workdir: tests/skyserve/load_balancer

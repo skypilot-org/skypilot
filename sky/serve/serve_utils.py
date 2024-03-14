@@ -1,5 +1,6 @@
 """User interface with the SkyServe."""
 import base64
+import collections
 import enum
 import os
 import pathlib
@@ -10,8 +11,8 @@ import shutil
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
-                    TextIO, Type, TypeVar)
+from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
+                    Optional, TextIO, Type, TypeVar)
 import uuid
 
 import colorama
@@ -33,6 +34,8 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
+
+    from sky.serve import replica_managers
 
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
@@ -74,6 +77,14 @@ class UserSignal(enum.Enum):
         """Get the error corresponding to the signal."""
         return _SIGNAL_TO_ERROR[self]
 
+
+class UpdateMode(enum.Enum):
+    """Update mode for updating a service."""
+    ROLLING = 'rolling'
+    BLUE_GREEN = 'blue_green'
+
+
+DEFAULT_UPDATE_MODE = UpdateMode.ROLLING
 
 _SIGNAL_TO_ERROR = {
     UserSignal.TERMINATE: exceptions.ServeUserTerminatedError,
@@ -228,9 +239,9 @@ def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
 
-def set_service_status_from_replica_statuses(
-        service_name: str,
-        replica_statuses: List[serve_state.ReplicaStatus]) -> None:
+def set_service_status_and_active_versions_from_replica(
+        service_name: str, replica_infos: List['replica_managers.ReplicaInfo'],
+        update_mode: UpdateMode) -> None:
     record = serve_state.get_service_from_name(service_name)
     if record is None:
         raise ValueError('The service is up-ed in an old version and does not '
@@ -242,9 +253,20 @@ def set_service_status_from_replica_statuses(
         # terminated, the service status will still be READY, but we don't want
         # change service status to READY.
         return
-    serve_state.set_service_status(
+
+    ready_replicas = list(filter(lambda info: info.is_ready, replica_infos))
+    if update_mode == UpdateMode.ROLLING:
+        active_versions = sorted(
+            list(set(info.version for info in ready_replicas)))
+    else:
+        chosen_version = get_latest_version_with_min_replicas(
+            service_name, replica_infos)
+        active_versions = [chosen_version] if chosen_version is not None else []
+    serve_state.set_service_status_and_active_versions(
         service_name,
-        serve_state.ServiceStatus.from_replica_statuses(replica_statuses))
+        serve_state.ServiceStatus.from_replica_statuses(
+            [info.status for info in ready_replicas]),
+        active_versions=active_versions)
 
 
 def update_service_status() -> None:
@@ -258,11 +280,11 @@ def update_service_status() -> None:
         controller_status = job_lib.get_status(controller_job_id)
         if controller_status is None or controller_status.is_terminal():
             # If controller job is not running, set it as controller failed.
-            serve_state.set_service_status(
+            serve_state.set_service_status_and_active_versions(
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-def update_service_encoded(service_name: str, version: int) -> str:
+def update_service_encoded(service_name: str, version: int, mode: str) -> str:
     service_status = _get_service_status(service_name)
     if service_status is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
@@ -272,6 +294,7 @@ def update_service_encoded(service_name: str, version: int) -> str:
         '/controller/update_service',
         json={
             'version': version,
+            'mode': mode,
         })
     if resp.status_code == 404:
         raise ValueError('The service is up-ed in an old version and does not '
@@ -496,6 +519,24 @@ def check_service_status_healthy(service_name: str) -> Optional[str]:
     return None
 
 
+def get_latest_version_with_min_replicas(
+        service_name: str,
+        replica_infos: List['replica_managers.ReplicaInfo']) -> Optional[int]:
+    # Find the latest version with at least min_replicas replicas.
+    version2count: DefaultDict[int, int] = collections.defaultdict(int)
+    for info in replica_infos:
+        if info.is_ready:
+            version2count[info.version] += 1
+
+    active_versions = sorted(version2count.keys(), reverse=True)
+    for version in active_versions:
+        spec = serve_state.get_spec(service_name, version)
+        if (spec is not None and version2count[version] >= spec.min_replicas):
+            return version
+    # Use the oldest version if no version has enough replicas.
+    return active_versions[-1] if active_versions else None
+
+
 def _follow_replica_logs(
         file: TextIO,
         cluster_name: str,
@@ -710,7 +751,9 @@ def format_service_table(service_records: List[Dict[str, Any]],
             replica_infos.append(replica)
 
         service_name = record['name']
-        version = record['version'] if 'version' in record else '-'
+        version = ','.join(
+            str(v) for v in record['active_versions']
+        ) if 'active_versions' in record and record['active_versions'] else '-'
         uptime = log_utils.readable_time_duration(record['uptime'],
                                                   absolute=True)
         service_status = record['status']
@@ -815,9 +858,13 @@ class ServeCodeGen:
     Usage:
       >> code = ServeCodeGen.get_service_status(service_name)
     """
+
+    # TODO(zhwu): When any API is changed, we should update the
+    # constants.SERVE_VERSION.
     _PREFIX = [
         'from sky.serve import serve_state',
         'from sky.serve import serve_utils',
+        'from sky.serve import constants',
     ]
 
     @classmethod
@@ -879,9 +926,17 @@ class ServeCodeGen:
         return f'python3 -u -c {shlex.quote(generated_code)}'
 
     @classmethod
-    def update_service(cls, service_name: str, version: int) -> str:
+    def update_service(cls, service_name: str, version: int, mode: str) -> str:
         code = [
+            # Backward compatibility for old serve version on the remote
+            # machine. The `mode` argument was added in #3249, and if the remote
+            # machine has an old SkyPilot version before that, we need to avoid
+            # passing the `mode` argument to the job_lib functions.
+            # TODO(zhwu): Remove this in 0.7.0 release.
+            f'mode_kwargs = {{"mode": {mode!r}}} '
+            'if getattr(constants, "SERVE_VERSION", 0) >= 1 else {}',
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
-            f'{version})', 'print(msg, end="", flush=True)'
+            f'{version}, **mode_kwargs)',
+            'print(msg, end="", flush=True)',
         ]
         return cls._build(code)

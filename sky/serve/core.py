@@ -295,7 +295,10 @@ def up(
 
 
 @usage_lib.entrypoint
-def update(task: 'sky.Task', service_name: str) -> None:
+def update(
+        task: 'sky.Task',
+        service_name: str,
+        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
     """Update an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -401,7 +404,8 @@ def update(task: 'sky.Task', service_name: str) -> None:
                                  storage_mounts=None)
 
         code = serve_utils.ServeCodeGen.update_service(service_name,
-                                                       current_version)
+                                                       current_version,
+                                                       mode=mode.value)
         returncode, _, stderr = backend.run_on_head(handle,
                                                     code,
                                                     require_outputs=True,
@@ -501,6 +505,7 @@ def status(
 
         {
             'name': (str) service name,
+            'active_versions': (List[int]) a list of versions that are active,
             'controller_job_id': (int) the job id of the controller,
             'uptime': (int) uptime in seconds,
             'status': (sky.ServiceStatus) service status,

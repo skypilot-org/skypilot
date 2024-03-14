@@ -3756,6 +3756,14 @@ def serve_up(
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--mode',
+              default=serve_lib.DEFAULT_UPDATE_MODE.value,
+              type=click.Choice([m.value for m in serve_lib.UpdateMode],
+                                case_sensitive=False),
+              required=False,
+              help=('Update mode. If "rolling", SkyServe will update the '
+                    'service with rolling update. If "blue_green", SkyServe '
+                    'will update the service with blue-green update. '))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3783,21 +3791,35 @@ def serve_update(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    mode: str,
     yes: bool,
 ):
     """Update a SkyServe service.
+
+    service_yaml must point to a valid YAML file.
 
     SkyServe will reuse old replicas, if only the service section is changed
     and no file mounts are specified.
     Otherwise, SkyServe will terminate the old replicas and start new replicas.
 
-    service_yaml must point to a valid YAML file.
+    Two update modes are supported:
+    - "rolling": (default) SkyServe will update the service with rolling update,
+        i.e., it will terminate one old replica whenever one new replica is
+        ready. Traffic can be mixed on old and new replicas.
+    - "blue_green": SkyServe will update the service with blue-green update,
+        i.e., it will wait for new replicas to be ready and then terminate old
+        replicas. Traffic will only be switched from old to new replicas after
+        enough new replicas are ready.
 
     Example:
 
     .. code-block:: bash
 
+        # Update an existing service with rolling update
         sky serve update sky-service-16aa new_service.yaml
+        # Use blue-green update
+        sky serve update --mode blue_green sky-service-16aa new_service.yaml
+
     """
     task = _generate_task_with_service(
         service_name=service_name,
@@ -3835,7 +3857,7 @@ def serve_update(
                       abort=True,
                       show_default=True)
 
-    serve_lib.update(task, service_name)
+    serve_lib.update(task, service_name, mode=serve_lib.UpdateMode(mode))
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)

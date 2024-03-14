@@ -30,6 +30,7 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -46,12 +47,13 @@ _DEFAULT_DRAIN_SECONDS = 120
 
 # Since sky.launch is very resource demanding, we limit the number of
 # concurrent sky.launch process to avoid overloading the machine.
-_MAX_NUM_LAUNCH = psutil.cpu_count()
+_MAX_NUM_LAUNCH = psutil.cpu_count() * 2
 
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
-def launch_cluster(task_yaml_path: str,
+def launch_cluster(replica_id: int,
+                   task_yaml_path: str,
                    cluster_name: str,
                    resources_override: Optional[Dict[str, Any]] = None,
                    max_retry: int = 3) -> None:
@@ -74,8 +76,10 @@ def launch_cluster(task_yaml_path: str,
                 r.copy(**resources_override) for r in resources
             ]
             task.set_resources(type(resources)(overrided_resources))
-        logger.info(f'Launching replica cluster {cluster_name} with '
-                    f'resources: {task.resources}')
+        task.update_envs({serve_constants.REPLICA_ID_ENV_VAR: str(replica_id)})
+
+        logger.info(f'Launching replica (id: {replica_id}) cluster '
+                    f'{cluster_name} with resources: {task.resources}')
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to construct task object from yaml file with '
                      f'error {common_utils.format_exception(e)}')
@@ -404,10 +408,8 @@ class ReplicaInfo:
         return handle
 
     @property
-    def is_provisioning_or_launched(self) -> bool:
-        return (
-            self.status
-            in serve_state.ReplicaStatus.provisioning_or_launched_statuses())
+    def is_terminal(self) -> bool:
+        return self.status in serve_state.ReplicaStatus.terminal_statuses()
 
     @property
     def is_ready(self) -> bool:
@@ -443,6 +445,21 @@ class ReplicaInfo:
         if with_handle:
             info_dict['handle'] = self.handle(cluster_record)
         return info_dict
+
+    def __repr__(self) -> str:
+        info_dict = self.to_info_dict(
+            with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+        handle_str = ''
+        if 'handle' in info_dict:
+            handle_str = f', handle={info_dict["handle"]}'
+        info = (f'ReplicaInfo(replica_id={self.replica_id}, '
+                f'cluster_name={self.cluster_name}, '
+                f'version={self.version}, '
+                f'replica_port={self.replica_port}, '
+                f'is_spot={self.is_spot}, '
+                f'status={self.status}, '
+                f'launched_at={info_dict["launched_at"]}{handle_str})')
+        return info
 
     def probe(
         self,
@@ -513,6 +530,7 @@ class ReplicaManager:
         self._next_replica_id: int = 1
         self._service_name: str = service_name
         self._uptime: Optional[float] = None
+        self._update_mode = serve_utils.DEFAULT_UPDATE_MODE
         logger.info(f'Readiness probe path: {spec.readiness_path}\n'
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
                     f'Post data: {spec.post_data}')
@@ -536,8 +554,12 @@ class ReplicaManager:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       update_mode: serve_utils.UpdateMode) -> None:
+        raise NotImplementedError
+
+    def get_active_replica_urls(self) -> List[str]:
+        """Get the urls of the active replicas."""
         raise NotImplementedError
 
 
@@ -595,7 +617,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(self._task_yaml_path, cluster_name, resources_override),
+            args=(replica_id, self._task_yaml_path, cluster_name,
+                  resources_override),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _should_use_spot(self._task_yaml_path, resources_override)
@@ -1057,12 +1080,13 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.debug('Running replica prober.')
             try:
                 self._probe_all_replicas()
-                replica_statuses = [
-                    info.status for info in serve_state.get_replica_infos(
-                        self._service_name)
-                ]
-                serve_utils.set_service_status_from_replica_statuses(
-                    self._service_name, replica_statuses)
+                replica_infos = serve_state.get_replica_infos(
+                    self._service_name)
+                # TODO(zhwu): when there are multiple load balancers, we need
+                # to make sure the active_versions are the union of all
+                # versions of all load balancers.
+                serve_utils.set_service_status_and_active_versions_from_replica(
+                    self._service_name, replica_infos, self._update_mode)
 
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
@@ -1074,12 +1098,26 @@ class SkyPilotReplicaManager(ReplicaManager):
             # TODO(MaoZiming): Probe cloud for early preemption warning.
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
 
+    def get_active_replica_urls(self) -> List[str]:
+        """Get the urls of all active replicas."""
+        record = serve_state.get_service_from_name(self._service_name)
+        assert record is not None, (f'{self._service_name} not found on '
+                                    'controller records.')
+        ready_replica_urls = []
+        active_versions = set(record['active_versions'])
+        for info in serve_state.get_replica_infos(self._service_name):
+            if (info.status == serve_state.ReplicaStatus.READY and
+                    info.version in active_versions):
+                assert info.url is not None, info
+                ready_replica_urls.append(info.url)
+        return ready_replica_urls
+
     ###########################################
     # SkyServe Update and replica versioning. #
     ###########################################
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       update_mode: serve_utils.UpdateMode) -> None:
         if version <= self.latest_version:
             logger.error(f'Invalid version: {version}, '
                          f'latest version: {self.latest_version}')
@@ -1089,6 +1127,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_version(self._service_name, version, spec)
         self.latest_version = version
         self._task_yaml_path = task_yaml_path
+        self._update_mode = update_mode
 
         # Reuse all replicas that have the same config as the new version
         # (except for the `service` field) by directly setting the version to be
@@ -1104,7 +1143,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             new_config.pop(key)
         replica_infos = serve_state.get_replica_infos(self._service_name)
         for info in replica_infos:
-            if info.version < version and info.is_provisioning_or_launched:
+            if info.version < version and not info.is_terminal:
                 # Assume user does not change the yaml file on the controller.
                 old_task_yaml_path = serve_utils.generate_task_yaml_file_name(
                     self._service_name, info.version)
