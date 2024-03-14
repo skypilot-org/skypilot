@@ -126,9 +126,8 @@ Documentation
    :caption: SkyServe: Model Serving
 
    serving/sky-serve
+   serving/user-guides
    serving/service-yaml-spec
-   serving/autoscaling
-   serving/update
 
 .. toctree::
    :maxdepth: 1
