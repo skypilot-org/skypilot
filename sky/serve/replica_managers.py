@@ -25,6 +25,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
+from sky.serve import spot_placer
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -49,11 +50,18 @@ _DEFAULT_DRAIN_SECONDS = 120
 _MAX_NUM_LAUNCH = psutil.cpu_count()
 
 
+def _get_launched_resources(cluster_name: str) -> Optional[sky.Resources]:
+
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        return None
+    return handle.launched_resources
+
+
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
-def launch_cluster(task_yaml_path: str,
+def launch_cluster(task: sky.Task,
                    cluster_name: str,
-                   resources_override: Optional[Dict[str, Any]] = None,
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
 
@@ -65,23 +73,6 @@ def launch_cluster(task_yaml_path: str,
             or some error happened before provisioning and will happen again
             if retry.
     """
-    try:
-        config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
-        task = sky.Task.from_yaml_config(config)
-        if resources_override is not None:
-            resources = task.resources
-            overrided_resources = [
-                r.copy(**resources_override) for r in resources
-            ]
-            task.set_resources(type(resources)(overrided_resources))
-        logger.info(f'Launching replica cluster {cluster_name} with '
-                    f'resources: {task.resources}')
-    except Exception as e:  # pylint: disable=broad-except
-        logger.error('Failed to construct task object from yaml file with '
-                     f'error {common_utils.format_exception(e)}')
-        raise RuntimeError(
-            f'Failed to launch the sky serve replica cluster {cluster_name} '
-            'due to failing to initialize sky.Task from yaml file.') from e
     retry_cnt = 0
     backoff = common_utils.Backoff(_RETRY_INIT_GAP_SECONDS)
     while True:
@@ -369,7 +360,7 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    _VERSION = 0
+    _VERSION = 1
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
                  is_spot: bool, version: int) -> None:
@@ -567,7 +558,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self._down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
-
+        self.spot_placer: spot_placer.SpotPlacer = (
+            spot_placer.SpotPlacer.from_spec(spec, task_yaml_path))
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
@@ -590,16 +582,38 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
+
+        try:
+            config = common_utils.read_yaml(
+                os.path.expanduser(self._task_yaml_path))
+            task = sky.Task.from_yaml_config(config)
+            if resources_override is not None:
+                resources = task.resources
+                overrided_resources = [
+                    r.copy({
+                        **resources_override,
+                        **self.spot_placer.select(r).to_dict()
+                    }) for r in resources
+                ]
+                task.set_resources(type(resources)(overrided_resources))
+            logger.info(f'Launching replica cluster {cluster_name} with '
+                        f'resources: {task.resources}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('Failed to construct task object from yaml file with '
+                         f'error {common_utils.format_exception(e)}')
+            raise RuntimeError(
+                f'Failed to launch the sky serve replica cluster {cluster_name}'
+                ' due to failing to initialize sky.Task from yaml file.') from e
+
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(self._task_yaml_path, cluster_name, resources_override),
+            args=(task, cluster_name, resources_override),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _should_use_spot(self._task_yaml_path, resources_override)
-
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
                            self.latest_version)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
@@ -740,6 +754,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                               f' (status: {cluster_status.value})')
         logger.info(
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
+        self.spot_placer.set_preemption(
+            _get_launched_resources(info.cluster_name))
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
@@ -792,6 +808,12 @@ class SkyPilotReplicaManager(ReplicaManager):
                             ProcessStatus.FAILED)
                         error_in_sky_launch = True
                     else:
+                        if info.is_spot:
+                            self.spot_placer.set_active(
+                                _get_launched_resources(info.cluster_name))
+                        else:
+                            self.spot_placer.set_preemption(
+                                _get_launched_resources(info.cluster_name))
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
                 serve_state.add_or_update_replica(self._service_name,
