@@ -62,7 +62,7 @@ We can use :code:`sky serve status http-server` to check the status of the servi
 
 Service ``http-server`` has an initial version of 1.
 
-Suppose we want to update the service to have at least 3 replicas instead of 2. We can update
+Suppose we want to update the service to have 3 replicas instead of 2. We can update
 the task yaml ``examples/serve/http_server/task.yaml``, by changing the ``replicas``
 field:
 
