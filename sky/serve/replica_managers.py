@@ -57,6 +57,7 @@ def _get_launched_resources(cluster_name: str) -> Optional[sky.Resources]:
         return None
     return handle.launched_resources
 
+
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
 def launch_cluster(task: sky.Task,
