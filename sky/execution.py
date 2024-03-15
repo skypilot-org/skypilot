@@ -676,8 +676,7 @@ def spot_launch(
             'dag_name': dag.name,
             'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
-            'remote_catalog_path': service_catalog.CATALOG_REL_DIR,
-            'local_catalog_path': service_catalog.LOCAL_CATALOG_DIR,
+            'modified_catalogs': service_catalog.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
                 'spot',
                 remote_user_config_path=remote_user_config_path,

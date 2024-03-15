@@ -19,7 +19,7 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_CATALOG_DIR = os.path.join(constants.LOCAL_CATALOG_DIR,
+_CATALOG_DIR = os.path.join(os.path.expanduser(constants.CATALOG_DIR),
                             constants.CATALOG_SCHEMA_VERSION)
 os.makedirs(_CATALOG_DIR, exist_ok=True)
 
@@ -55,6 +55,19 @@ def get_catalog_path(filename: str) -> str:
     return os.path.join(_CATALOG_DIR, filename)
 
 
+def is_catalog_modified(filename: str) -> bool:
+    # Check the md5 of the file to see if it has changed.
+    catalog_path = get_catalog_path(filename)
+    meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
+    with open(catalog_path, 'rb') as f:
+        file_md5 = hashlib.md5(f.read()).hexdigest()
+    md5_filepath = meta_path + '.md5'
+    if os.path.exists(md5_filepath):
+        with open(md5_filepath, 'r', encoding='utf-8') as f:
+            last_md5 = f.read()
+        return file_md5 != last_md5
+
+
 def read_catalog(filename: str,
                  pull_frequency_hours: Optional[int] = None) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.
@@ -85,16 +98,8 @@ def read_catalog(filename: str,
                 return True
             if pull_frequency_hours is None:
                 return False
-            # Check the md5 of the file to see if it has changed.
-            with open(catalog_path, 'rb') as f:
-                file_md5 = hashlib.md5(f.read()).hexdigest()
-            md5_filepath = meta_path + '.md5'
-            if os.path.exists(md5_filepath):
-                with open(md5_filepath, 'r', encoding='utf-8') as f:
-                    last_md5 = f.read()
-                if file_md5 != last_md5:
-                    # Do not update the file if the user modified it.
-                    return False
+            if is_catalog_modified(filename):
+                return False
 
             last_update = os.path.getmtime(catalog_path)
             return last_update + pull_frequency_hours * 3600 < time.time()

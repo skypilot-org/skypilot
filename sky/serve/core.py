@@ -1,4 +1,5 @@
 """SkyServe core APIs."""
+import os.path
 import re
 import tempfile
 import typing
@@ -124,8 +125,7 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
-            'remote_catalog_path': service_catalog.CATALOG_REL_DIR,
-            'local_catalog_path': service_catalog.LOCAL_CATALOG_DIR,
+            'modified_catalogs': service_catalog.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
                 'serve',
                 remote_user_config_path=remote_config_yaml_path,
