@@ -1,4 +1,4 @@
-Common AI Frameworks
+AI Example Gallery
 ====================
 
 ..    axolotl

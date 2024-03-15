@@ -2,10 +2,14 @@
 
 import os
 import sys
+import pathlib
+import yaml
+
 
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
 sys.path.insert(0, os.path.abspath('../../'))
+from custom_directives import setup_context, update_context, parse_navbar_config
 
 # -- Project information
 
@@ -60,21 +64,46 @@ autodoc_member_order = 'bysource'
 
 # -- Options for HTML output
 
-html_theme = 'sphinx_book_theme'
+# html_theme = 'sphinx_book_theme'
+html_theme = 'pydata_sphinx_theme'
 html_theme_options = {
-    # 'show_toc_level': 2,
+    "show_toc_level": 1,
+    "navbar_align": "left",  # [left, content, right] For testing that the navbar items align properly
+    "navbar_center": ["navbar-nav"],
+    # "navbar_start": ["navbar-skypilot-logo"],
+    # "navbar_end": [
+    #     "navbar-icon-links",
+    # ],
+    # "navbar_center": ["navbar-links"],
+    "navbar_align": "left",
+    "navbar_persistent": [
+        "search-button-field",
+    ],
+    # "back_to_top_button": False,
     'logo': {
         'image_dark': '_static/SkyPilot_wide_dark.svg',
     },
-    'repository_url': 'https://github.com/skypilot-org/skypilot',
-    'use_repository_button': True,
-    'use_issues_button': True,
-    'use_edit_page_button': True,
-    'repository_branch': 'master',
-    'path_to_docs': 'docs/source',
+    "use_edit_page_button": True,
+    "announcement": None,
+    "secondary_sidebar_items": [
+        "page-toc",
+        "edit-this-page",
+    ],
+    "navigation_depth": 4,
     'pygment_light_style': 'tango',
     'pygment_dark_style': 'monokai',
     'primary_sidebar_end': [],
+}
+
+html_context = {
+    'github_user': 'skypilot-org',
+    'github_repo': 'skypilot',
+    'github_version': 'master',
+    'doc_path': 'docs/source',
+}
+
+html_sidebars = {
+    "**": ["main-sidebar"],
 }
 
 # The name for this set of Sphinx documents.  If None, it defaults to
@@ -104,3 +133,14 @@ html_favicon = '_static/favicon.ico'
 html_static_path = ['_static']
 html_js_files = ['custom.js']
 html_css_files = ['custom.css']
+
+# Allowing cross references in markdown files to be parsed
+myst_heading_anchors = 3
+
+
+def setup(app):
+    app.connect("html-page-context", update_context)
+
+    app.add_config_value("navbar_content_path", "navbar.yml", "env")
+    app.connect("config-inited", parse_navbar_config)
+    app.connect("html-page-context", setup_context)

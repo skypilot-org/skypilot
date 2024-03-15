@@ -99,84 +99,13 @@ Read the research:
 * `Sky Computing whitepaper <https://arxiv.org/abs/2205.07147>`_
 * `Sky Computing vision paper <https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf>`_ (HotOS 2021)
 
-Documentation
---------------------------
+
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Getting Started
+   :hidden:
+   :maxdepth: 2
 
-   getting-started/installation
-   getting-started/quickstart
-   getting-started/tutorial
-   examples/gpu-jupyter
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Running Jobs
-
-   examples/spot-jobs
-   reference/job-queue
-   examples/auto-failover
-   reference/kubernetes/index
-   running-jobs/index
-
-.. toctree::
-   :maxdepth: 1
-   :caption: SkyServe: Model Serving
-
-   serving/sky-serve
-   serving/user-guides
-   serving/service-yaml-spec
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Cutting Cloud Costs
-
-   examples/spot-jobs
-   reference/auto-stop
-   reference/benchmark/index
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Using Data
-
-   examples/syncing-code-artifacts
-   reference/storage
-
-.. toctree::
-   :maxdepth: 1
-   :caption: User Guides
-
-   Common AI Frameworks <framework-examples/index>
-   examples/docker-containers
-   examples/ports
-   reference/tpu
-   reference/logging
-   reference/faq
-   Developer Guides <developers/index>
-
-.. .. toctree::
-..    :maxdepth: 1
-..    :caption: Developer Guides
-
-..    developers/CONTRIBUTING
-..    Guide: Adding a New Cloud <https://docs.google.com/document/d/1oWox3qb3Kz3wXXSGg9ZJWwijoa99a3PIQUHBR8UgEGs/edit?usp=sharing>
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Cloud Admin and Usage
-
-   cloud-setup/cloud-permissions/index
-   cloud-setup/cloud-auth
-   cloud-setup/quota
-
-.. toctree::
-   :maxdepth: 1
-   :caption: References
-
-   reference/yaml-spec
-   reference/cli
-   reference/api
-   reference/config
+   getting-started/index
+   docs/index
+   gallery/index
 
