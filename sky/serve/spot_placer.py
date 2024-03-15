@@ -56,7 +56,7 @@ class SpotPlacer:
         task = sky.Task.from_yaml_config(config)
 
         enabled_clouds = global_user_state.get_enabled_clouds()
-        self.resources2locations: Dict[str, Dict[Location, LocationStatus]]
+        self.resources2locations: Dict[str, Dict[Location, LocationStatus]] = {}
 
         for resources in task.resources:
             resources_str = resources.hardware_str()

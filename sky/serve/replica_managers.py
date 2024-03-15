@@ -55,6 +55,7 @@ def _get_launched_resources(cluster_name: str) -> Optional[sky.Resources]:
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return None
+    print(handle.launched_resources)
     return handle.launched_resources
 
 
@@ -808,6 +809,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                             ProcessStatus.FAILED)
                         error_in_sky_launch = True
                     else:
+                        logger.info(
+                            'launched_resources: '
+                            f'{_get_launched_resources(info.cluster_name)}')
                         if info.is_spot:
                             self.spot_placer.set_active(
                                 _get_launched_resources(info.cluster_name))
@@ -1007,6 +1011,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 future_result: Tuple[ReplicaInfo, bool, float] = future.get()
                 info, probe_succeeded, probe_time = future_result
                 info.status_property.service_ready_now = probe_succeeded
+                logger.info(_get_launched_resources(info.cluster_name))
                 should_teardown = False
                 if probe_succeeded:
                     if self._uptime is None:
