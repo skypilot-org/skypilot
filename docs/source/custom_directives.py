@@ -169,7 +169,6 @@ def preload_sidebar_nav(
     pathto: Callable[[str], str],
     root_doc: str,
     pagename: str,
-    doctree: Any,
 ) -> bs4.BeautifulSoup:
     """Return the navigation link structure in HTML.
 
