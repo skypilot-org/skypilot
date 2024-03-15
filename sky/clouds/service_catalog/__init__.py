@@ -322,18 +322,17 @@ def is_image_tag_valid(tag: str,
 
 def get_modified_catalogs() -> List[str]:
     """Returns a list of modified catalog paths relative to the catalog dir."""
-    meta_path = os.path.join(os.path.expanduser(CATALOG_DIR),
-                             constants.CATALOG_SCHEMA_VERSION,
-                             '.meta')
+    catalog_path = os.path.join(os.path.expanduser(CATALOG_DIR),
+                                CATALOG_SCHEMA_VERSION)
     modified_catalogs = []
     for cloud in ALL_CLOUDS:
-        cloud_meta_dir = os.path.join(meta_path, cloud)
-        if not os.path.exists(cloud_meta_dir):
+        cloud_catalog_dir = os.path.join(catalog_path, cloud)
+        if not os.path.exists(cloud_catalog_dir):
             continue
-        # Iterate over all files ending in md5 in the cloud's meta directory
-        for file in os.listdir(cloud_meta_dir):
-            if file.endswith('.md5'):
-                filename = os.path.join(cloud, file[:-4])  # e.g., aws/vms.csv
+        # Iterate over all csvs cloud's catalog directory
+        for file in os.listdir(cloud_catalog_dir):
+            if file.endswith('.csv'):
+                filename = os.path.join(cloud, file)  # e.g., aws/vms.csv
                 if common.is_catalog_modified(filename):
                     modified_catalogs.append(filename)
     return modified_catalogs
@@ -352,9 +351,7 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
     modified_catalog_list = get_modified_catalogs()
     modified_catalog_path_map = {}  # Map of remote: local catalog paths
     for catalog in modified_catalog_list:
-        remote_path = os.path.join(CATALOG_DIR,
-                                   CATALOG_SCHEMA_VERSION,
-                                   catalog)
+        remote_path = os.path.join(CATALOG_DIR, CATALOG_SCHEMA_VERSION, catalog)
         local_path = os.path.expanduser(remote_path)
         modified_catalog_path_map[remote_path] = local_path
     return modified_catalog_path_map

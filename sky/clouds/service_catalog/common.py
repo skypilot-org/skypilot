@@ -66,7 +66,10 @@ def is_catalog_modified(filename: str) -> bool:
         with open(md5_filepath, 'r', encoding='utf-8') as f:
             last_md5 = f.read()
         return file_md5 != last_md5
-
+    else:
+        # If the md5 file does not exist, it means the catalog was manually
+        # populated instead of being fetched from the cloud.
+        return True
 
 def read_catalog(filename: str,
                  pull_frequency_hours: Optional[int] = None) -> pd.DataFrame:
