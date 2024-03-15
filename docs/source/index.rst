@@ -103,7 +103,7 @@ Read the research:
 
 .. toctree::
    :hidden:
-   :maxdepth: 2
+   :maxdepth: 1
 
    getting-started/index
    docs/index

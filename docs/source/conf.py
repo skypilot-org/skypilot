@@ -138,9 +138,3 @@ html_css_files = ['custom.css']
 myst_heading_anchors = 3
 
 
-def setup(app):
-    app.connect("html-page-context", update_context)
-
-    app.add_config_value("navbar_content_path", "navbar.yml", "env")
-    app.connect("config-inited", parse_navbar_config)
-    app.connect("html-page-context", setup_context)
