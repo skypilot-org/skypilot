@@ -50,15 +50,6 @@ _DEFAULT_DRAIN_SECONDS = 120
 _MAX_NUM_LAUNCH = psutil.cpu_count()
 
 
-def _get_launched_resources(cluster_name: str) -> Optional[sky.Resources]:
-
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    if not isinstance(handle, backends.CloudVmRayResourceHandle):
-        return None
-    print(handle.launched_resources)
-    return handle.launched_resources
-
-
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
 def launch_cluster(task: sky.Task,
@@ -755,8 +746,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                               f' (status: {cluster_status.value})')
         logger.info(
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
-        self.spot_placer.set_preemption(
-            _get_launched_resources(info.cluster_name))
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
@@ -809,15 +798,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                             ProcessStatus.FAILED)
                         error_in_sky_launch = True
                     else:
-                        logger.info(
-                            'launched_resources: '
-                            f'{_get_launched_resources(info.cluster_name)}')
-                        if info.is_spot:
-                            self.spot_placer.set_active(
-                                _get_launched_resources(info.cluster_name))
-                        else:
-                            self.spot_placer.set_preemption(
-                                _get_launched_resources(info.cluster_name))
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
                 serve_state.add_or_update_replica(self._service_name,
@@ -1011,7 +991,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                 future_result: Tuple[ReplicaInfo, bool, float] = future.get()
                 info, probe_succeeded, probe_time = future_result
                 info.status_property.service_ready_now = probe_succeeded
-                logger.info(_get_launched_resources(info.cluster_name))
                 should_teardown = False
                 if probe_succeeded:
                     if self._uptime is None:
