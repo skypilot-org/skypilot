@@ -71,6 +71,44 @@ def is_catalog_modified(filename: str) -> bool:
         # populated instead of being fetched from the cloud.
         return True
 
+
+def get_modified_catalog_file_mounts() -> Dict[str, str]:
+    """Returns a dict of catalogs which have been modified locally.
+
+    The dictionary maps the remote catalog path (relative) to the local path of
+    the modified catalog (absolute). Can be used directly as file_mounts for a
+    Task.
+
+    Used to determine which catalogs to upload to the controllers when they
+    are provisioned.
+    """
+
+    def _get_modified_catalogs() -> List[str]:
+        """Returns a list of modified catalogs relative to the catalog dir."""
+        modified_catalogs = []
+        for cloud_name in constants.ALL_CLOUDS:
+            cloud_catalog_dir = os.path.join(_CATALOG_DIR, cloud_name)
+            if not os.path.exists(cloud_catalog_dir):
+                continue
+            # Iterate over all csvs cloud's catalog directory
+            for file in os.listdir(cloud_catalog_dir):
+                if file.endswith('.csv'):
+                    filename = os.path.join(cloud_name,
+                                            file)  # e.g., aws/vms.csv
+                    if is_catalog_modified(filename):
+                        modified_catalogs.append(filename)
+        return modified_catalogs
+
+    modified_catalog_list = _get_modified_catalogs()
+    modified_catalog_path_map = {}  # Map of remote: local catalog paths
+    for catalog in modified_catalog_list:
+        remote_path = os.path.join(constants.CATALOG_DIR,
+                                   constants.CATALOG_SCHEMA_VERSION, catalog)
+        local_path = os.path.expanduser(remote_path)
+        modified_catalog_path_map[remote_path] = local_path
+    return modified_catalog_path_map
+
+
 def read_catalog(filename: str,
                  pull_frequency_hours: Optional[int] = None) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.

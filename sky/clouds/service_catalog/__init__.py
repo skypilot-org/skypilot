@@ -1,11 +1,11 @@
 """Service catalog."""
 import collections
 import importlib
-import os
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 from sky.clouds.service_catalog.config import fallback_to_default_catalog
+from sky.clouds.service_catalog.constants import ALL_CLOUDS
 from sky.clouds.service_catalog.constants import CATALOG_DIR
 from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
 from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
@@ -16,8 +16,6 @@ if typing.TYPE_CHECKING:
     from sky.clouds.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
-ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
-              'kubernetes', 'runpod', 'vsphere', 'cudo', 'fluidstack')
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
@@ -318,43 +316,6 @@ def is_image_tag_valid(tag: str,
                        clouds: CloudFilter = None) -> bool:
     """Validates the image tag."""
     return _map_clouds_catalog(clouds, 'is_image_tag_valid', tag, region)
-
-
-def get_modified_catalogs() -> List[str]:
-    """Returns a list of modified catalog paths relative to the catalog dir."""
-    catalog_path = os.path.join(os.path.expanduser(CATALOG_DIR),
-                                CATALOG_SCHEMA_VERSION)
-    modified_catalogs = []
-    for cloud in ALL_CLOUDS:
-        cloud_catalog_dir = os.path.join(catalog_path, cloud)
-        if not os.path.exists(cloud_catalog_dir):
-            continue
-        # Iterate over all csvs cloud's catalog directory
-        for file in os.listdir(cloud_catalog_dir):
-            if file.endswith('.csv'):
-                filename = os.path.join(cloud, file)  # e.g., aws/vms.csv
-                if common.is_catalog_modified(filename):
-                    modified_catalogs.append(filename)
-    return modified_catalogs
-
-
-def get_modified_catalog_file_mounts() -> Dict[str, str]:
-    """Returns a dict of catalogs which have been modified locally.
-
-    The dictionary maps the remote catalog path (relative) to the local path of
-    the modified catalog (absolute). Can be used directly as file_mounts for a
-    Task.
-
-    Used to determine which catalogs to upload to the controllers when they
-    are provisioned.
-    """
-    modified_catalog_list = get_modified_catalogs()
-    modified_catalog_path_map = {}  # Map of remote: local catalog paths
-    for catalog in modified_catalog_list:
-        remote_path = os.path.join(CATALOG_DIR, CATALOG_SCHEMA_VERSION, catalog)
-        local_path = os.path.expanduser(remote_path)
-        modified_catalog_path_map[remote_path] = local_path
-    return modified_catalog_path_map
 
 
 __all__ = [

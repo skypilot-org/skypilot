@@ -1,5 +1,4 @@
 """SkyServe core APIs."""
-import os.path
 import re
 import tempfile
 import typing
@@ -15,7 +14,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.clouds import service_catalog
+from sky.clouds.service_catalog import common as service_catalog_common
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -126,7 +125,7 @@ def up(
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
             'modified_catalogs':
-                service_catalog.get_modified_catalog_file_mounts(),
+                service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
                 'serve',
                 remote_user_config_path=remote_config_yaml_path,
