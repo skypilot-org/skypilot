@@ -335,6 +335,7 @@ __all__ = [
     # Configuration
     'fallback_to_default_catalog',
     # Constants
+    'ALL_CLOUDS',
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',
     'CATALOG_DIR',
