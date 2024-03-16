@@ -5,7 +5,9 @@ Welcome to SkyPilot!
 
 .. toctree::
    :maxdepth: 1
+   :caption: Contents
 
    docs/index
    gallery/index
+   developers/index
 
