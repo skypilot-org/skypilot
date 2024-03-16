@@ -445,7 +445,9 @@ class GCP(clouds.Cloud):
                 # https://cloud.google.com/compute/docs/gpus
                 if acc in ('A100-80GB', 'L4'):
                     # A100-80GB and L4 have a different name pattern.
-                    resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
+                    resources_vars['gpu'] = f'nvidia-{acc.lower()}'
+                elif acc == 'H100':
+                    resources_vars['gpu'] = f'nvidia-{acc.lower()}-80gb'
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
@@ -741,13 +743,13 @@ class GCP(clouds.Cloud):
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
-        service = googleapiclient.discovery.build('cloudresourcemanager',
-                                                  'v1',
-                                                  credentials=credentials)
+        crm = googleapiclient.discovery.build('cloudresourcemanager',
+                                              'v1',
+                                              credentials=credentials)
         gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
         permissions = {'permissions': gcp_minimal_permissions}
-        request = service.projects().testIamPermissions(resource=project,
-                                                        body=permissions)
+        request = crm.projects().testIamPermissions(resource=project,
+                                                    body=permissions)
         ret_permissions = request.execute().get('permissions', [])
 
         diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))

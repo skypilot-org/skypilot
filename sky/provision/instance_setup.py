@@ -2,6 +2,7 @@
 from concurrent import futures
 import functools
 import hashlib
+import json
 import os
 import resource
 import time
@@ -13,6 +14,7 @@ from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
+from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -22,7 +24,7 @@ logger = sky_logging.init_logger(__name__)
 _START_TITLE = '\n' + '-' * 20 + 'Start: {} ' + '-' * 20
 _END_TITLE = '-' * 20 + 'End:   {} ' + '-' * 20 + '\n'
 
-_MAX_RETRY = 5
+_MAX_RETRY = 6
 
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
@@ -51,8 +53,7 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
 RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
-    f'while `RAY_ADDRESS=127.0.0.1:{constants.SKY_REMOTE_RAY_PORT} '
-    'ray status | grep -q "No cluster status."`; do '
+    f'while `{constants.RAY_STATUS} | grep -q "No cluster status."`; do '
     'sleep 0.5; '
     'echo "Waiting ray cluster to be initialized"; '
     'done;')
@@ -199,6 +200,23 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                                                     stream_logs=False,
                                                     log_path=log_path,
                                                     require_outputs=True)
+            retry_cnt = 0
+            while returncode == 255 and retry_cnt < _MAX_RETRY:
+                # Got network connection issue occur during setup. This could
+                # happen when a setup step requires a reboot, e.g. nvidia-driver
+                # installation (happens for fluidstack). We should retry for it.
+                logger.info('Network connection issue during setup, this is '
+                            'likely due to the reboot of the instance. '
+                            'Retrying setup in 10 seconds.')
+                time.sleep(10)
+                retry_cnt += 1
+                returncode, stdout, stderr = runner.run(cmd,
+                                                        stream_logs=False,
+                                                        log_path=log_path,
+                                                        require_outputs=True)
+                if not returncode:
+                    break
+
             if returncode:
                 raise RuntimeError(
                     'Failed to run setup commands on an instance. '
@@ -212,6 +230,22 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                              digest=digest,
                              cluster_info=cluster_info,
                              ssh_credentials=ssh_credentials)
+
+
+def _ray_gpu_options(custom_resource: str) -> str:
+    """Returns GPU options for the ray start command.
+
+    For some cases (e.g., within docker container), we need to explicitly set
+    --num-gpus to have ray clusters recognize the schedulable GPUs.
+    """
+    acc_dict = json.loads(custom_resource)
+    assert len(acc_dict) == 1, acc_dict
+    acc_name, acc_count = list(acc_dict.items())[0]
+    if accelerator_registry.is_schedulable_non_gpu_accelerator(acc_name):
+        return ''
+    # We need to manually set the number of GPUs, as it may not automatically
+    # detect the GPUs within the container.
+    return f' --num-gpus={acc_count}'
 
 
 @_log_start_end
@@ -239,6 +273,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += _ray_gpu_options(custom_resource)
 
     if cluster_info.custom_ray_options:
         if 'use_external_ip' in cluster_info.custom_ray_options:
@@ -265,7 +300,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                                                 require_outputs=True)
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
-                           f'(exit code {returncode}). Error: '
+                           f'(exit code {returncode}). Error: \n'
                            f'===== stdout ===== \n{stdout}\n'
                            f'===== stderr ====={stderr}')
 
@@ -313,6 +348,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += _ray_gpu_options(custom_resource)
 
     if cluster_info.custom_ray_options:
         for key, value in cluster_info.custom_ray_options.items():

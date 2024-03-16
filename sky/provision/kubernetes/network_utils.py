@@ -67,9 +67,10 @@ def fill_loadbalancer_template(namespace: str, service_name: str,
     return content
 
 
-def fill_ingress_template(namespace: str, path_prefix: str, service_name: str,
-                          service_port: int, ingress_name: str,
-                          selector_key: str, selector_value: str) -> Dict:
+def fill_ingress_template(namespace: str, service_details: List[Tuple[str, int,
+                                                                      str]],
+                          ingress_name: str, selector_key: str,
+                          selector_value: str) -> Dict:
     template_path = os.path.join(sky.__root_dir__, 'templates',
                                  _INGRESS_TEMPLATE_NAME)
     if not os.path.exists(template_path):
@@ -80,15 +81,22 @@ def fill_ingress_template(namespace: str, path_prefix: str, service_name: str,
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,
-        path_prefix=path_prefix.rstrip('/').lstrip('/'),
-        service_name=service_name,
-        service_port=service_port,
+        service_names_and_ports=[{
+            'service_name': name,
+            'service_port': port,
+            'path_prefix': path_prefix
+        } for name, port, path_prefix in service_details],
         ingress_name=ingress_name,
         selector_key=selector_key,
         selector_value=selector_value,
     )
     content = yaml.safe_load(cont)
-    return content
+
+    # Return a dictionary containing both specs
+    return {
+        'ingress_spec': content['ingress_spec'],
+        'services_spec': content['services_spec']
+    }
 
 
 def create_or_replace_namespaced_ingress(

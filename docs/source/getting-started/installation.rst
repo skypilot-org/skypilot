@@ -17,7 +17,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -43,7 +43,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -69,7 +69,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
