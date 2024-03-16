@@ -1,14 +1,19 @@
 Documentation
 =============
 
-.. .. toctree::
-..    :maxdepth: 1
-..    :caption: Getting Started
+.. include:: content.rst
 
-..    ../getting-started/installation
-..    ../getting-started/quickstart
-..    ../getting-started/tutorial
-..    ../examples/gpu-jupyter
+Contents
+--------
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Getting Started
+
+   ../getting-started/installation
+   ../getting-started/quickstart
+   ../getting-started/tutorial
+   ../examples/gpu-jupyter
 
 
 .. toctree::

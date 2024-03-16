@@ -9,7 +9,6 @@ import yaml
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
 sys.path.insert(0, os.path.abspath('../../'))
-from custom_directives import setup_context, update_context, parse_navbar_config
 
 # -- Project information
 
@@ -63,25 +62,28 @@ napolean_use_rtype = False
 autodoc_member_order = 'bysource'
 
 # -- Options for HTML output
+def render_svg_logo(path):
+    with open(pathlib.Path(__file__).parent / path, "r") as f:
+        content = f.read()
 
+    return content
 # html_theme = 'sphinx_book_theme'
 html_theme = 'pydata_sphinx_theme'
 html_theme_options = {
     "show_toc_level": 1,
     "navbar_align": "left",  # [left, content, right] For testing that the navbar items align properly
-    "navbar_center": ["navbar-nav"],
-    # "navbar_start": ["navbar-skypilot-logo"],
+    # "navbar_center": ["navbar-links"],
+    "navbar_start": ["navbar-skypilot-logo"],
     # "navbar_end": [
     #     "navbar-icon-links",
     # ],
-    # "navbar_center": ["navbar-links"],
     "navbar_align": "left",
     "navbar_persistent": [
         "search-button-field",
     ],
     # "back_to_top_button": False,
     'logo': {
-        'image_dark': '_static/SkyPilot_wide_dark.svg',
+        'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
     },
     "use_edit_page_button": True,
     "announcement": None,
@@ -93,6 +95,9 @@ html_theme_options = {
     'pygment_light_style': 'tango',
     'pygment_dark_style': 'monokai',
     'primary_sidebar_end': [],
+    "footer_start": ["copyright"],
+    "footer_center": [],
+    "footer_end": [],
 }
 
 html_context = {
@@ -103,7 +108,6 @@ html_context = {
 }
 
 html_sidebars = {
-    "index": [],
     "**": ["main-sidebar"],
 }
 
@@ -122,7 +126,7 @@ html_show_sourcelink = False
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-html_logo = '_static/SkyPilot_wide_light.svg'
+# html_logo = '_static/SkyPilot_wide_light.svg'
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs. This file should be a Windows icon file (.ico), 16x16 or 32x32 pixels.
@@ -137,5 +141,31 @@ html_css_files = ['custom.css']
 
 # Allowing cross references in markdown files to be parsed
 myst_heading_anchors = 3
+show_sphinx = False
 
+def add_metadata_to_page(app, pagename, templatename, context, doctree):
+    # Add the author if it exists
+    if app.config.author != "unknown":
+        context["author"] = app.config.author
 
+def setup(app):
+    # -- To demonstrate ReadTheDocs switcher -------------------------------------
+    # This links a few JS and CSS files that mimic the environment that RTD uses
+    # so that we can test RTD-like behavior. We don't need to run it on RTD and we
+    # don't wanted it loaded in GitHub Actions because it messes up the lighthouse
+    # results.
+    if not os.environ.get("READTHEDOCS") and not os.environ.get("GITHUB_ACTIONS"):
+        app.add_css_file(
+            "https://assets.readthedocs.org/static/css/readthedocs-doc-embed.css"
+        )
+        app.add_css_file("https://assets.readthedocs.org/static/css/badge_only.css")
+
+        # Create the dummy data file so we can link it
+        # ref: https://github.com/readthedocs/readthedocs.org/blob/bc3e147770e5740314a8e8c33fec5d111c850498/readthedocs/core/static-src/core/js/doc-embed/footer.js  # noqa: E501
+        app.add_js_file("rtd-data.js")
+        app.add_js_file(
+            "https://assets.readthedocs.org/static/javascript/readthedocs-doc-embed.js",
+            priority=501,
+        )
+     
+    app.connect("html-page-context", add_metadata_to_page)
