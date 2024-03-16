@@ -104,7 +104,10 @@ To create a service account bound with these roles, you can use the following YA
     rules:
     - apiGroups: [""]
       resources: ["services"]
-      verbs: ["list", "get"]
+      verbs: ["list", "get", "watch"]
+    - apiGroups: ["rbac.authorization.k8s.io"]
+      resources: ["roles", "rolebindings"]
+      verbs: ["list", "get", "watch"]
     ---
     # RoleBinding for accessing ingress resources
     apiVersion: rbac.authorization.k8s.io/v1
