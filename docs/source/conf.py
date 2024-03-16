@@ -73,11 +73,12 @@ html_theme_options = {
     "show_toc_level": 1,
     "navbar_align": "left",  # [left, content, right] For testing that the navbar items align properly
     "navbar_start": ["navbar-skypilot-logo"],
-    # "navbar_end": [
-    #     "navbar-icon-links",
-    # ],
+    "navbar_end": [
+        # "navbar-icon-links",
+    ],
     "navbar_persistent": [
         "search-button-field",
+        "theme-switcher",
     ],
     'logo': {
         'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),

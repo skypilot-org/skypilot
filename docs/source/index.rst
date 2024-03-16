@@ -10,4 +10,4 @@ Welcome to SkyPilot!
    docs/index
    gallery/index
    developers/index
-
+   GitHub <https://github.com/skypilot-org/skypilot>
