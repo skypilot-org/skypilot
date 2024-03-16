@@ -72,16 +72,13 @@ html_theme = 'pydata_sphinx_theme'
 html_theme_options = {
     "show_toc_level": 1,
     "navbar_align": "left",  # [left, content, right] For testing that the navbar items align properly
-    # "navbar_center": ["navbar-links"],
     "navbar_start": ["navbar-skypilot-logo"],
     # "navbar_end": [
     #     "navbar-icon-links",
     # ],
-    "navbar_align": "left",
     "navbar_persistent": [
         "search-button-field",
     ],
-    # "back_to_top_button": False,
     'logo': {
         'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
     },
