@@ -54,6 +54,7 @@ from sky import global_user_state
 from sky import provision as provision_lib
 from sky import serve as serve_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import backend_utils
@@ -84,6 +85,8 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 _CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+CONFIG_PATH = "~/.sky/config.yaml"
+BACKUP_PATH = "~/.sky/backup_config.yaml"
 
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -5405,6 +5408,7 @@ def local_up(gpus: bool):
     message_str = message_str.format((' with GPU support (this may take up '
                                       'to 15 minutes)') if gpus else '')
     path_to_package = os.path.dirname(os.path.dirname(__file__))
+    change_config_port()
     up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                   'create_cluster.sh')
 
@@ -5507,6 +5511,19 @@ def local_up(gpus: bool):
             '\nHint: To change the number of CPUs, change your docker '
             'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
             f'{gpu_hint}')
+
+def change_config_port():
+    if not skypilot_config.loaded_config_path():
+        default_config = {'kubernetes': {'ports': 'loadbalancer'}}
+        config_path = os.path.expanduser(CONFIG_PATH)
+        common_utils.dump_yaml(config_path, default_config)
+        skypilot_config._try_load_config()
+    backup_path = os.path.expanduser(BACKUP_PATH)
+    backup_config = skypilot_config.to_dict()
+    common_utils.dump_yaml(backup_path, backup_config)
+    updated_config = skypilot_config.set_nested(('kubernetes', 'ports'), 'ingress')
+    common_utils.dump_yaml(skypilot_config.loaded_config_path(), updated_config)
+    skypilot_config._try_load_config()
 
 
 @local.command('down', cls=_DocumentedCodeCommand)

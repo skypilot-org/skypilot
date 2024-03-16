@@ -1,0 +1,5 @@
+setup: |
+  echo "setup"
+
+run: |
+  echo "Hello Sky."
