@@ -4771,8 +4771,11 @@ def local_up(gpus: bool):
     message_str = 'Creating local cluster{}...'
     message_str = message_str.format((' with GPU support (this may take up '
                                       'to 15 minutes)') if gpus else '')
-    path_to_package = os.path.dirname(os.path.dirname(__file__))
+    
+    # Set port forwarding option to ingress for local cluster, and make backup
     change_config_port()
+
+    path_to_package = os.path.dirname(os.path.dirname(__file__))
     up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                   'create_cluster.sh')
 
@@ -4877,25 +4880,15 @@ def local_up(gpus: bool):
             'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
             f'{gpu_hint}')
 
-def change_config_port():
-    if not skypilot_config.loaded_config_path():
-        default_config = {'kubernetes': {'ports': 'loadbalancer'}}
-        config_path = os.path.expanduser(CONFIG_PATH)
-        common_utils.dump_yaml(config_path, default_config)
-        skypilot_config._try_load_config()
-    backup_path = os.path.expanduser(BACKUP_PATH)
-    backup_config = skypilot_config.to_dict()
-    common_utils.dump_yaml(backup_path, backup_config)
-    updated_config = skypilot_config.set_nested(('kubernetes', 'ports'), 'ingress')
-    common_utils.dump_yaml(skypilot_config.loaded_config_path(), updated_config)
-    skypilot_config._try_load_config()
-
 
 @local.command('down', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
 def local_down():
     """Deletes a local cluster."""
     cluster_removed = False
+
+    # Restore port forwarding option to for local cluster from backup
+    restore_config_port()
 
     path_to_package = os.path.dirname(os.path.dirname(__file__))
     down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
@@ -4936,6 +4929,43 @@ def local_down():
             sky_check.check(quiet=True)
         click.echo(
             f'{colorama.Fore.GREEN}Local cluster removed.{style.RESET_ALL}')
+
+
+def change_config_port():
+    """Set the `kubernetes:ports` to be `ingress` and backup the original value."""
+    
+    if not skypilot_config.loaded_config_path():
+        logger.debug(f'Making base {CONFIG_PATH} file as it did not previously exist.')
+        default_config = {'kubernetes': {'ports': 'loadbalancer'}}
+        config_path = os.path.expanduser(CONFIG_PATH)
+        common_utils.dump_yaml(config_path, default_config)
+        skypilot_config._try_load_config()
+    
+    logger.debug(f'Creating backup at {BACKUP_PATH} of current kubernetes port forwarding option.')
+    backup_path = os.path.expanduser(BACKUP_PATH)
+    backup_port_config = skypilot_config.to_dict()['kubernetes']['ports']
+    common_utils.dump_yaml(backup_path, {'kubernetes': {'ports': backup_port_config}})
+    
+    current_path = skypilot_config.loaded_config_path()
+    logger.debug(f'Set current port forwarding option to ingress in {current_path}.')
+    updated_config = skypilot_config.set_nested(('kubernetes', 'ports'), 'ingress')
+    common_utils.dump_yaml(current_path, updated_config)
+    skypilot_config._try_load_config()
+
+
+def restore_config_port():
+    """Restore the original value of `kubernetes:ports`."""
+
+    current_path = skypilot_config.loaded_config_path()
+    logger.debug(f'Restore original port forwarding option in {current_path} from backup file {BACKUP_PATH}.')
+    backup_path = os.path.expanduser(BACKUP_PATH)
+    backup_port_config = common_utils.read_yaml(backup_path)['kubernetes']['ports']
+    restored_config = skypilot_config.set_nested(('kubernetes', 'ports'), backup_port_config)
+    common_utils.dump_yaml(current_path, restored_config)
+    
+    logger.debug(f'Resetting backup file {BACKUP_PATH} to be empty.')
+    common_utils.dump_yaml(backup_path, {})
+    skypilot_config._try_load_config()
 
 
 def main():
