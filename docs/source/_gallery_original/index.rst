@@ -6,12 +6,15 @@ AI Gallery
    :maxdepth: 1
    :caption: Common Frameworks
 
-   ray
-   vllm
+   frameworks/vllm
+   frameworks/ray
+   frameworks/axolotl
 
 .. toctree::
    :maxdepth: 1
    :caption: LLMs
+   
+   llms/codellama
 
    
 

@@ -10,6 +10,8 @@ sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
 sys.path.insert(0, os.path.abspath('../../'))
 
+import prepare_github_markdown
+
 # -- Project information
 
 project = 'SkyPilot'
@@ -167,3 +169,4 @@ def setup(app):
         )
      
     app.connect("html-page-context", add_metadata_to_page)
+    app.connect("builder-inited", prepare_github_markdown.handle_markdown_in_gallery)
