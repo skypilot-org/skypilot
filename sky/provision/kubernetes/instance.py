@@ -274,7 +274,7 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
         '/bin/sh', '-c',
         ('prefix_cmd() '
          '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-         'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > '
+         'printenv | awk -F "=" \'{var=$1; $1=""; value=substr($0, 2); printf "export %s=\"%s\"\n", var, value}\' > '  # pylint: disable=line-too-long
          '~/k8s_env_var.sh && '
          'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
          '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
