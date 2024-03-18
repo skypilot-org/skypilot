@@ -271,13 +271,15 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     shell sessions.
     """
     set_k8s_env_var_cmd = [
-        '/bin/sh', '-c',
-        ('prefix_cmd() '
-         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-         'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
-         '~/k8s_env_var.sh && '
-         'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-         '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+        '/bin/sh',
+        '-c',
+        (
+            'prefix_cmd() '
+            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+            'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
+            '~/k8s_env_var.sh && '
+            'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
+            '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
     ]
 
     for new_pod in new_pods:
