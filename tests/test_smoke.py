@@ -682,26 +682,24 @@ def test_image_no_conda():
     )
     run_one_test(test)
 
+
 def test_custom_default_conda_env(generic_cloud: str):
     name = _get_cluster_name()
-    test = Test(
-        'custom_default_conda_env',
-        [
-            f'sky launch -c {name} -y --cloud {generic_cloud} examples/test_custom_default_conda_env.yaml',
-            f'sky status -r {name} | grep "UP"',
-            f'sky logs {name} 1 --status',
-            f'sky logs {name} 1 --no-follow | grep -P "myenv\\s+\\*"',
-            f'sky exec {name} examples/test_custom_default_conda_env.yaml',
-            f'sky logs {name} 2 --status',
-            f'sky autostop -y -i 0 {name}',
-            'sleep 60',
-            f'sky status -r {name} | grep "STOPPED"',
-            f'sky start -y {name}',
-            f'sky logs {name} 2 --no-follow | grep -P "myenv\\s+\\*"',
-            f'sky exec {name} examples/test_custom_default_conda_env.yaml',
-            f'sky logs {name} 3 --status',
-        ]
-    )
+    test = Test('custom_default_conda_env', [
+        f'sky launch -c {name} -y --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
+        f'sky status -r {name} | grep "UP"',
+        f'sky logs {name} 1 --status',
+        f'sky logs {name} 1 --no-follow | grep -P "myenv\\s+\\*"',
+        f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
+        f'sky logs {name} 2 --status',
+        f'sky autostop -y -i 0 {name}',
+        'sleep 60',
+        f'sky status -r {name} | grep "STOPPED"',
+        f'sky start -y {name}',
+        f'sky logs {name} 2 --no-follow | grep -P "myenv\\s+\\*"',
+        f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
+        f'sky logs {name} 3 --status',
+    ])
     run_one_test(test)
 
 
