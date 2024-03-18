@@ -151,7 +151,7 @@ User
     compute.images.get
     compute.images.useReadOnly
 
-9. **Optional**: If the user sets ``gcp.prioritize_reservations`` or ``gcp.specific_reservations`` in :ref:`~/.sky/config.yaml <config-yaml>`, you can additionally add the following permissions:
+9. **Optional**: If your organization sets ``gcp.prioritize_reservations`` or ``gcp.specific_reservations`` in :ref:`~/.sky/config.yaml <config-yaml>`, you can additionally add the following permissions:
 
 .. code-block:: text
 
