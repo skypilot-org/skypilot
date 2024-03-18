@@ -142,7 +142,7 @@ html_js_files = ['custom.js']
 html_css_files = ['custom.css']
 
 # Allowing cross references in markdown files to be parsed
-myst_heading_anchors = 3
+myst_heading_anchors = 7
 show_sphinx = False
 
 def add_metadata_to_page(app, pagename, templatename, context, doctree):

@@ -1,7 +1,7 @@
 <!-- $REMOVE -->
 # vLLM: Easy, Fast, and Cheap LLM Serving with PagedAttention
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# vLLM: Easy, Fast, and Cheap LLM Inference Engine -->
+<!-- $UNCOMMENT# vLLM: Easy, Fast, and Cheap LLM Inference -->
 
 <p align="center">
     <img src="https://imgur.com/yxtzPEu.png" alt="vLLM"/>
@@ -23,7 +23,7 @@ See the vLLM SkyPilot [YAMLs](https://github.com/skypilot-org/skypilot/tree/mast
 
 ## Serving Llama-2 with vLLM's OpenAI-compatible API server
 
-Before you get started, you need to have access to the Llama-2 model weights on huggingface. Please check the prerequisites section in [Llama-2 example](../llama-2/README.md#pre-requisites) for more details.
+Before you get started, you need to have access to the Llama-2 model weights on huggingface. Please check the prerequisites section in [Llama-2 example](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2/README.md#pre-requisites) for more details.
 
 1. Start serving the Llama-2 model:
 ```bash
@@ -121,7 +121,7 @@ service:
   replicas: 2
 ```
 
-The entire Service YAML can be found here: [service.yaml](service.yaml).
+The entire Service YAML can be found here: [service.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm/service.yaml).
 
 2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
 ```bash
