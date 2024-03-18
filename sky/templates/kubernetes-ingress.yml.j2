@@ -1,0 +1,40 @@
+ingress_spec:
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    annotations:
+      nginx.ingress.kubernetes.io/use-regex: "true"
+      nginx.ingress.kubernetes.io/rewrite-target: /$2
+    name: {{ ingress_name }}
+    namespace: {{ namespace }}
+  spec:
+    ingressClassName: nginx
+    rules:
+    - http:
+        paths:
+        {% for service in service_names_and_ports %}
+        - path: /{{ service.path_prefix }}(/|$)(.*)
+          pathType: ImplementationSpecific
+          backend:
+            service:
+              name: {{ service.service_name }}
+              port:
+                number: {{ service.service_port }}
+        {% endfor %}
+services_spec:
+  {% for service in service_names_and_ports %}
+  {{ service.service_name }}:
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: {{ service.service_name }}
+      labels:
+        parent: skypilot
+    spec:
+      type: ClusterIP
+      selector:
+        {{ selector_key }}: {{ selector_value }}
+      ports:
+      - port: {{ service.service_port }}
+        targetPort: {{ service.service_port }}
+  {% endfor %}

@@ -12,6 +12,7 @@ from sky import status_lib
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
 from sky.clouds import service_catalog
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -34,20 +35,27 @@ class IBM(clouds.Cloud):
     _regions: List[clouds.Region] = []
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return {
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
-                (f'Migrating disk is not supported in {cls._REPR}.'),
+                (f'Migrating disk is currently not supported on {cls._REPR}.'),
             clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-                (f'Docker image is not supported in {cls._REPR}. '
+                (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
             clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-                (f'Custom disk tier is not supported in {cls._REPR}.'),
+                (f'Custom disk tier is currently not supported on {cls._REPR}.'
+                ),
             clouds.CloudImplementationFeatures.OPEN_PORTS:
-                (f'Opening ports is not supported in {cls._REPR}.'),
+                (f'Opening ports is currently not supported on {cls._REPR}.'),
         }
+        if resources.use_spot:
+            features[clouds.CloudImplementationFeatures.STOP] = (
+                'Stopping spot instances is currently not supported on'
+                f' {cls._REPR}.')
+        return features
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -166,6 +174,7 @@ class IBM(clouds.Cloud):
         cluster_name_on_cloud: str,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
+        dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
@@ -178,7 +187,7 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
-        del cluster_name_on_cloud  # Unused.
+        del cluster_name_on_cloud, dryrun  # Unused.
 
         def _get_profile_resources(instance_profile):
             """returns a dict representing the
@@ -251,7 +260,8 @@ class IBM(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -421,11 +431,6 @@ class IBM(clouds.Cloud):
         except Exception as e:
             return (False, f'{str(e)}' + help_str)
 
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
-        del instance_type, disk_tier  # unused
-
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a {remote:local} credential path mapping
          written to the cluster's file_mounts segment
@@ -440,15 +445,6 @@ class IBM(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         """Validates the region and zone."""
         return service_catalog.validate_region_zone(region, zone, clouds='ibm')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        """Returns whether the accelerator is valid in the region or zone."""
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'ibm')
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

@@ -13,6 +13,8 @@ SIGTSTP_CODE = 146
 RSYNC_FILE_NOT_FOUND_CODE = 23
 # Arbitrarily chosen value. Used in SkyPilot's storage mounting scripts
 MOUNT_PATH_NON_EMPTY_CODE = 42
+# Arbitrarily chosen value. Used to provision Kubernetes instance in Skypilot
+INSUFFICIENT_PRIVILEGES_CODE = 52
 # Return code when git command is ran in a dir that is not git repo
 GIT_FATAL_EXIT_CODE = 128
 
@@ -42,6 +44,11 @@ class ResourcesUnavailableError(Exception):
         # Copy the list to avoid modifying from outside.
         self.failover_history = list(failover_history)
         return self
+
+
+class InvalidCloudConfigs(Exception):
+    """Raised when invalid configurations are provided for a given cloud."""
+    pass
 
 
 class ProvisionPrechecksError(Exception):
@@ -92,8 +99,11 @@ class CommandError(Exception):
         self.command = command
         self.error_msg = error_msg
         self.detailed_reason = detailed_reason
-        message = (f'Command {command} failed with return code {returncode}.'
-                   f'\n{error_msg}')
+        if not command:
+            message = error_msg
+        else:
+            message = (f'Command {command} failed with return code '
+                       f'{returncode}.\n{error_msg}')
         super().__init__(message)
 
 
@@ -261,3 +271,7 @@ class AWSAzFetchingError(Exception):
 class ServeUserTerminatedError(Exception):
     """Raised by serve controller when a user tear down the service."""
     pass
+
+
+class PortDoesNotExistError(Exception):
+    """Raised when the port does not exist."""

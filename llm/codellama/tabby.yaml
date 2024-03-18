@@ -1,0 +1,25 @@
+# Starts a Tabby server that connects to the Code Llama OpenAI API server.
+# This works with the endpoint.yaml, please refer to llm/codellama/README.md
+# for more details.
+# Usage:
+#  1. If you have a endpoint started on a cluster (sky launch):
+#     `sky launch -c tabby ./tabby.yaml --env ENDPOINT=$(sky status --ip code-llama):8000`
+#  2. If you have a SkyPilot Service started (sky serve up) called code-llama:
+#     `sky launch -c tabby ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint code-llama)`
+# After the Tabby server is started, you can add the endpoint (URL:port) to VSCode
+# Tabby extension and start using it.
+
+envs:
+  ENDPOINT: x.x.x.x:3031 # Address of the API server running codellama. 
+
+resources:
+  cpus: 2
+  ports: 8080
+
+setup: |
+  wget https://github.com/TabbyML/tabby/releases/download/v0.8.0-rc.1/tabby_x86_64-manylinux2014 -O tabby
+  chmod +x tabby
+
+run: |
+  ./tabby serve --device experimental-http \
+    --model "{\"kind\": \"openai\", \"model_name\": \"codellama/CodeLlama-70b-Instruct-hf\", \"api_endpoint\": \"http://$ENDPOINT/v1/completions\", \"prompt_template\": \"{prefix}\"}"

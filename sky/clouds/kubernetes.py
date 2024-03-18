@@ -5,14 +5,13 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
+from sky.provision.kubernetes import network_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
-from sky.utils import kubernetes_utils
-from sky.utils import ux_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -20,15 +19,19 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-CREDENTIAL_PATH = '~/.kube/config'
+# Check if KUBECONFIG is set, and use it if it is.
+DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
+CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
-    SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
-    SKY_SSH_JUMP_NAME = f'sky-ssh-jump-{common_utils.get_user_hash()}'
+    SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
+    SKY_SSH_KEY_SECRET_FIELD_NAME = \
+        f'ssh-publickey-{common_utils.get_user_hash()}'
+    SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
         'kubernetes-port-forward-proxy-command.sh.j2'
     PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
@@ -54,8 +57,6 @@ class Kubernetes(clouds.Cloud):
         #  https://kubernetes.io/blog/2022/12/05/forensic-container-checkpointing-alpha/ # pylint: disable=line-too-long
         clouds.CloudImplementationFeatures.STOP: 'Kubernetes does not '
                                                  'support stopping VMs.',
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not '
-                                                     'support stopping VMs.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
@@ -63,21 +64,30 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker image is not '
-                                                         'supported in '
-                                                         'Kubernetes.',
-        clouds.CloudImplementationFeatures.OPEN_PORTS: 'Opening ports is not '
-                                                       'supported in '
-                                                       'Kubernetes.'
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
     IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
+        if curr_context == kubernetes_utils.KIND_CONTEXT_NAME:
+            # If we are using KIND, the loadbalancer service will never be
+            # assigned an external IP. Users may use ingress, but that requires
+            # blocking HTTP port 80.
+            # For now, we disable port opening feature on kind clusters.
+            unsupported_features[
+                clouds.CloudImplementationFeatures.OPEN_PORTS] = (
+                    'Opening ports is not supported in Kubernetes when '
+                    'using local kind cluster.')
+        return unsupported_features
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
@@ -124,10 +134,11 @@ class Kubernetes(clouds.Cloud):
         return kubernetes_utils.get_port(svc_name, ns)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[str] = None) -> str:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[resources_utils.DiskTier] = None) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
         del disk_tier  # Unused.
@@ -135,8 +146,15 @@ class Kubernetes(clouds.Cloud):
         # exactly the requested resources.
         instance_cpus = float(
             cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
-        instance_mem = float(memory.strip('+')) if memory is not None else \
-            instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
+        if memory is not None:
+            if memory.endswith('+'):
+                instance_mem = float(memory[:-1])
+            elif memory.endswith('x'):
+                instance_mem = float(memory[:-1]) * instance_cpus
+            else:
+                instance_mem = float(memory)
+        else:
+            instance_mem = instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
         virtual_instance_type = kubernetes_utils.KubernetesInstanceType(
             instance_cpus, instance_mem).name
         return virtual_instance_type
@@ -179,11 +197,21 @@ class Kubernetes(clouds.Cloud):
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> int:
+        del image_id, region  # Unused.
+        # We don't limit the image by its size compared to the disk size, as
+        # we don't have a notion of disk size in Kubernetes.
+        return 0
+
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud, zones  # Unused.
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud, zones, dryrun  # Unused.
         if region is None:
             region = self._regions[0]
 
@@ -204,15 +232,17 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else None
 
-        # Select image based on whether we are using GPUs or not.
-        image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
-        # Get the container image ID from the service catalog.
-        # TODO(romilb): Note that currently we do not support custom images,
-        #  so the image_id should start with 'skypilot:'.
-        #  In the future we may want to get image_id from the resources object.
-        assert image_id.startswith('skypilot:')
-        image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                         clouds='kubernetes')
+        if resources.image_id is not None:
+            # Use custom image specified in resources
+            image_id = resources.image_id['kubernetes']
+            if image_id.startswith('docker:'):
+                image_id = image_id[len('docker:'):]
+        else:
+            # Select image based on whether we are using GPUs or not.
+            image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+            # Get the container image ID from the service catalog.
+            image_id = service_catalog.get_image_id_from_tag(
+                image_id, clouds='kubernetes')
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')
@@ -225,6 +255,8 @@ class Kubernetes(clouds.Cloud):
             k8s_acc_label_key, k8s_acc_label_value = \
                 kubernetes_utils.get_gpu_label_key_value(acc_type)
 
+        port_mode = network_utils.get_port_mode(None)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -233,6 +265,9 @@ class Kubernetes(clouds.Cloud):
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             'timeout': str(self.TIMEOUT),
+            'k8s_namespace':
+                kubernetes_utils.get_current_kube_config_context_namespace(),
+            'k8s_port_mode': port_mode.value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
@@ -241,6 +276,7 @@ class Kubernetes(clouds.Cloud):
             # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
         }
+
         return deploy_vars
 
     def _get_feasible_launchable_resources(
@@ -319,7 +355,12 @@ class Kubernetes(clouds.Cloud):
                     f'check if {CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {CREDENTIAL_PATH: CREDENTIAL_PATH}
+        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+            # Upload kubeconfig to the default path to avoid having to set
+            # KUBECONFIG in the environment.
+            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
+        else:
+            return {}
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
@@ -334,54 +375,6 @@ class Kubernetes(clouds.Cloud):
             raise ValueError('Kubernetes support does not support setting zone.'
                              ' Cluster used is determined by the kubeconfig.')
         return region, zone
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        try:
-            # Check if accelerator is available by checking node labels
-            _, _ = kubernetes_utils.get_gpu_label_key_value(accelerator)
-            return True
-        except exceptions.ResourcesUnavailableError:
-            return False
-
-    @classmethod
-    def query_status(cls, name: str, tag_filters: Dict[str, str],
-                     region: Optional[str], zone: Optional[str],
-                     **kwargs) -> List['status_lib.ClusterStatus']:
-        del tag_filters, region, zone, kwargs  # Unused.
-        namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-
-        # Get all the pods with the label skypilot-cluster: <cluster_name>
-        try:
-            pods = kubernetes.core_api().list_namespaced_pod(
-                namespace,
-                label_selector=f'skypilot-cluster={name}',
-                _request_timeout=kubernetes.API_TIMEOUT).items
-        except kubernetes.max_retry_error():
-            with ux_utils.print_exception_no_traceback():
-                ctx = kubernetes_utils.get_current_kube_config_context_name()
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query cluster {name!r} status. '
-                    'Network error - check if the Kubernetes cluster in '
-                    f'context {ctx} is up and accessible.') from None
-        except Exception as e:  # pylint: disable=broad-except
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query Kubernetes cluster {name!r} status: '
-                    f'{common_utils.format_exception(e)}')
-
-        # Check if the pods are running or pending
-        cluster_status = []
-        for pod in pods:
-            if pod.status.phase == 'Running':
-                cluster_status.append(status_lib.ClusterStatus.UP)
-            elif pod.status.phase == 'Pending':
-                cluster_status.append(status_lib.ClusterStatus.INIT)
-        # If pods are not found, we don't add them to the return list
-        return cluster_status
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

@@ -169,11 +169,6 @@ class AbstractStore:
     present in a cloud.
     """
 
-    _STAT_CACHE_TTL = '5s'
-    _STAT_CACHE_CAPACITY = 4096
-    _TYPE_CACHE_TTL = '5s'
-    _RENAME_DIR_LIMIT = 10000
-
     class StoreMetadata:
         """A pickle-able representation of Store
 
@@ -321,6 +316,35 @@ class AbstractStore:
         # S3 Client and GCS Client cannot be deep copied, hence the
         # original Store object is returned
         return self
+
+    def _validate_existing_bucket(self):
+        """Validates the storage fields for existing buckets."""
+        # Check if 'source' is None, this is only allowed when Storage is in
+        # either MOUNT mode or COPY mode with sky-managed storage.
+        # Note: In COPY mode, a 'source' being None with non-sky-managed
+        # storage is already handled as an error in _validate_storage_spec.
+        if self.source is None:
+            # Retrieve a handle associated with the storage name.
+            # This handle links to sky managed storage if it exists.
+            handle = global_user_state.get_handle_from_storage_name(self.name)
+            # If handle is None, it implies the bucket is created
+            # externally and not managed by Skypilot. For mounting such
+            # externally created buckets, users must provide the
+            # bucket's URL as 'source'.
+            if handle is None:
+                with ux_utils.print_exception_no_traceback():
+                    store_prefix = get_store_prefix(StoreType.from_store(self))
+                    raise exceptions.StorageSpecError(
+                        'Attempted to mount a non-sky managed bucket '
+                        f'{self.name!r} without specifying the storage source.'
+                        f' Bucket {self.name!r} already exists. \n'
+                        '    • To create a new bucket, specify a unique name.\n'
+                        '    • To mount an externally created bucket (e.g., '
+                        'created through cloud console or cloud cli), '
+                        'specify the bucket URL in the source field '
+                        'instead of its name. I.e., replace '
+                        f'`name: {self.name}` with '
+                        f'`source: {store_prefix}{self.name}`.')
 
 
 class Storage(object):
@@ -820,6 +844,10 @@ class Storage(object):
             logger.error(f'Could not initialize {store_type} store with '
                          f'name {self.name}. General initialization error.')
             raise
+        except exceptions.StorageSpecError:
+            logger.error(f'Could not mount externally created {store_type}'
+                         f'store with name {self.name!r}.')
+            raise
 
         # Add store to storage
         self._add_store(store)
@@ -1240,6 +1268,8 @@ class S3Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -1255,6 +1285,7 @@ class S3Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
+            self._validate_existing_bucket()
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -1307,14 +1338,9 @@ class S3Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
-                       'releases/download/0.24.0-romilb-upstream/goofys '
-                       '-O /usr/local/bin/goofys && '
-                       'sudo chmod +x /usr/local/bin/goofys')
-        mount_cmd = ('goofys -o allow_other '
-                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-                     f'{self.bucket.name} {mount_path}')
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
+        mount_cmd = mounting_utils.get_s3_mount_cmd(self.bucket.name,
+                                                    mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -1391,9 +1417,6 @@ class GcsStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-
-    # https://github.com/GoogleCloudPlatform/gcsfuse/releases
-    _GCSFUSE_VERSION = '1.3.0'
 
     def __init__(self,
                  name: str,
@@ -1689,6 +1712,8 @@ class GcsStore(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -1697,6 +1722,7 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(self.name)
+            self._validate_existing_bucket()
             return bucket, False
         except gcp.not_found_exception() as e:
             if isinstance(self.source, str) and self.source.startswith('gs://'):
@@ -1744,20 +1770,11 @@ class GcsStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
-                       f'/releases/download/v{self._GCSFUSE_VERSION}/'
-                       f'gcsfuse_{self._GCSFUSE_VERSION}_amd64.deb '
-                       '-O /tmp/gcsfuse.deb && '
-                       'sudo dpkg --install /tmp/gcsfuse.deb')
-        mount_cmd = ('gcsfuse -o allow_other '
-                     '--implicit-dirs '
-                     f'--stat-cache-capacity {self._STAT_CACHE_CAPACITY} '
-                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-                     f'--rename-dir-limit {self._RENAME_DIR_LIMIT} '
-                     f'{self.bucket.name} {mount_path}')
+        install_cmd = mounting_utils.get_gcs_mount_install_cmd()
+        mount_cmd = mounting_utils.get_gcs_mount_cmd(self.bucket.name,
+                                                     mount_path)
         version_check_cmd = (
-            f'gcsfuse --version | grep -q {self._GCSFUSE_VERSION}')
+            f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
@@ -2047,6 +2064,8 @@ class R2Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -2062,6 +2081,7 @@ class R2Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
+            self._validate_existing_bucket()
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -2123,18 +2143,15 @@ class R2Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
-                       'releases/download/0.24.0-romilb-upstream/goofys '
-                       '-O /usr/local/bin/goofys && '
-                       'sudo chmod +x /usr/local/bin/goofys')
+        install_cmd = mounting_utils.get_s3_mount_install_cmd()
         endpoint_url = cloudflare.create_endpoint()
-        mount_cmd = (
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
-            f'AWS_PROFILE={cloudflare.R2_PROFILE_NAME} goofys -o allow_other '
-            f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-            f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-            f'--endpoint {endpoint_url} '
-            f'{self.bucket.name} {mount_path}')
+        r2_credential_path = cloudflare.R2_CREDENTIALS_PATH
+        r2_profile_name = cloudflare.R2_PROFILE_NAME
+        mount_cmd = mounting_utils.get_r2_mount_cmd(r2_credential_path,
+                                                    r2_profile_name,
+                                                    endpoint_url,
+                                                    self.bucket.name,
+                                                    mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -2466,6 +2483,8 @@ class IBMCosStore(AbstractStore):
           bool: indicates whether a new bucket was created.
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If bucket creation fails.
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -2525,7 +2544,9 @@ class IBMCosStore(AbstractStore):
                 f'{self.name}')
         else:
             # bucket exists
-            return self.s3_resource.Bucket(self.name), False
+            bucket = self.s3_resource.Bucket(self.name)
+            self._validate_existing_bucket()
+            return bucket, False
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
@@ -2546,22 +2567,18 @@ class IBMCosStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
+        # install rclone if not installed.
+        install_cmd = mounting_utils.get_cos_mount_install_cmd()
         rclone_config_data = Rclone.get_rclone_config(
             self.bucket.name,
             Rclone.RcloneClouds.IBM,
             self.region,  # type: ignore
         )
-        # pylint: disable=line-too-long
-        # creates a fusermount soft link on older (<22) Ubuntu systems for rclone's mount utility.
-        create_fuser3_soft_link = '[ ! -f /bin/fusermount3 ] && sudo ln -s /bin/fusermount /bin/fusermount3 || true'
-        # stores bucket profile in rclone config file at the cluster's nodes.
-        configure_rclone_profile = (
-            f'{create_fuser3_soft_link}; mkdir -p ~/.config/rclone/ && echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}'
-        )
-        # install rclone if not installed.
-        install_cmd = 'rclone version >/dev/null 2>&1 || (curl https://rclone.org/install.sh | sudo bash)'
-        # --daemon will keep the mounting process running in the background.
-        mount_cmd = f'{configure_rclone_profile} && rclone mount {self.bucket_rclone_profile}:{self.bucket.name} {mount_path} --daemon'
+        mount_cmd = mounting_utils.get_cos_mount_cmd(rclone_config_data,
+                                                     Rclone.RCLONE_CONFIG_PATH,
+                                                     self.bucket_rclone_profile,
+                                                     self.bucket.name,
+                                                     mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 

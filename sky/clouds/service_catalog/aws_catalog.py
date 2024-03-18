@@ -20,6 +20,7 @@ from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
 from sky.clouds.service_catalog.data_fetchers import fetch_aws
 from sky.utils import common_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -197,14 +198,6 @@ def validate_region_zone(
     return common.validate_region_zone_impl('aws', _get_df(), region, zone)
 
 
-def accelerator_in_region_or_zone(acc_name: str,
-                                  acc_count: int,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_get_df(), acc_name,
-                                                     acc_count, region, zone)
-
-
 def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
@@ -219,9 +212,10 @@ def get_vcpus_mem_from_instance_type(
                                                         instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
@@ -291,12 +285,15 @@ def list_accelerators(
         name_filter: Optional[str],
         region_filter: Optional[str],
         quantity_filter: Optional[int],
-        case_sensitive: bool = True
-) -> Dict[str, List[common.InstanceTypeInfo]]:
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in AWS offering accelerators."""
+    del require_price  # Unused.
     return common.list_accelerators_impl('AWS', _get_df(), gpus_only,
                                          name_filter, region_filter,
-                                         quantity_filter, case_sensitive)
+                                         quantity_filter, case_sensitive,
+                                         all_regions)
 
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:

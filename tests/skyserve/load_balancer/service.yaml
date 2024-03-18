@@ -1,0 +1,17 @@
+service:
+  readiness_probe:
+    path: /health
+    # For install dependencies
+    initial_delay_seconds: 180
+  replica_policy:
+    min_replicas: 3
+
+resources:
+  ports: 8080
+  cpus: 2+
+
+workdir: tests/skyserve/load_balancer
+
+setup: pip install fastapi[all] uvicorn
+
+run: python3 server.py --port 8080

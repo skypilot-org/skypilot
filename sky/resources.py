@@ -4,9 +4,9 @@ import textwrap
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
-from typing_extensions import Literal
 
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
@@ -19,7 +19,6 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
-from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -44,7 +43,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 13
+    _VERSION = 15
 
     def __init__(
         self,
@@ -60,9 +59,10 @@ class Resources:
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
-        disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
+        disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         # Internal use only.
+        # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
     ):
@@ -170,6 +170,15 @@ class Resources:
                 }
         self._is_image_managed = _is_image_managed
 
+        if isinstance(disk_tier, str):
+            disk_tier_str = str(disk_tier).lower()
+            supported_tiers = [tier.value for tier in resources_utils.DiskTier]
+            if disk_tier_str not in supported_tiers:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid disk_tier {disk_tier_str!r}. '
+                                     f'Disk tier must be one of '
+                                     f'{", ".join(supported_tiers)}.')
+            disk_tier = resources_utils.DiskTier(disk_tier_str)
         self._disk_tier = disk_tier
 
         if ports is not None:
@@ -191,7 +200,6 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
-        self._try_validate_local()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_spot()
@@ -244,9 +252,6 @@ class Resources:
         if self.memory is not None:
             memory = f', mem={self.memory}'
 
-        if isinstance(self.cloud, clouds.Local):
-            return f'{self.cloud}({self.accelerators})'
-
         use_spot = ''
         if self.use_spot:
             use_spot = '[Spot]'
@@ -260,7 +265,7 @@ class Resources:
 
         disk_tier = ''
         if self.disk_tier is not None:
-            disk_tier = f', disk_tier={self.disk_tier}'
+            disk_tier = f', disk_tier={self.disk_tier.value}'
 
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
@@ -392,7 +397,7 @@ class Resources:
         return self._image_id
 
     @property
-    def disk_tier(self) -> str:
+    def disk_tier(self) -> resources_utils.DiskTier:
         return self._disk_tier
 
     @property
@@ -443,7 +448,10 @@ class Resources:
 
         self._memory = str(memory)
         if isinstance(memory, str):
-            if memory.endswith('+'):
+            if memory.endswith(('+', 'x')):
+                # 'x' is used internally for make sure our resources used by
+                # spot controller (memory: 3x) to have enough memory based on
+                # the vCPUs.
                 num_memory_gb = memory[:-1]
             else:
                 num_memory_gb = memory
@@ -494,16 +502,11 @@ class Resources:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
 
-            # Ignore check for the local cloud case.
-            # It is possible the accelerators dict can contain multiple
-            # types of accelerators for some on-prem clusters.
-            if not isinstance(self._cloud, clouds.Local):
-                assert len(accelerators) == 1, accelerators
-
             # Canonicalize the accelerator names.
             accelerators = {
-                accelerator_registry.canonicalize_accelerator_name(acc):
-                acc_count for acc, acc_count in accelerators.items()
+                accelerator_registry.canonicalize_accelerator_name(
+                    acc, self._cloud): acc_count
+                for acc, acc_count in accelerators.items()
             }
 
             acc, _ = list(accelerators.items())[0]
@@ -514,9 +517,7 @@ class Resources:
                     clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
-                use_tpu_vm = accelerator_args.get('tpu_vm', False)
-                if use_tpu_vm:
-                    tpu_utils.check_gcp_cli_include_tpu_vm()
+                use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if self.instance_type is not None and use_tpu_vm:
                     if self.instance_type != 'TPU-VM':
                         with ux_utils.print_exception_no_traceback():
@@ -713,7 +714,7 @@ class Resources:
                             f'number of vCPUs. {self.instance_type} has {cpus} '
                             f'vCPUs, but {self.cpus} is requested.')
             if self.memory is not None:
-                if self.memory.endswith('+'):
+                if self.memory.endswith(('+', 'x')):
                     if mem < float(self.memory[:-1]):
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
@@ -742,25 +743,6 @@ class Resources:
                     'is not supported. The strategy should be among '
                     f'{list(spot.SPOT_STRATEGIES.keys())}')
 
-    def _try_validate_local(self) -> None:
-        if isinstance(self._cloud, clouds.Local):
-            if self._use_spot:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Local/On-prem mode does not support spot '
-                                     'instances.')
-            local_instance = clouds.Local.get_default_instance_type()
-            if (self._instance_type is not None and
-                    self._instance_type != local_instance):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Local/On-prem mode does not support instance type:'
-                        f' {self._instance_type}.')
-            if self._image_id is not None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Local/On-prem mode does not support custom '
-                        'images.')
-
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
             return None
@@ -784,7 +766,7 @@ class Resources:
                                 'Docker image is not supported for TPU VM.')
             if self.cloud is not None:
                 self.cloud.check_features_are_supported(
-                    {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
+                    self, {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
             return
 
         if self.cloud is None:
@@ -792,16 +774,17 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified when image_id is provided.')
 
-        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-        if not self._cloud.is_same_cloud(
-                clouds.AWS()) and not self._cloud.is_same_cloud(
-                    clouds.GCP()) and not self._cloud.is_same_cloud(
-                        clouds.IBM()) and not self._cloud.is_same_cloud(
-                            clouds.OCI()):
+        try:
+            self._cloud.check_features_are_supported(
+                self,
+                requested_features={
+                    clouds.CloudImplementationFeatures.IMAGE_ID
+                })
+        except exceptions.NotSupportedError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS/GCP/IBM/OCI, please '
-                    'explicitly specify the cloud.')
+                    'image_id is only supported for AWS/GCP/IBM/OCI/Kubernetes,'
+                    ' please explicitly specify the cloud.') from e
 
         if self._region is not None:
             if self._region not in self._image_id:
@@ -845,13 +828,6 @@ class Resources:
     def _try_validate_disk_tier(self) -> None:
         if self.disk_tier is None:
             return
-        if self.disk_tier not in ['high', 'medium', 'low']:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Invalid disk_tier {self.disk_tier}. '
-                    'Please use one of "high", "medium", or "low".')
-        if self.instance_type is None:
-            return
         if self.cloud is not None:
             self.cloud.check_disk_tier_enabled(self.instance_type,
                                                self.disk_tier)
@@ -867,7 +843,7 @@ class Resources:
                     'specified.')
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
-                {clouds.CloudImplementationFeatures.OPEN_PORTS})
+                self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
 
@@ -895,9 +871,10 @@ class Resources:
     def get_spot_str(self) -> str:
         return '[Spot]' if self.use_spot else ''
 
-    def make_deploy_variables(
-            self, cluster_name_on_cloud: str, region: clouds.Region,
-            zones: Optional[List[clouds.Zone]]) -> Dict[str, Optional[str]]:
+    def make_deploy_variables(self, cluster_name_on_cloud: str,
+                              region: clouds.Region,
+                              zones: Optional[List[clouds.Zone]],
+                              dryrun: bool) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to resource variables.
 
         These variables are divided into two categories: cloud-specific and
@@ -906,7 +883,7 @@ class Resources:
         variables are generated by this method.
         """
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
-            self, cluster_name_on_cloud, region, zones)
+            self, cluster_name_on_cloud, region, zones, dryrun)
         docker_image = self.extract_docker_image()
         return dict(
             cloud_specific_variables,
@@ -924,14 +901,16 @@ class Resources:
                 'docker_login_config': self._docker_login_config
             })
 
-    def get_reservations_available_resources(
-            self, specific_reservations: Set[str]) -> Dict[str, int]:
+    def get_reservations_available_resources(self) -> Dict[str, int]:
         """Returns the number of available reservation resources."""
         if self.use_spot:
             # GCP's & AWS's reservations do not support spot instances. We
             # assume other clouds behave the same. We can move this check down
             # to each cloud if any cloud supports reservations for spot.
             return {}
+        specific_reservations = set(
+            skypilot_config.get_nested(
+                (str(self.cloud).lower(), 'specific_reservations'), set()))
         return self.cloud.get_reservations_available_resources(
             self._instance_type, self._region, self._zone,
             specific_reservations)
@@ -1008,10 +987,14 @@ class Resources:
         if self.disk_tier is not None:
             if other.disk_tier is None:
                 return False
-            if self.disk_tier != other.disk_tier:
-                types = ['low', 'medium', 'high']
-                return types.index(self.disk_tier) < types.index(
-                    other.disk_tier)
+            # Here, BEST tier means the best we can get; for a launched
+            # cluster, the best (and only) tier we can get is the launched
+            # cluster's tier. Therefore, we don't need to check the tier
+            # if it is BEST.
+            if self.disk_tier != resources_utils.DiskTier.BEST:
+                # Add parenthesis for better readability.
+                if not (self.disk_tier <= other.disk_tier):  # pylint: disable=superfluous-parens
+                    return False
 
         if check_ports:
             if self.ports is not None:
@@ -1108,10 +1091,13 @@ class Resources:
         features = set()
         if self.use_spot:
             features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
-        if self.disk_tier is not None:
+        if (self.disk_tier is not None and
+                self.disk_tier != resources_utils.DiskTier.BEST):
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         if self.extract_docker_image() is not None:
             features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
+        elif self.image_id is not None:
+            features.add(clouds.CloudImplementationFeatures.IMAGE_ID)
         if self.ports is not None:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
         return features
@@ -1258,9 +1244,9 @@ class Resources:
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
-        add_if_not_none('disk_tier', self.disk_tier)
+        if self.disk_tier is not None:
+            config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
-        add_if_not_none('_docker_login_config', self._docker_login_config)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         return config
@@ -1307,8 +1293,9 @@ class Resources:
             accelerators = state.pop('_accelerators', None)
             if accelerators is not None:
                 accelerators = {
-                    accelerator_registry.canonicalize_accelerator_name(acc):
-                    acc_count for acc, acc_count in accelerators.items()
+                    accelerator_registry.canonicalize_accelerator_name(
+                        acc, cloud=None): acc_count
+                    for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators
 
@@ -1339,5 +1326,24 @@ class Resources:
             if original_ports is not None:
                 state['_ports'] = resources_utils.simplify_ports(
                     [str(port) for port in original_ports])
+
+        if version < 14:
+            # Backward compatibility: we change the default value for TPU VM to
+            # True in version 14 (#1758), so we need to explicitly set it to
+            # False when loading the old handle.
+            accelerators = state.get('_accelerators', None)
+            if accelerators is not None:
+                for acc in accelerators.keys():
+                    if acc.startswith('tpu'):
+                        accelerator_args = state.get('_accelerator_args', {})
+                        accelerator_args['tpu_vm'] = accelerator_args.get(
+                            'tpu_vm', False)
+                        state['_accelerator_args'] = accelerator_args
+
+        if version < 15:
+            original_disk_tier = state.get('_disk_tier', None)
+            if original_disk_tier is not None:
+                state['_disk_tier'] = resources_utils.DiskTier(
+                    original_disk_tier)
 
         self.__dict__.update(state)

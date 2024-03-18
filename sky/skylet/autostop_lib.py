@@ -55,13 +55,11 @@ def get_autostop_config() -> AutostopConfig:
 def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
     boot_time = psutil.boot_time()
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, down)
-    prev_autostop_config = get_autostop_config()
     configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
     logger.debug(f'set_autostop(): idle_minutes {idle_minutes}, down {down}.')
-    if (prev_autostop_config.autostop_idle_minutes < 0 or
-            prev_autostop_config.boot_time != psutil.boot_time()):
-        # Either autostop never set, or has been canceled. Reset timer.
-        set_last_active_time_to_now()
+    # Reset timer whenever an autostop setting is submitted, i.e. the idle
+    # time will be counted from now.
+    set_last_active_time_to_now()
 
 
 def set_autostopping_started() -> None:

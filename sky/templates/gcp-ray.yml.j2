@@ -15,6 +15,15 @@ docker:
     {%- if gpu is not none %}
       --gpus all
     {%- endif %}
+{%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password}}
+    server: |-
+      {{docker_login_config.server}}
+{%- endif %}
 {%- endif %}
 
 provider:
@@ -37,18 +46,15 @@ provider:
 {% if firewall_rule is not none %}
   firewall_rule: {{firewall_rule}}
 {% endif %}
-{%- if docker_login_config is not none %}
-  # We put docker login config in provider section because ray's schema disabled
-  # additionalProperties for docker config.
-  # See: https://github.com/ray-project/ray/blob/d2fc4823126927b2c54f89ec72fa3d24b442e6a3/python/ray/autoscaler/ray-schema.json#L227
-  docker_login_config:
-    username: {{docker_login_config.username}}
-    password: {{docker_login_config.password}}
-    server: {{docker_login_config.server}}
-{%- endif %}
   use_internal_ips: {{use_internal_ips}}
 {%- if tpu_vm %}
   _has_tpus: True
+{%- endif %}
+{%- if tpu_node_name %}
+  tpu_node:
+    name: {{tpu_node_name}}
+    acceleratorType: {{tpu_type}}
+    runtimeVersion: {{runtime_version}}
 {%- endif %}
   # Disable launch config check for worker nodes as it can cause resource
   # leakage.
@@ -70,6 +76,9 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
+      {%- for tag_key, tag_value in instance_tags.items() %}
+        {{ tag_key }}: {{ tag_value }}
+      {%- endfor %}
       {%- if specific_reservations %}
       reservationAffinity:
         consumeReservationType: SPECIFIC_RESERVATION
@@ -83,7 +92,7 @@ available_node_types:
         # TPU VM's metadata has different format than normal VMs.
         # After replacing the variables, this will become username:ssh_public_key_content.
         # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-        ssh-keys: |
+        ssh-keys: |-
               skypilot:ssh_user:skypilot:ssh_public_key_content
   {%- if use_spot %}
       schedulingConfig:
@@ -115,147 +124,24 @@ available_node_types:
           - key: ssh-keys
             # After replacing the variables, this will become username:ssh_public_key_content.
             # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-            value: |
+            value: |-
               skypilot:ssh_user:skypilot:ssh_public_key_content
   {%- if gpu is not none %}
           - key: install-nvidia-driver
             value: "True"
   {%- endif %}
+  {%- if use_spot or gpu is not none %}
       scheduling:
   {%- if use_spot %}
-        - preemptible: true
+        automaticRestart: false
+        instanceTerminationAction: DELETE
+        onHostMaintenance: TERMINATE
+        provisioningModel: SPOT
+        preemptible: true
   {%- endif %}
   {%- if gpu is not none %}
-        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+        onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
   {%- endif %}
-{%- endif %}
-{% if num_nodes - 1 - num_specific_reserved_workers > 0 %}
-  ray_worker_default:
-    min_workers: {{num_nodes - 1 - num_specific_reserved_workers}}
-    max_workers: {{num_nodes - 1 - num_specific_reserved_workers}}
-    resources: {}
-    node_config:
-      labels:
-        skypilot-user: {{ user }}
-  {%- if tpu_vm %}
-      acceleratorType: {{tpu_type}}
-      runtimeVersion: {{runtime_version}}
-      metadata:
-        # TPU VM's metadata has different format than normal VMs.
-        # After replacing the variables, this will become username:ssh_public_key_content.
-        # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-        ssh-keys: |
-              skypilot:ssh_user:skypilot:ssh_public_key_content
-    {%- if use_spot %}
-      schedulingConfig:
-        preemptible: true
-    {%- endif %}
-  {%- else %}
-      machineType: {{instance_type}}
-    {%- if machine_image is not none %}
-      sourceMachineImage: {{machine_image}}
-    {%- endif %}
-      disks:
-        - boot: true
-          autoDelete: true
-          type: PERSISTENT
-          initializeParams:
-            diskSizeGb: {{disk_size}}
-            # See https://cloud.google.com/deep-learning-vm/docs/images
-          {%- if machine_image is none %}
-            sourceImage: {{image_id}}
-          {%- endif %}
-            diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
-    {%- if gpu is not none %}
-      guestAccelerators:
-        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
-          acceleratorCount: {{gpu_count}}
-    {%- endif %}
-      metadata:
-        items:
-          - key: ssh-keys
-            # After replacing the variables, this will become username:ssh_public_key_content.
-            # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-            value: |
-              skypilot:ssh_user:skypilot:ssh_public_key_content
-    {%- if gpu is not none %}
-          - key: install-nvidia-driver
-            value: "True"
-    {%- endif %}
-      scheduling:
-    {%- if use_spot %}
-        - preemptible: true
-    {%- endif %}
-    {%- if gpu is not none %}
-        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
-    {%- endif %}
-  {%- endif %}
-{%- endif %}
-
-{% if num_specific_reserved_workers > 0 %}
-  ray_worker_reserved:
-    min_workers: {{num_specific_reserved_workers}}
-    max_workers: {{num_specific_reserved_workers}}
-    resources: {}
-    node_config:
-      labels:
-        skypilot-user: {{ user }}
-      reservationAffinity:
-        consumeReservationType: SPECIFIC_RESERVATION
-        key: compute.googleapis.com/reservation-name
-        values: {{ specific_reservations }}
-  {%- if tpu_vm %}
-      acceleratorType: {{tpu_type}}
-      runtimeVersion: {{runtime_version}}
-      metadata:
-        # TPU VM's metadata has different format than normal VMs.
-        # After replacing the variables, this will become username:ssh_public_key_content.
-        # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-        ssh-keys: |
-              skypilot:ssh_user:skypilot:ssh_public_key_content
-    {%- if use_spot %}
-      schedulingConfig:
-        preemptible: true
-    {%- endif %}
-  {%- else %}
-      machineType: {{instance_type}}
-    {%- if machine_image is not none %}
-      sourceMachineImage: {{machine_image}}
-    {%- endif %}
-      disks:
-        - boot: true
-          autoDelete: true
-          type: PERSISTENT
-          initializeParams:
-            diskSizeGb: {{disk_size}}
-            # See https://cloud.google.com/deep-learning-vm/docs/images
-          {%- if machine_image is none %}
-            sourceImage: {{image_id}}
-          {%- endif %}
-            diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
-    {%- if gpu is not none %}
-      guestAccelerators:
-        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
-          acceleratorCount: {{gpu_count}}
-    {%- endif %}
-      metadata:
-        items:
-          - key: ssh-keys
-            # After replacing the variables, this will become username:ssh_public_key_content.
-            # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-            value: |
-              skypilot:ssh_user:skypilot:ssh_public_key_content
-    {%- if gpu is not none %}
-          - key: install-nvidia-driver
-            value: "True"
-    {%- endif %}
-      scheduling:
-    {%- if use_spot %}
-        - preemptible: true
-    {%- endif %}
-    {%- if gpu is not none %}
-        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
-    {%- endif %}
   {%- endif %}
 {%- endif %}
 
@@ -269,10 +155,6 @@ file_mounts: {
   "{{remote_path}}": "{{local_path}}",
 {%- endfor %}
 }
-
-rsync_exclude: []
-
-initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
@@ -306,10 +188,14 @@ setup_commands:
     sudo dpkg --configure --force-overwrite -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
-    {{ ray_and_skypilot_setup_commands }}
+    source ~/.bashrc;
   {%- if tpu_vm %}
     pip install --upgrade google-api-python-client
   {%- endif %}
+  {%- if tpu_node_name %}
+    grep "export TPU_NAME=" ~/.bashrc && echo "TPU_NAME already set" || echo "export TPU_NAME={{tpu_node_name}}" >> ~/.bashrc;
+  {%- endif %}
+    {{ ray_skypilot_installation_commands }}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
@@ -319,37 +205,5 @@ setup_commands:
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
 
-# Command to start ray on the head node. You don't need to change this.
-# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
-# connection, which is expensive. Try your best to co-locate commands into fewer
-# items! The same comment applies for worker_start_ray_commands.
-#
-# Increment the following for catching performance bugs easier:
-#   current num items (num SSH connections): 1
-head_start_ray_commands:
-  # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
-  # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
-  # all the sessions to be reloaded. This is a workaround.
-  - export SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
-    source {{ skypilot_runtime_env }}/bin/activate; ray stop; export RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0; ray start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS --temp-dir {{ray_temp_dir}} || exit 1;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
-    {{dump_port_command}}
-
-# Worker commands are needed for TPU VM Pods
-{%- if num_nodes > 1 or tpu_vm %}
-worker_start_ray_commands:
-  - SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
-    source {{ skypilot_runtime_env }}/bin/activate; ray stop; export RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0; ray start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS --temp-dir {{ray_temp_dir}} || exit 1;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done
-{%- else %}
-worker_start_ray_commands: []
-{%- endif %}
-
-head_node: {}
-worker_nodes: {}
-
-# These fields are required for external cloud providers.
-head_setup_commands: []
-worker_setup_commands: []
-cluster_synced_files: []
-file_mounts_sync_continuously: False
+# Command to start ray clusters are now placed in `sky.provision.instance_setup`.
+# We do not need to list it here anymore.

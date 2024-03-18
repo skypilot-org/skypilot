@@ -100,9 +100,52 @@ Available fields and semantics:
       us-east-1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-east-1.proxy
       us-east-2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ec2-user@<jump server public ip>
 
+    # Security group (optional).
+    #
+    # The name of the security group to use for all instances. If not specified,
+    # SkyPilot will use the default name for the security group: sky-sg-<hash>
+    # Note: please ensure the security group name specified exists in the
+    # regions the instances are going to be launched or the AWS account has the
+    # permission to create a security group.
+    security_group_name: my-security-group
+
+    # Identity to use for all AWS instances (optional).
+    #
+    # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
+    # AWS instances created by SkyPilot. They are used for accessing cloud
+    # resources (e.g., private buckets) or launching new instances (e.g., for
+    # spot/serve controllers).
+    #
+    # SERVICE_ACCOUNT: Local credential files are not uploaded to AWS
+    # instances. SkyPilot will auto-create and reuse a service account (IAM
+    # role) for AWS instances.
+    #
+    # Two caveats of SERVICE_ACCOUNT for multicloud users:
+    #
+    # - This only affects AWS instances. Local AWS credentials will still be
+    #   uploaded to non-AWS instances (since those instances may need to access
+    #   AWS resources).
+    # - If the SkyPilot spot/serve controller is on AWS, this setting will make
+    #   non-AWS managed spot jobs / non-AWS service replicas fail to access any
+    #   resources on AWS (since the controllers don't have AWS credential
+    #   files to assign to these non-AWS instances).
+    #
+    # Default: 'LOCAL_CREDENTIALS'.
+    remote_identity: LOCAL_CREDENTIALS
+
   # Advanced GCP configurations (optional).
   # Apply to all new instances but not existing ones.
   gcp:
+    # Labels to assign to all instances launched by SkyPilot (optional).
+    #
+    # Example use case: cost tracking by user/team/project.
+    #
+    # Users should guarantee that these key-values are valid GCP labels, otherwise
+    # errors from the cloud provider will be surfaced.
+    instance_tags:
+      Owner: user-unique-name
+      my-tag: my-value
+
     # VPC to use (optional).
     #
     # Default: null, which implies the following behavior. First, all existing
@@ -147,15 +190,58 @@ Available fields and semantics:
 
 
     # Reserved capacity (optional).
+    # 
+    # Whether to prioritize reserved instance types/locations (considered as 0
+    # cost) in the optimizer.
+    # 
+    # If you have "automatically consumed" reservations in your GCP project:
+    # Setting this to true guarantees the optimizer will pick any matching
+    # reservation and GCP will auto consume your reservation, and setting to
+    # false means optimizer uses regular, non-zero pricing in optimization (if
+    # by chance any matching reservation is selected, GCP still auto consumes
+    # the reservation).
+    # 
+    # If you have "specifically targeted" reservations (set by the
+    # `specific_reservations` field below): This field will automatically be set
+    # to true.
+    # 
+    # Default: false.
+    prioritize_reservations: false
     #
-    # The specific reservation to be considered when provisioning clusters on GCP.
-    # SkyPilot will automatically prioritize this reserved capacity (considered as
-    # zero cost) if the requested resources matches the reservation.
+    # The "specifically targeted" reservations to be considered when provisioning
+    # clusters on GCP. SkyPilot will automatically prioritize this reserved
+    # capacity (considered as zero cost) if the requested resources matches the
+    # reservation.
+    #
     # Ref: https://cloud.google.com/compute/docs/instances/reservations-overview#consumption-type
     specific_reservations:
-      # Only one element is allowed in this list, as GCP disallows multiple
-      # specific_reservations in a single request.
-      - projects/my-project/reservations/my-reservation
+      - projects/my-project/reservations/my-reservation1
+      - projects/my-project/reservations/my-reservation2
+
+
+    # Identity to use for all GCP instances (optional).
+    #
+    # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
+    # GCP instances created by SkyPilot. They are used for accessing cloud
+    # resources (e.g., private buckets) or launching new instances (e.g., for
+    # spot/serve controllers).
+    #
+    # SERVICE_ACCOUNT: Local credential files are not uploaded to GCP
+    # instances. SkyPilot will auto-create and reuse a service account for GCP
+    # instances.
+    #
+    # Two caveats of SERVICE_ACCOUNT for multicloud users:
+    #
+    # - This only affects GCP instances. Local GCP credentials will still be
+    #   uploaded to non-GCP instances (since those instances may need to access
+    #   GCP resources).
+    # - If the SkyPilot spot/serve controller is on GCP, this setting will make
+    #   non-GCP managed spot jobs / non-GCP service replicas fail to access any
+    #   resources on GCP (since the controllers don't have GCP credential
+    #   files to assign to these non-GCP instances).
+    #
+    # Default: 'LOCAL_CREDENTIALS'.
+    remote_identity: LOCAL_CREDENTIALS
 
   # Advanced Kubernetes configurations (optional).
   kubernetes:
@@ -173,6 +259,56 @@ Available fields and semantics:
     # require opening ports the cluster nodes and is more secure. 'portforward'
     # is used as default if 'networking' is not specified.
     networking: portforward
+
+    # The mode to use for opening ports on Kubernetes
+    #
+    # This must be either: 'ingress' or 'loadbalancer'. If not specified,
+    # defaults to 'loadbalancer'.
+    #
+    # loadbalancer: Creates services of type `LoadBalancer` to expose ports.
+    # See https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#loadbalancer-service.
+    # This mode is supported out of the box on most cloud managed Kubernetes
+    # environments (e.g., GKE, EKS).
+    #
+    # ingress: Creates an ingress and a ClusterIP service for each port opened.
+    # Requires an Nginx ingress controller to be configured on the Kubernetes cluster.
+    # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#nginx-ingress
+    # for details on deploying the NGINX ingress controller.
+    ports: loadbalancer
+
+    # Additional fields to override the pod fields used by SkyPilot (optional)
+    #
+    # Any key:value pairs added here would get added to the pod spec used to
+    # create SkyPilot pods. The schema follows the same schema for a Pod object
+    # in the Kubernetes API:
+    # https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core
+    #
+    # Some example use cases are shown below. All fields are optional.
+    pod_config:
+      metadata:
+        labels:
+          my-label: my-value    # Custom labels to SkyPilot pods
+      spec:
+        runtimeClassName: nvidia    # Custom runtimeClassName for GPU pods.
+        imagePullSecrets:
+          - name: my-secret     # Pull images from a private registry using a secret
+        containers:
+          - env:                # Custom environment variables for the pod, e.g., for proxy
+            - name: HTTP_PROXY
+              value: http://proxy-host:3128
+            volumeMounts:       # Custom volume mounts for the pod
+              - mountPath: /foo
+                name: example-volume
+                readOnly: true
+        volumes:
+          - name: example-volume
+            hostPath:
+              path: /tmp
+              type: Directory
+          - name: dshm          # Use this to modify the /dev/shm volume mounted by SkyPilot
+            emptyDir:
+              medium: Memory
+              sizeLimit: 3Gi    # Set a size limit for the /dev/shm volume
 
   # Advanced OCI configurations (optional).
   oci:

@@ -56,7 +56,13 @@ def create_table(cursor, conn):
         handle BLOB,
         last_use TEXT,
         status TEXT,
-        autostop INTEGER DEFAULT -1)""")
+        autostop INTEGER DEFAULT -1,
+        metadata TEXT DEFAULT "{}",
+        to_down INTEGER DEFAULT 0,
+        owner TEXT DEFAULT null,
+        cluster_hash TEXT DEFAULT null,
+        storage_mounts_metadata BLOB DEFAULT null,
+        cluster_ever_up INTEGER DEFAULT 0)""")
 
     # Table for Cluster History
     # usage_intervals: List[Tuple[int, int]]
@@ -112,7 +118,20 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters',
                                  'storage_mounts_metadata', 'BLOB DEFAULT null')
-
+    db_utils.add_column_to_table(
+        cursor,
+        conn,
+        'clusters',
+        'cluster_ever_up',
+        'INTEGER DEFAULT 0',
+        # Set the value to 1 so that all the existing clusters before #2977
+        # are considered as ever up, i.e:
+        #   existing cluster's default (null) -> 1;
+        #   new cluster's default -> 0;
+        # This is conservative for the existing clusters: even if some INIT
+        # clusters were never really UP, setting it to 1 means they won't be
+        # auto-deleted during any failover.
+        value_to_replace_existing_entries=1)
     conn.commit()
 
 
@@ -174,7 +193,7 @@ def add_or_update_cluster(cluster_name: str,
         # specified.
         '(name, launched_at, handle, last_use, status, '
         'autostop, to_down, metadata, owner, cluster_hash, '
-        'storage_mounts_metadata) '
+        'storage_mounts_metadata, cluster_ever_up) '
         'VALUES ('
         # name
         '?, '
@@ -209,7 +228,9 @@ def add_or_update_cluster(cluster_name: str,
         '?,'
         # storage_mounts_metadata
         'COALESCE('
-        '(SELECT storage_mounts_metadata FROM clusters WHERE name=?), null)'
+        '(SELECT storage_mounts_metadata FROM clusters WHERE name=?), null), '
+        # cluster_ever_up
+        '((SELECT cluster_ever_up FROM clusters WHERE name=?) OR ?)'
         ')',
         (
             # name
@@ -238,6 +259,9 @@ def add_or_update_cluster(cluster_name: str,
             cluster_hash,
             # storage_mounts_metadata
             cluster_name,
+            # cluster_ever_up
+            cluster_name,
+            int(ready),
         ))
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
@@ -304,8 +328,8 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         handle = get_handle_from_cluster_name(cluster_name)
         if handle is None:
             return
-        # Must invalidate IP list: otherwise 'sky cpunode'
-        # on a stopped cpunode will directly try to ssh, which leads to timeout.
+        # Must invalidate IP list to avoid directly trying to ssh into a
+        # stopped VM, which leads to timeout.
         if hasattr(handle, 'stable_internal_external_ips'):
             handle.stable_internal_external_ips = None
         _DB.cursor.execute(
@@ -555,7 +579,8 @@ def get_cluster_from_name(
         # we can add new fields to the database in the future without
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner, cluster_hash, storage_mounts_metadata) = row[:11]
+         to_down, owner, cluster_hash, storage_mounts_metadata,
+         cluster_ever_up) = row[:12]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -570,6 +595,7 @@ def get_cluster_from_name(
             'cluster_hash': cluster_hash,
             'storage_mounts_metadata':
                 _load_storage_mounts_metadata(storage_mounts_metadata),
+            'cluster_ever_up': bool(cluster_ever_up),
         }
         return record
     return None
@@ -581,7 +607,8 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner, cluster_hash, storage_mounts_metadata) = row[:11]
+         to_down, owner, cluster_hash, storage_mounts_metadata,
+         cluster_ever_up) = row[:12]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -596,6 +623,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'cluster_hash': cluster_hash,
             'storage_mounts_metadata':
                 _load_storage_mounts_metadata(storage_mounts_metadata),
+            'cluster_ever_up': bool(cluster_ever_up),
         }
 
         records.append(record)
@@ -662,7 +690,14 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
         break
     enabled_clouds: List[clouds.Cloud] = []
     for c in ret:
-        cloud = clouds.CLOUD_REGISTRY.from_str(c)
+        try:
+            cloud = clouds.CLOUD_REGISTRY.from_str(c)
+        except ValueError:
+            # Handle the case for the clouds whose support has been removed from
+            # SkyPilot, e.g., 'local' was a cloud in the past and may be stored
+            # in the database for users before #3037. We should ignore removed
+            # clouds and continue.
+            continue
         if cloud is not None:
             enabled_clouds.append(cloud)
     return enabled_clouds

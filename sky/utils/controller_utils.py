@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Optional
 
 import colorama
 
+from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
@@ -25,7 +27,6 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import clouds
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
 
@@ -50,10 +51,11 @@ class _ControllerSpec:
     cluster_name: str
     in_progress_hint: str
     decline_cancel_hint: str
-    decline_down_in_init_status_hint: str
+    decline_down_when_failed_to_fetch_status_hint: str
     decline_down_for_dirty_controller_hint: str
     check_cluster_name_hint: str
     default_hint_if_non_existent: str
+    connection_error_hint: str
 
 
 class Controllers(enum.Enum):
@@ -70,7 +72,7 @@ class Controllers(enum.Enum):
             'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
             f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
             f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
-        decline_down_in_init_status_hint=(
+        decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the spot controller while '
             'it is in INIT state is not supported (this means a spot launch '
             'is in progress or the previous launch failed), as we cannot '
@@ -84,17 +86,19 @@ class Controllers(enum.Enum):
             f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
         check_cluster_name_hint=(
             f'Cluster {spot_utils.SPOT_CONTROLLER_NAME} is reserved for '
-            'managed spot controller. '),
-        default_hint_if_non_existent='No managed spot jobs are found.')
+            'managed spot controller.'),
+        default_hint_if_non_existent='No in-progress spot jobs.',
+        connection_error_hint=(
+            'Failed to connect to spot controller, please try again later.'))
     SKY_SERVE_CONTROLLER = _ControllerSpec(
-        name='sky serve controller',
+        name='serve controller',
         cluster_name=serve_utils.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status -a{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
-        decline_down_in_init_status_hint=(
+        decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the sky serve controller '
             'while it is in INIT state is not supported (this means a sky '
             'serve up is in progress or the previous launch failed), as we '
@@ -111,8 +115,10 @@ class Controllers(enum.Enum):
             f'{colorama.Style.RESET_ALL}.'),
         check_cluster_name_hint=(
             f'Cluster {serve_utils.SKY_SERVE_CONTROLLER_NAME} is reserved for '
-            'sky serve controller. '),
-        default_hint_if_non_existent='No service is found.')
+            'sky serve controller.'),
+        default_hint_if_non_existent='No live services.',
+        connection_error_hint=(
+            'Failed to connect to serve controller, please try again later.'))
 
     @classmethod
     def from_name(cls, name: Optional[str]) -> Optional['Controllers']:
@@ -143,6 +149,7 @@ def _get_cloud_dependencies_installation_commands(
         'pip install google-api-python-client>=2.69.0 google-cloud-storage '
         '> /dev/null 2>&1',
         f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}',
+        # fluidstack does not need to install any cloud dependencies.
     ]
     # k8s and ibm doesn't support open port and spot instance yet, so we don't
     # install them for either controller.
@@ -151,9 +158,11 @@ def _get_cloud_dependencies_installation_commands(
         # dependencies for sky serve controller.
         commands.append('pip list | grep oci > /dev/null 2>&1 || '
                         'pip install oci > /dev/null 2>&1')
-    else:
-        # We do not install azure dependencies for spot controller since our
-        # subscription does not support spot instances.
+    # TODO(tian): Make dependency installation command a method of cloud
+    # class and get all installation command for enabled clouds.
+    if any(
+            cloud.is_same_cloud(clouds.Azure())
+            for cloud in global_user_state.get_enabled_clouds()):
         commands.append(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
@@ -217,7 +226,7 @@ def download_and_stream_latest_job_log(
 
             # Print the logs to the console.
             try:
-                with open(log_file) as f:
+                with open(log_file, 'r', encoding='utf-8') as f:
                     print(f.read())
             except FileNotFoundError:
                 logger.error('Failed to find the logs for the user '
@@ -253,7 +262,7 @@ def shared_controller_vars_to_fill(
 def get_controller_resources(
     controller_type: str,
     controller_resources_config: Dict[str, Any],
-) -> resources.Resources:
+) -> 'resources.Resources':
     """Read the skypilot config and setup the controller resources.
 
     Returns:

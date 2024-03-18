@@ -12,8 +12,8 @@ PORT_SELECTION_FILE_LOCK_PATH = f'{SKYSERVE_METADATA_DIR}/port_selection.lock'
 # Signal file path for controller to handle signals.
 SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
 
-# Time to wait in seconds for service to initialize.
-INITIALIZATION_TIMEOUT_SECONDS = 60
+# Time to wait in seconds for service to register on the controller.
+SERVICE_REGISTER_TIMEOUT_SECONDS = 60
 
 # The time interval in seconds for load balancer to sync with controller. Every
 # time the load balancer syncs with controller, it will update all available
@@ -30,12 +30,22 @@ ENDPOINT_PROBE_INTERVAL_SECONDS = 10
 # TODO(tian): Expose this option to users in yaml file.
 READINESS_PROBE_TIMEOUT_SECONDS = 15
 
-# Autoscaler window size in seconds for request per second. We calculate rps by
-# divide the number of requests in last window size by this window size.
-AUTOSCALER_RPS_WINDOW_SIZE_SECONDS = 60
-# Autoscaler scale frequency in seconds. We will try to scale up/down every
-# `scale_frequency`.
-AUTOSCALER_SCALE_FREQUENCY_SECONDS = 20
+# Autoscaler window size in seconds for query per second. We calculate qps by
+# divide the number of queries in last window size by this window size.
+AUTOSCALER_QPS_WINDOW_SIZE_SECONDS = 60
+# Autoscaler scale decision interval in seconds.
+# We will try to scale up/down every `decision_interval`.
+AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS = 20
+# Autoscaler no replica decision interval in seconds.
+AUTOSCALER_NO_REPLICA_DECISION_INTERVAL_SECONDS = 5
+# Autoscaler default upscale delays in seconds.
+# We will upscale only if the target number of instances
+# is larger than the current launched instances for delay amount of time.
+AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS = 300
+# Autoscaler default downscale delays in seconds.
+# We will downscale only if the target number of instances
+# is smaller than the current launched instances for delay amount of time.
+AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # The default controller resources. We need 200 GB disk space to enable using
 # Azure as controller, since its default image size is 150 GB.
 # TODO(tian): We might need to be careful that service logs can take a lot of
@@ -43,9 +53,12 @@ AUTOSCALER_SCALE_FREQUENCY_SECONDS = 20
 # do some log rotation.
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 
-# A default controller with 4 vCPU and 16 GB memory can run up to 16 services.
-SERVICES_MEMORY_USAGE_GB = 1.0
-SERVICES_TASK_CPU_DEMAND = 0.25
+# Due to the CPU/memory usage of the controller process launched with sky job (
+# use ray job under the hood), we need to reserve some CPU/memory for each serve
+# controller process.
+# Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
+# services.
+CONTROLLER_MEMORY_USAGE_GB = 1.0
 
 # A period of time to initialize your service. Any readiness probe failures
 # during this period will be ignored.
@@ -57,3 +70,15 @@ DEFAULT_MIN_REPLICAS = 1
 CONTROLLER_PORT_START = 20001
 LOAD_BALANCER_PORT_START = 30001
 LOAD_BALANCER_PORT_RANGE = '30001-30100'
+
+# Initial version of service.
+INITIAL_VERSION = 1
+
+# Replica ID environment variable name that can be accessed on the replica.
+REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
+
+# The version of the lib files that serve use. Whenever there is an API
+# change for the serve_utils.ServeCodeGen, we need to bump this version, so that
+# the user can be notified to update their SkyPilot serve version on the remote
+# cluster.
+SERVE_VERSION = 1
