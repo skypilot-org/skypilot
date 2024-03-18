@@ -131,7 +131,7 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # The ray installation above can be skipped due to the existing ray cluster
     # for backward compatibility. In this case, we should not patch the ray
     # files.
-    f'{SKY_PIP_CMD} list | grep "ray " | grep {{SKY_REMOTE_RAY_VERSION}} 2>&1 > /dev/null '
+    f'{SKY_PIP_CMD} list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'&& {{ {SKY_PYTHON_CMD} -c "from sky.skylet.ray_patches import patch; patch()" '
     '|| exit 1; };')
 

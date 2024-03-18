@@ -448,7 +448,7 @@ def _internal_file_mounts(file_mounts: Dict,
 
         rc, stdout, stderr = runner.run(mkdir_command,
                                         log_path=log_path,
-                                        stream_logs=True,
+                                        stream_logs=False,
                                         require_outputs=True)
         subprocess_utils.handle_returncode(
             rc,
