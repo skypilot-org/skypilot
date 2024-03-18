@@ -1,4 +1,7 @@
-# Tabby + SkyPilot: The AI Coding Assistant You Can Self-Host on Any Cloud
+<!-- $REMOVE -->
+# Tabby: The AI Coding Assistant You Can Self-Host on Any Cloud
+<!-- $END_REMOVE -->
+<!-- $UNCOMMENT# Tabby: Self-hosted AI Coding Assistant -->
 
 This post shows how to use SkyPilot to host an ai coding assistant with just one CLI command.
 

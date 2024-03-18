@@ -1,4 +1,4 @@
-# Serve Your Gemma on Any Cloud
+# Gemma: Open-source Gemini
 ![image](https://github.com/skypilot-org/skypilot/assets/6753189/e452c39e-b5ef-4cb2-ab48-053f9e6f67b7)
 
 Google released [Gemma](https://blog.google/technology/developers/gemma-open-models/) and has made a big wave in the AI community.

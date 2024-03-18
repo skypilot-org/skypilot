@@ -1,4 +1,7 @@
+<!-- $REMOVE -->
 # LoRAX: Multi-LoRA inference server that scales to 1000s of fine-tuned LLMs
+<!-- $END_REMOVE -->
+<!-- $UNCOMMENT# LoRAX: Multi-LoRA Inference Server -->
 
 <p align="center">
     <img src="https://github.com/predibase/lorax/blob/main/docs/images/lorax_guy.png" alt="LoRAX" style="width:200px;" />

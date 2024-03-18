@@ -1,4 +1,7 @@
+<!-- $REMOVE -->
 # Serving Mixtral from Mistral.ai
+<!-- $END_REMOVE -->
+<!-- $UNCOMMENT# Mixtral: MOE LLM from Mistral.ai -->
 
 Mistral AI released Mixtral 8x7B, a high-quality sparse mixture of experts model (SMoE) with open weights. Mixtral outperforms Llama 2 70B on most benchmarks with 6x faster inference. Mistral.ai uses SkyPilot as [the default way](https://docs.mistral.ai/self-deployment/skypilot) to distribute their new model. This folder contains the code to serve Mixtral on any cloud with SkyPilot. 
 

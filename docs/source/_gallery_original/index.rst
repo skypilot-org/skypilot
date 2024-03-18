@@ -4,17 +4,30 @@ AI Gallery
 
 .. toctree::
    :maxdepth: 1
-   :caption: Common Frameworks
+   :caption: Inference Engine
 
    frameworks/vllm
-   frameworks/ray
-   frameworks/axolotl
+   frameworks/sglang
+   frameworks/tgi
+   frameworks/lorax
+   frameworks/tabby
 
 .. toctree::
    :maxdepth: 1
-   :caption: LLMs
+   :caption: Training/Fine-tuning
+
+   tutorials/finetuning.md
+   frameworks/axolotl
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: LLM Models
    
+   llms/mixtral
+   llms/llama-2
    llms/codellama
+   llms/gemma
 
    
 
