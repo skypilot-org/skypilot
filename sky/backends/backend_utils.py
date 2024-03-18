@@ -904,6 +904,7 @@ def write_cluster_config(
                 'dump_port_command': dump_port_command,
                 # Ray version.
                 'RAY_CMD': constants.SKY_RAY_CMD,
+                'SKY_PIP_CMD': constants.SKY_PIP_CMD,
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Command for waiting ray cluster to be ready on head.
                 'ray_head_wait_initialized_command':

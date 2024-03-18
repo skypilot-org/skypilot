@@ -94,7 +94,7 @@ CONDA_INSTALLATION_COMMANDS = (
     f'[ -f {SKY_PYTHON_PATH_FILE} ] || which python3 > {SKY_PYTHON_PATH_FILE};')
 
 _sky_version = str(version.parse(sky.__version__))
-RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} ray status'
+RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 # Install ray and skypilot on the remote cluster if they are not already
 # installed. {var} will be replaced with the actual value in
 # backend_utils.write_cluster_config.
