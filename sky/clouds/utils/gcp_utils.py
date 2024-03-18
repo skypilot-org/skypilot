@@ -179,9 +179,8 @@ def get_minimal_permissions() -> List[str]:
         # allow opening ports (e.g., via `resources.ports`).
         permissions += constants.FIREWALL_PERMISSIONS
 
-    if skypilot_config.get_nested(('gcp', 'prioritize_reservations'),
-                                  False) or skypilot_config.get_nested(
-                                      ('gcp', 'specific_reservations'), []):
+    if (skypilot_config.get_nested(('gcp', 'prioritize_reservations'), False) or
+            skypilot_config.get_nested(('gcp', 'specific_reservations'), [])):
         permissions += constants.RESERVATION_PERMISSIONS
 
     return permissions
