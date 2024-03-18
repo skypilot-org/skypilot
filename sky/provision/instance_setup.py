@@ -61,7 +61,7 @@ RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_PYTHON_ENV} '
+MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_PYTHON_ENV} '
                              'python -m sky.skylet.attempt_skylet')
 
 
