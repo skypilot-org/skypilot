@@ -152,6 +152,13 @@ User
     compute.images.get
     compute.images.useReadOnly
 
+9. **Optional**: If the user sets ``gcp.prioritize_reservations`` or ```gcp.specific_reservations`` in :ref:`~/.sky/config.yaml <config-yaml>`, you can additionally add the following permissions:
+
+.. code-block:: text
+
+    compute.reservations.get
+    compute.reservations.list
+
 9. Click **Create** to create the role.
 10. Go back to the "IAM" tab and click on **GRANT ACCESS**.
 11. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
