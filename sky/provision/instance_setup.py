@@ -62,7 +62,7 @@ RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
 MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_PYTHON_ENV} '
-                             'python -m sky.skylet.attempt_skylet')
+                            'python -m sky.skylet.attempt_skylet')
 
 
 def _auto_retry(func):
