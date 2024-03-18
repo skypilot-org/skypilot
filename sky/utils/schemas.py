@@ -557,6 +557,9 @@ def get_config_schema():
                 'additionalProperties': False,
                 'properties': {
                     'resources': resources_schema,
+                    'down_after_idle': {
+                        'type': 'boolean',
+                    },
                 }
             },
         }

@@ -10,6 +10,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
@@ -180,6 +181,8 @@ def up(
 
         print(f'{colorama.Fore.YELLOW}Launching controller for '
               f'{service_name!r}...{colorama.Style.RESET_ALL}')
+        down = skypilot_config.get_nested(
+            ('spot', 'controller', 'down_after_idle'), False)
         # We directly submit the request to the controller and let the
         # controller to check name conflict. Suppose we have multiple
         # sky.serve.up() with same service name, the first one will
@@ -197,6 +200,7 @@ def up(
             detach_run=True,
             idle_minutes_to_autostop=constants.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            down=down,
             retry_until_up=True,
             _disable_controller_check=True,
         )

@@ -17,6 +17,7 @@ from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -706,6 +707,8 @@ def spot_launch(
               f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
+        down = skypilot_config.get_nested(
+            ('spot', 'controller', 'down_after_idle'), False)
         _execute(
             entrypoint=controller_task,
             stream_logs=stream_logs,
@@ -714,4 +717,5 @@ def spot_launch(
             idle_minutes_to_autostop=constants.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
+            down=down,
         )
