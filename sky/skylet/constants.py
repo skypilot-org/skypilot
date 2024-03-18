@@ -25,7 +25,8 @@ SKY_REMOTE_RAY_VERSION = '2.9.3'
 
 # Use the same Python used for installing ray and skypilot.
 SKY_PYTHON_PATH_FILE = '~/.sky/python_path'
-SKY_PYTHON_CMD = f'$(cat {SKY_PYTHON_PATH_FILE} || which python3)'
+SKY_GET_PYTHON_PATH_CMD = f'cat {SKY_PYTHON_PATH_FILE} || which python3'
+SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
 _SKY_PYTHON_DIR_CMD = f'$(dirname {SKY_PYTHON_CMD})'
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 SKY_RAY_CMD = f'{_SKY_PYTHON_DIR_CMD}/ray'

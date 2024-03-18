@@ -184,8 +184,13 @@ def run_with_log(
             daemon_script = os.path.join(
                 os.path.dirname(os.path.abspath(job_lib.__file__)),
                 'subprocess_daemon.py')
+            python_path = subprocess.check_output(
+                constants.SKY_GET_PYTHON_PATH_CMD,
+                shell=True,
+                stderr=subprocess.DEVNULL,
+                encoding='utf-8').strip()
             daemon_cmd = [
-                constants.SKY_PYTHON_CMD,
+                python_path,
                 daemon_script,
                 '--parent-pid',
                 str(parent_pid),
