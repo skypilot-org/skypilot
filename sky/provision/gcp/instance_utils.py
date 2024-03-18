@@ -650,7 +650,6 @@ class GCPComputeInstance(GCPInstance):
 
         all_names = []
         if 'reservationAffinity' in config:
-            print(set(config['reservationAffinity']['values']))
             specific_reservations = set(config['reservationAffinity']['values'])
             reservations = gcp_cloud.GCP().get_reservations_available_resources(
                 config['machineType'],
@@ -683,7 +682,6 @@ class GCPComputeInstance(GCPInstance):
                 logger.debug(f'Creating {reservation_count} instances '
                              f'with reservation {reservation}')
                 config['reservationAffinity']['values'] = [reservation]
-                print(config)
                 created_names = names[:reservation_count]
                 errors = cls._create_instances(
                     created_names, project_id, zone, config,
