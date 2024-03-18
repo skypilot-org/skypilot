@@ -23,6 +23,13 @@ SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.9.3'
 
+# Use the same Python used for installing ray and skypilot.
+SKY_PYTHON_PATH_FILE = '~/.sky/python_path'
+SKY_PYTHON_CMD = f'$(cat {SKY_PYTHON_PATH_FILE} || which python3)'
+_SKY_PYTHON_DIR_CMD = f'$(dirname {SKY_PYTHON_CMD})'
+SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
+SKY_RAY_CMD = f'{_SKY_PYTHON_DIR_CMD}/ray'
+
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
 # same spot task.
@@ -78,7 +85,12 @@ CONDA_INSTALLATION_COMMANDS = (
     'bash Miniconda3-Linux-x86_64.sh -b && '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     'conda config --set auto_activate_base true); '
-    'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;')
+    'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;'
+    '(type -a python | grep -q python3) || '
+    'echo \'alias python=python3\' >> ~/.bashrc;'
+    '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
+    'source ~/.bashrc;'
+    f'[ -f {SKY_PYTHON_PATH_FILE} ] || which python3 > {SKY_PYTHON_PATH_FILE};')
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} ray status'
@@ -86,11 +98,7 @@ RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} ray status'
 # installed. {var} will be replaced with the actual value in
 # backend_utils.write_cluster_config.
 RAY_SKYPILOT_INSTALLATION_COMMANDS = (
-    '(type -a python | grep -q python3) || '
-    'echo \'alias python=python3\' >> ~/.bashrc;'
-    '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
-    'source ~/.bashrc;'
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -104,14 +112,15 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # latest ray port 6380, but those existing cluster launched before #1790
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
-    f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
+    f'{SKY_PIP_CMD} list | grep "ray " | '
+    f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
-    f'pip3 install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
     # END ray package check and installation
-    '{ pip3 list | grep "skypilot " && '
+    f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
-    '{ pip3 uninstall skypilot -y; '
-    'pip3 install "$(echo ~/.sky/wheels/{sky_wheel_hash}/'
+    f'{{ {SKY_PIP_CMD} uninstall skypilot -y; '
+    f'{SKY_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; '
@@ -121,8 +130,8 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # The ray installation above can be skipped due to the existing ray cluster
     # for backward compatibility. In this case, we should not patch the ray
     # files.
-    f'pip3 list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
-    '&& { python3 -c "from sky.skylet.ray_patches import patch; patch()" '
+    f'{SKY_PIP_CMD} list | grep "ray " | grep {{SKY_REMOTE_RAY_VERSION}} 2>&1 > /dev/null '
+    f'&& {{ {SKY_PYTHON_CMD} -c "from sky.skylet.ray_patches import patch; patch()" '
     '|| exit 1; };')
 
 # The name for the environment variable that stores SkyPilot user hash, which

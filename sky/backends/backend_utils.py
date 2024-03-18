@@ -850,7 +850,7 @@ def write_cluster_config(
 
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
-        f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
+        f'{constants.SKY_PYTHON_CMD} -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
@@ -903,6 +903,7 @@ def write_cluster_config(
                 'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
                 'dump_port_command': dump_port_command,
                 # Ray version.
+                'RAY_CMD': constants.SKY_RAY_CMD,
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Command for waiting ray cluster to be ready on head.
                 'ray_head_wait_initialized_command':

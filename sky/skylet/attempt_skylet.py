@@ -13,12 +13,13 @@ def restart_skylet():
     # TODO(zhwu): make the killing graceful, e.g., use a signal to tell
     # skylet to exit, instead of directly killing it.
     subprocess.run(
-        'ps aux | grep "sky.skylet.skylet" | grep "python3 -m"'
+        'ps aux | grep "sky.skylet.skylet" | '
+        f'grep "{constants.SKY_PYTHON_CMD} -m"'
         '| awk \'{print $2}\' | xargs kill >> ~/.sky/skylet.log 2>&1',
         shell=True,
         check=False)
     subprocess.run(
-        'nohup python3 -m sky.skylet.skylet'
+        f'nohup {constants.SKY_PYTHON_CMD} -m sky.skylet.skylet'
         ' >> ~/.sky/skylet.log 2>&1 &',
         shell=True,
         check=True)
@@ -27,7 +28,8 @@ def restart_skylet():
 
 
 proc = subprocess.run(
-    'ps aux | grep -v "grep" | grep "sky.skylet.skylet" | grep "python3 -m"',
+    f'ps aux | grep -v "grep" | grep "sky.skylet.skylet" | '
+    f'grep "{constants.SKY_PYTHON_CMD} -m"',
     shell=True,
     check=False)
 
