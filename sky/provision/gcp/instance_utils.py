@@ -657,7 +657,7 @@ class GCPComputeInstance(GCPInstance):
                 zone=zone,
                 specific_reservations=specific_reservations)
             # Filter the reservations by the user-specified ones, because
-            # reservations contains auto reservations as well, which does not
+            # reservations contain auto reservations as well, which do not
             # need to explicitly specify in the config for creating instances.
             specific_reservations_to_count = {
                 reservation: count
