@@ -197,7 +197,6 @@ FIREWALL_PERMISSIONS = [
 ]
 
 RESERVATION_PERMISSIONS = [
-    'compute.reservations.get',
     'compute.reservations.list',
 ]
 
