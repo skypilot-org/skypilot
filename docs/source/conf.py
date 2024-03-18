@@ -75,6 +75,7 @@ html_theme_options = {
     "show_toc_level": 1,
     "navbar_align": "left",  # [left, content, right] For testing that the navbar items align properly
     "navbar_start": ["navbar-skypilot-logo"],
+    "navbar_center": ["navbar-nav"],
     "navbar_end": [
         # "navbar-icon-links",
     ],
@@ -98,6 +99,7 @@ html_theme_options = {
     "footer_start": ["copyright"],
     "footer_center": [],
     "footer_end": [],
+    'header_links_before_dropdown': 6,
 }
 
 html_context = {
