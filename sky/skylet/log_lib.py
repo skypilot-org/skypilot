@@ -194,10 +194,10 @@ def run_with_log(
                 python_path = 'python3'
             else:
                 python_path = subprocess.check_output(
-                constants.SKY_GET_PYTHON_PATH_CMD,
-                shell=True,
-                stderr=subprocess.DEVNULL,
-                encoding='utf-8').strip()
+                    constants.SKY_GET_PYTHON_PATH_CMD,
+                    shell=True,
+                    stderr=subprocess.DEVNULL,
+                    encoding='utf-8').strip()
             daemon_cmd = [
                 python_path,
                 daemon_script,

@@ -29,7 +29,8 @@ SKY_REMOTE_RAY_VERSION = '2.9.3'
 # conda environment as a default environment, which is not the same as the one
 # used for installing SkyPilot runtime (ray and skypilot).
 SKY_PYTHON_PATH_FILE = '~/.sky/python_path'
-SKY_GET_PYTHON_PATH_CMD = f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || which python3'
+SKY_GET_PYTHON_PATH_CMD = (f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
+                           'which python3')
 # Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
 _SKY_PYTHON_DIR_CMD = f'$(dirname {SKY_PYTHON_CMD})'
