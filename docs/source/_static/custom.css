@@ -127,9 +127,9 @@ html[data-theme="dark"] {
   max-width: 30vw;
 }
 
-/* .navbar {
+.navbar {
   --bs-navbar-nav-link-padding-x: 1rem;
-} */
+}
 
 /* Ray logo */
 .navbar-brand.logo>svg {
