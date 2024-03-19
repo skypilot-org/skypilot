@@ -167,6 +167,8 @@ def run_with_retries(
         if retry_cnt < max_retry:
             if (retry_returncode is not None and
                     returncode in retry_returncode):
+                logger.debug(
+                    f'Retrying command due to returncode {returncode}: {cmd}')
                 retry_cnt += 1
                 time.sleep(random.uniform(0, 1) * 2)
                 continue

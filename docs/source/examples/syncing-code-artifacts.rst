@@ -105,6 +105,12 @@ pass the ``--no-setup`` flag to ``sky launch``. For example, ``sky launch --no-s
     under a local file_mount source are also ignored (the same behavior as
     handling ``workdir``).
 
+.. note::
+
+    If relative paths are used in :code:`file_mounts` or :code:`workdir`, they
+    are evaluated relative to the location from which the :code:`sky` command
+    is run.
+
 .. _uploading-or-reusing-large-files:
 
 Uploading or reusing large files

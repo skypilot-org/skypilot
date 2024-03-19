@@ -79,7 +79,6 @@ User
     compute.networks.list
     compute.networks.getEffectiveFirewalls
     compute.globalOperations.get
-    compute.reservations.list
     compute.subnetworks.use
     compute.subnetworks.list
     compute.subnetworks.useExternalIp
@@ -97,6 +96,10 @@ User
 .. note::
     
     For custom VPC users (with :code:`gcp.vpc_name` specified in :code:`~/.sky/config.yaml`, check `here <#_gcp-bring-your-vpc>`_),  :code:`compute.firewalls.create` and :code:`compute.firewalls.delete` are not necessary unless opening ports is needed via `resources.ports` in task yaml.
+
+.. note::
+
+     (Advanced) To further limit the ``iam.serviceAccounts.actAs`` permission to access SkyPilot's service account only, you can remove the permission from the list above and additionally grant your organization's users the ability to use the service account ``skypilot-v1`` created by the admin (see :ref:`Service Account <gcp-service-account-creation>`). This can be done by going to ``IAM & Admin console -> Service Accounts -> skypilot-v1 -> Permissions -> GRANT ACCESS`` and adding the users with role ``roles/iam.serviceAccountUser``. This permits the users to use the ``skypilot-v1`` service account required by SkyPilot.
 
 4. **Optional**: If the user needs to access GCS buckets, you can additionally add the following permissions:
 
@@ -147,6 +150,12 @@ User
     compute.disks.resize
     compute.images.get
     compute.images.useReadOnly
+
+9. **Optional**: If your organization sets ``gcp.prioritize_reservations`` or ``gcp.specific_reservations`` in :ref:`~/.sky/config.yaml <config-yaml>`, you can additionally add the following permissions:
+
+.. code-block:: text
+
+    compute.reservations.list
 
 9. Click **Create** to create the role.
 10. Go back to the "IAM" tab and click on **GRANT ACCESS**.

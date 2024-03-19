@@ -255,13 +255,14 @@ class Task:
         self.event_callback = event_callback
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
+        self._num_nodes = 1
         self.num_nodes = num_nodes  # type: ignore
 
         self.inputs: Optional[str] = None
         self.outputs: Optional[str] = None
         self.estimated_inputs_size_gigabytes: Optional[float] = None
         self.estimated_outputs_size_gigabytes: Optional[float] = None
-        # Default to CPUNode
+        # Default to CPU VM
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
         self._service: Optional[service_spec.SkyServiceSpec] = None
