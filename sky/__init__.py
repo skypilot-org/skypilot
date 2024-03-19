@@ -1,6 +1,7 @@
 """The SkyPilot package."""
 import os
 import subprocess
+import urllib
 
 # Replaced with the current commit when building the wheels.
 _SKYPILOT_COMMIT_SHA = '{{SKYPILOT_COMMIT_SHA}}'
@@ -38,7 +39,7 @@ __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 
 def make_proxy_var_case_insensitive(proxy_var: str):
-    """Set both http_proxy and HTTP_PROXY if either is set.
+    """Set both http_proxy and HTTP_PROXY if either or the system proxy is set.
 
     Although many of our underlying libraries are case-insensitive when it comes
     to proxy environment variables, some are not. This function ensures that
@@ -46,14 +47,15 @@ def make_proxy_var_case_insensitive(proxy_var: str):
     are set if either is set to ensure maximum compatibility.
     """
     # Check for the uppercase version first
-    proxy = os.getenv(proxy_var.upper())
+    proxy = os.getenv(proxy_var.upper(), os.getenv(proxy_var.lower()))
+    if proxy is None:
+        proxy = urllib.request.getproxies().get(proxy_var.lower())
 
     if proxy is not None:
         os.environ[proxy_var.lower()] = proxy
-
-    proxy = os.getenv(proxy_var.lower())
-    if proxy is not None:
         os.environ[proxy_var.upper()] = proxy
+
+
 
 
 for proxy_env_var in ['http_proxy', 'https_proxy', 'all_proxy']:
