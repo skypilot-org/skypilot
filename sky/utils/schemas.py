@@ -622,7 +622,17 @@ def get_config_schema():
                     'required': [],
                     # Allow arbitrary keys since validating metadata is hard
                     'additionalProperties': True,
-                    # TODO(romilb): Check if there's a way to disallow name and namespace keys in this dict
+                    # Disallow 'name' and 'namespace' keys in this dict
+                    'not': {
+                        'anyOf': [
+                            {
+                                'required': ['name']
+                            },
+                            {
+                                'required': ['namespace']
+                            }
+                        ]
+                    }
                 }
             }
         },

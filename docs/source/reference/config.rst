@@ -278,12 +278,15 @@ Available fields and semantics:
 
     # Attach custom metadata to Kubernetes objects created by SkyPilot
     #
-    # Uses the same schema as Kubernetes metadata object: TODO(romilb): Add link
+    # Uses the same schema as Kubernetes metadata object: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#objectmeta-v1-meta
+    #
+    # Since metadata is applied to all all objects created by SkyPilot,
+    # specifying 'name' and 'namespace' fields here is not allowed.
     custom_metadata:
       labels:
-        app: mycustomapp
+        mylabel: myvalue
       annotations:
-        myannotation: myannotationvalue
+        myannotation: myvalue
 
     # Additional fields to override the pod fields used by SkyPilot (optional)
     #
