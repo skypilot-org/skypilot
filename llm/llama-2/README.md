@@ -29,7 +29,7 @@ Go to the [application page](https://ai.meta.com/resources/models-and-libraries/
 
 Generate a read-only access token on huggingface [here](https://huggingface.co/settings/token), and make sure your huggingface account can access the Llama-2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
-Fill the access token in the [chatbot-hf.yaml](chatbot-hf.yaml) and [chatbot-meta.yaml](chatbot-meta.yaml) file.
+Fill the access token in the [chatbot-hf.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2/chatbot-hf.yaml) and [chatbot-meta.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2/chatbot-meta.yaml) file.
 ```yaml
 envs:
   MODEL_SIZE: 7

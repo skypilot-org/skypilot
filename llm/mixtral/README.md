@@ -150,4 +150,4 @@ curl -L http://$ENDPOINT/v1/chat/completions \
 
 Mistral.ai also includes a guide for launching the Mixtral 8x7B model with SkyPilot in their official doc. Please refer to [this link](https://docs.mistral.ai/self-deployment/skypilot) for more details.
 
-> Note: the docker image of the official doc may not be updated yet, which can cause a failure where vLLM is complaining about the missing support for the model. Please feel free to create a new docker image with the setup commands in our [serve.yaml](./serve.yaml) file instead.
+> Note: the docker image of the official doc may not be updated yet, which can cause a failure where vLLM is complaining about the missing support for the model. Please feel free to create a new docker image with the setup commands in our [serve.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral/serve.yaml) file instead.

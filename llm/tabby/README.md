@@ -39,7 +39,7 @@ All YAML files used below live in [the SkyPilot repo](https://github.com/skypilo
     ```
 
 3. launch a Tabby cluster:
-    You can select the model to be used by `--model` in the `command` field of the [docker-compose.cuda.yaml(GPU)](./docker-compose.cuda.yaml) or [docker-compose.yaml(CPU)](./docker-compose.yaml). `TabbyML/SantaCoder-1B` is used by default, for more model options, see the tabby [docs](https://tabby.tabbyml.com/docs/models/) to learn more.
+    You can select the model to be used by `--model` in the `command` field of the [docker-compose.cuda.yaml(GPU)](https://github.com/skypilot-org/skypilot/tree/master/llm/tabby/docker-compose.cuda.yaml) or [docker-compose.yaml(CPU)](https://github.com/skypilot-org/skypilot/tree/master/llm/tabby/docker-compose.yaml). `TabbyML/SantaCoder-1B` is used by default, for more model options, see the tabby [docs](https://tabby.tabbyml.com/docs/models/) to learn more.
 
     ```bash
      sky launch -c tabby tabby.yaml
