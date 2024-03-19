@@ -25,10 +25,10 @@ AI Gallery
 
 .. toctree::
    :maxdepth: 1
-   :caption: Training/Fine-tuning
+   :caption: Training/Finetuning
 
    tutorials/finetuning.md
-   frameworks/axolotl
+   .. frameworks/axolotl
 
    
 
