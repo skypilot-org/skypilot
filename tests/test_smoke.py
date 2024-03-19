@@ -68,6 +68,7 @@ from sky.utils import subprocess_utils
 test_id = str(uuid.uuid4())[-2:]
 
 LAMBDA_TYPE = '--cloud lambda --gpus A10'
+FLUIDSTACK_TYPE = '--cloud fluidstack --gpus RTXA4000'
 
 SCP_TYPE = '--cloud scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
@@ -85,19 +86,19 @@ storage_setup_commands = [
 # are running in parallel, the spot controller may be in INIT and
 # the spot queue/cancel command will return staled table.
 _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
-                    'until [ `echo "$s" '
-                    '| grep "jobs will not be shown until it becomes UP." '
-                    '| wc -l` -eq 0 ]; '
+                    'until ! echo "$s" | grep "jobs will not be shown until"; '
                     'do echo "Waiting for spot queue to be ready..."; '
                     'sleep 5; s=$(sky spot queue); done; echo "$s"; '
                     'echo; echo; echo "$s"')
 _SPOT_CANCEL_WAIT = (
-    's=$(sky spot cancel -y -n {job_name}); until [ `echo "$s" '
-    '| grep "Please wait for the controller to be ready." '
-    '| wc -l` -eq 0 ]; do echo "Waiting for the spot controller '
+    's=$(sky spot cancel -y -n {job_name}); '
+    'until ! echo "$s" | grep "Please wait for the controller to be ready."; '
+    'do echo "Waiting for the spot controller '
     'to be ready"; sleep 5; s=$(sky spot cancel -y -n {job_name}); '
     'done; echo "$s"; echo; echo; echo "$s"')
 # TODO(zhwu): make the spot controller on GCP.
+
+DEFAULT_CMD_TIMEOUT = 15 * 60
 
 
 class Test(NamedTuple):
@@ -107,7 +108,7 @@ class Test(NamedTuple):
     commands: List[str]
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
-    timeout: int = 15 * 60
+    timeout: int = DEFAULT_CMD_TIMEOUT
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -116,6 +117,12 @@ class Test(NamedTuple):
         message = f'{prefix} {message}'
         message = message.replace('\n', f'\n{prefix} ')
         print(message, file=sys.stderr, flush=True)
+
+
+def _get_timeout(generic_cloud: str,
+                 override_timeout: int = DEFAULT_CMD_TIMEOUT):
+    timeouts = {'fluidstack': 60 * 60}  # file_mounts
+    return timeouts.get(generic_cloud, override_timeout)
 
 
 def _get_cluster_name() -> str:
@@ -129,6 +136,15 @@ def _get_cluster_name() -> str:
                                                         24,
                                                         add_user_hash=False)
     return f'{test_name}-{test_id}'
+
+
+def _terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
+    cluster_name = serve.generate_replica_cluster_name(name, replica_id)
+    query_cmd = (f'gcloud compute instances list --filter='
+                 f'"(labels.ray-cluster-name:{cluster_name})" '
+                 f'--zones={zone} --format="value(name)"')
+    return (f'gcloud compute instances delete --zone={zone}'
+            f' --quiet $({query_cmd})')
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
@@ -243,6 +259,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
+@pytest.mark.no_fluidstack  #requires GCP and AWS set up
 def test_example_app():
     test = Test(
         'example_app',
@@ -267,6 +284,7 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud),
     )
     run_one_test(test)
 
@@ -666,6 +684,7 @@ def test_image_no_conda():
 
 
 # ------------ Test stale job ------------
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_stale_job(generic_cloud: str):
@@ -749,6 +768,7 @@ def test_gcp_stale_job_manual_restart():
 
 
 # ---------- Check Sky's environment variables; workdir. ----------
+@pytest.mark.no_fluidstack  # Requires amazon S3
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
@@ -784,7 +804,7 @@ def test_file_mounts(generic_cloud: str):
         'using_file_mounts',
         test_commands,
         f'sky down -y {name}',
-        timeout=20 * 60,  # 20 mins
+        _get_timeout(generic_cloud, 20 * 60),  # 20 mins
     )
     run_one_test(test)
 
@@ -806,23 +826,28 @@ def test_scp_file_mounts():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = _get_cluster_name()
+    storage_name = TestStorageWithCredentials.generate_bucket_name()
     test_commands = [
         *storage_setup_commands,
         (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
-         'examples/using_file_mounts_with_env_vars.yaml'),
+         'examples/using_file_mounts_with_env_vars.yaml '
+         f'--env MY_BUCKET={storage_name}'),
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         # Override with --env:
         (f'sky launch -y -c {name}-2 --cpus 2+ --cloud {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
+         f'--env MY_BUCKET={storage_name} '
          '--env MY_LOCAL_PATH=tmpfile'),
         f'sky logs {name}-2 1 --status',  # Ensure the job succeeded.
     ]
     test = Test(
         'using_file_mounts_with_env_vars',
         test_commands,
-        f'sky down -y {name} {name}-2',
+        (f'sky down -y {name} {name}-2',
+         f'sky storage delete -y {storage_name} {storage_name}-2'),
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
@@ -991,21 +1016,17 @@ def test_cli_logs(generic_cloud: str):
         # Kubernetes does not support multi-node
         num_nodes = 1
     timestamp = time.time()
-    test = Test(
-        'cli_logs',
-        [
-            f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} "echo {timestamp} 1"',
-            f'sky exec {name} "echo {timestamp} 2"',
-            f'sky exec {name} "echo {timestamp} 3"',
-            f'sky exec {name} "echo {timestamp} 4"',
-            f'sky logs {name} 2 --status',
-            f'sky logs {name} 3 4 --sync-down',
-            f'sky logs {name} * --sync-down',
-            f'sky logs {name} 1 | grep "{timestamp} 1"',
-            f'sky logs {name} | grep "{timestamp} 4"',
-        ],
-        f'sky down -y {name}',
-    )
+    test = Test('cli_logs', [
+        f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} "echo {timestamp} 1"',
+        f'sky exec {name} "echo {timestamp} 2"',
+        f'sky exec {name} "echo {timestamp} 3"',
+        f'sky exec {name} "echo {timestamp} 4"',
+        f'sky logs {name} 2 --status',
+        f'sky logs {name} 3 4 --sync-down',
+        f'sky logs {name} * --sync-down',
+        f'sky logs {name} 1 | grep "{timestamp} 1"',
+        f'sky logs {name} | grep "{timestamp} 4"',
+    ], f'sky down -y {name}')
     run_one_test(test)
 
 
@@ -1032,6 +1053,7 @@ def test_scp_logs():
 
 
 # ---------- Job Queue. ----------
+@pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue instead
 @pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
@@ -1063,20 +1085,29 @@ def test_job_queue(generic_cloud: str):
 
 
 # ---------- Job Queue with Docker. ----------
+@pytest.mark.no_fluidstack  # FluidStack does not support docker for now
 @pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
-def test_job_queue_with_docker(generic_cloud: str):
-    name = _get_cluster_name()
+@pytest.mark.parametrize(
+    "image_id",
+    [
+        "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
+        "docker:ubuntu:18.04",
+        # Test image with python 3.11 installed by default.
+        "docker:continuumio/miniconda3",
+    ])
+def test_job_queue_with_docker(generic_cloud: str, image_id: str):
+    name = _get_cluster_name() + image_id[len('docker:'):][:4]
     test = Test(
         'job_queue_with_docker',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_docker.yaml',
-            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-3 -d examples/job_queue/job_docker.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} examples/job_queue/cluster_docker.yaml',
+            f'sky exec {name} -n {name}-1 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-2 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-3 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
@@ -1084,6 +1115,14 @@ def test_job_queue_with_docker(generic_cloud: str):
             'sleep 5',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 3',
+            f'sky stop -y {name}',
+            # Make sure the job status preserve after stop and start the
+            # cluster. This is also a test for the docker container to be
+            # preserved after stop and start.
+            f'sky start -y {name}',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep CANCELLED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep CANCELLED',
             f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 4 --status',
@@ -1165,6 +1204,7 @@ def test_scp_job_queue():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -1309,6 +1349,7 @@ def test_ibm_job_queue_multinode():
 
 
 # ---------- Docker with preinstalled package. ----------
+@pytest.mark.no_fluidstack  # Doesn't support Fluidstack for now
 @pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
 @pytest.mark.no_scp  # Doesn't support SCP for now
@@ -1330,6 +1371,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
+@pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -1500,7 +1542,7 @@ def test_multi_hostname(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-        timeout=total_timeout_minutes * 60,
+        timeout=_get_timeout(generic_cloud, total_timeout_minutes * 60),
     )
     run_one_test(test)
 
@@ -1671,6 +1713,7 @@ def test_azure_start_stop():
 
 
 # ---------- Testing Autostopping ----------
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -1693,7 +1736,7 @@ def test_autostop(generic_cloud: str):
             f'sky status | grep {name} | grep "1m"',
 
             # Ensure the cluster is not stopped early.
-            'sleep 20',
+            'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
@@ -1708,12 +1751,11 @@ def test_autostop(generic_cloud: str):
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
 
-            # Test restarting the idleness timer via cancel + reset:
+            # Test restarting the idleness timer via reset:
             f'sky autostop -y {name} -i 1',  # Idleness starts counting.
-            'sleep 30',  # Almost reached the threshold.
-            f'sky autostop -y {name} --cancel',
+            'sleep 40',  # Almost reached the threshold.
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
-            'sleep 30',
+            'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
             f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
@@ -1736,6 +1778,7 @@ def test_autostop(generic_cloud: str):
 
 
 # ---------- Testing Autodowning ----------
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
@@ -1751,7 +1794,7 @@ def test_autodown(generic_cloud: str):
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
             # Ensure the cluster is not terminated early.
-            'sleep 30',
+            'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
             # Ensure the cluster is terminated.
             f'sleep {autodown_timeout}',
@@ -1911,6 +1954,7 @@ def test_cancel_ibm():
 
 
 # ---------- Testing use-spot option ----------
+@pytest.mark.no_fluidstack  # FluidStack does not support spot instances
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
@@ -1962,6 +2006,7 @@ def test_stop_gcp_spot():
 
 
 # ---------- Testing managed spot ----------
+@pytest.mark.no_fluidstack  # FluidStack does not support spot instances
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
@@ -1996,6 +2041,7 @@ def test_spot(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  #fluidstack does not support spot instances
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
@@ -2036,6 +2082,7 @@ def test_spot_pipeline(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  #fluidstack does not support spot instances
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
@@ -2060,6 +2107,7 @@ def test_spot_failed_setup(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  #fluidstack does not support spot instances
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
@@ -2253,6 +2301,7 @@ def test_spot_pipeline_recovery_gcp():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
@@ -2475,6 +2524,7 @@ def test_spot_cancellation_gcp():
 
 
 # ---------- Testing storage for managed spot ----------
+@pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
@@ -2532,6 +2582,7 @@ def test_spot_tpu():
 
 
 # ---------- Testing env for spot ----------
+@pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
@@ -2563,11 +2614,13 @@ def test_inline_env(generic_cloud: str):
         'test-inline-env',
         [
             f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            'sleep 20',
             f'sky logs {name} 1 --status',
             f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud),
     )
     run_one_test(test)
 
@@ -2585,6 +2638,7 @@ def test_inline_env_file(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud),
     )
     run_one_test(test)
 
@@ -2607,10 +2661,14 @@ def test_aws_custom_image():
 
 
 @pytest.mark.kubernetes
-@pytest.mark.parametrize("image_id", [
-    "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
-    "docker:ubuntu:18.04",
-])
+@pytest.mark.parametrize(
+    "image_id",
+    [
+        "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
+        "docker:ubuntu:18.04",
+        # Test image with python 3.11 installed by default.
+        "docker:continuumio/miniconda3",
+    ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
     name = _get_cluster_name()
@@ -2830,15 +2888,16 @@ def _get_service_name() -> str:
 # serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS to make sure load balancer have
 # enough time to sync with the controller and get all ready replica IPs.
 _SERVE_WAIT_UNTIL_READY = (
-    '(while true; do'
-    '     output=$(sky serve status {name});'
-    '     echo "$output" | grep -q "{replica_num}/{replica_num}" && break;'
-    '     echo "$output" | grep -q "FAILED" && exit 1;'
+    '{{ while true; do'
+    '     s=$(sky serve status {name}); echo "$s";'
+    '     echo "$s" | grep -q "{replica_num}/{replica_num}" && break;'
+    '     echo "$s" | grep -q "FAILED" && exit 1;'
     '     sleep 10;'
-    f' done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};')
+    ' done; }}; echo "Got service status $s";'
+    f'sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS + 2};')
 _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
-_ENDPOINT_REGEX = _IP_REGEX + r':[0-9]{1,5}'
 _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
+_SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
 # Since we don't allow terminate the service if the controller is INIT,
 # which is common for simultaneous pytest, we need to wait until the
 # controller is UP before we can terminate the service.
@@ -2846,24 +2905,30 @@ _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
 # the timeout here. See implementation of run_one_test() for details.
 _TEARDOWN_SERVICE = (
     '(while true; do'
-    '     output=$(sky serve down -y {name});'
-    '     echo "$output" | grep -q "scheduled to be terminated" && break;'
+    '     s=$(sky serve down -y {name});'
+    '     echo "$s" | grep -q "scheduled to be terminated" && break;'
     '     sleep 10;'
     'done)')
 
+_SERVE_ENDPOINT_WAIT = (
+    'export ORIGIN_SKYPILOT_DEBUG=$SKYPILOT_DEBUG; export SKYPILOT_DEBUG=0; '
+    'endpoint=$(sky serve status --endpoint {name}); '
+    'until ! echo "$endpoint" | grep "Controller is initializing"; '
+    'do echo "Waiting for serve endpoint to be ready..."; '
+    'sleep 5; endpoint=$(sky serve status --endpoint {name}); done; '
+    'export SKYPILOT_DEBUG=$ORIGIN_SKYPILOT_DEBUG; echo "$endpoint"')
 
-def _get_serve_endpoint(name: str) -> str:
-    return f'endpoint=$(sky serve status {name} | grep -Eo "{_ENDPOINT_REGEX}")'
-
-
-def _get_replica_line(name: str, replica_id: int) -> str:
-    return (f'sky serve status {name} | awk "{_AWK_ALL_LINES_BELOW_REPLICAS}"'
-            f' | grep -E "{name}\s+{replica_id}"')
+_SERVE_STATUS_WAIT = ('s=$(sky serve status {name}); '
+                      'until ! echo "$s" | grep "Controller is initializing."; '
+                      'do echo "Waiting for serve status to be ready..."; '
+                      'sleep 5; s=$(sky serve status {name}); done; echo "$s"')
 
 
 def _get_replica_ip(name: str, replica_id: int) -> str:
-    return (f'ip{replica_id}=$({_get_replica_line(name, replica_id)}'
-            f' | grep -Eo "{_IP_REGEX}")')
+    return (f'ip{replica_id}=$(echo "$s" | '
+            f'awk "{_AWK_ALL_LINES_BELOW_REPLICAS}" | '
+            f'grep -E "{name}\s+{replica_id}" | '
+            f'grep -Eo "{_IP_REGEX}")')
 
 
 def _get_skyserve_http_test(name: str, cloud: str,
@@ -2873,7 +2938,8 @@ def _get_skyserve_http_test(name: str, cloud: str,
         [
             f'sky serve up -n {name} -y tests/skyserve/http/{cloud}.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=timeout_minutes * 60,
@@ -2881,8 +2947,40 @@ def _get_skyserve_http_test(name: str, cloud: str,
     return test
 
 
+def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
+                                                                 str]]) -> str:
+    """Check replicas' status and count in sky serve status
+
+    We will check vCPU=2, as all our tests use vCPU=2.
+    
+    Args:
+        name: the name of the service
+        check_tuples: A list of replica property to check. Each tuple is
+            (count, is_spot, status)
+    """
+    check_cmd = ''
+    for check_tuple in check_tuples:
+        count, is_spot, status = check_tuple
+        resource_str = ''
+        if status not in ['PENDING', 'SHUTTING_DOWN', 'FAILED']:
+            spot_str = ''
+            if is_spot:
+                spot_str = '\[Spot\]'
+            resource_str = f'({spot_str}vCPU=2)'
+        check_cmd += (f' echo "$s" | grep "{resource_str}" | '
+                      f'grep "{status}" | wc -l | grep {count} || exit 1;')
+    return (f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s"; ' + check_cmd)
+
+
+def _check_service_version(service_name: str, version: str) -> str:
+    # Grep the lines before 'Service Replicas' and check if the service version
+    # is correct.
+    return (f'echo "$s" | grep -B1000 "Service Replicas" | '
+            f'grep -E "{service_name}\s+{version}" || exit 1; ')
+
+
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_gcp_http():
     """Test skyserve on GCP"""
     name = _get_service_name()
@@ -2891,7 +2989,7 @@ def test_skyserve_gcp_http():
 
 
 @pytest.mark.aws
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_aws_http():
     """Test skyserve on AWS"""
     name = _get_service_name()
@@ -2900,7 +2998,7 @@ def test_skyserve_aws_http():
 
 
 @pytest.mark.azure
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_azure_http():
     """Test skyserve on Azure"""
     name = _get_service_name()
@@ -2908,9 +3006,8 @@ def test_skyserve_azure_http():
     run_one_test(test)
 
 
-@pytest.mark.gcp
-@pytest.mark.sky_serve
-def test_skyserve_llm():
+@pytest.mark.serve
+def test_skyserve_llm(generic_cloud: str):
     """Test skyserve with real LLM usecase"""
     name = _get_service_name()
 
@@ -2918,8 +3015,9 @@ def test_skyserve_llm():
         prompt = shlex.quote(prompt)
         expected_output = shlex.quote(expected_output)
         return (
-            f'{_get_serve_endpoint(name)}; python tests/skyserve/llm/get_response.py'
-            f' --endpoint $endpoint --prompt {prompt} | grep {expected_output}')
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'python tests/skyserve/llm/get_response.py --endpoint $endpoint '
+            f'--prompt {prompt} | grep {expected_output}')
 
     with open('tests/skyserve/llm/prompt_output.json', 'r',
               encoding='utf-8') as f:
@@ -2928,7 +3026,7 @@ def test_skyserve_llm():
     test = Test(
         f'test-skyserve-llm',
         [
-            f'sky serve up -n {name} -y tests/skyserve/llm/service.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/llm/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             *[
                 generate_llm_test_command(prompt, output)
@@ -2942,29 +3040,22 @@ def test_skyserve_llm():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_spot_recovery():
     name = _get_service_name()
     zone = 'us-central1-a'
-
-    # Reference: test_spot_recovery_gcp
-    def terminate_replica(replica_id: int) -> str:
-        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-        query_cmd = (f'gcloud compute instances list --filter='
-                     f'"(labels.ray-cluster-name:{cluster_name})" '
-                     f'--zones={zone} --format="value(name)"')
-        return (f'gcloud compute instances delete --zone={zone}'
-                f' --quiet $({query_cmd})')
 
     test = Test(
         f'test-skyserve-spot-recovery-gcp',
         [
             f'sky serve up -n {name} -y tests/skyserve/spot/recovery.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            terminate_replica(1),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            _terminate_gcp_replica(name, zone, 1),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -2972,24 +3063,16 @@ def test_skyserve_spot_recovery():
     run_one_test(test)
 
 
-@pytest.mark.gcp
-@pytest.mark.sky_serve
-def test_skyserve_spot_user_bug():
-    """Tests that spot recovery doesn't occur for non-preemption failures"""
+@pytest.mark.serve
+def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = Test(
-        f'test-skyserve-spot-user-bug-gcp',
+        f'test-skyserve-base-ondemand-fallback',
         [
-            f'sky serve up -n {name} -y tests/skyserve/spot/user_bug.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            # After failure due to user bug, the service should fail instead of
-            # triggering spot recovery.
-            '(while true; do'
-            f'    output=$(sky serve status {name});'
-            '     echo "$output" | grep -q "FAILED" && break;'
-            '     echo "$output" | grep -q "PROVISIONING" && exit 1;'
-            '     sleep 10;'
-            f'done)',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/spot/base_ondemand_fallback.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _check_replica_in_status(name, [(1, True, 'READY'),
+                                            (1, False, 'READY')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -2998,16 +3081,96 @@ def test_skyserve_spot_user_bug():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
-def test_skyserve_load_balancer():
+@pytest.mark.serve
+def test_skyserve_dynamic_ondemand_fallback():
+    name = _get_service_name()
+    zone = 'us-central1-a'
+
+    test = Test(
+        f'test-skyserve-dynamic-ondemand-fallback',
+        [
+            f'sky serve up -n {name} --cloud gcp -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
+            f'sleep 40',
+            # 2 on-demand (provisioning) + 2 Spot (provisioning).
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s";'
+            'echo "$s" | grep -q "0/4" || exit 1',
+            # Wait for the provisioning starts
+            f'sleep 40',
+            _check_replica_in_status(name, [
+                (2, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                (2, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|SHUTTING_DOWN')
+            ]),
+
+            # Wait until 2 spot instances are ready.
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _check_replica_in_status(name, [(2, True, 'READY'),
+                                            (0, False, '')]),
+            _terminate_gcp_replica(name, zone, 1),
+            f'sleep 40',
+            # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            'echo "$s" | grep -q "1/3"',
+            _check_replica_in_status(
+                name, [(1, True, 'READY'),
+                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+
+            # Wait until 2 spot instances are ready.
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _check_replica_in_status(name, [(2, True, 'READY'),
+                                            (0, False, '')]),
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_user_bug_restart(generic_cloud: str):
+    """Tests that we restart the service after user bug."""
+    # TODO(zhwu): this behavior needs some rethinking.
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-user-bug-restart',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/restart/user_bug.yaml',
+            f's=$(sky serve status {name}); echo "$s";'
+            'until echo "$s" | grep -A2 "Service Replicas" | grep "SHUTTING_DOWN"; '
+            'do echo "Waiting for first service to be SHUTTING DOWN..."; '
+            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; sleep 20; '
+            + _SERVE_STATUS_WAIT.format(name=name) +
+            # When the first replica is detected failed, the controller will
+            # start to provision a new replica, and shut down the first one.
+            _check_replica_in_status(
+                name, [(1, True, 'SHUTTING_DOWN'),
+                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            f's=$(sky serve status {name}); echo "$s";'
+            'until echo "$s" | grep -A2 "Service Replicas" | grep "FAILED"; '
+            'do echo "Waiting for first service to be FAILED..."; '
+            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
+            + _check_replica_in_status(
+                name, [(1, True, 'FAILED'),
+                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
     test = Test(
         f'test-skyserve-load-balancer',
         [
-            f'sky serve up -n {name} -y tests/skyserve/load_balancer/service.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/load_balancer/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
-            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 1)}; '
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            f'{_get_replica_ip(name, 1)}; '
             f'{_get_replica_ip(name, 2)}; {_get_replica_ip(name, 3)}; '
             'python tests/skyserve/load_balancer/test_round_robin.py '
             '--endpoint $endpoint --replica-num 3 --replica-ips $ip1 $ip2 $ip3',
@@ -3019,21 +3182,11 @@ def test_skyserve_load_balancer():
 
 
 @pytest.mark.gcp
-@pytest.mark.sky_serve
+@pytest.mark.serve
 def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
     zone = 'us-central1-a'
-
-    # Reference: test_spot_recovery_gcp
-    def terminate_replica(replica_id: int) -> str:
-        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-        query_cmd = (f'gcloud compute instances list --filter='
-                     f'"(labels.ray-cluster-name:{cluster_name})" '
-                     f'--zones={zone} --format="value(name)"')
-        return (f'gcloud compute instances delete --zone={zone}'
-                f' --quiet $({query_cmd})')
-
     test = Test(
         f'test-skyserve-auto-restart',
         [
@@ -3041,11 +3194,12 @@ def test_skyserve_auto_restart():
             # avoid maintaining too many YAML files
             f'sky serve up -n {name} -y tests/skyserve/auto_restart.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             # sleep for 20 seconds (initial delay) to make sure it will
             # be restarted
             f'sleep 20',
-            terminate_replica(1),
+            _terminate_gcp_replica(name, zone, 1),
             # Wait for consecutive failure timeout passed.
             # If the cluster is not using spot, it won't check the cluster status
             # on the cloud (since manual shutdown is not a common behavior and such
@@ -3060,7 +3214,8 @@ def test_skyserve_auto_restart():
             '     echo "$output" | grep -q "1/1" && break;'
             '     sleep 10;'
             f'done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};',
-            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3068,21 +3223,24 @@ def test_skyserve_auto_restart():
     run_one_test(test)
 
 
-@pytest.mark.gcp
-@pytest.mark.sky_serve
-def test_skyserve_cancel():
+@pytest.mark.serve
+def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
 
     test = Test(
         f'test-skyserve-cancel',
         [
-            f'sky serve up -n {name} -y tests/skyserve/cancel/cancel.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/cancel/cancel.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            f'{_get_serve_endpoint(name)}; python3 '
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; python3 '
             'tests/skyserve/cancel/send_cancel_request.py '
             '--endpoint $endpoint | grep "Request was cancelled"',
-            f'sky serve logs {name} 1 --no-follow | grep "Client disconnected, stopping computation"',
+            f's=$(sky serve logs {name} 1 --no-follow); '
+            'until ! echo "$s" | grep "Please wait for the controller to be"; '
+            'do echo "Waiting for serve logs"; sleep 10; '
+            f's=$(sky serve logs {name} 1 --no-follow); done; '
+            'echo "$s"; echo "$s" | grep "Client disconnected, stopping computation"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3090,22 +3248,27 @@ def test_skyserve_cancel():
     run_one_test(test)
 
 
-@pytest.mark.gcp
-@pytest.mark.sky_serve
-def test_skyserve_update():
+@pytest.mark.serve
+def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
     test = Test(
         f'test-skyserve-update',
         [
-            f'sky serve up -n {name} -y tests/skyserve/update/old.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} -y tests/skyserve/update/new.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/new.yaml',
             # sleep before update is registered.
             'sleep 20',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, new SkyPilot here!"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done;'
+            # Make sure the traffic is not mixed
+            'curl -L http://$endpoint | grep "Hi, new SkyPilot here"',
+            # The latest 2 version should be READY and the older versions should be shutting down
+            (_check_replica_in_status(name, [(2, False, 'READY'),
+                                             (2, False, 'SHUTTING_DOWN')]) +
+             _check_service_version(name, "2")),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3113,28 +3276,174 @@ def test_skyserve_update():
     run_one_test(test)
 
 
-@pytest.mark.gcp
-@pytest.mark.sky_serve
-def test_skyserve_update_autoscale():
+@pytest.mark.serve
+def test_skyserve_rolling_update(generic_cloud: str):
+    """Test skyserve with rolling update"""
+    name = _get_service_name()
+    single_new_replica = _check_replica_in_status(
+        name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+               (1, False, 'SHUTTING_DOWN')])
+    test = Test(
+        f'test-skyserve-rolling-update',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/new.yaml',
+            # Make sure the traffic is mixed across two versions, the replicas
+            # with even id will sleep 60 seconds before being ready, so we
+            # should be able to get observe the period that the traffic is mixed
+            # across two versions.
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; '
+            # The latest version should have one READY and the one of the older versions should be shutting down
+            f'{single_new_replica} {_check_service_version(name, "1,2")} '
+            # Check the output from the old version, immediately after the
+            # output from the new version appears. This is guaranteed by the
+            # round robin load balancing policy.
+            # TODO(zhwu): we should have a more generalized way for checking the
+            # mixed version of replicas to avoid depending on the specific
+            # round robin load balancing policy.
+            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_fast_update(generic_cloud: str):
+    """Test skyserve with fast update (Increment version of old replicas)"""
+    name = _get_service_name()
+
+    test = Test(
+        f'test-skyserve-fast-update',
+        [
+            f'sky serve up -n {name} -y --cloud {generic_cloud} tests/skyserve/update/bump_version_before.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
+            # sleep to wait for update to be registered.
+            'sleep 120',
+            # 2 on-deamnd (ready) + 1 on-demand (provisioning).
+            (
+                _check_replica_in_status(
+                    name, [(2, False, 'READY'),
+                           (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]) +
+                # Fast update will directly have the latest version ready.
+                _check_service_version(name, "2")),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3) +
+            _check_service_version(name, "2"),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            # Test rolling update
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
+            # sleep to wait for update to be registered.
+            'sleep 30',
+            # 2 on-deamnd (ready) + 1 on-demand (shutting down).
+            _check_replica_in_status(name, [(2, False, 'READY'),
+                                            (1, False, 'SHUTTING_DOWN')]),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
+            _check_service_version(name, "3"),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     name = _get_service_name()
     test = Test(
         f'test-skyserve-update-autoscale',
         [
-            f'sky serve up -n {name} -y tests/skyserve/update/num_min_two.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} -y tests/skyserve/update/num_min_one.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/num_min_two.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
+            _check_service_version(name, "1"),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/num_min_one.yaml',
             # sleep before update is registered.
             'sleep 20',
             # Timeout will be triggered when update fails.
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here!"',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1) +
+            _check_service_version(name, "2"),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl -L http://$endpoint | grep "Hi, SkyPilot here!"',
+            # Rolling Update
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/num_min_two.yaml',
+            # sleep before update is registered.
+            'sleep 20',
+            # Timeout will be triggered when update fails.
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
+            _check_service_version(name, "3"),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl -L http://$endpoint | grep "Hi, SkyPilot here!"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
+@pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
+def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
+    """Test skyserve with update that changes autoscaler"""
+    name = _get_service_name() + mode
+
+    four_spot_up_cmd = _check_replica_in_status(name, [(4, True, 'READY')])
+    update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done; sleep 10;']
+    if mode == 'rolling':
+        # Check rolling update, it will terminate one of the old on-demand
+        # instances, once there are 4 spot instance ready.
+        update_check += [
+            _check_replica_in_status(
+                name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (1, False, 'SHUTTING_DOWN'), (1, False, 'READY')]) +
+            _check_service_version(name, "1,2"),
+        ]
+    else:
+        # Check blue green update, it will keep both old on-demand instances
+        # running, once there are 4 spot instance ready.
+        update_check += [
+            _check_replica_in_status(
+                name, [(1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (2, False, 'READY')]) +
+            _check_service_version(name, "1"),
+        ]
+    test = Test(
+        f'test-skyserve-new-autoscaler-update',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
+            _check_service_version(name, "1"),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            's=$(curl -L http://$endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
+            # Wait for update to be registered
+            f'sleep 120',
+            _check_replica_in_status(
+                name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (2, False, 'READY')]),
+            *update_check,
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            _check_replica_in_status(name, [(4, True, 'READY'),
+                                            (1, False, 'READY')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
+
+
+# TODO(Ziming, Tian): Add tests for autoscaling.
 
 
 # ------- Testing user ray cluster --------
@@ -3428,13 +3737,17 @@ class TestStorageWithCredentials:
         circle_link.symlink_to(tmp_dir, target_is_directory=True)
         yield str(tmp_dir)
 
-    @pytest.fixture
-    def tmp_bucket_name(self):
+    @staticmethod
+    def generate_bucket_name():
         # Creates a temporary bucket name
         # time.time() returns varying precision on different systems, so we
         # replace the decimal point and use whatever precision we can get.
         timestamp = str(time.time()).replace('.', '')
-        yield f'sky-test-{timestamp}'
+        return f'sky-test-{timestamp}'
+
+    @pytest.fixture
+    def tmp_bucket_name(self):
+        yield self.generate_bucket_name()
 
     @staticmethod
     def yield_storage_object(
@@ -3584,28 +3897,30 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
-        subprocess.check_call(['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
-        yield tmp_bucket_name
-        subprocess.check_call(
-            ['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force'])
+        bucket_uri = f's3://{tmp_bucket_name}'
+        subprocess.check_call(['aws', 's3', 'mb', bucket_uri])
+        yield tmp_bucket_name, bucket_uri
+        subprocess.check_call(['aws', 's3', 'rb', bucket_uri, '--force'])
 
     @pytest.fixture
     def tmp_gsutil_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using gsutil
-        subprocess.check_call(['gsutil', 'mb', f'gs://{tmp_bucket_name}'])
-        yield tmp_bucket_name
-        subprocess.check_call(['gsutil', 'rm', '-r', f'gs://{tmp_bucket_name}'])
+        bucket_uri = f'gs://{tmp_bucket_name}'
+        subprocess.check_call(['gsutil', 'mb', bucket_uri])
+        yield tmp_bucket_name, bucket_uri
+        subprocess.check_call(['gsutil', 'rm', '-r', bucket_uri])
 
     @pytest.fixture
     def tmp_awscli_bucket_r2(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
         endpoint_url = cloudflare.create_endpoint()
+        bucket_uri = f's3://{tmp_bucket_name}'
         subprocess.check_call(
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2',
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 mb {bucket_uri} --endpoint {endpoint_url} --profile=r2',
             shell=True)
-        yield tmp_bucket_name
+        yield tmp_bucket_name, bucket_uri
         subprocess.check_call(
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2',
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {bucket_uri} --force --endpoint {endpoint_url} --profile=r2',
             shell=True)
 
     @pytest.fixture
@@ -3623,6 +3938,7 @@ class TestStorageWithCredentials:
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
@@ -3646,6 +3962,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -3686,6 +4003,7 @@ class TestStorageWithCredentials:
         ]
         assert all([item not in out for item in storage_obj_name])
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
@@ -3710,6 +4028,7 @@ class TestStorageWithCredentials:
         ]
         assert all([item in out for item in storage_obj_names])
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
@@ -3739,6 +4058,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_scratch_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
@@ -3756,6 +4076,7 @@ class TestStorageWithCredentials:
         output = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
@@ -3771,6 +4092,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('nonexist_bucket_url', [
         's3://{random_name}', 'gs://{random_name}',
         pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
@@ -3832,6 +4154,7 @@ class TestStorageWithCredentials:
             storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
                 random_name=nonexist_bucket_name))
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('private_bucket', [
         f's3://imagenet', f'gs://imagenet',
         pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
@@ -3849,6 +4172,7 @@ class TestStorageWithCredentials:
                     name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
@@ -3862,7 +4186,7 @@ class TestStorageWithCredentials:
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
         # sky) and verifies that files are written.
-        bucket_name = request.getfixturevalue(ext_bucket_fixture)
+        bucket_name, _ = request.getfixturevalue(ext_bucket_fixture)
         storage_obj = storage_lib.Storage(name=bucket_name, source=tmp_source)
         storage_obj.add_store(store_type)
 
@@ -3886,6 +4210,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_fluidstack
     def test_copy_mount_existing_storage(self,
                                          tmp_copy_mnt_existing_storage_obj):
         # Creates a bucket with no source in MOUNT mode (empty bucket), and
@@ -3897,6 +4222,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
@@ -3923,6 +4249,7 @@ class TestStorageWithCredentials:
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('invalid_name_list, store_type',
                              [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
                               (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
@@ -3940,6 +4267,7 @@ class TestStorageWithCredentials:
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
 
+    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'gitignore_structure, store_type',
         [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
@@ -3977,6 +4305,44 @@ class TestStorageWithCredentials:
         # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
         assert '4' in cnt_output.decode('utf-8'), \
                'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+
+    @pytest.mark.parametrize('ext_bucket_fixture, store_type',
+                             [('tmp_awscli_bucket', storage_lib.StoreType.S3),
+                              ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
+                              pytest.param('tmp_awscli_bucket_r2',
+                                           storage_lib.StoreType.R2,
+                                           marks=pytest.mark.cloudflare)])
+    def test_externally_created_bucket_mount_without_source(
+            self, ext_bucket_fixture, request, store_type):
+        # Non-sky managed buckets(buckets created outside of Skypilot CLI)
+        # are allowed to be MOUNTed by specifying the URI of the bucket to
+        # source field only. When it is attempted by specifying the name of
+        # the bucket only, it should error out.
+        #
+        # TODO(doyoung): Add test for IBM COS. Currently, this is blocked
+        # as rclone used to interact with IBM COS does not support feature to
+        # create a bucket, and the ibmcloud CLI is not supported in Skypilot.
+        # Either of the feature is necessary to simulate an external bucket
+        # creation for IBM COS.
+        # https://github.com/skypilot-org/skypilot/pull/1966/files#r1253439837
+
+        ext_bucket_name, ext_bucket_uri = request.getfixturevalue(
+            ext_bucket_fixture)
+        # invalid spec
+        with pytest.raises(sky.exceptions.StorageSpecError) as e:
+            storage_obj = storage_lib.Storage(
+                name=ext_bucket_name, mode=storage_lib.StorageMode.MOUNT)
+            storage_obj.add_store(store_type)
+
+        assert 'Attempted to mount a non-sky managed bucket' in str(e)
+
+        # valid spec
+        storage_obj = storage_lib.Storage(source=ext_bucket_uri,
+                                          mode=storage_lib.StorageMode.MOUNT)
+        handle = global_user_state.get_handle_from_storage_name(
+            storage_obj.name)
+        if handle:
+            storage_obj.delete()
 
 
 # ---------- Testing YAML Specs ----------
@@ -4037,6 +4403,7 @@ class TestYamlSpecs:
 
 
 # ---------- Testing Multiple Accelerators ----------
+@pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 def test_multiple_accelerators_ordered():
     name = _get_cluster_name()
     test = Test(
@@ -4051,6 +4418,7 @@ def test_multiple_accelerators_ordered():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 def test_multiple_accelerators_ordered_with_default():
     name = _get_cluster_name()
     test = Test(
@@ -4065,6 +4433,7 @@ def test_multiple_accelerators_ordered_with_default():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 def test_multiple_accelerators_unordered():
     name = _get_cluster_name()
     test = Test(
@@ -4078,6 +4447,7 @@ def test_multiple_accelerators_unordered():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 def test_multiple_accelerators_unordered_with_default():
     name = _get_cluster_name()
     test = Test(
@@ -4092,6 +4462,7 @@ def test_multiple_accelerators_unordered_with_default():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = _get_cluster_name()
     test = Test(
@@ -4106,6 +4477,7 @@ def test_multiple_resources():
 
 
 # ---------- Sky Benchmark ----------
+@pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
 def test_sky_bench(generic_cloud: str):
     name = _get_cluster_name()

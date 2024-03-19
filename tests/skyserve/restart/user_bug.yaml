@@ -7,9 +7,7 @@ service:
 
 resources:
   ports: 8080
-  cloud: gcp
   cpus: 2+
-  zone: us-central1-a
   use_spot: True
 
 workdir: tests/skyserve/spot

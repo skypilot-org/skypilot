@@ -17,7 +17,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -29,6 +29,8 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[oci]"
           pip install "skypilot-nightly[lambda]"
           pip install "skypilot-nightly[runpod]"
+          pip install "skypilot-nightly[fluidstack]"
+          pip install "skypilot-nightly[cudo]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
@@ -41,7 +43,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -53,6 +55,8 @@ Install SkyPilot using pip:
           pip install "skypilot[oci]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
+          pip install "skypilot[fluidstack]"
+          pip install "skypilot[cudo]"
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
@@ -65,7 +69,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -80,6 +84,8 @@ Install SkyPilot using pip:
           pip install -e ".[oci]"
           pip install -e ".[lambda]"
           pip install -e ".[runpod]"
+          pip install -e ".[fluidstack]"
+          pip install -e ".[cudo]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
@@ -135,6 +141,8 @@ This will produce a summary like:
     OCI: enabled
     Lambda: enabled
     RunPod: enabled
+    Fluidstack: enabled
+    Cudo: enabled
     IBM: enabled
     SCP: enabled
     vSphere: enabled
@@ -157,7 +165,7 @@ section :ref:`below <cloud-account-setup>`.
 Cloud account setup
 -------------------
 
-SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod,
+SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidstack, Cudo,
 IBM, SCP, VMware vSphere and Cloudflare (for R2 object store).
 
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
@@ -269,6 +277,43 @@ RunPod
   
   pip install "runpod>=1.5.1"
   runpod config
+
+
+Fluidstack
+~~~~~~~~~~~~~~~~~~
+
+`Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access, go to the `Home <https://console.fluidstack.io/>`__ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` and the :code:`API token` to :code:`~/.fluidstack/api_token`:
+
+.. code-block:: shell
+
+  mkdir -p ~/.fluidstack
+  echo "your_api_key_here" > ~/.fluidstack/api_key
+  echo "your_api_token_here" > ~/.fluidstack/api_token
+
+
+Cudo Compute
+~~~~~~~~~~~~~~~~~~
+
+`Cudo Compute <https://www.cudocompute.com/>`__ GPU cloud provides low cost GPUs powered with green energy.
+
+1. Create an API Key by following `this guide <https://www.cudocompute.com/docs/guide/api-keys/>`__.
+2. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
+3. Run :code:`cudoctl init`:
+
+.. code-block:: shell
+
+  cudoctl init
+    ✔ api key: my-api-key
+    ✔ project: my-project
+    ✔ billing account: my-billing-account
+    ✔ context: default
+    config file saved ~/.config/cudo/cudo.yml
+
+  pip install "cudocompute>=0.1.8"
+
+If you want to want to use skypilot with a different Cudo Compute account or project, just run :code:`cudoctl init`: again.
+
+
 
 
 IBM

@@ -1,0 +1,38 @@
+# Runs a simple HTTP server in a skypilot base container
+# Also creates a service to expose the server internally.
+#
+# Usage:
+#   kubectl apply -f cpu_test_pod.yaml
+#
+# Access the server by running:
+#   kubectl port-forward svc/skytest-svc 8080:8080
+#
+# Then open a browser and go to http://localhost:8080
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: skytest
+  labels:
+      app: skytest
+spec:
+  containers:
+  - name: skytest
+    image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
+    # Run apt update and run a simple HTTP server
+    command: ["/bin/bash", "-c", "--"]
+    args: ["sudo apt update && python3 -m http.server 8080"]
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: skytest-svc
+spec:
+  selector:
+    app: skytest
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080

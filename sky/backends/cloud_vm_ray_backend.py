@@ -147,6 +147,7 @@ def _get_cluster_config_template(cloud):
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
+        clouds.Fluidstack: 'fluidstack-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 
@@ -284,9 +285,8 @@ class RayCodeGen:
                 # next job can be scheduled on the released resources immediately.
                 ray_util.remove_placement_group(pg)
                 sys.stdout.flush()
-                sys.stderr.flush()
                 return returncodes
-            
+
             run_fn = None
             futures = []
             """),
@@ -371,14 +371,12 @@ class RayCodeGen:
                 message = {_CTRL_C_TIP_MESSAGE!r} + '\\n'
                 message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
                 print(message,
-                      file=sys.stderr,
                       flush=True)
                 # FIXME: This will print the error message from autoscaler if
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
                 print('INFO: All task resources reserved.',
-                      file=sys.stderr,
                       flush=True)
                 """)
         ]
@@ -426,7 +424,6 @@ class RayCodeGen:
                     print('ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with '
                         'return code list:{colorama.Style.RESET_ALL}',
                         setup_returncodes,
-                        file=sys.stderr,
                         flush=True)
                     # Need this to set the job status in ray job to be FAILED.
                     sys.exit(1)
@@ -542,10 +539,6 @@ class RayCodeGen:
             sky_env_vars_dict_str += [
                 f'sky_env_vars_dict[{constants.TASK_ID_ENV_VAR!r}]'
                 f' = {job_run_id!r}',
-                # TODO(zhwu): remove this deprecated env var in later release
-                # (after 0.5).
-                f'sky_env_vars_dict[{constants.TASK_ID_ENV_VAR_DEPRECATED!r}]'
-                f' = {job_run_id!r}'
             ]
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
@@ -622,7 +615,6 @@ class RayCodeGen:
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
                       reason,
-                      file=sys.stderr,
                       flush=True)
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
@@ -1836,6 +1828,8 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     'Retrying launching in {:.1f} seconds.'.format(sleep))
                 time.sleep(sleep)
+            # TODO(zhwu): when we retry ray up, it is possible that the ray
+            # cluster fail to start because --no-restart flag is used.
             ray_up_return_value = ray_up()
 
         assert ray_up_return_value is not None
@@ -3136,7 +3130,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{cd} && ray job submit '
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
-            f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
+            # Redirect stderr to /dev/null to avoid distracting error from ray.
+            f'"{executable} -u {script_path} > {remote_log_path} 2> /dev/null"')
 
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
@@ -3232,11 +3227,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           separate_stderr=True)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to fetch job id.',
-                                           stderr,
-                                           cluster_name=handle.cluster_name)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to fetch job id.', stderr)
         try:
             job_id_match = _JOB_ID_PATTERN.search(job_id_str)
             if job_id_match is not None:
@@ -3275,7 +3267,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Handle multiple resources exec case.
         task_copy.set_resources(valid_resource)
         if len(task.resources) > 1:
-            logger.info('Multiple resources are specified'
+            logger.info('Multiple resources are specified '
                         f'for the task, using: {valid_resource}')
         task_copy.best_resources = None
         resources_str = backend_utils.get_task_resources_str(task_copy)
@@ -3334,7 +3326,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   handle: CloudVmRayResourceHandle,
                   terminate: bool,
                   purge: bool = False):
-        """Tear down/ Stop the cluster.
+        """Tear down or stop the cluster.
 
         Args:
             handle: The handle to the cluster.
@@ -3411,11 +3403,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       stream_logs=stream_logs,
                                                       require_outputs=True,
                                                       separate_stderr=True)
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to get job status.',
-                                           stderr,
-                                           cluster_name=handle.cluster_name)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to get job status.', stderr)
         statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
@@ -3440,19 +3429,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.cancel_jobs(jobs, cancel_all)
 
         # All error messages should have been redirected to stdout.
-        returncode, stdout, stderr = self.run_on_head(handle,
-                                                      code,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
-        # TODO(zongheng): remove after >=0.5.0, 2 minor versions after.
-        backend_utils.check_stale_runtime_on_remote(returncode, stdout + stderr,
-                                                    handle.cluster_name)
+        returncode, stdout, _ = self.run_on_head(handle,
+                                                 code,
+                                                 stream_logs=False,
+                                                 require_outputs=True)
         subprocess_utils.handle_returncode(
-            returncode,
-            code,
-            f'Failed to cancel jobs on cluster {handle.cluster_name}.',
-            stdout,
-            cluster_name=handle.cluster_name)
+            returncode, code,
+            f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
         cancelled_ids = common_utils.decode_payload(stdout)
         if cancelled_ids:
@@ -3479,11 +3462,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stream_logs=False,
             require_outputs=True,
             separate_stderr=True)
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to sync logs.',
-                                           stderr,
-                                           cluster_name=handle.cluster_name)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to sync logs.', stderr)
         run_timestamps = common_utils.decode_payload(run_timestamps)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
@@ -4036,8 +4016,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                code,
                                                'Failed to set autostop',
                                                stderr=stderr,
-                                               stream_logs=stream_logs,
-                                               cluster_name=handle.cluster_name)
+                                               stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
 
@@ -4063,7 +4042,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if returncode == 0:
             return common_utils.decode_payload(stdout)
-        logger.debug(f'Failed to check if cluster is autostopping: {stderr}')
+        logger.debug('Failed to check if cluster is autostopping with '
+                     f'{returncode}: {stdout+stderr}\n'
+                     f'Command: {code}')
         return False
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
@@ -4108,6 +4089,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream: Whether to post-process the stdout/stderr of the
                 command, such as replacing or skipping lines on the fly. If
                 enabled, lines are printed only when '\r' or '\n' is found.
+
+        Returns:
+            returncode
+            or
+            A tuple of (returncode, stdout, stderr).
 
         Raises:
             exceptions.FetchIPError: If the head node IP cannot be fetched.

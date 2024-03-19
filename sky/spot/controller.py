@@ -70,7 +70,6 @@ class SpotController:
 
         for i, task in enumerate(self._dag.tasks):
             task_envs = task.envs or {}
-            task_envs[constants.TASK_ID_ENV_VAR_DEPRECATED] = job_id_env_vars[i]
             task_envs[constants.TASK_ID_ENV_VAR] = job_id_env_vars[i]
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
@@ -386,9 +385,6 @@ def _handle_signal(job_id):
     if signal_file.exists():
         # Filelock is needed to prevent race condition with concurrent
         # signal writing.
-        # TODO(mraheja): remove pylint disabling when filelock version
-        # updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(str(signal_file) + '.lock'):
             with signal_file.open(mode='r', encoding='utf-8') as f:
                 user_signal = f.read().strip()

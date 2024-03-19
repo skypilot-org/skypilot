@@ -51,8 +51,11 @@ if [ "$start_from" -le 1 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
 which sky
+# Job 1
 sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME} examples/minimal.yaml
 sky autostop -i 10 -y ${CLUSTER_NAME}
+# Job 2
+sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 100
 
 conda activate sky-back-compat-current
 sky status -r ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
@@ -60,12 +63,20 @@ rm -r  ~/.sky/wheels || true
 if [ "$need_launch" -eq "1" ]; then
   sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}
 fi
-sky exec --cloud ${CLOUD} ${CLUSTER_NAME} examples/minimal.yaml
+# Job 3
+sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 50
+q=$(sky queue ${CLUSTER_NAME})
+echo "$q"
+echo "$q" | grep "RUNNING" | wc -l | grep 2 || exit 1
+# Job 4
 s=$(sky launch --cloud ${CLOUD} -d -c ${CLUSTER_NAME} examples/minimal.yaml)
-echo $s
+sky logs ${CLUSTER_NAME} 2 --status | grep RUNNING || exit 1
 # remove color and find the job id
-echo $s | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 3" || exit 1
-sky queue ${CLUSTER_NAME}
+echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 4" || exit 1
+sleep 45
+q=$(sky queue ${CLUSTER_NAME})
+echo "$q"
+echo "$q" | grep "SUCCEEDED" | wc -l | grep 4 || exit 1
 fi
 
 # sky stop + sky start + sky exec
@@ -112,7 +123,7 @@ sky logs ${CLUSTER_NAME}-4 2
 fi
 
 # (1 node) sky start + sky exec + sky queue + sky logs
-if [ "$start_form" -le 5 ]; then
+if [ "$start_from" -le 5 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME}-5 examples/minimal.yaml
@@ -147,4 +158,32 @@ sky logs ${CLUSTER_NAME}-6 2 --status
 sky logs ${CLUSTER_NAME}-6 2
 fi
 
+# Test spot jobs to make sure existing jobs and new job can run correctly, after
+# the spot controller is updated.
+if [ "$start_from" -le 7 ]; then
+conda activate sky-back-compat-master
+rm -r  ~/.sky/wheels || true
+sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-7-0 "echo hi; sleep 1000"
+sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-7-1 "echo hi; sleep 300"
+conda activate sky-back-compat-current
+rm -r  ~/.sky/wheels || true
+s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-1)
+echo "$s"
+echo "$s" | grep " hi" || exit 1
+sky spot launch -d --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7-2 "echo hi; sleep 10"
+s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-2)
+echo "$s"
+echo "$s" | grep " hi" || exit 1
+s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
+echo "$s"
+echo "$s" | grep "RUNNING" | wc -l | grep 3 || exit 1
+sky spot cancel -y -n ${CLUSTER_NAME}-7-0
+sleep 200
+s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
+echo "$s"
+echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
+echo "$s" | grep "CANCELLED" | wc -l | grep 1 || exit 1
+fi
+
 sky down ${CLUSTER_NAME}* -y
+sky spot cancel -n ${CLUSTER_NAME}* -y
