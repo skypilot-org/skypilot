@@ -23,12 +23,18 @@ SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.9.3'
 
-# Use the same Python used for installing ray and skypilot.
+# We store the absolute path of the python executable (/opt/conda/bin/python3)
+# in this file, so that any future internal commands that need to use python
+# can use this path. This is useful for the case where the user has a custom
+# conda environment as a default environment, which is not the same as the one
+# used for installing SkyPilot runtime (ray and skypilot).
 SKY_PYTHON_PATH_FILE = '~/.sky/python_path'
 SKY_GET_PYTHON_PATH_CMD = f'cat {SKY_PYTHON_PATH_FILE} || which python3'
+# Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
 _SKY_PYTHON_DIR_CMD = f'$(dirname {SKY_PYTHON_CMD})'
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
+# Ray executable, e.g., /opt/conda/bin/ray
 SKY_RAY_CMD = f'{_SKY_PYTHON_DIR_CMD}/ray'
 
 # The name for the environment variable that stores the unique ID of the

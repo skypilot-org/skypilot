@@ -8,7 +8,11 @@ setup: |
     conda activate myenv
   fi
 
+  # Set user's conda environment as default, which does not have the SkyPilot
+  # runtime installed.
   grep -qxF 'conda activate myenv' ~/.bashrc || echo "conda activate myenv" >> ~/.bashrc
+  # Further install the older version of Ray to test SkyPilot being able to use
+  # the original environment to submit jobs.
   pip install ray==2.6.0
 
 run: |
