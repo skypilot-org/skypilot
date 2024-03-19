@@ -1,10 +1,10 @@
 # Configuration file for the Sphinx documentation builder.
 
 import os
-import sys
 import pathlib
-import yaml
+import sys
 
+import yaml
 
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
@@ -63,42 +63,45 @@ napolean_use_rtype = False
 # Python methods should be presented in source code order
 autodoc_member_order = 'bysource'
 
+
 # -- Options for HTML output
 def render_svg_logo(path):
-    with open(pathlib.Path(__file__).parent / path, "r") as f:
+    with open(pathlib.Path(__file__).parent / path, 'r') as f:
         content = f.read()
 
     return content
+
+
 # html_theme = 'sphinx_book_theme'
 html_theme = 'pydata_sphinx_theme'
 html_theme_options = {
-    "show_toc_level": 1,
-    "navbar_align": "left",  # [left, content, right] For testing that the navbar items align properly
-    "navbar_start": ["navbar-skypilot-logo"],
-    "navbar_center": ["navbar-nav"],
-    "navbar_end": [
-        # "navbar-icon-links",
+    'show_toc_level': 1,
+    'navbar_align': 'left',  # [left, content, right] For testing that the navbar items align properly
+    'navbar_start': ['navbar-skypilot-logo'],
+    'navbar_center': ['navbar-nav'],
+    'navbar_end': [
+        # 'navbar-icon-links',
     ],
-    "navbar_persistent": [
-        "search-button-field",
-        "theme-switcher",
+    'navbar_persistent': [
+        'search-button-field',
+        'theme-switcher',
     ],
     'logo': {
         'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
     },
-    "use_edit_page_button": True,
-    "announcement": None,
-    "secondary_sidebar_items": [
-        "page-toc",
-        "edit-this-page",
+    'use_edit_page_button': True,
+    'announcement': None,
+    'secondary_sidebar_items': [
+        'page-toc',
+        'edit-this-page',
     ],
-    "navigation_depth": 4,
+    'navigation_depth': 4,
     'pygment_light_style': 'tango',
     'pygment_dark_style': 'monokai',
     'primary_sidebar_end': [],
-    "footer_start": ["copyright"],
-    "footer_center": [],
-    "footer_end": [],
+    'footer_start': ['copyright'],
+    'footer_center': [],
+    'footer_end': [],
     'header_links_before_dropdown': 6,
 }
 
@@ -110,11 +113,11 @@ html_context = {
 }
 
 html_sidebars = {
-    "**": ["main-sidebar"],
+    '**': ['main-sidebar'],
 }
 
 # The name for this set of Sphinx documents.  If None, it defaults to
-# "<project> v<release> documentation".
+# '<project> v<release> documentation'.
 html_title = 'SkyPilot documentation'
 
 # -- Options for EPUB output
@@ -145,10 +148,12 @@ html_css_files = ['custom.css']
 myst_heading_anchors = 7
 show_sphinx = False
 
+
 def add_metadata_to_page(app, pagename, templatename, context, doctree):
     # Add the author if it exists
-    if app.config.author != "unknown":
-        context["author"] = app.config.author
+    if app.config.author != 'unknown':
+        context['author'] = app.config.author
+
 
 def setup(app):
     # -- To demonstrate ReadTheDocs switcher -------------------------------------
@@ -156,19 +161,22 @@ def setup(app):
     # so that we can test RTD-like behavior. We don't need to run it on RTD and we
     # don't wanted it loaded in GitHub Actions because it messes up the lighthouse
     # results.
-    if not os.environ.get("READTHEDOCS") and not os.environ.get("GITHUB_ACTIONS"):
+    if not os.environ.get('READTHEDOCS') and not os.environ.get(
+            'GITHUB_ACTIONS'):
         app.add_css_file(
-            "https://assets.readthedocs.org/static/css/readthedocs-doc-embed.css"
+            'https://assets.readthedocs.org/static/css/readthedocs-doc-embed.css'
         )
-        app.add_css_file("https://assets.readthedocs.org/static/css/badge_only.css")
+        app.add_css_file(
+            'https://assets.readthedocs.org/static/css/badge_only.css')
 
         # Create the dummy data file so we can link it
         # ref: https://github.com/readthedocs/readthedocs.org/blob/bc3e147770e5740314a8e8c33fec5d111c850498/readthedocs/core/static-src/core/js/doc-embed/footer.js  # noqa: E501
-        app.add_js_file("rtd-data.js")
+        app.add_js_file('rtd-data.js')
         app.add_js_file(
-            "https://assets.readthedocs.org/static/javascript/readthedocs-doc-embed.js",
+            'https://assets.readthedocs.org/static/javascript/readthedocs-doc-embed.js',
             priority=501,
         )
-     
-    app.connect("html-page-context", add_metadata_to_page)
-    app.connect("builder-inited", prepare_github_markdown.handle_markdown_in_gallery)
+
+    app.connect('html-page-context', add_metadata_to_page)
+    app.connect('builder-inited',
+                prepare_github_markdown.handle_markdown_in_gallery)

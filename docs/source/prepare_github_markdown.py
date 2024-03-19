@@ -1,9 +1,12 @@
-import re
+# Modified from: https://github.com/ray-project/ray/blob/master/doc/source/preprocess_github_markdown.py
 import pathlib
-from typing import Optional
+import re
 import shutil
+from typing import Optional
 
-def preprocess_github_markdown_file(source_path: str, dest_path: Optional[str] = None):
+
+def preprocess_github_markdown_file(source_path: str,
+                                    dest_path: Optional[str] = None):
     """
     Preprocesses GitHub Markdown files by:
         - Uncommenting all ``<!-- -->`` comments in which opening tag is immediately
@@ -19,28 +22,29 @@ def preprocess_github_markdown_file(source_path: str, dest_path: Optional[str] =
             If not provided, save to the same location as source_path.
     """
     dest_path = dest_path if dest_path else source_path
-    with open(source_path, "r") as f:
+    with open(source_path, 'r') as f:
         text = f.read()
     # $UNCOMMENT
-    text = re.sub(r"<!--\s*\$UNCOMMENT(.*?)(-->)", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r'<!--\s*\$UNCOMMENT(.*?)(-->)', r'\1', text, flags=re.DOTALL)
     # $REMOVE
     text = re.sub(
-        r"(<!--\s*\$REMOVE\s*-->)(.*?)(<!--\s*\$END_REMOVE\s*-->)",
-        r"",
+        r'(<!--\s*\$REMOVE\s*-->)(.*?)(<!--\s*\$END_REMOVE\s*-->)',
+        r'',
         text,
         flags=re.DOTALL,
     )
-    with open(dest_path, "w") as f:
+    with open(dest_path, 'w') as f:
         f.write(text)
 
+
 def handle_markdown_in_gallery(self, *args, **kwargs):
-    gallery_dir = pathlib.Path(__file__).parent / "_gallery_original"
-    processed_dir = pathlib.Path(__file__).parent / "gallery"
+    gallery_dir = pathlib.Path(__file__).parent / '_gallery_original'
+    processed_dir = pathlib.Path(__file__).parent / 'gallery'
     # Copy folder gallery_dir to processed_dir
     if processed_dir.exists():
         shutil.rmtree(processed_dir)
     shutil.copytree(gallery_dir, processed_dir)
 
-    for file in processed_dir.glob("**/*.md"):
+    for file in processed_dir.glob('**/*.md'):
         # Preprocess the markdown file
         preprocess_github_markdown_file(file)
