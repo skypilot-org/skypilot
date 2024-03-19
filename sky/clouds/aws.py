@@ -409,7 +409,8 @@ class AWS(clouds.Cloud):
             security_group = user_security_group
         else:
             security_group = DEFAULT_SECURITY_GROUP_NAME
-
+        tailscale_key = os.environ['TAILSCALE_KEY']
+        authkey_option = f"'--authkey={tailscale_key}'"  # pylint: disable=invalid-string-quote
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
@@ -418,6 +419,7 @@ class AWS(clouds.Cloud):
             'zones': ','.join(zone_names),
             'image_id': image_id,
             'security_group': security_group,
+            'authkey_option': authkey_option,
             **AWS._get_disk_specs(r.disk_tier)
         }
 
