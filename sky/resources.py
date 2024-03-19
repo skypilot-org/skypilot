@@ -553,7 +553,8 @@ class Resources:
             # Try to infer the cloud from region/zone, if unique. If 0 or >1
             # cloud corresponds to region/zone, errors out.
             valid_clouds = []
-            enabled_clouds = sky_check.get_enabled_clouds()
+            enabled_clouds = sky_check.get_enabled_clouds(
+                raise_if_no_cloud_access=True)
             cloud_to_errors = {}
             for cloud in enabled_clouds:
                 try:
@@ -664,7 +665,8 @@ class Resources:
         else:
             # If cloud not specified
             valid_clouds = []
-            enabled_clouds = sky_check.get_enabled_clouds()
+            enabled_clouds = sky_check.get_enabled_clouds(
+                raise_if_no_cloud_access=True)
             for cloud in enabled_clouds:
                 if cloud.instance_type_exists(self._instance_type):
                     valid_clouds.append(cloud)
@@ -846,7 +848,8 @@ class Resources:
                 self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
         else:
             at_least_one_cloud_supports_ports = False
-            for cloud in sky_check.get_enabled_clouds():
+            for cloud in sky_check.get_enabled_clouds(
+                    raise_if_no_cloud_access=True):
                 try:
                     cloud.check_features_are_supported(
                         self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
