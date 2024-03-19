@@ -38,7 +38,7 @@ __version__ = '1.0.0-dev0'
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 
-def make_proxy_var_case_insensitive(proxy_var: str):
+def set_proxy_env_var(proxy_var: str):
     """Set both http_proxy and HTTP_PROXY if either or the system proxy is set.
 
     Although many of our underlying libraries are case-insensitive when it comes
@@ -57,7 +57,7 @@ def make_proxy_var_case_insensitive(proxy_var: str):
 
 
 for proxy_env_var in ['http_proxy', 'https_proxy', 'all_proxy']:
-    make_proxy_var_case_insensitive(proxy_env_var)
+    set_proxy_env_var(proxy_env_var)
 
 # Keep this order to avoid cyclic imports
 # pylint: disable=wrong-import-position
