@@ -30,7 +30,7 @@ def restart_skylet():
 
 
 proc = subprocess.run(
-    f'ps aux | grep -v "grep" | grep "sky.skylet.skylet" | grep " -m"',
+    'ps aux | grep -v "grep" | grep "sky.skylet.skylet" | grep " -m"',
     shell=True,
     check=False)
 
