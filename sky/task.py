@@ -871,9 +871,8 @@ class Task:
         # assert len(self.resources) == 1, self.resources
         storage_cloud = None
 
-        enabled_storage_clouds = storage_lib.get_enabled_storage_clouds()
-        if not enabled_storage_clouds:
-            raise ValueError('No enabled cloud for storage, run: sky check')
+        enabled_storage_clouds = storage_lib.get_enabled_storage_clouds(
+            raise_if_no_cloud_access=True)
 
         if self.best_resources is not None:
             storage_cloud = self.best_resources.cloud

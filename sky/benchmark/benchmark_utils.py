@@ -168,19 +168,9 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     bucket_name = f'sky-bench-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
     # Select the bucket type.
-    enabled_clouds = sky_check.get_enabled_clouds()
-    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
-    if 'AWS' in enabled_clouds:
-        bucket_type = data.StoreType.S3.value
-    elif 'GCP' in enabled_clouds:
-        bucket_type = data.StoreType.GCS.value
-    elif 'AZURE' in enabled_clouds:
-        raise RuntimeError(
-            'Azure Blob Storage is not supported yet. '
-            'Please enable another cloud to create a benchmark bucket.')
-    else:
-        raise RuntimeError('No cloud is enabled. '
-                           'Please enable at least one cloud.')
+    enabled_clouds = sky_check.get_enabled_clouds(raise_if_no_cloud_access=True)
+    assert enabled_clouds
+    bucket_type = data.StoreType.from_cloud(enabled_clouds[0])
 
     # Create a benchmark bucket.
     logger.info(f'Creating a bucket {bucket_name} to save the benchmark logs.')
