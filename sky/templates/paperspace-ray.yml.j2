@@ -33,7 +33,8 @@ provider:
 auth:
   ssh_user: paperspace
   ssh_private_key: {{ssh_private_key}}
-  ssh_public_key: skypilot:ssh_public_key_content
+  ssh_public_key: |-
+      skypilot:ssh_public_key_content
 
 available_node_types:
   ray_head_default:
