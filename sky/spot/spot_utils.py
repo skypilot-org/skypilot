@@ -178,9 +178,6 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
             bash_command=event_callback,
             log_path=log_path,
             env_vars=dict(
-                SKYPILOT_JOB_ID=str(
-                    task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED,
-                                  'N.A.')),
                 SKYPILOT_TASK_ID=str(
                     task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
                 SKYPILOT_TASK_IDS=str(
@@ -657,7 +654,7 @@ def format_job_table(
     if status_str:
         status_str = f'In progress tasks: {status_str}'
     else:
-        status_str = 'No in progress tasks.'
+        status_str = 'No in-progress spot jobs.'
     output = status_str
     if str(job_table):
         output += f'\n{job_table}'
