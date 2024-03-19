@@ -1,7 +1,6 @@
 """SkyServe core APIs."""
 import re
 import tempfile
-import typing
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -11,7 +10,6 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
@@ -21,12 +19,75 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
-if typing.TYPE_CHECKING:
-    from sky import clouds
+logger = sky_logging.init_logger(__name__)
+
+
+def _validate_service_task(task: 'sky.Task') -> None:
+    """Validate the task for Sky Serve.
+
+    Args:
+        task: sky.Task to validate
+
+    Raises:
+        ValueError: if the arguments are invalid.
+        RuntimeError: if the task.serve is not found.
+    """
+    spot_resources: List['sky.Resources'] = [
+        resource for resource in task.resources if resource.use_spot
+    ]
+    # TODO(MaoZiming): Allow mixed on-demand and spot specification in resources
+    # On-demand fallback should go to the resources specified as on-demand.
+    if len(spot_resources) not in [0, len(task.resources)]:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Resources must either all use spot or none use spot. '
+                'To use on-demand and spot instances together, '
+                'use `dynamic_ondemand_fallback` or set '
+                'base_ondemand_fallback_replicas.')
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Service section not found.')
+
+    policy_description = ('on-demand'
+                          if task.service.dynamic_ondemand_fallback else 'spot')
+    for resource in list(task.resources):
+        if resource.spot_recovery is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('spot_recovery is disabled for SkyServe. '
+                                 'SkyServe will replenish preempted spot '
+                                 f'with {policy_description} instances.')
+
+    replica_ingress_port: Optional[int] = None
+    for requested_resources in task.resources:
+        if (task.service.use_ondemand_fallback and
+                not requested_resources.use_spot):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    '`use_ondemand_fallback` is only supported '
+                    'for spot resources. Please explicitly specify '
+                    '`use_spot: true` in resources for on-demand fallback.')
+        requested_ports = list(
+            resources_utils.port_ranges_to_set(requested_resources.ports))
+        if len(requested_ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port = requested_ports[0]
+        if replica_ingress_port is None:
+            replica_ingress_port = service_port
+        elif service_port != replica_ingress_port:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Got multiple ports: {service_port} and '
+                    f'{replica_ingress_port} in different resources. '
+                    'Please specify the same port instead.')
 
 
 @usage_lib.entrypoint
@@ -56,38 +117,7 @@ def up(
                              'only contains lower letters, numbers and dash): '
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
-    if task.service is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Service section not found.')
-
-    requested_cloud: Optional['clouds.Cloud'] = None
-    service_port: Optional[int] = None
-    for requested_resources in task.resources:
-        if requested_resources.ports is None or len(
-                requested_resources.ports) != 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify one port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
-        service_port_str = requested_resources.ports[0]
-        if not service_port_str.isdigit():
-            # For the case when the user specified a port range like 10000-10010
-            raise ValueError(f'Port {service_port_str!r} is not a valid port '
-                             'number. Please specify a single port instead. '
-                             f'Got: {service_port_str!r}')
-        resource_port = int(service_port_str)
-        if service_port is None:
-            service_port = resource_port
-        if service_port != resource_port:
-            raise ValueError(
-                f'Got multiple ports: {service_port} and {resource_port} '
-                'in different resources. Please specify single port instead.')
-        if requested_cloud is None:
-            requested_cloud = requested_resources.cloud
-        if requested_cloud != requested_resources.cloud:
-            raise ValueError(f'Got multiple clouds: {requested_cloud} and '
-                             f'{requested_resources.cloud} in different '
-                             'resources. Please specify single cloud instead.')
+    _validate_service_task(task)
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
@@ -130,6 +160,7 @@ def up(
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
             is not None)
+        requested_cloud = list(task.resources)[0].cloud
         controller_cloud = (requested_cloud if not controller_exist and
                             controller_resources.cloud is None else
                             controller_resources.cloud)
@@ -177,11 +208,11 @@ def up(
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
         # change after the first time, so there is no consistency issue.
         with rich_utils.safe_status(
-                '[cyan]Waiting for the service to initialize[/]'):
+                '[cyan]Waiting for the service to register[/]'):
             # This function will check the controller job id in the database
             # and return the endpoint if the job id matches. Otherwise it will
             # return None.
-            code = serve_utils.ServeCodeGen.wait_service_initialization(
+            code = serve_utils.ServeCodeGen.wait_service_registration(
                 service_name, controller_job_id)
             backend = backend_utils.get_backend_from_handle(controller_handle)
             assert isinstance(backend, backends.CloudVmRayBackend)
@@ -264,9 +295,20 @@ def up(
 
 
 @usage_lib.entrypoint
-def update(task: 'sky.Task', service_name: str) -> None:
+def update(
+        task: 'sky.Task',
+        service_name: str,
+        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
+    """Update an existing service.
 
-    cluster_status, handle = backend_utils.is_controller_up(
+    Please refer to the sky.cli.serve_update for the document.
+
+    Args:
+        task: sky.Task to update.
+        service_name: Name of the service.
+    """
+    _validate_service_task(task)
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'Service controller is stopped. There is no service to update. '
@@ -276,14 +318,6 @@ def update(task: 'sky.Task', service_name: str) -> None:
         'To spin up a new service, '
         f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
-
-    if handle is None or handle.head_ip is None:
-        # The error message is already printed in
-        # backend_utils.is_controller_up
-        # TODO(zhwu): Move the error message into the exception.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(message='',
-                                               cluster_status=cluster_status)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -329,10 +363,6 @@ def update(task: 'sky.Task', service_name: str) -> None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
-    if task.service is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Service section not found in the task. ')
-
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
 
@@ -374,7 +404,8 @@ def update(task: 'sky.Task', service_name: str) -> None:
                                  storage_mounts=None)
 
         code = serve_utils.ServeCodeGen.update_service(service_name,
-                                                       current_version)
+                                                       current_version,
+                                                       mode=mode.value)
         returncode, _, stderr = backend.run_on_head(handle,
                                                     code,
                                                     require_outputs=True,
@@ -421,16 +452,9 @@ def down(
         service_names = []
     if isinstance(service_names, str):
         service_names = [service_names]
-    cluster_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have terminated.')
-    if handle is None or handle.head_ip is None:
-        # The error message is already printed in
-        # backend_utils.is_controller_up
-        # TODO(zhwu): Move the error message into the exception.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(message='',
-                                               cluster_status=cluster_status)
 
     service_names_str = ','.join(service_names)
     if sum([len(service_names) > 0, all]) != 1:
@@ -481,6 +505,7 @@ def status(
 
         {
             'name': (str) service name,
+            'active_versions': (List[int]) a list of versions that are active,
             'controller_job_id': (int) the job id of the controller,
             'uptime': (int) uptime in seconds,
             'status': (sky.ServiceStatus) service status,
@@ -533,21 +558,10 @@ def status(
             raise RuntimeError(
                 'Failed to refresh service status due to network error.') from e
 
-    # TODO(tian): This is so slow... It will take ~10s to refresh the status
-    # of controller. Can we optimize this?
-    controller_status, handle = backend_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No service is found.')
-
-    if handle is None or handle.head_ip is None:
-        # When the controller is STOPPED, the head_ip will be None, as
-        # it will be set in global_user_state.remove_cluster().
-        # We do not directly check for UP because the controller may be
-        # in INIT state during another `sky serve up`, but still have
-        # head_ip available. In this case, we can still try to ssh
-        # into the controller and fetch the job table.
-        raise exceptions.ClusterNotUpError('Sky serve controller is not up.',
-                                           cluster_status=controller_status)
+    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+    handle = backend_utils.is_controller_accessible(
+        controller_type=controller_type,
+        stopped_message=controller_type.value.default_hint_if_non_existent)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -629,15 +643,11 @@ def tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
-    controller_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No service is found.')
-    if handle is None or handle.head_ip is None:
-        msg = 'No service is found.'
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg = ''
-        raise exceptions.ClusterNotUpError(msg,
-                                           cluster_status=controller_status)
+        stopped_message=(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
+                         value.default_hint_if_non_existent))
+
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     backend.tail_serve_logs(handle,

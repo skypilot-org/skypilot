@@ -264,8 +264,10 @@ class Azure(clouds.Cloud):
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        acc_count = None
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
+            acc_count = str(sum(acc_dict.values()))
         else:
             custom_resources = None
         # pylint: disable=import-outside-toplevel
@@ -319,6 +321,7 @@ class Azure(clouds.Cloud):
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
+            'num_gpus': acc_count,
             'use_spot': r.use_spot,
             'region': region_name,
             # Azure does not support specific zones.
@@ -648,6 +651,10 @@ class Azure(clouds.Cloud):
             original_statuses_list = [original_statuses_list]
         statuses = []
         for s in original_statuses_list:
+            if s not in status_map:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ClusterStatusFetchingError(
+                        f'Failed to parse status from Azure response: {stdout}')
             node_status = status_map[s]
             if node_status is not None:
                 statuses.append(node_status)

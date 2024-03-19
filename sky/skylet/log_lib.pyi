@@ -58,7 +58,6 @@ def run_with_log(cmd: Union[List[str], str],
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
                  ray_job_id: Optional[str] = ...,
-                 use_sudo: bool = ...,
                  **kwargs) -> int:
     ...
 
@@ -78,7 +77,6 @@ def run_with_log(cmd: Union[List[str], str],
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
                  ray_job_id: Optional[str] = ...,
-                 use_sudo: bool = ...,
                  **kwargs) -> Tuple[int, str, str]:
     ...
 
@@ -98,7 +96,6 @@ def run_with_log(cmd: Union[List[str], str],
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
                  ray_job_id: Optional[str] = ...,
-                 use_sudo: bool = ...,
                  **kwargs) -> Union[int, Tuple[int, str, str]]:
     ...
 
@@ -115,17 +112,13 @@ def add_ray_env_vars(
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              job_owner: Optional[str] = ...,
-                              job_id: Optional[int] = ...,
                               env_vars: Optional[Dict[str, str]] = ...,
                               stream_logs: bool = ...,
-                              with_ray: bool = ...,
-                              use_sudo: bool = ...):
+                              with_ray: bool = ...):
     ...
 
 
-def tail_logs(job_owner: str,
-              job_id: int,
+def tail_logs(job_id: int,
               log_dir: Optional[str],
               spot_job_id: Optional[int] = ...,
               follow: bool = ...) -> None:

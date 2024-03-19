@@ -12,8 +12,8 @@ PORT_SELECTION_FILE_LOCK_PATH = f'{SKYSERVE_METADATA_DIR}/port_selection.lock'
 # Signal file path for controller to handle signals.
 SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
 
-# Time to wait in seconds for service to initialize.
-INITIALIZATION_TIMEOUT_SECONDS = 60
+# Time to wait in seconds for service to register on the controller.
+SERVICE_REGISTER_TIMEOUT_SECONDS = 60
 
 # The time interval in seconds for load balancer to sync with controller. Every
 # time the load balancer syncs with controller, it will update all available
@@ -53,9 +53,12 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # do some log rotation.
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 
-# A default controller with 4 vCPU and 16 GB memory can run up to 16 services.
-SERVICES_MEMORY_USAGE_GB = 1.0
-SERVICES_TASK_CPU_DEMAND = 0.25
+# Due to the CPU/memory usage of the controller process launched with sky job (
+# use ray job under the hood), we need to reserve some CPU/memory for each serve
+# controller process.
+# Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
+# services.
+CONTROLLER_MEMORY_USAGE_GB = 1.0
 
 # A period of time to initialize your service. Any readiness probe failures
 # during this period will be ignored.
@@ -70,3 +73,12 @@ LOAD_BALANCER_PORT_RANGE = '30001-30100'
 
 # Initial version of service.
 INITIAL_VERSION = 1
+
+# Replica ID environment variable name that can be accessed on the replica.
+REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
+
+# The version of the lib files that serve use. Whenever there is an API
+# change for the serve_utils.ServeCodeGen, we need to bump this version, so that
+# the user can be notified to update their SkyPilot serve version on the remote
+# cluster.
+SERVE_VERSION = 1

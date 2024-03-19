@@ -166,10 +166,9 @@ class JobScheduler:
         subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
 
     def schedule_step(self) -> None:
-        job_owner = getpass.getuser()
         jobs = self._get_jobs()
         if len(jobs) > 0:
-            update_status(job_owner)
+            update_status()
         # TODO(zhwu, mraheja): One optimization can be allowing more than one
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
@@ -262,8 +261,8 @@ def _create_ray_job_submission_client():
         address=f'http://127.0.0.1:{port}')
 
 
-def make_ray_job_id(sky_job_id: int, job_owner: str) -> str:
-    return f'{sky_job_id}-{job_owner}'
+def make_ray_job_id(sky_job_id: int) -> str:
+    return f'{sky_job_id}-{getpass.getuser()}'
 
 
 def make_job_command_with_user_switching(username: str,
@@ -420,7 +419,7 @@ def get_ray_port():
     port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 6379
-    port = json.load(open(port_path))['ray_port']
+    port = json.load(open(port_path, 'r', encoding='utf-8'))['ray_port']
     return port
 
 
@@ -433,7 +432,8 @@ def get_job_submission_port():
     port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
     if not os.path.exists(port_path):
         return 8265
-    port = json.load(open(port_path))['ray_dashboard_port']
+    port = json.load(open(port_path, 'r',
+                          encoding='utf-8'))['ray_dashboard_port']
     return port
 
 
@@ -510,8 +510,7 @@ def _get_pending_jobs():
     }
 
 
-def update_job_status(job_owner: str,
-                      job_ids: List[int],
+def update_job_status(job_ids: List[int],
                       silent: bool = False) -> List[JobStatus]:
     """Updates and returns the job statuses matching our `JobStatus` semantics.
 
@@ -528,7 +527,7 @@ def update_job_status(job_owner: str,
         return []
 
     # TODO: if too slow, directly query against redis.
-    ray_job_ids = [make_ray_job_id(job_id, job_owner) for job_id in job_ids]
+    ray_job_ids = [make_ray_job_id(job_id) for job_id in job_ids]
 
     job_client = _create_ray_job_submission_client()
 
@@ -626,7 +625,7 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status(job_owner: str) -> None:
+def update_status() -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
@@ -637,7 +636,7 @@ def update_status(job_owner: str) -> None:
                                  status_list=JobStatus.nonterminal_statuses())
     nonterminal_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
-    update_job_status(job_owner, nonterminal_job_ids)
+    update_job_status(nonterminal_job_ids)
 
 
 def is_cluster_idle() -> bool:
@@ -715,8 +714,7 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def cancel_jobs_encoded_results(job_owner: str,
-                                jobs: Optional[List[int]],
+def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                                 cancel_all: bool = False) -> str:
     """Cancel jobs.
 
@@ -751,7 +749,7 @@ def cancel_jobs_encoded_results(job_owner: str,
     # Sequentially cancel the jobs to avoid the resource number bug caused by
     # ray cluster (tracked in #1262).
     for job in job_records:
-        job_id = make_ray_job_id(job['job_id'], job_owner)
+        job_id = make_ray_job_id(job['job_id'])
         # Job is locked to ensure that pending queue does not start it while
         # it is being cancelled
         with filelock.FileLock(_get_lock_path(job['job_id'])):
@@ -811,7 +809,19 @@ class JobLibCodeGen:
       >> codegen = JobLibCodeGen.add_job(...)
     """
 
-    _PREFIX = ['import os', 'from sky.skylet import job_lib, log_lib']
+    _PREFIX = [
+        'import os',
+        'import getpass',
+        'from sky.skylet import job_lib, log_lib, constants',
+        # Backward compatibility for old skylet lib version on the remote
+        # machine. The `job_owner` argument was removed in #3037, and if the
+        # remote machine has an old SkyPilot version before that, we need to
+        # pass the `job_owner` argument to the job_lib functions.
+        # TODO(zhwu): Remove this in 0.7.0 release.
+        'job_owner_kwargs = {} '
+        'if getattr(constants, "SKYLET_LIB_VERSION", 0) >= 1 '
+        'else {"job_owner": getpass.getuser()}',
+    ]
 
     @classmethod
     def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
@@ -836,10 +846,8 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def update_status(cls, job_owner: str) -> str:
-        code = [
-            f'job_lib.update_status({job_owner!r})',
-        ]
+    def update_status(cls) -> str:
+        code = ['job_lib.update_status(**job_owner_kwargs)']
         return cls._build(code)
 
     @classmethod
@@ -852,13 +860,12 @@ class JobLibCodeGen:
 
     @classmethod
     def cancel_jobs(cls,
-                    job_owner: str,
                     job_ids: Optional[List[int]],
                     cancel_all: bool = False) -> str:
         """See job_lib.cancel_jobs()."""
         code = [
-            (f'cancelled = job_lib.cancel_jobs_encoded_results({job_owner!r},'
-             f' {job_ids!r}, {cancel_all})'),
+            (f'cancelled = job_lib.cancel_jobs_encoded_results('
+             f' {job_ids!r}, {cancel_all}, **job_owner_kwargs)'),
             # Print cancelled IDs. Caller should parse by decoding.
             'print(cancelled, flush=True)',
         ]
@@ -872,7 +879,6 @@ class JobLibCodeGen:
 
     @classmethod
     def tail_logs(cls,
-                  job_owner: str,
                   job_id: Optional[int],
                   spot_job_id: Optional[int],
                   follow: bool = True) -> str:
@@ -881,7 +887,8 @@ class JobLibCodeGen:
             f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',
             'run_timestamp = job_lib.get_run_timestamp(job_id)',
             f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
-            f'log_lib.tail_logs({job_owner!r}, job_id, log_dir, {spot_job_id!r}, follow={follow})',
+            f'log_lib.tail_logs(job_id=job_id, log_dir=log_dir, '
+            f'spot_job_id={spot_job_id!r}, follow={follow}, **job_owner_kwargs)',
         ]
         return cls._build(code)
 
@@ -926,4 +933,4 @@ class JobLibCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'python3 -u -c {shlex.quote(code)}'
+        return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}'

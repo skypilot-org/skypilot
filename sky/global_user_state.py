@@ -328,8 +328,8 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         handle = get_handle_from_cluster_name(cluster_name)
         if handle is None:
             return
-        # Must invalidate IP list: otherwise 'sky cpunode'
-        # on a stopped cpunode will directly try to ssh, which leads to timeout.
+        # Must invalidate IP list to avoid directly trying to ssh into a
+        # stopped VM, which leads to timeout.
         if hasattr(handle, 'stable_internal_external_ips'):
             handle.stable_internal_external_ips = None
         _DB.cursor.execute(
@@ -690,7 +690,14 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
         break
     enabled_clouds: List[clouds.Cloud] = []
     for c in ret:
-        cloud = clouds.CLOUD_REGISTRY.from_str(c)
+        try:
+            cloud = clouds.CLOUD_REGISTRY.from_str(c)
+        except ValueError:
+            # Handle the case for the clouds whose support has been removed from
+            # SkyPilot, e.g., 'local' was a cloud in the past and may be stored
+            # in the database for users before #3037. We should ignore removed
+            # clouds and continue.
+            continue
         if cloud is not None:
             enabled_clouds.append(cloud)
     return enabled_clouds

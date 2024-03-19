@@ -74,7 +74,6 @@ from sky.core import job_status
 from sky.core import queue
 from sky.core import spot_cancel
 from sky.core import spot_queue
-from sky.core import spot_status
 from sky.core import start
 from sky.core import status
 from sky.core import stop
@@ -99,29 +98,31 @@ from sky.task import Task
 IBM = clouds.IBM
 AWS = clouds.AWS
 Azure = clouds.Azure
+Cudo = clouds.Cudo
 GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
-Local = clouds.Local
 Kubernetes = clouds.Kubernetes
 OCI = clouds.OCI
 RunPod = clouds.RunPod
 Vsphere = clouds.Vsphere
+Fluidstack = clouds.Fluidstack
 optimize = Optimizer.optimize
 
 __all__ = [
     '__version__',
     'AWS',
     'Azure',
+    'Cudo',
     'GCP',
     'IBM',
     'Kubernetes',
     'Lambda',
-    'Local',
     'OCI',
     'RunPod',
     'SCP',
     'Vsphere',
+    'Fluidstack',
     'Optimizer',
     'OptimizeTarget',
     'backends',
@@ -156,7 +157,6 @@ __all__ = [
     'job_status',
     # core APIs Spot Job Management
     'spot_queue',
-    'spot_status',  # Deprecated (alias for spot_queue)
     'spot_cancel',
     # core APIs Storage Management
     'storage_ls',

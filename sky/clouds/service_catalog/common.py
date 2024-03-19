@@ -90,7 +90,7 @@ def read_catalog(filename: str,
                 file_md5 = hashlib.md5(f.read()).hexdigest()
             md5_filepath = meta_path + '.md5'
             if os.path.exists(md5_filepath):
-                with open(md5_filepath, 'r') as f:
+                with open(md5_filepath, 'r', encoding='utf-8') as f:
                     last_md5 = f.read()
                 if file_md5 != last_md5:
                     # Do not update the file if the user modified it.
@@ -127,9 +127,9 @@ def read_catalog(filename: str,
                 else:
                     # Download successful, save the catalog to a local file.
                     os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-                    with open(catalog_path, 'w') as f:
+                    with open(catalog_path, 'w', encoding='utf-8') as f:
                         f.write(r.text)
-                    with open(meta_path + '.md5', 'w') as f:
+                    with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
                         f.write(hashlib.md5(r.text.encode()).hexdigest())
 
     try:
@@ -445,15 +445,15 @@ def get_instance_type_for_accelerator_impl(
 
 
 def list_accelerators_impl(
-    cloud: str,
-    df: pd.DataFrame,
-    gpus_only: bool,
-    name_filter: Optional[str],
-    region_filter: Optional[str],
-    quantity_filter: Optional[int],
-    case_sensitive: bool = True,
-    all_regions: bool = False,
-) -> Dict[str, List[InstanceTypeInfo]]:
+        cloud: str,
+        df: pd.DataFrame,
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        quantity_filter: Optional[int],
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
     `name_filter` is a regular expression used to filter accelerator names
@@ -462,6 +462,7 @@ def list_accelerators_impl(
     Returns a mapping from the canonical names of accelerators to a list of
     instance types offered by this cloud.
     """
+    del require_price  # Unused.
     if gpus_only:
         df = df[~df['GpuInfo'].isna()]
     df = df.copy()  # avoid column assignment warning

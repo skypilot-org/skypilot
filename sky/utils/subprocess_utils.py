@@ -4,7 +4,7 @@ import os
 import random
 import subprocess
 import time
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 import colorama
 import psutil
@@ -50,12 +50,14 @@ def get_parallel_threads() -> int:
     return max(4, cpu_count - 1)
 
 
-def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
+def run_in_parallel(func: Callable, args: Iterable[Any]) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
-    The function should raise a CommandError if the command fails.
-    Returns a list of the return values of the function func, in the same order
-    as the arguments.
+    The function 'func' should raise a CommandError if the command fails.
+
+    Returns:
+      A list of the return values of the function func, in the same order as the
+      arguments.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     with pool.ThreadPool(processes=get_parallel_threads()) as p:
@@ -165,6 +167,8 @@ def run_with_retries(
         if retry_cnt < max_retry:
             if (retry_returncode is not None and
                     returncode in retry_returncode):
+                logger.debug(
+                    f'Retrying command due to returncode {returncode}: {cmd}')
                 retry_cnt += 1
                 time.sleep(random.uniform(0, 1) * 2)
                 continue

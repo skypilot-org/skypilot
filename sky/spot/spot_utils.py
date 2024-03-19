@@ -178,9 +178,6 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
             bash_command=event_callback,
             log_path=log_path,
             env_vars=dict(
-                SKYPILOT_JOB_ID=str(
-                    task.envs.get(constants.TASK_ID_ENV_VAR_DEPRECATED,
-                                  'N.A.')),
                 SKYPILOT_TASK_ID=str(
                     task.envs.get(constants.TASK_ID_ENV_VAR, 'N.A.')),
                 SKYPILOT_TASK_IDS=str(
@@ -248,7 +245,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         # TODO(mraheja): remove pylint disabling when filelock version updated
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(str(signal_file) + '.lock'):
-            with signal_file.open('w') as f:
+            with signal_file.open('w', encoding='utf-8') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
         cancelled_job_ids.append(job_id)
@@ -657,7 +654,7 @@ def format_job_table(
     if status_str:
         status_str = f'In progress tasks: {status_str}'
     else:
-        status_str = 'No in progress tasks.'
+        status_str = 'No in-progress spot jobs.'
     output = status_str
     if str(job_table):
         output += f'\n{job_table}'
@@ -744,13 +741,13 @@ class SpotCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
-        return f'python3 -u -c {shlex.quote(generated_code)}'
+        return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}'
 
 
 def dump_job_table_cache(job_table: str):
     """Dump job table cache to file."""
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
-    with cache_file.open('w') as f:
+    with cache_file.open('w', encoding='utf-8') as f:
         json.dump((time.time(), job_table), f)
 
 
@@ -766,5 +763,5 @@ def load_job_table_cache() -> Optional[Tuple[float, str]]:
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     if not cache_file.exists():
         return None
-    with cache_file.open('r') as f:
+    with cache_file.open('r', encoding='utf-8') as f:
         return json.load(f)

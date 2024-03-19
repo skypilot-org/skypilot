@@ -47,14 +47,14 @@ SkyPilot **cuts your cloud costs**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported providers (AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, IBM, Samsung, Cloudflare, VMware vSphere, any Kubernetes cluster):
+Current supported providers (AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidstack, Cudo, IBM, Samsung, Cloudflare, VMware vSphere, any Kubernetes cluster):
 
 .. raw:: html
 
    <p align="center">
    <picture>
-      <img class="only-light" alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=80%>
-      <img class="only-dark" alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png" width=80%>
+      <img class="only-light" alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=85%>
+      <img class="only-dark" alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png" width=85%>
    </picture>
    </p>
 
@@ -65,13 +65,19 @@ Tutorials: `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutoria
 
 Runnable examples:
 
+.. Keep this section in sync with README.md in SkyPilot repo
+
 * **LLMs on SkyPilot**
 
+  * `Gemma <https://github.com/skypilot-org/skypilot/tree/master/llm/gemma>`_
   * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)
+  * `Code Llama <https://github.com/skypilot-org/skypilot/tree/master/llm/codellama/>`_
   * `vLLM: Serving LLM 24x Faster On the Cloud <https://github.com/skypilot-org/skypilot/tree/master/llm/vllm>`_ (from official vLLM team)
+  * `SGLang: Fast and Expressive LLM Serving On the Cloud <https://github.com/skypilot-org/skypilot/tree/master//llm/sglang/>`_ (from official SGLang team)
   * `Vicuna chatbots: Training & Serving <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_ (from official Vicuna team)
   * `Train your own Vicuna on Llama-2 <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna-llama-2>`_
   * `Self-Hosted Llama-2 Chatbot <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2>`_
+  * `LoRAX <https://github.com/skypilot-org/skypilot/tree/master/llm/lorax/>`_
   * `QLoRA <https://github.com/artidoro/qlora/pull/132>`_
   * `LLaMA-LoRA-Tuner <https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot>`_
   * `Tabby: Self-hosted AI coding assistant <https://github.com/TabbyML/tabby/blob/bed723fcedb44a6b867ce22a7b1f03d2f3531c1e/experimental/eval/skypilot.yaml>`_
@@ -79,7 +85,7 @@ Runnable examples:
   * `Falcon <https://github.com/skypilot-org/skypilot/tree/master/llm/falcon>`_
   * Add yours here & see more in `llm/ <https://github.com/skypilot-org/skypilot/tree/master/llm>`_!
 
-* Framework examples: `PyTorch DDP <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml>`_, `DeepSpeed <https://github.com/skypilot-org/skypilot/blob/master/examples/deepspeed-multinode/sky.yaml>`_, `JAX/Flax on TPU <https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml>`_, `Stable Diffusion <https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion>`_, `Detectron2 <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_, `Distributed <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py>`_ `TensorFlow <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml>`_, `NeMo <https://github.com/skypilot-org/skypilot/blob/master/examples/nemo/nemo.yaml>`_, `programmatic grid search <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py>`_, `Docker <https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml>`_, and `many more <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
+* Framework examples: `PyTorch DDP <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml>`_, `DeepSpeed <https://github.com/skypilot-org/skypilot/blob/master/examples/deepspeed-multinode/sky.yaml>`_, `JAX/Flax on TPU <https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml>`_, `Stable Diffusion <https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion>`_, `Detectron2 <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_, `Distributed <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py>`_ `TensorFlow <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml>`_, `NeMo <https://github.com/skypilot-org/skypilot/blob/master/examples/nemo/nemo.yaml>`_, `programmatic grid search <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py>`_, `Docker <https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml>`_, `Cog <https://github.com/skypilot-org/skypilot/blob/master/examples/cog/>`_, `Unsloth <https://github.com/skypilot-org/skypilot/blob/master/examples/unsloth/unsloth.yaml>`_, and `many more <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
 
 Follow updates:
 
@@ -120,9 +126,8 @@ Documentation
    :caption: SkyServe: Model Serving
 
    serving/sky-serve
+   serving/user-guides
    serving/service-yaml-spec
-   serving/autoscaling
-   serving/update
 
 .. toctree::
    :maxdepth: 1

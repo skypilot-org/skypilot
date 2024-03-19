@@ -94,6 +94,7 @@ def _fill_in_env_vars(
               messages:
                 - role: user
                   content: How to print hello world?
+              max_tokens: 1
 
     We simply dump yaml_field into a json string, and replace env vars using
     regex. This should be safe as yaml config has been schema-validated.
@@ -254,13 +255,14 @@ class Task:
         self.event_callback = event_callback
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
+        self._num_nodes = 1
         self.num_nodes = num_nodes  # type: ignore
 
         self.inputs: Optional[str] = None
         self.outputs: Optional[str] = None
         self.estimated_inputs_size_gigabytes: Optional[float] = None
         self.estimated_outputs_size_gigabytes: Optional[float] = None
-        # Default to CPUNode
+        # Default to CPU VM
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
         self._service: Optional[service_spec.SkyServiceSpec] = None
@@ -982,6 +984,10 @@ class Task:
                     k) and not data_utils.is_cloud_store_url(v):
                 d[k] = v
         return d
+
+    def is_controller_task(self) -> bool:
+        """Returns whether this task is a spot/serve controller process."""
+        return self.spot_dag is not None or self.service_name is not None
 
     def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=cloud URL).

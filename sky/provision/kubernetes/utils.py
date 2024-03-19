@@ -32,7 +32,7 @@ MEMORY_SIZE_UNITS = {
 }
 NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. \
 If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
-(e.g., skypilot.co/accelerators) are setup correctly. \
+(e.g., skypilot.co/accelerator) are setup correctly. \
 To further debug, run: sky check.'
 
 # TODO(romilb): Add links to docs for configuration instructions when ready.
@@ -1004,7 +1004,7 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
     if not os.path.exists(template_path):
         raise FileNotFoundError(
             'Template "kubernetes-ssh-jump.j2" does not exist.')
-    with open(template_path) as fin:
+    with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     j2_template = jinja2.Template(template)
     cont = j2_template.render(name=ssh_jump_name,
@@ -1121,12 +1121,25 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
                     assert len(value) == 1, \
                         f'Expected only one container, found {value}'
                     _merge_dicts(value[0], destination[key][0])
+                elif key in ['volumes', 'volumeMounts']:
+                    # If the key is 'volumes' or 'volumeMounts', we search for
+                    # item with the same name and merge it.
+                    for new_volume in value:
+                        new_volume_name = new_volume.get('name')
+                        if new_volume_name is not None:
+                            destination_volume = next(
+                                (v for v in destination[key]
+                                 if v.get('name') == new_volume_name), None)
+                            if destination_volume is not None:
+                                _merge_dicts(new_volume, destination_volume)
+                            else:
+                                destination[key].append(new_volume)
                 else:
                     destination[key].extend(value)
             else:
                 destination[key] = value
 
-    with open(config_yaml_path, 'r') as f:
+    with open(config_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
     kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
@@ -1139,3 +1152,33 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
 
     # Write the updated YAML back to the file
     common_utils.dump_yaml(config_yaml_path, yaml_obj)
+
+
+def check_nvidia_runtime_class() -> bool:
+    """Checks if the 'nvidia' RuntimeClass exists in the cluster"""
+    # Fetch the list of available RuntimeClasses
+    runtime_classes = kubernetes.node_api().list_runtime_class()
+
+    # Check if 'nvidia' RuntimeClass exists
+    nvidia_exists = any(
+        rc.metadata.name == 'nvidia' for rc in runtime_classes.items)
+    return nvidia_exists
+
+
+def check_secret_exists(secret_name: str, namespace: str) -> bool:
+    """Checks if a secret exists in a namespace
+
+    Args:
+        secret_name: Name of secret to check
+        namespace: Namespace to check
+    """
+
+    try:
+        kubernetes.core_api().read_namespaced_secret(
+            secret_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        if e.status == 404:
+            return False
+        raise
+    else:
+        return True

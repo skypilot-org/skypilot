@@ -12,6 +12,7 @@ if typing.TYPE_CHECKING:
     from sky.data import storage as storage_lib
 
 Path = str
+# pylint: disable=invalid-name
 _ResourceHandleType = typing.TypeVar('_ResourceHandleType',
                                      bound='ResourceHandle')
 
