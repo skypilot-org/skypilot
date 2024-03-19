@@ -624,14 +624,11 @@ def get_config_schema():
                     'additionalProperties': True,
                     # Disallow 'name' and 'namespace' keys in this dict
                     'not': {
-                        'anyOf': [
-                            {
-                                'required': ['name']
-                            },
-                            {
-                                'required': ['namespace']
-                            }
-                        ]
+                        'anyOf': [{
+                            'required': ['name']
+                        }, {
+                            'required': ['namespace']
+                        }]
                     }
                 }
             }

@@ -3,8 +3,8 @@ from typing import Any, Dict, List, Optional
 
 from sky.adaptors import kubernetes
 from sky.provision import common
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import network_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils.resources_utils import port_ranges_to_set
 
@@ -86,8 +86,10 @@ def _open_ports_using_ingress(
         )
 
         # Update metadata from config
-        kubernetes_utils.merge_custom_metadata(content['service_spec']['metadata'])
-        kubernetes_utils.merge_custom_metadata(content['ingress_spec']['metadata'])
+        kubernetes_utils.merge_custom_metadata(
+            content['service_spec']['metadata'])
+        kubernetes_utils.merge_custom_metadata(
+            content['ingress_spec']['metadata'])
 
         network_utils.create_or_replace_namespaced_service(
             namespace=provider_config.get('namespace', 'default'),

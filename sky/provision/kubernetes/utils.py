@@ -1173,9 +1173,8 @@ def combine_metadata_fields(cluster_yaml_path: str) -> None:
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
-    custom_metadata = skypilot_config.get_nested(('kubernetes',
-                                                  'custom_metadata'),
-                                                 {})
+    custom_metadata = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata'), {})
 
     # List of objects in the cluster YAML to be updated
     combination_destinations = [
@@ -1185,7 +1184,8 @@ def combine_metadata_fields(cluster_yaml_path: str) -> None:
         yaml_obj['provider']['autoscaler_role_binding']['metadata'],
         yaml_obj['provider']['autoscaler_service_account']['metadata'],
         # Pod spec
-        yaml_obj['available_node_types']['ray_head_default']['node_config']['metadata'],
+        yaml_obj['available_node_types']['ray_head_default']['node_config']
+        ['metadata'],
         # Services for pods
         *[svc['metadata'] for svc in yaml_obj['provider']['services']]
     ]
@@ -1202,11 +1202,9 @@ def merge_custom_metadata(original_metadata: Dict[str, Any]) -> None:
 
     Merge is done in-place, so return is not required
     """
-    custom_metadata = skypilot_config.get_nested(('kubernetes',
-                                                  'custom_metadata'),
-                                                 {})
+    custom_metadata = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata'), {})
     merge_dicts(custom_metadata, original_metadata)
-
 
 
 def check_nvidia_runtime_class() -> bool:

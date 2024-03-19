@@ -417,11 +417,14 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             public_key += '\n'
 
         # Generate metadata
-        secret_metadata = {'name': secret_name,
-                           'labels': {'parent': 'skypilot'}}
-        custom_metadata = skypilot_config.get_nested(('kubernetes',
-                                                      'custom_metadata'),
-                                                     {})
+        secret_metadata = {
+            'name': secret_name,
+            'labels': {
+                'parent': 'skypilot'
+            }
+        }
+        custom_metadata = skypilot_config.get_nested(
+            ('kubernetes', 'custom_metadata'), {})
         kubernetes_utils.merge_dicts(custom_metadata, secret_metadata)
 
         secret = k8s.client.V1Secret(
