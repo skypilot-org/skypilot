@@ -1,7 +1,7 @@
 """The SkyPilot package."""
 import os
 import subprocess
-import urllib
+import urllib.request
 
 # Replaced with the current commit when building the wheels.
 _SKYPILOT_COMMIT_SHA = '{{SKYPILOT_COMMIT_SHA}}'
