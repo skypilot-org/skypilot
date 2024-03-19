@@ -56,8 +56,6 @@ def make_proxy_var_case_insensitive(proxy_var: str):
         os.environ[proxy_var.upper()] = proxy
 
 
-
-
 for proxy_env_var in ['http_proxy', 'https_proxy', 'all_proxy']:
     make_proxy_var_case_insensitive(proxy_env_var)
 
