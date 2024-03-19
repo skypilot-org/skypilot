@@ -3,6 +3,12 @@
 #  1. Launch on a single instance: `sky launch -c gemma ./serve.yaml`
 #  2. Scale up to multiple instances with a single endpoint:
 #     `sky serve up -n gemma ./serve.yaml`
+envs:
+  BUCKET_PATH: <your-bucket-name> # TODO: Replace with your bucket name
+  HF_TOKEN: <your-huggingface-token> # TODO: Replace with your Hugging Face token
+  MODEL_NAME: google/gemma-7b
+
+
 service:
   readiness_probe:
     path: /v1/chat/completions
@@ -15,12 +21,13 @@ service:
     initial_delay_seconds: 1200
   replicas: 2
 
-envs:
-  MODEL_NAME: google/gemma-7b-it
-  HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
+file_mounts:
+  /artifacts:
+    source: $BUCKET_PATH
+    mode: MOUNT
 
 resources: 
-  accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB}
+  accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
   ports: 8000
   disk_tier: best
 
@@ -30,18 +37,19 @@ setup: |
     conda create -n gemma -y python=3.10
     conda activate gemma
   fi
-  pip install vllm==0.3.2
+  # TODO: wait for vllm 0.3.3 release
+  pip install vllm==0.3.3
   pip install transformers==4.38.1
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 run: |
   conda activate gemma
   export PATH=$PATH:/sbin
-  # --max-model-len is set to 1024 to avoid taking too much GPU memory on L4 and
-  # A10g with small memory.
   python -u -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --model $MODEL_NAME \
+    --enable-lora \
+    --lora-modules quote=/artifacts \
     --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
     --max-model-len 1024 | tee ~/openai_api_server.log
 
