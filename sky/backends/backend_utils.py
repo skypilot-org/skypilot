@@ -902,7 +902,7 @@ def write_cluster_config(
                 'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
                 'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
                 'dump_port_command': dump_port_command,
-                # Ray version.
+                # Sky-internal constants.
                 'sky_ray_cmd': constants.SKY_RAY_CMD,
                 'sky_pip_cmd': constants.SKY_PIP_CMD,
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
