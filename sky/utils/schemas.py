@@ -616,6 +616,13 @@ def get_config_schema():
                     'required': [],
                     # Allow arbitrary keys since validating pod spec is hard
                     'additionalProperties': True,
+                },
+                'custom_metadata': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating metadata is hard
+                    'additionalProperties': True,
+                    # TODO(romilb): Check if there's a way to disallow name and namespace keys in this dict
                 }
             }
         },
