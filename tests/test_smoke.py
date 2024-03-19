@@ -3452,7 +3452,7 @@ def test_user_ray_cluster(generic_cloud: str):
     test = Test(
         'user-ray-cluster',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} "ray start --head"',
+            f'sky launch -y -c {name} --cloud {generic_cloud} "pip install ray==2.7.1; ray start --head"',
             f'sky exec {name} "echo hi"',
             f'sky logs {name} 1 --status',
             f'sky status -r {name} | grep UP',
@@ -3465,13 +3465,6 @@ def test_user_ray_cluster(generic_cloud: str):
 
 
 _CODE_PREFIX = ['import sky']
-
-
-def _build(code: List[str]) -> str:
-    code = _CODE_PREFIX + code
-    code = ';'.join(code)
-    return f'python3 -u -c {shlex.quote(code)}'
-
 
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
@@ -4443,6 +4436,7 @@ def test_multiple_accelerators_unordered():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=30 * 60,
     )
     run_one_test(test)
 

@@ -22,6 +22,14 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
 SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.9.3'
+SKY_REMOTE_WHEEL_PATH = '~/.sky/wheels'
+SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
+SKY_REMOTE_PYTHON_ENV = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
+
+# TODO(mluo): Make explicit `sky launch -c <name> ''` optional.
+UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
+    'Found uninitialized local cluster {cluster}. Run this '
+    'command to initialize it locally: sky launch -c {cluster} \'\'')
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
@@ -66,19 +74,38 @@ DOCKER_LOGIN_ENV_VARS = {
     DOCKER_SERVER_ENV_VAR,
 }
 
+ACTIVATE_PYTHON_ENV = (f'[ -d {SKY_REMOTE_PYTHON_ENV} ] && '
+                       f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate;')
+
+
+def run_in_python_env(command):
+    """Returns a command that runs in the SkyPilot's python environment."""
+    return f'( {ACTIVATE_PYTHON_ENV}{command}; deactivate )'
+
+
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with
 # best effort.
 # https://github.com/ray-project/ray/issues/31606
 # We use python 3.10 to be consistent with the python version of the
 # AWS's Deep Learning AMI's default conda environment.
+_RUN_PYTHON = run_in_python_env('python \\$@')
+_RUN_PIP = run_in_python_env('pip \\$@')
+_RUN_RAY = run_in_python_env('ray \\$@')
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
-    '(wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
+    '{ wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
     'bash Miniconda3-Linux-x86_64.sh -b && '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
-    'conda config --set auto_activate_base true); '
-    'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;')
+    'conda config --set auto_activate_base true && source ~/.bashrc; }; '
+    'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;'
+    # Create a separate conda environment for SkyPilot dependencies.
+    f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
+    f'python -m venv {SKY_REMOTE_PYTHON_ENV}; '
+    f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate; '
+    f'echo "function skypy () {{ {_RUN_PYTHON} }}" >> ~/.bashrc;'
+    f'echo "function skypip () {{ {_RUN_PIP} }}" >> ~/.bashrc;'
+    f'echo "function skyray () {{ {_RUN_RAY} }}" >> ~/.bashrc;')
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} ray status'

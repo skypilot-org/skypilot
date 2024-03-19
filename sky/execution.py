@@ -677,6 +677,7 @@ def spot_launch(
             # Note: actual spot cluster name will be <task.name>-<spot job ID>
             'dag_name': dag.name,
             'retry_until_up': retry_until_up,
+            'skypilot_runtime_env': constants.SKY_REMOTE_PYTHON_ENV,
             'remote_user_config_path': remote_user_config_path,
             **controller_utils.shared_controller_vars_to_fill(
                 'spot',

@@ -8,6 +8,7 @@ import psutil
 
 from sky import sky_logging
 from sky.skylet import configs
+from sky.skylet import constants
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -121,4 +122,5 @@ class AutostopCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'python3 -u -c {shlex.quote(code)}'
+        return (f'{constants.ACTIVATE_PYTHON_ENV} '
+                f'python -u -c {shlex.quote(code)}')

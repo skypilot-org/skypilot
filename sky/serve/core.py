@@ -147,6 +147,7 @@ def up(
             'local_task_yaml_path': service_file.name,
             'service_name': service_name,
             'controller_log_file': controller_log_file,
+            'skypilot_runtime_env': constants.SKY_REMOTE_PYTHON_ENV,
             'remote_user_config_path': remote_config_yaml_path,
             **controller_utils.shared_controller_vars_to_fill(
                 'serve',

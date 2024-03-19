@@ -47,8 +47,10 @@ _RAY_PORT_COMMAND = (
 
 # Command that calls `ray status` with SkyPilot's Ray port set.
 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
+    f'{constants.ACTIVATE_PYTHON_ENV} '
     f'{_RAY_PORT_COMMAND}; '
-    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
+    'export RAY_ADDRESS=127.0.0.1:$RAY_PORT; '
+    f'ray status')
 
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
@@ -59,7 +61,8 @@ RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet;'
+MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_PYTHON_ENV} '
+                            'python -m sky.skylet.attempt_skylet')
 
 
 def _auto_retry(func):
@@ -288,8 +291,9 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     # the same credentials. Otherwise, `ray status` will fail to fetch the
     # available nodes.
     # Reference: https://github.com/skypilot-org/skypilot/issues/2441
-    cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
-           'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+    cmd = (f'{constants.ACTIVATE_PYTHON_ENV} ray stop; '
+           'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
+           'export RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0; '
            f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
            _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
@@ -371,6 +375,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                f'{{ {cmd} }}')
     else:
         cmd = 'ray stop; ' + cmd
+    cmd = constants.ACTIVATE_PYTHON_ENV + cmd
 
     logger.info(f'Running command on worker nodes: {cmd}')
 

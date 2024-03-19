@@ -3126,6 +3126,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
         job_submit_cmd = (
+            f'{constants.ACTIVATE_PYTHON_ENV}'
             'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
             f'{cd} && ray job submit '
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
