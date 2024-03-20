@@ -15,6 +15,7 @@
    gallery/index
    developers/index
    Blog <https://blog.skypilot.co/>
+   Community <https://blog.skypilot.co/community/>
 
 .. Slack <https://slack.skypilot.co>
 .. GitHub <https://github.com/skypilot-org/skypilot>
