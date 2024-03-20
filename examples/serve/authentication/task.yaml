@@ -2,9 +2,9 @@
 # Fields between `# === AUTH START ===` and `# ===  AUTH END  ===`
 # are added to the original `service.yaml` file for authentication.
 # Usage:
-#   sky launch examples/serve/authentication/task.yaml -c vllm-auth
-#   curl http://$(sky status --ip vllm-auth):8000/v1/models
-#   curl http://$(sky status --ip vllm-auth):8000/v1/chat/completions \
+#   sky serve up examples/serve/authentication/task.yaml -n vllm-auth
+#   curl -L http://$(sky serve status --endpoint vllm-auth)/v1/models
+#   curl --location-trusted http://$(sky serve status --endpoint vllm-auth)/v1/chat/completions \
 #     -H "Authorization: Bearer static_secret_token" \
 #     -X POST \
 #     -H 'Content-Type: application/json' \
