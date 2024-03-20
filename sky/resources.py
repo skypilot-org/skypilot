@@ -546,6 +546,12 @@ class Resources:
 
     def _validate_and_set_region_zone(self, region: Optional[str],
                                       zone: Optional[str]) -> None:
+        """Try to validate and set the region and zone attribute.
+
+        Raises:
+            ValueError: if the attributes are invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
+        """
         if region is None and zone is None:
             return
 
@@ -651,6 +657,12 @@ class Resources:
         return filtered_regions
 
     def _try_validate_instance_type(self) -> None:
+        """Try to validate the instance type attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
+        """
         if self.instance_type is None:
             return
 
@@ -691,6 +703,11 @@ class Resources:
             self._cloud = valid_clouds[0]
 
     def _try_validate_cpus_mem(self) -> None:
+        """Try to validate the cpus and memory attributes.
+
+        Raises:
+            ValueError: if the attributes are invalid.
+        """
         if self.cpus is None and self.memory is None:
             return
         if self.instance_type is not None:
@@ -731,6 +748,11 @@ class Resources:
                             f'memory, but {self.memory} is requested.')
 
     def _try_validate_spot(self) -> None:
+        """Try to validate the spot related attributes.
+
+        Raises:
+            ValueError: if the attributes are invalid.
+        """
         if self._spot_recovery is None:
             return
         if not self._use_spot:
@@ -755,6 +777,11 @@ class Resources:
         return None
 
     def _try_validate_image_id(self) -> None:
+        """Try to validate the image_id attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
         if self._image_id is None:
             return
 
@@ -828,13 +855,30 @@ class Resources:
                         'image.')
 
     def _try_validate_disk_tier(self) -> None:
+        """Try to validate the disk_tier attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
         if self.disk_tier is None:
             return
         if self.cloud is not None:
-            self.cloud.check_disk_tier_enabled(self.instance_type,
-                                               self.disk_tier)
+            try:
+                self.cloud.check_disk_tier_enabled(self.instance_type,
+                                                   self.disk_tier)
+            except exceptions.NotSupportedError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Disk tier {self.disk_tier.value} is not supported '
+                        f'for instance type {self.instance_type}.') from None
 
     def _try_validate_ports(self) -> None:
+        """Try to validate the ports attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
+        """
         if self.ports is None:
             return
         if skypilot_config.get_nested(('aws', 'security_group_name'),
