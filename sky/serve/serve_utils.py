@@ -26,6 +26,7 @@ from sky import global_user_state
 from sky import status_lib
 from sky.serve import constants
 from sky.serve import serve_state
+from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -923,7 +924,8 @@ class ServeCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
-        return f'python3 -u -c {shlex.quote(generated_code)}'
+        return (f'{skylet_constants.SKY_PYTHON_CMD} '
+                f'-u -c {shlex.quote(generated_code)}')
 
     @classmethod
     def update_service(cls, service_name: str, version: int, mode: str) -> str:

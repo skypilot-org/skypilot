@@ -34,21 +34,22 @@ _RAY_PRLIMIT = (
     'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
 
 _DUMP_RAY_PORTS = (
-    'python -c \'import json, os; '
+    f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
     f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
     f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
     'encoding="utf-8"))\';')
 
 _RAY_PORT_COMMAND = (
-    'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
-    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
-    'python -c "from sky.utils import common_utils; '
+    f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
+    '"from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
+    '2> /dev/null || echo 6379);'
+    f'{constants.SKY_PYTHON_CMD} -c "from sky.utils import common_utils; '
     'print(common_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
 
 # Command that calls `ray status` with SkyPilot's Ray port set.
 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     f'{_RAY_PORT_COMMAND}; '
-    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
+    f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_RAY_CMD} status')
 
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
@@ -59,7 +60,8 @@ RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet;'
+MAYBE_SKYLET_RESTART_CMD = (f'{constants.SKY_PYTHON_CMD} -m '
+                            'sky.skylet.attempt_skylet;')
 
 
 def _auto_retry(func):
@@ -288,10 +290,11 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     # the same credentials. Otherwise, `ray status` will fail to fetch the
     # available nodes.
     # Reference: https://github.com/skypilot-org/skypilot/issues/2441
-    cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
+    cmd = (f'{constants.SKY_RAY_CMD} stop; '
+           'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-           f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
-           _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
+           f'{constants.SKY_RAY_CMD} start --head {ray_options} || exit 1;' +
+           _RAY_PRLIMIT + _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = ssh_runner.run(cmd,
@@ -356,10 +359,11 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 
     # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY, see the comment in
     # `start_ray_on_head_node`.
-    cmd = (f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
-           'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-           f'ray start --disable-usage-stats {ray_options} || exit 1;' +
-           _RAY_PRLIMIT)
+    cmd = (
+        f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
+        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+        f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options} || '
+        'exit 1;' + _RAY_PRLIMIT)
     if no_restart:
         # We do not use ray status to check whether ray is running, because
         # on worker node, if the user started their own ray cluster, ray status

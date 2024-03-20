@@ -79,7 +79,6 @@ User
     compute.networks.list
     compute.networks.getEffectiveFirewalls
     compute.globalOperations.get
-    compute.reservations.list
     compute.subnetworks.use
     compute.subnetworks.list
     compute.subnetworks.useExternalIp
@@ -151,6 +150,12 @@ User
     compute.disks.resize
     compute.images.get
     compute.images.useReadOnly
+
+9. **Optional**: If your organization sets ``gcp.prioritize_reservations`` or ``gcp.specific_reservations`` in :ref:`~/.sky/config.yaml <config-yaml>`, you can additionally add the following permissions:
+
+.. code-block:: text
+
+    compute.reservations.list
 
 9. Click **Create** to create the role.
 10. Go back to the "IAM" tab and click on **GRANT ACCESS**.

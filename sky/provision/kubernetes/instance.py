@@ -271,13 +271,15 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     shell sessions.
     """
     set_k8s_env_var_cmd = [
-        '/bin/sh', '-c',
-        ('prefix_cmd() '
-         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-         'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > '
-         '~/k8s_env_var.sh && '
-         'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-         '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+        '/bin/sh',
+        '-c',
+        (
+            'prefix_cmd() '
+            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+            'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
+            '~/k8s_env_var.sh && '
+            'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
+            '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
     ]
 
     for new_pod in new_pods:
@@ -510,9 +512,15 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
                      f'pods: {list(uninitialized_pods.keys())}')
         uninitialized_pods_list = list(uninitialized_pods.values())
+
+        # Setup SSH and environment variables in pods.
+        # Make sure commands used in these methods are generic and work
+        # on most base images. E.g., do not use Python, since that may not
+        # be installed by default.
         _check_user_privilege(namespace, uninitialized_pods_list)
         _setup_ssh_in_pods(namespace, uninitialized_pods_list)
         _set_env_vars_in_pods(namespace, uninitialized_pods_list)
+
         for pod in uninitialized_pods.values():
             _label_pod(namespace,
                        pod.metadata.name,
