@@ -3,6 +3,12 @@ Welcome to SkyPilot!
 
 .. include:: docs/content.rst
 
+.. raw:: html
+
+   <script type="text/javascript">
+       window.location.href = "docs/index.html";
+   </script>
+
 .. toctree::
    :maxdepth: 1
    :caption: Contents

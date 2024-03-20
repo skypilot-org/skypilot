@@ -130,6 +130,7 @@ html_context = {
 }
 
 html_sidebars = {
+    'index': ['main-sidebar-home'],
     '**': ['main-sidebar'],
 }
 
@@ -164,7 +165,6 @@ html_css_files = ['custom.css']
 # Allowing cross references in markdown files to be parsed
 myst_heading_anchors = 7
 show_sphinx = False
-
 
 def add_metadata_to_page(app, pagename, templatename, context, doctree):
     # Add the author if it exists
