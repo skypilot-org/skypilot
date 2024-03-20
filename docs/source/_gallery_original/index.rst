@@ -14,22 +14,28 @@ Contents
    :maxdepth: 1
    :caption: Inference Engine
 
-   frameworks/vllm
-   frameworks/sglang
-   frameworks/tgi
-   frameworks/lorax
-   frameworks/tabby
+   vLLM <frameworks/vllm>
+   SGLang <frameworks/sglang>
+   Hugging Face TGI <frameworks/tgi>
+   LoRAX <frameworks/lorax>
 
 
 .. toctree::
    :maxdepth: 1
    :caption: LLM Models
    
-   llms/mixtral
-   Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot/>
-   llms/llama-2
-   llms/codellama
-   llms/gemma
+   Mixtral (Mistral.ai) <llms/mixtral>
+   Mistral 7B (Mistral.ai) <https://docs.mistral.ai/self-deployment/skypilot/>
+   Llama-2 (Meta) <llms/llama-2>
+   CodeLlama (Meta) <llms/codellama>
+   Gemma (Google) <llms/gemma>
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Applications
+
+   Tabby: Code Assistant <applications/tabby>
+   LocalGPT: Chat with PDF <applications/localgpt>
 
 .. toctree::
    :maxdepth: 1
