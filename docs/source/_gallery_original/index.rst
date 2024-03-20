@@ -15,11 +15,11 @@ Contents
 
 .. toctree::
    :maxdepth: 1
-   :caption: Inference Engine
+   :caption: Inference Engines
 
    vLLM <frameworks/vllm>
-   SGLang <frameworks/sglang>
    Hugging Face TGI <frameworks/tgi>
+   SGLang <frameworks/sglang>
    LoRAX <frameworks/lorax>
 
 
@@ -27,8 +27,8 @@ Contents
    :maxdepth: 1
    :caption: LLM Models
    
-   Mixtral (Mistral.ai) <llms/mixtral>
-   Mistral 7B (Mistral.ai) <https://docs.mistral.ai/self-deployment/skypilot/>
+   Mixtral (Mistral AI) <llms/mixtral>
+   Mistral 7B (Mistral AI) <https://docs.mistral.ai/self-deployment/skypilot/>
    Llama-2 (Meta) <llms/llama-2>
    CodeLlama (Meta) <llms/codellama>
    Gemma (Google) <llms/gemma>

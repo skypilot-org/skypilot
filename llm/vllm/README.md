@@ -195,7 +195,7 @@ Notice that it is the same with previously curl command, except for thr `-L` arg
 }
 ```
 
-## Serving Mistral.ai's Mixtral 8x7b model with vLLM
+## Serving Mistral AI's Mixtral 8x7b model with vLLM
 
 Please refer to the [Mixtral 8x7b example](https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral) for more details.
 
