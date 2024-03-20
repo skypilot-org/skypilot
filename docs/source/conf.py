@@ -89,23 +89,19 @@ html_theme_options = {
     'logo': {
         'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
     },
-    "icon_links": [
-        {
-            "name": "Slack",
-            "url": "https://slack.skypilot.co/",
-            "icon": "fa-brands fa-slack",
-        },
-        {
-            "name": "Twitter",
-            "url": "https://twitter.com/skypilot_org",
-            "icon": "fa-brands fa-twitter",
-        },
-        {
-            "name": "GitHub",
-            "url": "https://github.com/skypilot-org/skypilot/",
-            "icon": "fa-brands fa-github",
-        }
-    ],
+    "icon_links": [{
+        "name": "Slack",
+        "url": "https://slack.skypilot.co/",
+        "icon": "fa-brands fa-slack",
+    }, {
+        "name": "Twitter",
+        "url": "https://twitter.com/skypilot_org",
+        "icon": "fa-brands fa-twitter",
+    }, {
+        "name": "GitHub",
+        "url": "https://github.com/skypilot-org/skypilot/",
+        "icon": "fa-brands fa-github",
+    }],
     'use_edit_page_button': True,
     'announcement': None,
     'secondary_sidebar_items': [
@@ -165,6 +161,7 @@ html_css_files = ['custom.css']
 # Allowing cross references in markdown files to be parsed
 myst_heading_anchors = 7
 show_sphinx = False
+
 
 def add_metadata_to_page(app, pagename, templatename, context, doctree):
     # Add the author if it exists
