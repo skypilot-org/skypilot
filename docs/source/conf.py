@@ -96,7 +96,7 @@ html_theme_options = {
     }, {
         "name": "Twitter",
         "url": "https://twitter.com/skypilot_org",
-        "icon": "fa-brands fa-twitter",
+        "icon": "fa-brands fa-x-twitter",
     }, {
         "name": "GitHub",
         "url": "https://github.com/skypilot-org/skypilot/",
