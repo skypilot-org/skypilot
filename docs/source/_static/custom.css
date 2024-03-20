@@ -119,14 +119,6 @@ html[data-theme="dark"] {
     line-height: 1; /* Adjust line height to ensure vertical alignment */
 }
 
-/* RTD footer container makes the parent */
-/* #main-sidebar always scrollable if you don't remove negative margin. */
-/* Restrict width to 30% of the window */
-.bd-sidebar-primary div#rtd-footer-container {
-  margin: unset;
-  max-width: 30vw;
-}
-
 .navbar {
   --bs-navbar-nav-link-padding-x: 1rem;
 }
@@ -160,4 +152,13 @@ html[data-theme="dark"] {
       }
     }
   }
+}
+
+.bd-sidebar-primary {
+  width: 20%;
+}
+
+.bd-header .navbar-nav li.current a.nav-link:hover {
+  text-decoration: none;
+  /* Prevents underline for the current tab on hover */
 }
