@@ -131,6 +131,10 @@ class Resources:
           _docker_login_config: the docker configuration to use. This include
             the docker username, password, and registry server. If None, skip
             docker login.
+
+        Raises:
+            ValueError: if some attributes are invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
         """
         self._version = self._VERSION
         self._cloud = cloud
