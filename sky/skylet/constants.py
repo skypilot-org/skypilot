@@ -99,7 +99,7 @@ CONDA_INSTALLATION_COMMANDS = (
     '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
     'source ~/.bashrc;'
     f'[ -f {SKY_PYTHON_PATH_FILE} ] || which python3 > {SKY_PYTHON_PATH_FILE};'
-    f'[ -f {SKY_RAY_PATH_FILE} ] || which python3 > {SKY_RAY_PATH_FILE};')
+    f'[ -f {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE};')
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
