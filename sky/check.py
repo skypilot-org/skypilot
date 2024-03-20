@@ -95,7 +95,8 @@ def get_enabled_clouds(
         exceptions.NoCloudAccessError: if no public cloud is enabled and
             raise_if_no_cloud_access is set to True.
     """
-    if not global_user_state.get_cached_enabled_clouds():
+    cached_enabled_clouds = global_user_state.get_cached_enabled_clouds()
+    if not cached_enabled_clouds:
         try:
             check(quiet=True)
         except SystemExit:
@@ -103,7 +104,7 @@ def get_enabled_clouds(
             # Here we catch it and raise the exception later only if
             # raise_if_no_cloud_access is set to True.
             pass
-    cached_enabled_clouds = global_user_state.get_cached_enabled_clouds()
+        cached_enabled_clouds = global_user_state.get_cached_enabled_clouds()
     if raise_if_no_cloud_access and not cached_enabled_clouds:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
