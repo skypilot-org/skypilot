@@ -1,19 +1,101 @@
+# Borrowed from llm/vllm/service.yaml.
+# Fields between `# === AUTH START ===` and `# ===  AUTH END  ===`
+# are added to the original `service.yaml` file for authentication.
 # Usage:
-#   sky serve up -n authentication examples/serve/authentication/task.yaml
-#   export ENDPOINT=$(sky serve status --endpoint authentication)
-#   curl -H "Authorization: Bearer static_secret_token" \
-#     --location-trusted http://$ENDPOINT/compute
+#   sky launch examples/serve/authentication/task.yaml -c vllm-auth
+#   curl http://$(sky status --ip vllm-auth):8000/v1/models
+#   curl http://$(sky status --ip vllm-auth):8000/v1/chat/completions \
+#     -H "Authorization: Bearer static_secret_token" \
+#     -X POST \
+#     -H 'Content-Type: application/json' \
+#     -d '{"model": "meta-llama/Llama-2-7b-chat-hf", "messages": [{"role": "user", "content": "Who are you?"}]}'
 
+# service.yaml
+# The newly-added `service` section to the `serve-openai-api.yaml` file.
 service:
-  readiness_probe: /health
-  replicas: 1
+  # Specifying the path to the endpoint to check the readiness of the service.
+  readiness_probe: /v1/models
+  # How many replicas to manage.
+  replicas: 2
+
+# Fields below are the same with `serve-openai-api.yaml`.
+envs:
+  MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
+  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
 
 resources:
-  ports: 8087
-  cpus: 2
+  accelerators: {L4:1, A10G:1, A10:1, A100:1, A100-80GB:1}
+  ports:
+    - 8000
 
-workdir: examples/serve/authentication
+setup: |
+  conda activate vllm
+  if [ $? -ne 0 ]; then
+    conda create -n vllm python=3.10 -y
+    conda activate vllm
+  fi
 
-setup: pip install fastapi uvicorn
+  pip install transformers==4.38.0
+  pip install vllm==0.3.2
 
-run: python3 server.py
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+
+run: |
+  # === AUTH START ===
+
+  # Install Nginx if it's not already installed
+  if ! command -v nginx &> /dev/null
+  then
+      echo "Nginx not found. Installing Nginx..."
+      sudo apt update
+      sudo apt install nginx -y
+  else
+      echo "Nginx is already installed."
+  fi
+
+  # Prepare Nginx configuration
+  cat > /tmp/nginx_conf.tmp <<EOF
+  map \$http_authorization \$is_valid_token {
+      default                       0;
+      "Bearer static_secret_token"  1;
+  }
+
+  server {
+      listen 8000;
+
+      # Location for the unprotected readiness probe endpoint
+      location /v1/models {
+          proxy_pass http://localhost:8087;
+          proxy_set_header Host \$host;
+          proxy_set_header X-Real-IP \$remote_addr;
+          proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto \$scheme;
+      }
+
+      location / {
+          if (\$is_valid_token = 0) {
+              return 403 "Invalid authentication credentials";
+          }
+
+          proxy_pass http://localhost:8087;
+          proxy_set_header Host \$host;
+          proxy_set_header X-Real-IP \$remote_addr;
+          proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto \$scheme;
+      }
+  }
+  EOF
+
+  # Setup Nginx
+  sudo cp /tmp/nginx_conf.tmp /etc/nginx/sites-available/default
+  sudo nginx -t && sudo systemctl reload nginx
+
+  # ===  AUTH END  ===
+
+  conda activate vllm
+  echo 'Starting vllm openai api server...'
+  python -m vllm.entrypoints.openai.api_server \
+    --model $MODEL_NAME --tokenizer hf-internal-testing/llama-tokenizer \
+    --host 0.0.0.0 --port 8087
+
