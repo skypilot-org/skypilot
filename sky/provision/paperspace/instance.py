@@ -148,14 +148,19 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             head_instance_id = instance_id
 
     # Wait for instances to be ready.
-    while True:
+   for _ in range(MAX_POLLS_FOR_STOP):
         instances = _filter_instances(cluster_name_on_cloud, ['ready'])
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
         if len(instances) == config.count:
             break
-
+   
         time.sleep(POLL_INTERVAL)
+    else:
+        # Failed to launch config.count of instances after max retries
+        msg = 'run_instances: Failed to create the instances due to capacity issue.'
+        logger.warning(msg)
+        raise RuntimeError(msg)
     assert head_instance_id is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(
         provider_name='paperspace',
