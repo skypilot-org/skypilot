@@ -98,8 +98,8 @@ CONDA_INSTALLATION_COMMANDS = (
     'echo \'alias python=python3\' >> ~/.bashrc;'
     '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
     'source ~/.bashrc;'
-    f'[ -f {SKY_PYTHON_PATH_FILE} ] || which python3 > {SKY_PYTHON_PATH_FILE};'
-    f'[ -f {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE};')
+    # Set Python path to file if it does not exist or the file is empty.
+    f'[ -s {SKY_PYTHON_PATH_FILE} ] || which python3 > {SKY_PYTHON_PATH_FILE};')
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
@@ -124,7 +124,9 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'{SKY_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
-    f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION};'  # pylint: disable=line-too-long
+    # Set ray path to file if it does not exist or the file is empty.
+    f'[ -s {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE};'
     # END ray package check and installation
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
