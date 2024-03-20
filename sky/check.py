@@ -83,7 +83,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
 
 def get_enabled_clouds(
         raise_if_no_cloud_access: bool = False) -> List[clouds.Cloud]:
-    """Returns a list of enabled clouds.
+    """Returns cached enabled clouds and if no cloud is enabled, refresh.
 
     This function will perform a refresh if no public cloud is enabled.
 
