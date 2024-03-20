@@ -92,15 +92,15 @@ html_theme_options = {
     "icon_links": [{
         "name": "Slack",
         "url": "https://slack.skypilot.co/",
-        "icon": "fa-brands fa-slack",
+        "icon": "fab fa-slack",
     }, {
         "name": "Twitter",
         "url": "https://twitter.com/skypilot_org",
-        "icon": "fa-brands fa-x-twitter",
+        "icon": "fab fa-twitter",
     }, {
         "name": "GitHub",
         "url": "https://github.com/skypilot-org/skypilot/",
-        "icon": "fa-brands fa-github",
+        "icon": "fab fa-github",
     }],
     'use_edit_page_button': True,
     'announcement': None,
@@ -162,11 +162,8 @@ html_css_files = ['custom.css']
 myst_heading_anchors = 7
 show_sphinx = False
 
+exclude_patterns = ['_gallery_original']
 
-def add_metadata_to_page(app, pagename, templatename, context, doctree):
-    # Add the author if it exists
-    if app.config.author != 'unknown':
-        context['author'] = app.config.author
 
 
 def setup(app):
@@ -191,6 +188,5 @@ def setup(app):
             priority=501,
         )
 
-    app.connect('html-page-context', add_metadata_to_page)
     app.connect('builder-inited',
                 prepare_github_markdown.handle_markdown_in_gallery)
