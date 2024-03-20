@@ -191,7 +191,7 @@ setup_commands:
     source ~/.bashrc;
   {%- if tpu_vm %}
     test -f ~/miniconda3/etc/profile.d/conda.sh && source ~/miniconda3/etc/profile.d/conda.sh && conda activate base || true;
-    {{ sky_pip_cmd }} install --upgrade google-api-python-client;
+    pip3 install --upgrade google-api-python-client;
   {%- endif %}
   {%- if tpu_node_name %}
     grep "export TPU_NAME=" ~/.bashrc && echo "TPU_NAME already set" || echo "export TPU_NAME={{tpu_node_name}}" >> ~/.bashrc;

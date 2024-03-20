@@ -678,7 +678,6 @@ def spot_launch(
             'dag_name': dag.name,
             'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
-            'sky_python_cmd': constants.SKY_PYTHON_CMD,
             **controller_utils.shared_controller_vars_to_fill(
                 'spot',
                 remote_user_config_path=remote_user_config_path,

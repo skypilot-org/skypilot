@@ -1933,7 +1933,7 @@ class RetryingVmProvisioner(object):
                 require_outputs=True)
         if returncode == 0:
             return
-        backend.run_on_head(handle, f'{constants.SKY_RAY_CMD} stop')
+        backend.run_on_head(handle, 'ray stop')
 
         # Runs `ray up <kwargs>` with our monkey-patched launch hash
         # calculation. See the monkey patch file for why.
@@ -3095,6 +3095,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         codegen: str,
         job_id: int,
+        executable: str,
         detach_run: bool = False,
         spot_dag: Optional['dag.Dag'] = None,
     ) -> None:
@@ -3121,16 +3122,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
+        assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
         job_submit_cmd = (
-            f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
-            f'{cd} && {constants.SKY_RAY_CMD} job submit '
+            'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
+            f'{cd} && ray job submit '
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
             # Redirect stderr to /dev/null to avoid distracting error from ray.
-            f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} 2> /dev/null"'
-        )
+            f'"{executable} -u {script_path} > {remote_log_path} 2> /dev/null"')
 
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
@@ -3685,8 +3686,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # We do not check the return code, since Ray returns
                 # non-zero return code when calling Ray stop,
                 # even when the command was executed successfully.
-                self.run_on_head(handle,
-                                 f'{constants.SKY_RAY_CMD} stop --force')
+                self.run_on_head(handle, 'ray stop --force')
             except exceptions.FetchIPError:
                 # This error is expected if the previous cluster IP is
                 # failed to be found,
@@ -4582,6 +4582,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
+                                executable='python3',
                                 detach_run=detach_run,
                                 spot_dag=task.spot_dag)
 
@@ -4645,5 +4646,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
+                                executable='python3',
                                 detach_run=detach_run,
                                 spot_dag=task.spot_dag)
