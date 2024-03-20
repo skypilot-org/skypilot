@@ -14,7 +14,7 @@ from sky.utils import ux_utils
 POLL_INTERVAL = 5
 MAX_POLLS = 60 // POLL_INTERVAL
 # Stopping instances can take several minutes, so we increase the timeout
-MAX_POLLS_FOR_STOP = MAX_POLLS * 8
+MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 8
 
 logger = sky_logging.init_logger(__name__)
 
@@ -148,7 +148,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             head_instance_id = instance_id
 
     # Wait for instances to be ready.
-    for _ in range(MAX_POLLS_FOR_STOP):
+    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = _filter_instances(cluster_name_on_cloud, ['ready'])
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
@@ -201,14 +201,14 @@ def stop_instances(
         client.stop(instance_id=instance_id)
 
     # Wait for instances to stop
-    for _ in range(MAX_POLLS_FOR_STOP):
+    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         all_instances = _filter_instances(cluster_name_on_cloud, ['off'])
         if len(all_instances) >= num_instances:
             break
         time.sleep(POLL_INTERVAL)
     else:
         raise RuntimeError(f'Maximum number of polls: '
-                           f'{MAX_POLLS_FOR_STOP} reached. '
+                           f'{MAX_POLLS_FOR_UP_OR_STOP} reached. '
                            f'Instance {all_instances} is still not in '
                            'STOPPED status.')
 
