@@ -246,10 +246,10 @@ def _run_command_on_pods(node_name: str,
                          stream_logs: bool = False):
     """Run command on Kubernetes pods.
 
-    If `stream_logs` is False (default), then the command will execute without
-    streaming logs. However, if `stream_logs` is set to True, then we will be
-    polling for output and error messages while the command is executing, and
-    adding these messages to the relevant `provision.log` file.
+    If `stream_logs` is True, we poll for output and error messages while the
+    command is executing, and the stdout and stderr is written to logger.info.
+    When called from the provisioner, this logger.info is written to the
+    provision.log file (see setup_provision_logging()).
     """
     cmd_output = kubernetes.stream()(
         kubernetes.core_api().connect_get_namespaced_pod_exec,
