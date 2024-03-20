@@ -72,7 +72,7 @@ def get_enabled_storage_clouds(
         raise_if_no_cloud_access: bool = False) -> List[str]:
     # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
     # is resolved by implementing separate 'enabled_storage_clouds'
-    enabled_clouds = sky_check.get_enabled_clouds(
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
         raise_if_no_cloud_access=raise_if_no_cloud_access)
     enabled_clouds = [str(cloud) for cloud in enabled_clouds]
 

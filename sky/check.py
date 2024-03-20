@@ -81,7 +81,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
                        f'{enabled_clouds_str}[/green]')
 
 
-def get_enabled_clouds(
+def get_cached_enabled_clouds_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[clouds.Cloud]:
     """Returns cached enabled clouds and if no cloud is enabled, refresh.
 
@@ -120,7 +120,7 @@ def get_cloud_credential_file_mounts(
     Returns a dictionary that will be added to a task's file mounts
     and a list of patterns that will be excluded (used as rsync_exclude).
     """
-    enabled_clouds = get_enabled_clouds()
+    enabled_clouds = get_cached_enabled_clouds_or_refresh()
     file_mounts = {}
     for cloud in enabled_clouds:
         if (excluded_clouds is not None and
@@ -128,10 +128,9 @@ def get_cloud_credential_file_mounts(
             continue
         cloud_file_mounts = cloud.get_credential_file_mounts()
         file_mounts.update(cloud_file_mounts)
-    # Currently, get_enabled_clouds() does not support r2
-    # as only clouds with computing instances are marked
-    # as enabled by skypilot. This will be removed when
-    # cloudflare/r2 is added as a 'cloud'.
+    # Currently, get_cached_enabled_clouds_or_refresh() does not support r2 as
+    # only clouds with computing instances are marked as enabled by skypilot.
+    # This will be removed when cloudflare/r2 is added as a 'cloud'.
     r2_is_enabled, _ = cloudflare.check_credentials()
     if r2_is_enabled:
         r2_credential_mounts = cloudflare.get_credential_file_mounts()

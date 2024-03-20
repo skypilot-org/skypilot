@@ -22,7 +22,7 @@ def enable_all_clouds_in_monkeypatch(
     if enabled_clouds is None:
         enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
     monkeypatch.setattr(
-        'sky.check.get_enabled_clouds',
+        'sky.check.get_cached_enabled_clouds_or_refresh',
         lambda *_args, **_kwargs: enabled_clouds,
     )
     monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)

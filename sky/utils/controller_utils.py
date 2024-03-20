@@ -162,7 +162,7 @@ def _get_cloud_dependencies_installation_commands(
     # class and get all installation command for enabled clouds.
     if any(
             cloud.is_same_cloud(clouds.Azure())
-            for cloud in sky_check.get_enabled_clouds()):
+            for cloud in sky_check.get_cached_enabled_clouds_or_refresh()):
         commands.append(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '

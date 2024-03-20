@@ -332,7 +332,8 @@ class Optimizer:
                 # If Kubernetes was included in the search space, then
                 # mention "kubernetes cluster" and/instead of "catalog"
                 # in the error message.
-                enabled_clouds = sky_check.get_enabled_clouds()
+                enabled_clouds = (
+                    sky_check.get_cached_enabled_clouds_or_refresh())
                 if clouds.cloud_in_list(clouds.Kubernetes(), enabled_clouds):
                     if any(orig_resources.cloud is None
                            for orig_resources in node.resources):
@@ -1155,7 +1156,8 @@ def _fill_in_launchable_resources(
         Dict mapping Cloud to a list of feasible Resources (for printing),
         Sorted list of fuzzy candidates (alternative GPU names).
     """
-    enabled_clouds = sky_check.get_enabled_clouds(raise_if_no_cloud_access=True)
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        raise_if_no_cloud_access=True)
     launchable = collections.defaultdict(list)
     all_fuzzy_candidates = set()
     cloud_candidates: _PerCloudCandidates = collections.defaultdict(
