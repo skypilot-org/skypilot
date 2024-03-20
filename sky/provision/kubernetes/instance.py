@@ -266,7 +266,7 @@ def _run_command_on_pods(node_name: str,
         while cmd_output.is_open():
             cmd_output.update(timeout=1)
             if cmd_output.peek_stdout():
-                logger.debug(f'{cmd_output.read_stdout()}')
+                logger.info(f'{cmd_output.read_stdout()}')
             if cmd_output.peek_stderr():
                 logger.warning(f'{cmd_output.read_stderr()}')
         cmd_output.close()
@@ -343,6 +343,7 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
         '/bin/sh',
         '-c',
         (
+            'set -x; '
             'prefix_cmd() '
             '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
             'export DEBIAN_FRONTEND=noninteractive;'
@@ -368,11 +369,15 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
             '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
     ]
+    # TODO(romilb): Parallelize the setup of SSH in pods for multi-node clusters
     for new_node in new_nodes:
+        pod_name = new_node.metadata.name
+        logger.info(f'=== Setting up SSH in pod {pod_name!r} ===')
         _run_command_on_pods(new_node.metadata.name,
                              namespace,
                              set_k8s_ssh_cmd,
                              stream_logs=True)
+        logger.info(f'=== SSH setup done for pod {pod_name!r} ===')
 
 
 def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
