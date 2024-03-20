@@ -126,9 +126,9 @@ def up(
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
 
-    # If the controller and all replicas are from the same cloud, it should
+    # If the controller and replicas are from the same cloud, it should
     # provide better connectivity. We will let the controller choose from
-    # any cloud in the resources if the controller does not exist.
+    # the clouds of the resources if the controller does not exist.
     requested_clouds: Set['clouds.Cloud'] = set()
     for resources in task.resources:
         if resources.cloud is not None:
