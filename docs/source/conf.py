@@ -78,7 +78,7 @@ html_theme_options = {
     'show_toc_level': 1,
     'navbar_align': 'left',  # [left, content, right] For testing that the navbar items align properly
     'navbar_start': ['navbar-skypilot-logo'],
-    'navbar_center': ['navbar-nav'],
+    'navbar_center': ['navbar-nav', 'navbar-icon-links'],
     'navbar_end': [
         # 'navbar-icon-links',
     ],
@@ -89,6 +89,23 @@ html_theme_options = {
     'logo': {
         'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
     },
+    "icon_links": [
+        {
+            "name": "Slack",
+            "url": "https://slack.skypilot.co/",
+            "icon": "fa-brands fa-slack",
+        },
+        {
+            "name": "Twitter",
+            "url": "https://twitter.com/skypilot_org",
+            "icon": "fa-brands fa-twitter",
+        },
+        {
+            "name": "GitHub",
+            "url": "https://github.com/skypilot-org/skypilot/",
+            "icon": "fa-brands fa-github",
+        }
+    ],
     'use_edit_page_button': True,
     'announcement': None,
     'secondary_sidebar_items': [
