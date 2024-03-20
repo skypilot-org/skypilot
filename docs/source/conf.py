@@ -126,7 +126,7 @@ html_context = {
 }
 
 html_sidebars = {
-    'index': ['main-sidebar-home'],
+    'index': [],
     '**': ['main-sidebar'],
 }
 
