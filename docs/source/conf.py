@@ -165,7 +165,6 @@ show_sphinx = False
 exclude_patterns = ['_gallery_original']
 
 
-
 def setup(app):
     # -- To demonstrate ReadTheDocs switcher -------------------------------------
     # This links a few JS and CSS files that mimic the environment that RTD uses
