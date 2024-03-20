@@ -98,7 +98,7 @@ CONDA_INSTALLATION_COMMANDS = (
     'echo \'alias python=python3\' >> ~/.bashrc;'
     '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
     'source ~/.bashrc;'
-    # Set Python path to file if it does not exist or the file is empty.
+    # Writes Python path to file if it does not exist or the file is empty.
     f'[ -s {SKY_PYTHON_PATH_FILE} ] || which python3 > {SKY_PYTHON_PATH_FILE};')
 
 _sky_version = str(version.parse(sky.__version__))
