@@ -125,7 +125,7 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
     f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION};'  # pylint: disable=line-too-long
-    # Set ray path to file if it does not exist or the file is empty.
+    # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE};'
     # END ray package check and installation
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
