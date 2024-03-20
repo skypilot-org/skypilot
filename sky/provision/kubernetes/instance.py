@@ -266,9 +266,9 @@ def _run_command_on_pods(node_name: str,
         while cmd_output.is_open():
             cmd_output.update(timeout=1)
             if cmd_output.peek_stdout():
-                logger.info(f'{cmd_output.read_stdout()}')
+                logger.info(f'{cmd_output.read_stdout().strip()}')
             if cmd_output.peek_stderr():
-                logger.warning(f'{cmd_output.read_stderr()}')
+                logger.info(f'{cmd_output.read_stderr().strip()}')
         cmd_output.close()
     return cmd_output
 
@@ -372,12 +372,12 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
     # TODO(romilb): Parallelize the setup of SSH in pods for multi-node clusters
     for new_node in new_nodes:
         pod_name = new_node.metadata.name
-        logger.info(f'=== Setting up SSH in pod {pod_name!r} ===')
+        logger.info(f'{"-"*20}Start: Set up SSH in pod {pod_name!r} {"-"*20}')
         _run_command_on_pods(new_node.metadata.name,
                              namespace,
                              set_k8s_ssh_cmd,
                              stream_logs=True)
-        logger.info(f'=== SSH setup done for pod {pod_name!r} ===')
+        logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
 
 
 def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
