@@ -1,5 +1,5 @@
-Documentation
-=============
+Welcome to SkyPilot!
+====================
 
 .. include:: content.rst
 
