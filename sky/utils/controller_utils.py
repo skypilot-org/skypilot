@@ -141,10 +141,12 @@ def _get_cloud_dependencies_installation_commands(
         controller_type: str) -> List[str]:
     commands = [
         # aws
+        'echo Installing AWS dependencies...; '
         'pip list | grep boto3 > /dev/null 2>&1 || '
         'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
         'boto3>=1.26.1 > /dev/null 2>&1',
         # gcp
+        'echo Installing GCP dependencies...; '
         'pip list | grep google-api-python-client > /dev/null 2>&1 || '
         'pip install google-api-python-client>=2.69.0 google-cloud-storage '
         '> /dev/null 2>&1',
@@ -164,6 +166,7 @@ def _get_cloud_dependencies_installation_commands(
             cloud.is_same_cloud(clouds.Azure())
             for cloud in global_user_state.get_enabled_clouds()):
         commands.append(
+            'echo Installing Azure dependencies...; '
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
             'azure-mgmt-network > /dev/null 2>&1')
