@@ -504,6 +504,18 @@ def get_spec(service_name: str,
     return None
 
 
+def get_latest_version(service_name: str) -> Optional[int]:
+    """Gets the latest version of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT MAX(version) FROM version_specs
+            WHERE service_name=(?)""", (service_name,)).fetchall()
+    for row in rows:
+        return row[0]
+    return None
+
+
 def delete_version(service_name: str, version: int) -> None:
     """Deletes a version from the database."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:

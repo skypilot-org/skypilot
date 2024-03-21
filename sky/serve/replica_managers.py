@@ -541,12 +541,10 @@ class ReplicaManager:
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
                     f'Post data: {spec.post_data}')
 
-        # Newest version among the currently provisioned and launched replicas
-        self.latest_version: int = serve_constants.INITIAL_VERSION
         # Oldest version among the currently provisioned and launched replicas
         self.least_recent_version: int = serve_constants.INITIAL_VERSION
         serve_state.add_or_update_version(self._service_name,
-                                          self.latest_version, spec)
+                                          serve_constants.INITIAL_VERSION, spec)
 
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
@@ -629,8 +627,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _should_use_spot(self._task_yaml_path, resources_override)
 
+        latest_version = serve_state.get_latest_version(self._service_name)
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
-                           self.latest_version)
+                           latest_version)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -859,6 +858,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # initial_delay_seconds is not supported. We should add it
                 # later when we support `sky serve update`.
                 removal_reason = None
+                latest_version = serve_state.get_latest_version(
+                    self._service_name)
                 if info.status_property.is_scale_down_succeeded(
                         self._get_initial_delay_seconds(info.version)):
                     # This means the cluster is deleted due to
@@ -871,7 +872,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                         removal_reason = 'normally'
                 # Don't keep failed record for version mismatch replicas,
                 # since user should fixed the error before update.
-                elif info.version != self.latest_version:
+                elif info.version != latest_version:
                     removal_reason = 'for version outdated'
                 else:
                     logger.info(f'Termination of replica {replica_id} '
@@ -1124,14 +1125,14 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
-        if version <= self.latest_version:
+        latest_version = serve_state.get_latest_version(self._service_name)
+        if version <= latest_version:
             logger.error(f'Invalid version: {version}, '
-                         f'latest version: {self.latest_version}')
+                         f'latest version: {latest_version}')
             return
         task_yaml_path = serve_utils.generate_task_yaml_file_name(
             self._service_name, version)
         serve_state.add_or_update_version(self._service_name, version, spec)
-        self.latest_version = version
         self._task_yaml_path = task_yaml_path
         self._update_mode = update_mode
 

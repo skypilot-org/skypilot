@@ -74,16 +74,10 @@ class Autoscaler:
                                   is not None else spec.min_replicas)
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
-        self.latest_version: int = constants.INITIAL_VERSION
         self.update_mode = serve_utils.DEFAULT_UPDATE_MODE
 
-    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+    def update_version(self, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
-        if version <= self.latest_version:
-            logger.error(f'Invalid version: {version}, '
-                         f'latest version: {self.latest_version}')
-            return
-        self.latest_version = version
         self.min_replicas = spec.min_replicas
         self.max_replicas = (spec.max_replicas if spec.max_replicas is not None
                              else spec.min_replicas)
@@ -300,8 +294,10 @@ class RequestRateAutoscaler(Autoscaler):
         if self.update_mode == serve_utils.UpdateMode.ROLLING:
             latest_ready_replicas = []
             old_nonterminal_replicas = []
+            latest_version = serve_state.get_latest_version(
+                self._service_name)
             for info in replica_infos:
-                if info.version == self.latest_version:
+                if info.version == latest_version:
                     if info.is_ready:
                         latest_ready_replicas.append(info)
                 elif not info.is_terminal:
@@ -376,8 +372,9 @@ class RequestRateAutoscaler(Autoscaler):
         """
         latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
 
+        latest_version = serve_state.get_latest_version(self._service_name)
         for info in replica_infos:
-            if info.version == self.latest_version:
+            if info.version == latest_version:
                 if not info.is_terminal:
                     latest_nonterminal_replicas.append(info)
 
