@@ -37,7 +37,7 @@ Contents
    :maxdepth: 1
    :caption: Applications
 
-   Tabby: Code Assistant <applications/tabby>
+   Tabby: Coding Assistant <applications/tabby>
    LocalGPT: Chat with PDF <applications/localgpt>
 
 .. toctree::
