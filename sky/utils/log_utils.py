@@ -117,21 +117,27 @@ class SkyLocalUpLineProcessor(LineProcessor):
             logger.info(f'{colorama.Fore.GREEN}SkyPilot CPU image pulled.'
                         f'{colorama.Style.RESET_ALL}')
         if 'Updating Kubernetes port configuration...' in log_line:
-            self.status_display.update('[bold cyan]Updating Kubernetes port configuration...')
+            self.status_display.update(
+                '[bold cyan]Updating Kubernetes port configuration...')
         if 'Kubernetes port configuration updated' in log_line:
-            logger.info(f'{colorama.Fore.GREEN}Kubernetes port configuration updated.'
-                        f'{colorama.Style.RESET_ALL}')
+            logger.info(
+                f'{colorama.Fore.GREEN}Kubernetes port configuration updated.'
+                f'{colorama.Style.RESET_ALL}')
         if 'Starting installation of Nginx Ingress Controller...' in log_line:
-            self.status_display.update('[bold cyan]Creating Nginx Ingress Controller')
+            self.status_display.update(
+                '[bold cyan]Creating Nginx Ingress Controller')
         if 'Nginx Ingress Controller installed' in log_line:
-            logger.info(f'{colorama.Fore.GREEN}Nginx Ingress Controller installed.'
-                        f'{colorama.Style.RESET_ALL}')
+            logger.info(
+                f'{colorama.Fore.GREEN}Nginx Ingress Controller installed.'
+                f'{colorama.Style.RESET_ALL}')
         if 'Starting patch of Nginx Ingress Controller host port...' in log_line:
-            self.status_display.update('[bold cyan]Patching Nginx Ingress Controller '
-                                       'host port')
+            self.status_display.update(
+                '[bold cyan]Patching Nginx Ingress Controller '
+                'host port')
         if 'Nginx Ingress Controller host port patched' in log_line:
-            logger.info(f'{colorama.Fore.GREEN}Nginx Ingress Controller host port patched.'
-                        f'{colorama.Style.RESET_ALL}')
+            logger.info(
+                f'{colorama.Fore.GREEN}Nginx Ingress Controller host port patched.'
+                f'{colorama.Style.RESET_ALL}')
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
