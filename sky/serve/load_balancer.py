@@ -103,11 +103,10 @@ class SkyServeLoadBalancer:
             if not ready_replica_url.startswith('http'):
                 ready_replica_url = 'http://' + ready_replica_url
             ready_replica_urls[i] = ready_replica_url
-        return fastapi.responses.JSONResponse(
-            content={
-                'controller': self._controller_url,
-                'replicas': ready_replica_urls
-            })
+        return fastapi.responses.JSONResponse(content={
+            'controller': self._controller_url,
+            'replicas': ready_replica_urls
+        })
 
     def run(self):
         self._app.add_api_route('/-/urls', self._get_urls, methods=['GET'])
