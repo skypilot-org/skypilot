@@ -155,6 +155,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         if len(instances) == config.count:
             break
 
+        stopped_instances = _filter_instances(cluster_name_on_cloud, ['off'])
+        # Paperspace will turn off the machine if there is a capacity issue
+        if stopped_instances:
+            msg = ('run_instances: Found a stopped instance during creation '
+                   'likely due to capacity issue.')
+            logger.warning(msg)
+            raise RuntimeError(msg)
         time.sleep(POLL_INTERVAL)
     else:
         # Failed to launch config.count of instances after max retries
