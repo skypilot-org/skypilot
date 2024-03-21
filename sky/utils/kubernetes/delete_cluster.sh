@@ -24,6 +24,8 @@ fi
 
 kind delete cluster --name skypilot
 echo "Local cluster deleted!"
+python -m sky.utils.kubernetes.kind_port_config --restore
+echo "Kubernetes port configuration restored from backup"
 
 # Switch to the first available context
 AVAILABLE_CONTEXT=$(kubectl config get-contexts -o name | head -n 1)

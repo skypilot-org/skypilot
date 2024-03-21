@@ -243,6 +243,11 @@ fi
 # Load local skypilot image on to the cluster for faster startup
 wait_for_skypilot_cpu_image_pull
 
+# Update Kubernetes port configuration to Nginx
+echo "Updating Kubernetes port configuration..."
+python -m sky.utils.kubernetes.kind_port_config --modify
+echo "Kubernetes port configuration updated."
+
 # Install the Nginx Ingress Controller
 wait_for_nginx_ingress_controller_install
 wait_for_nginx_ingress_controller_patch
