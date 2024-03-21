@@ -16,7 +16,7 @@ PORT_FORWARD_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.v
 
 def _reload_config() -> None:
     skypilot_config._dict = None
-    skypilot_config._try_load_config()
+    skypilot_config.try_load_config()
 
 
 def _check_empty_config() -> None:

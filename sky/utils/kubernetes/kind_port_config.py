@@ -8,19 +8,20 @@ from sky import skypilot_config
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 
-CONFIG_PATH = "~/.sky/config.yaml"
-BACKUP_PATH = "~/.sky/backup_config.yaml"
+CONFIG_PATH = '~/.sky/config.yaml'
+BACKUP_PATH = '~/.sky/backup_config.yaml'
 
 logger = sky_logging.init_logger(__name__)
 
 
 def modify_port_config():
-    """Set the `kubernetes:ports` to be `ingress` and backup the original value.
-    
-    If there is currently no config file, we then create the ~/.sky/config.yaml file
-    and set the `kubernetes:ports` value to `loadbalancer`. We then store the current value
-    (either `ingress` or `loadbalancer`) to the backup file at ~/.sky/backup_config.yaml, and
-    finally set the value to `ingress` in the active config file.
+    """Set the `kubernetes:ports` to be `ingress` and backup original value.
+
+    If there is currently no config file, we then create the ~/.sky/config.yaml
+    file and set the `kubernetes:ports` value to `loadbalancer`. We then store
+    the current value (either `ingress` or `loadbalancer`) to the backup file
+    at ~/.sky/backup_config.yaml, and finally set the value to `ingress` in
+    the active config file.
     """
 
     if not skypilot_config.loaded_config_path():
@@ -33,11 +34,10 @@ def modify_port_config():
         }
         config_path = os.path.expanduser(CONFIG_PATH)
         common_utils.dump_yaml(config_path, default_config)
-        skypilot_config._try_load_config()
+        skypilot_config.try_load_config()
 
-    logger.debug(
-        f'Creating backup at {BACKUP_PATH} of current kubernetes port forwarding option.'
-    )
+    logger.debug(f'Creating backup at {BACKUP_PATH} of'
+                 'current kubernetes port forwarding option.')
     backup_path = os.path.expanduser(BACKUP_PATH)
     backup_port_config = skypilot_config.get_nested(
         ('kubernetes', 'ports'),
@@ -54,14 +54,15 @@ def modify_port_config():
         ('kubernetes', 'ports'),
         kubernetes_enums.KubernetesPortMode.INGRESS.value)
     common_utils.dump_yaml(current_path, updated_config)
-    skypilot_config._try_load_config()
+    skypilot_config.try_load_config()
 
 
 def restore_port_config():
     """Restore the original value of `kubernetes:ports`.
-    
-    Restores the value of `kubernetes:ports` from ~/.sky/backup_config.yaml in the active
-    config file. Then, clears the ~/.sky/backup_config.yaml file.
+
+    Restores the value of `kubernetes:ports` from ~/.sky/backup_config.yaml
+    in the active config file. Then, clears the ~/.sky/backup_config.yaml
+    file.
     """
 
     backup_path = os.path.expanduser(BACKUP_PATH)
@@ -80,15 +81,14 @@ def restore_port_config():
         logger.debug('There is no current active config file.')
         return
 
-    logger.debug(
-        f'Restore original port forwarding option in {current_path} from {BACKUP_PATH}.'
-    )
+    logger.debug(f'Restore original port forwarding option in {current_path}'
+                 f'from {BACKUP_PATH}.')
     restored_config = skypilot_config.set_nested(('kubernetes', 'ports'),
                                                  backup_port_config)
     common_utils.dump_yaml(current_path, restored_config)
     logger.debug(f'Resetting {BACKUP_PATH} to be empty.')
     common_utils.dump_yaml(backup_path, {})
-    skypilot_config._try_load_config()
+    skypilot_config.try_load_config()
 
 
 def main():

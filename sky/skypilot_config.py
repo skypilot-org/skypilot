@@ -124,7 +124,7 @@ def to_dict() -> Dict[str, Any]:
     return {}
 
 
-def _try_load_config() -> None:
+def try_load_config() -> None:
     global _dict, _loaded_config_path
     config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if config_path_via_env_var is not None:
@@ -156,7 +156,7 @@ def loaded_config_path() -> Optional[str]:
 
 
 # Load on import.
-_try_load_config()
+try_load_config()
 
 
 def _check_loaded_or_die():
