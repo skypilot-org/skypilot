@@ -541,8 +541,6 @@ class ReplicaManager:
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
                     f'Post data: {spec.post_data}')
 
-        # Oldest version among the currently provisioned and launched replicas
-        self.least_recent_version: int = serve_constants.INITIAL_VERSION
         serve_state.add_or_update_version(self._service_name,
                                           serve_constants.INITIAL_VERSION, spec)
 
@@ -627,9 +625,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _should_use_spot(self._task_yaml_path, resources_override)
 
-        latest_version = serve_state.get_latest_version(self._service_name)
+        version = serve_state.get_latest_version(self._service_name)
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
-                           latest_version)
+                           version)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -884,23 +882,21 @@ class SkyPilotReplicaManager(ReplicaManager):
                     serve_state.remove_replica(self._service_name, replica_id)
                     logger.info(f'Replica {replica_id} removed from the '
                                 f'replica table {removal_reason}.')
+                    
+                    removed_version = info.version
+                    replica_infos = serve_state.get_replica_infos(self._service_name)
+                    no_replica_of_removed_version = all([
+                        info.version != removed_version for info in replica_infos
+                    ])
+                    if (no_replica_of_removed_version and 
+                        removed_version != latest_version):
+                        task_yaml = serve_utils.generate_task_yaml_file_name(
+                            self._service_name, removed_version)
+                        # Delete old version metadata.
+                        serve_state.delete_version(self._service_name, removed_version)
+                        # Delete storage buckets of older versions.
+                        service.cleanup_storage(task_yaml)
 
-        # Clean old version
-        replica_infos = serve_state.get_replica_infos(self._service_name)
-        current_least_recent_version = min([
-            info.version for info in replica_infos
-        ]) if replica_infos else self.least_recent_version
-        if self.least_recent_version < current_least_recent_version:
-            for version in range(self.least_recent_version,
-                                 current_least_recent_version):
-                task_yaml = serve_utils.generate_task_yaml_file_name(
-                    self._service_name, version)
-                # Delete old version metadata.
-                serve_state.delete_version(self._service_name, version)
-                # Delete storage buckets of older versions.
-                service.cleanup_storage(task_yaml)
-            # newest version will be cleaned in serve down
-            self.least_recent_version = current_least_recent_version
 
     def _process_pool_refresher(self) -> None:
         """Periodically refresh the launch/down process pool."""
@@ -1123,13 +1119,9 @@ class SkyPilotReplicaManager(ReplicaManager):
     # SkyServe Update and replica versioning. #
     ###########################################
 
-    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+    def update_version(self, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
-        latest_version = serve_state.get_latest_version(self._service_name)
-        if version <= latest_version:
-            logger.error(f'Invalid version: {version}, '
-                         f'latest version: {latest_version}')
-            return
+        version = serve_state.get_latest_version(self._service_name)
         task_yaml_path = serve_utils.generate_task_yaml_file_name(
             self._service_name, version)
         serve_state.add_or_update_version(self._service_name, version, spec)
