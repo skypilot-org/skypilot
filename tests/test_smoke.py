@@ -683,6 +683,7 @@ def test_image_no_conda():
     run_one_test(test)
 
 
+@pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_custom_default_conda_env(generic_cloud: str):
     name = _get_cluster_name()
     test = Test('custom_default_conda_env', [
