@@ -36,3 +36,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
+
+// Remove Previous button from every first page of each tab.
+document.addEventListener("DOMContentLoaded", function () {
+    if (window.location.pathname.endsWith('/') || window.location.pathname.endsWith('index.html')) {
+        var style = document.createElement('style');
+        style.innerHTML = '.prev-next-area a.left-prev { display: none; }';
+        document.head.appendChild(style);
+    }
+});

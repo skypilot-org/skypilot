@@ -1,3 +1,6 @@
+Welcome to SkyPilot!
+====================
+
 
 .. raw:: html
 

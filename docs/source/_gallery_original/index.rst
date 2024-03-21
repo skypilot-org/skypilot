@@ -53,7 +53,7 @@ Contributing
 We welcome contributions from the community. If you would like to contribute, please follow the guidelines below.
 
 1. Fork the `SkyPilot repository <https://github.com/skypilot-org/skypilot>`__ on GitHub.
-2. Create a new folder for your own framework, LLM model, or Tutorial under `llm/ <https://github.com/skypilot-org/skypilot/tree/master/llm>`.
+2. Create a new folder for your own framework, LLM model, or Tutorial under `llm/ <https://github.com/skypilot-org/skypilot/tree/master/llm>`__.
 3. Add your own README, SkyPilot YAML file and the necessary files to run your AI.
 4. Create a soft link in `docs/source/_gallery_original <https://github.com/skypilot-org/skypilot/blob/master/docs/source/_gallery_original>`__ to the README file in one of the subfolders (frameworks, llms, tutorials), e.g., :code:`cd docs/source/_gallery_original/llms; ln -s ../../llm/mixtral/README.md mixtral.md`.
 5. Add the file path to the `toctree` above.
