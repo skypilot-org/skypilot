@@ -120,11 +120,11 @@ class SkyServeController:
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
-                # TODO(Xuanlin Jiang): This assertion is disabled because of 
+                # TODO(Xuanlin Jiang): This assertion is disabled because of
                 # possibility of race condition.
                 # assert version == self._replica_manager.get_latest_version(
                 #    self._service_name)
-                
+
                 self._replica_manager.update_version(service,
                                                      update_mode=update_mode)
                 new_autoscaler = autoscalers.Autoscaler.from_spec(

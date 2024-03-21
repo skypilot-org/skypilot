@@ -294,8 +294,7 @@ class RequestRateAutoscaler(Autoscaler):
         if self.update_mode == serve_utils.UpdateMode.ROLLING:
             latest_ready_replicas = []
             old_nonterminal_replicas = []
-            latest_version = serve_state.get_latest_version(
-                self._service_name)
+            latest_version = serve_state.get_latest_version(self._service_name)
             for info in replica_infos:
                 if info.version == latest_version:
                     if info.is_ready:
@@ -493,9 +492,10 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
+        latest_version = serve_state.get_latest_version(self._service_name)
         latest_nonterminal_replicas = list(
             filter(
-                lambda info: not info.is_terminal and info.version == self.
+                lambda info: not info.is_terminal and info.version ==
                 latest_version, replica_infos))
 
         self._set_target_num_replica_with_hysteresis()
