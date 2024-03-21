@@ -4768,7 +4768,6 @@ def local_up(gpus: bool):
     message_str = 'Creating local cluster{}...'
     message_str = message_str.format((' with GPU support (this may take up '
                                       'to 15 minutes)') if gpus else '')
-    
     path_to_package = os.path.dirname(os.path.dirname(__file__))
     up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                   'create_cluster.sh')

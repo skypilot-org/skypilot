@@ -9,7 +9,6 @@ import sky
 from sky import exceptions
 from sky import skypilot_config
 from sky.adaptors import kubernetes
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 
@@ -21,8 +20,8 @@ def get_port_mode(
         mode_str: Optional[str] = None) -> kubernetes_enums.KubernetesPortMode:
     """Get the port mode from the provider config."""
     mode_str = mode_str or skypilot_config.get_nested(
-    ('kubernetes', 'ports'),
-    kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
+        ('kubernetes', 'ports'),
+        kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
     try:
         port_mode = kubernetes_enums.KubernetesPortMode(mode_str)
     except ValueError as e:
