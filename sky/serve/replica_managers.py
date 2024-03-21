@@ -556,7 +556,7 @@ class ReplicaManager:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
-    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+    def update_version(self, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
         raise NotImplementedError
 

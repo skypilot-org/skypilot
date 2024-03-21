@@ -169,9 +169,9 @@ class RequestRateAutoscaler(Autoscaler):
         return max(self.min_replicas, min(self.max_replicas,
                                           target_num_replicas))
 
-    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+    def update_version(self, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
-        super().update_version(version, spec, update_mode)
+        super().update_version(spec, update_mode)
         self.target_qps_per_replica = spec.target_qps_per_replica
         upscale_delay_seconds = (
             spec.upscale_delay_seconds if spec.upscale_delay_seconds is not None
@@ -468,9 +468,9 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             spec.dynamic_ondemand_fallback
             if spec.dynamic_ondemand_fallback is not None else False)
 
-    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+    def update_version(self, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
-        super().update_version(version, spec, update_mode=update_mode)
+        super().update_version(spec, update_mode=update_mode)
         self.base_ondemand_fallback_replicas = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
