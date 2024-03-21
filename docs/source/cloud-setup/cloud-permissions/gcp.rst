@@ -51,7 +51,7 @@ User
 
 .. tip::
 
-    The following steps are instructions for creating a role, user and service account required by SkyPilot through GCP console, we also offer a Terraform config to automate the role creation, see :ref:`here <gcp-terraform-minimal-permissions>`_.
+    The following steps are instructions for creating a role, user and service account required by SkyPilot through console, we also offer a Terraform config to automate the role creation, see :ref:`here <gcp-terraform-minimal-permissions>`.
 
 1. Go to GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/roles>`__ and click on **Create Role**.
 
@@ -222,7 +222,7 @@ Instead of manually creating a custom role and service account with the minimal 
 
 1. Fill out the :code:`locals` variables according to your own GCP setup, and run :code:`terraform apply`
 
-.. code-block:: terraform
+.. code-block::
 
     locals {
         project_id = "your-project-id"
