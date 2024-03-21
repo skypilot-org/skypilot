@@ -42,7 +42,7 @@ Contents
 
 .. toctree::
    :maxdepth: 1
-   :caption: Tutorial
+   :caption: Tutorials
 
    tutorials/finetuning.md
 
