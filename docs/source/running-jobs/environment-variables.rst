@@ -96,21 +96,21 @@ Environment variables for ``setup``
 
 
 .. list-table::
-  :widths: 20 70 10
-  :header-rows: 1
+   :widths: 20 70 10
+   :header-rows: 1
 
-  * - Name
-    - Definition
-    - Example
-  * - ``SKYPILOT_SETUP_NODE_RANK``
-    - Rank (an integer ID from 0 to :code:`num_nodes-1`) of the node being set up.
-    - 0
-  * - ``SKYPILOT_SETUP_NODE_IPS``
-    - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
-    - 1.2.3.4
-  * - ``SKYPILOT_SERVE_REPLICA_ID``
-    - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
-    - 1
+   * - Name
+     - Definition
+     - Example
+   * - ``SKYPILOT_SETUP_NODE_RANK``
+     - Rank (an integer ID from 0 to :code:`num_nodes-1`) of the node being set up.
+     - 0
+   * - ``SKYPILOT_SETUP_NODE_IPS``
+     - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
+     - 1.2.3.4
+   * - ``SKYPILOT_SERVE_REPLICA_ID``
+     - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
+     - 1
 
 Since setup commands always run on all nodes of a cluster, SkyPilot ensures both of these environment variables (the ranks and the IP list) never change across multiple setups on the same cluster.
 
