@@ -154,9 +154,6 @@ html[data-theme="dark"] {
   }
 }
 
-.bd-sidebar-primary {
-  width: 20%;
-}
 
 .bd-header .navbar-nav li.current a.nav-link:hover {
   text-decoration: none;
@@ -167,3 +164,13 @@ active tab to be moved up. */
 .nav-link {
   border-bottom: max(3px, .1875rem, .12em) solid transparent;
 }
+
+/* Assuming your breakpoints are defined in pixels */
+@media (min-width: 959.98px) {
+
+  /* Replace 768px with the actual value of $breakpoint-sidebar-primary */
+  .bd-sidebar-primary {
+    width: 20% !important;
+  }
+}
+
