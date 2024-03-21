@@ -11,7 +11,6 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
@@ -305,7 +304,10 @@ def up(
 
 
 @usage_lib.entrypoint
-def update(task: 'sky.Task', service_name: str) -> None:
+def update(
+        task: 'sky.Task',
+        service_name: str,
+        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
     """Update an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -315,7 +317,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
         service_name: Name of the service.
     """
     _validate_service_task(task)
-    cluster_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'Service controller is stopped. There is no service to update. '
@@ -325,14 +327,6 @@ def update(task: 'sky.Task', service_name: str) -> None:
         'To spin up a new service, '
         f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
-
-    if handle is None or handle.head_ip is None:
-        # The error message is already printed in
-        # backend_utils.is_controller_up
-        # TODO(zhwu): Move the error message into the exception.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(message='',
-                                               cluster_status=cluster_status)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -419,7 +413,8 @@ def update(task: 'sky.Task', service_name: str) -> None:
                                  storage_mounts=None)
 
         code = serve_utils.ServeCodeGen.update_service(service_name,
-                                                       current_version)
+                                                       current_version,
+                                                       mode=mode.value)
         returncode, _, stderr = backend.run_on_head(handle,
                                                     code,
                                                     require_outputs=True,
@@ -466,16 +461,9 @@ def down(
         service_names = []
     if isinstance(service_names, str):
         service_names = [service_names]
-    cluster_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have terminated.')
-    if handle is None or handle.head_ip is None:
-        # The error message is already printed in
-        # backend_utils.is_controller_up
-        # TODO(zhwu): Move the error message into the exception.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(message='',
-                                               cluster_status=cluster_status)
 
     service_names_str = ','.join(service_names)
     if sum([len(service_names) > 0, all]) != 1:
@@ -526,6 +514,7 @@ def status(
 
         {
             'name': (str) service name,
+            'active_versions': (List[int]) a list of versions that are active,
             'controller_job_id': (int) the job id of the controller,
             'uptime': (int) uptime in seconds,
             'status': (sky.ServiceStatus) service status,
@@ -578,21 +567,10 @@ def status(
             raise RuntimeError(
                 'Failed to refresh service status due to network error.') from e
 
-    # TODO(tian): This is so slow... It will take ~10s to refresh the status
-    # of controller. Can we optimize this?
-    controller_status, handle = backend_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No service is found.')
-
-    if handle is None or handle.head_ip is None:
-        # When the controller is STOPPED, the head_ip will be None, as
-        # it will be set in global_user_state.remove_cluster().
-        # We do not directly check for UP because the controller may be
-        # in INIT state during another `sky serve up`, but still have
-        # head_ip available. In this case, we can still try to ssh
-        # into the controller and fetch the job table.
-        raise exceptions.ClusterNotUpError('Sky serve controller is not up.',
-                                           cluster_status=controller_status)
+    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+    handle = backend_utils.is_controller_accessible(
+        controller_type=controller_type,
+        stopped_message=controller_type.value.default_hint_if_non_existent)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -674,15 +652,11 @@ def tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
-    controller_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No service is found.')
-    if handle is None or handle.head_ip is None:
-        msg = 'No service is found.'
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg = ''
-        raise exceptions.ClusterNotUpError(msg,
-                                           cluster_status=controller_status)
+        stopped_message=(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
+                         value.default_hint_if_non_existent))
+
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     backend.tail_serve_logs(handle,

@@ -74,6 +74,15 @@ def _open_ports_using_ingress(
     ]
 
     # Generate ingress and services specs
+    # We batch ingress rule creation because each rule triggers a hot reload of
+    # the nginx controller. If the ingress rules are created sequentially,
+    # it could lead to multiple reloads of the Nginx-Ingress-Controller within
+    # a brief period. Consequently, the Nginx-Controller pod might spawn an
+    # excessive number of sub-processes. This surge triggers Kubernetes to kill
+    # and restart the Nginx due to the podPidsLimit parameter, which is
+    # typically set to a default value like 1024.
+    # To avoid this, we change ingress creation into one object containing
+    # multiple rules.
     content = network_utils.fill_ingress_template(
         namespace=provider_config.get('namespace', 'default'),
         service_details=service_details,

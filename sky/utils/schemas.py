@@ -580,6 +580,9 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'prioritize_reservations': {
+                    'type': 'boolean',
+                },
                 'specific_reservations': {
                     'type': 'array',
                     'items': {

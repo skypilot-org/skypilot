@@ -95,7 +95,21 @@ class SkyServeLoadBalancer:
         logger.info(f'Redirecting request to {path}')
         return fastapi.responses.RedirectResponse(url=path)
 
+    async def _get_urls(self, request: fastapi.Request):
+        del request  # Unused
+
+        ready_replica_urls = self._load_balancing_policy.ready_replicas
+        for i, ready_replica_url in enumerate(ready_replica_urls):
+            if not ready_replica_url.startswith('http'):
+                ready_replica_url = 'http://' + ready_replica_url
+            ready_replica_urls[i] = ready_replica_url
+        return fastapi.responses.JSONResponse(content={
+            'controller': self._controller_url,
+            'replicas': ready_replica_urls
+        })
+
     def run(self):
+        self._app.add_api_route('/-/urls', self._get_urls, methods=['GET'])
         self._app.add_api_route('/{path:path}',
                                 self._redirect_handler,
                                 methods=['GET', 'POST', 'PUT', 'DELETE'])
