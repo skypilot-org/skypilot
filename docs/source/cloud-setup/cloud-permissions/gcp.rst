@@ -49,6 +49,10 @@ The :ref:`Medium Permissions <gcp-medium-permissions>` assigns admin permissions
 User
 ~~~~~~~~~~~~
 
+.. tip::
+
+    The following steps are instructions for creating a role, user and service account required by SkyPilot through GCP console, we also offer a Terraform config to automate the role creation, see :ref:`here <gcp-terraform-minimal-permissions>`_.
+
 1. Go to GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/roles>`__ and click on **Create Role**.
 
 .. image:: ../../images/screenshots/gcp/create-role.png
@@ -207,6 +211,102 @@ Medium Permissions roles as described in the previous sections.
     :align: center
     :alt: Set Service Account Role
 
+
+.. _gcp-terraform-minimal-permissions:
+
+
+Terraform Config for Minimal Permissions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Instead of manually creating a custom role and service account with the minimal permission, you can use the following Terraform config to automate the process. 
+
+1. Fill out the :code:`locals` variables according to your own GCP setup, and run :code:`terraform apply`
+
+.. code-block:: terraform
+
+    locals {
+        project_id = "your-project-id"
+        credential_path = "/path/to/your/application_default_credentials.json"
+    }
+
+    terraform {
+        required_providers {
+            google = {
+                source  = "hashicorp/google"
+                version = "~> 3.5"
+            }
+        }
+    }
+    
+    provider "google" {
+        credentials = file(local.credential_path)
+        project     = local.project_id
+    }
+
+    resource "google_service_account" "skypilot-sa" {
+        account_id = "skypilot-v1"
+        display_name = "skypilot-v1"
+    }
+
+    resource "google_project_iam_custom_role" "skypilot-user-role" {
+        project     = local.project_id
+        role_id     = "minimal-skypilot-role"
+        title       = "Skypilot User Custom Role"
+        description = "The custom role for operating Skypilot"
+        permissions = [
+            "compute.disks.create",
+            "compute.disks.list",
+            "compute.disks.delete",
+            "compute.firewalls.create",
+            "compute.firewalls.delete",
+            "compute.firewalls.get",
+            "compute.globalOperations.get",
+            "compute.instances.create",
+            "compute.instances.delete",
+            "compute.instances.get",
+            "compute.instances.list",
+            "compute.instances.setLabels",
+            "compute.instances.setMetadata",
+            "compute.instances.setServiceAccount",
+            "compute.instances.setTags",
+            "compute.instances.start",
+            "compute.instances.stop",
+            "compute.networks.get",
+            "compute.networks.getEffectiveFirewalls",
+            "compute.networks.list",
+            "compute.projects.get",
+            "compute.projects.setCommonInstanceMetadata",
+            "compute.reservations.get",
+            "compute.reservations.list",
+            "compute.subnetworks.list",
+            "compute.subnetworks.use",
+            "compute.subnetworks.useExternalIp",
+            "compute.zoneOperations.get",
+            "iam.roles.get",
+            "iam.serviceAccounts.actAs",
+            "iam.serviceAccounts.get",
+            "resourcemanager.projects.get",
+            "resourcemanager.projects.getIamPolicy",
+            "serviceusage.services.enable",
+            "serviceusage.services.list",
+            "serviceusage.services.use",
+            "storage.buckets.create",
+            "storage.buckets.delete",
+            "storage.buckets.get",
+            "storage.objects.create",
+            "storage.objects.delete",
+            "storage.objects.get",
+            "storage.objects.list"
+        ]
+    }
+
+    resource "google_project_iam_member" "skypilot-iam-member" {
+        project = local.project_id
+        role    = google_project_iam_custom_role.skypilot-user-role.id
+        member  = "serviceAccount:${google_service_account.skypilot-sa.email}"
+    }
+
+2. After the Terraform config is applied, the user can follow the instructions in step 10-12 in :ref:`Minimal Permissions <gcp-minimal-permissions>` to grant the role to a user.
 
 .. _gcp-minimum-firewall-rules:
 
