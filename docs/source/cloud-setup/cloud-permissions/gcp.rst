@@ -114,7 +114,14 @@ User
     storage.objects.get
     storage.objects.list
 
-5. **Optional**: If the user needs to access TPU VMs, you can additionally add the following permissions (the following may not be exhaustive, please file an issue if you find any missing permissions):
+5. **Optional**: If :code:`--ports` or :ref:`SkyServe <sky-serve>` is used, you can additionally add the following permissions:
+
+.. code-block:: text
+
+    compute.firewalls.list
+    compute.networks.updatePolicy
+
+6. **Optional**: If the user needs to access TPU VMs, you can additionally add the following permissions (the following may not be exhaustive, please file an issue if you find any missing permissions):
 
 .. code-block:: text
 
@@ -125,7 +132,7 @@ User
     tpu.nodes.update
     tpu.operations.get
 
-6. **Optional**: To enable ``sky launch --clone-disk-from``, you need to have the following permissions for the role as well:
+7. **Optional**: To enable ``sky launch --clone-disk-from``, you need to have the following permissions for the role as well:
 
 .. code-block:: text
 
@@ -134,7 +141,7 @@ User
     compute.images.get
     compute.images.delete
 
-7. **Optional**: To enable opening ports on GCP cluster, you need to have the following permissions for the role as well:
+8. **Optional**: To enable opening ports on GCP cluster, you need to have the following permissions for the role as well:
 
 .. code-block:: text
 
@@ -142,7 +149,7 @@ User
     compute.firewalls.list
     compute.firewalls.update
 
-8. **Optional**: If the user needs to use custom machine images with ``sky launch --image-id``, you can additionally add the following permissions:
+9. **Optional**: If the user needs to use custom machine images with ``sky launch --image-id``, you can additionally add the following permissions:
 
 .. code-block:: text
     
@@ -151,15 +158,15 @@ User
     compute.images.get
     compute.images.useReadOnly
 
-9. **Optional**: If your organization sets ``gcp.prioritize_reservations`` or ``gcp.specific_reservations`` in :ref:`~/.sky/config.yaml <config-yaml>`, you can additionally add the following permissions:
+10. **Optional**: If your organization sets ``gcp.prioritize_reservations`` or ``gcp.specific_reservations`` in :ref:`~/.sky/config.yaml <config-yaml>`, you can additionally add the following permissions:
 
 .. code-block:: text
 
     compute.reservations.list
 
-9. Click **Create** to create the role.
-10. Go back to the "IAM" tab and click on **GRANT ACCESS**.
-11. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
+11. Click **Create** to create the role.
+12. Go back to the "IAM" tab and click on **GRANT ACCESS**.
+13. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
 
 
 .. image:: ../../images/screenshots/gcp/create-iam.png
@@ -167,7 +174,7 @@ User
     :align: center
     :alt: GCP Grant Access
 
-12. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
+14. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
 
 .. note::
 
