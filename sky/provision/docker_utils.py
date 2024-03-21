@@ -250,8 +250,12 @@ class DockerInitializer:
             run_env='docker')
         # Install dependencies.
         self._run(
-            'sudo apt-get update; sudo apt-get install -y rsync curl wget '
-            'patch openssh-server python3-pip;',
+            'sudo apt-get update; '
+            # Our mount script will install gcsfuse without fuse package.
+            # We need to install fuse package first to enable storage mount.
+            # The dpkg option is to suppress the prompt for fuse installation.
+            'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
+            'rsync curl wget patch openssh-server python3-pip fuse;',
             run_env='docker')
 
         # Copy local authorized_keys to docker container.
