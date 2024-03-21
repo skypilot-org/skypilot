@@ -11,6 +11,7 @@ import traceback
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
+import colorama
 import psutil
 import requests
 
@@ -495,15 +496,20 @@ class ReplicaInfo:
                     f'code {response.status_code}')
             if response.status_code == 200:
                 msg += '.'
+                log_method = logger.info
             else:
                 msg += f' and response {response.text}.'
-            logger.info(msg)
+                msg = f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}'
+                log_method = logger.error
+            log_method(msg)
             if response.status_code == 200:
                 logger.debug(f'{replica_identity.capitalize()} is ready.')
                 return self, True, probe_time
         except requests.exceptions.RequestException as e:
-            logger.info(f'Error when probing {replica_identity}: '
-                        f'{common_utils.format_exception(e)}.')
+            logger.error(
+                f'{colorama.Fore.YELLOW}Error when probing {replica_identity}:'
+                f' {common_utils.format_exception(e)}.'
+                f'{colorama.Style.RESET_ALL}')
         return self, False, probe_time
 
     def __setstate__(self, state):

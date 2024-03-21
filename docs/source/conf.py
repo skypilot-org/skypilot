@@ -163,6 +163,7 @@ myst_heading_anchors = 7
 show_sphinx = False
 
 exclude_patterns = ['_gallery_original']
+myst_heading_anchors = 3
 
 
 def setup(app):

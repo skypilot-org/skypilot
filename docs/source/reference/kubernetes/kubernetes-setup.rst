@@ -382,7 +382,7 @@ To use this mode:
     # ingress-nginx-controller         LoadBalancer        10.24.4.254   35.202.58.117   80:31253/TCP,443:32699/TCP
 
 .. note::
-    If the ``EXTERNAL-IP`` field is ``<none>``, you must to manually assign a External IP.
+    If the ``EXTERNAL-IP`` field is ``<none>``, you must manually assign an External IP.
     This can be done by patching the service with an IP that can be accessed from outside the cluster.
     If the service type is ``NodePort``, you can set the ``EXTERNAL-IP`` to any node's IP address:
 
