@@ -120,10 +120,11 @@ class SkyServeController:
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
-                # TODO(Xuanlin Jiang): This assertion is disabled because of
-                # possibility of race condition.
-                # assert version == self._replica_manager.get_latest_version(
-                #    self._service_name)
+                latest_version = serve_state.get_latest_version()
+                if version != latest_version:
+                    logger.error(f'Invalid version {version}, '
+                                 f'latest version: {latest_version}.')
+                    return
 
                 self._replica_manager.update_version(service,
                                                      update_mode=update_mode)
