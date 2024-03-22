@@ -59,8 +59,24 @@ kubectl scale deployment sky-lb-ha-<service_name> --replicas=3
     curl -L http://<ingress-ip>/sky-lb-ha-<service_name>
     ```
 
+## How to handle controller failure
 
+If the controller fails, the load balancer will continue to serve traffic by sending them to the original replicas. In order to restart the controller:
 
+1. Start the service with a **different** name. This is important to avoid conflicts with the existing service and downtime.
+    ```
+    sky serve up -n <service-name>-v2 your-service.yaml
+    ```
+2. Pointing the old load-balancer to the new service, once the new service is up and running.
+    ```
+    ./create_or_update_lb.sh <service-name> <docker-repo> <service-name>-v2
+    ```
+3. Once the load balancer is pointed to the new service, delete the old replicas.
+    ```
+    kubectl get pods | grep <service-name>
+    # Find the old services in the list and delete them
+    kubectl delete pod <pod-name>
+    ```
 
 
 ## Caveats

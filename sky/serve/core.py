@@ -171,7 +171,10 @@ def up(
         # any connection to the unregistered ports.
         controller_resources = controller_resources.copy(
             cloud=controller_cloud,
-            ports=[serve_constants.LOAD_BALANCER_PORT_RANGE, serve_constants.CONTROLLER_PORT_RANGE])
+            ports=[
+                serve_constants.LOAD_BALANCER_PORT_RANGE,
+                serve_constants.CONTROLLER_PORT_RANGE
+            ])
         controller_task.set_resources(controller_resources)
 
         # # Set service_name so the backend will know to modify default ray
