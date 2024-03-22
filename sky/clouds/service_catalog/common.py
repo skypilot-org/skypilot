@@ -449,6 +449,7 @@ def list_accelerators_impl(
         df: pd.DataFrame,
         gpus_only: bool,
         name_filter: Optional[str],
+        instance_type_filter: Optional[str],
         region_filter: Optional[str],
         quantity_filter: Optional[int],
         case_sensitive: bool = True,
@@ -493,6 +494,10 @@ def list_accelerators_impl(
         df = df[df['AcceleratorName'].str.contains(name_filter,
                                                    case=case_sensitive,
                                                    regex=True)]
+    if instance_type_filter is not None:
+        df = df[df['InstanceType'].str.contains(instance_type_filter,
+                                                case=case_sensitive,
+                                                regex=True)]
     if region_filter is not None:
         df = df[df['Region'].str.contains(region_filter,
                                           case=case_sensitive,

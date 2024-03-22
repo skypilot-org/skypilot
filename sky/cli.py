@@ -2813,6 +2813,7 @@ def check(verbose: bool):
 
 @cli.command()
 @click.argument('accelerator_str', required=False)
+@click.option('--instance-type', '-t', type=str, help='Instance type to query.')
 @click.option('--all',
               '-a',
               is_flag=True,
@@ -2840,6 +2841,7 @@ def check(verbose: bool):
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
+        instance_type: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
         cloud: Optional[str],
         region: Optional[str],
@@ -2878,7 +2880,7 @@ def show_gpus(
             'The --region flag is only valid when the --cloud flag is set.')
 
     # validation for the --all-regions flag
-    if all_regions and accelerator_str is None:
+    if all_regions and accelerator_str is None and instance_type is None:
         raise click.UsageError(
             'The --all-regions flag is only valid when an accelerator '
             'is specified.')
@@ -2906,9 +2908,20 @@ def show_gpus(
 
         name, quantity = None, None
 
+        if instance_type is not None:
+            result = service_catalog.list_accelerators(gpus_only=False,
+                                                       instance_type_filter=instance_type,
+                                                         region_filter=region,
+                                                         clouds=cloud)
+            if result:
+                gpu = list(result.keys())[0]
+                items = result[gpu][0]
+                quantity = items.accelerator_count
+                accelerator_str = f'{gpu}:{quantity}'
+
         if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
-                gpus_only=True,
+                gpus_only=False,
                 clouds=cloud,
                 region_filter=region,
             )
@@ -2973,8 +2986,9 @@ def show_gpus(
                 name, quantity = accelerator_str, None
 
         # Case-sensitive
-        result = service_catalog.list_accelerators(gpus_only=True,
+        result = service_catalog.list_accelerators(gpus_only=False,
                                                    name_filter=name,
+                                                   instance_type_filter=instance_type,
                                                    quantity_filter=quantity,
                                                    region_filter=region,
                                                    clouds=cloud,
