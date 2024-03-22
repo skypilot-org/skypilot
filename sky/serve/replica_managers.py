@@ -883,22 +883,22 @@ class SkyPilotReplicaManager(ReplicaManager):
                     logger.info(f'Replica {replica_id} removed from the '
                                 f'replica table {removal_reason}.')
 
-                    removed_version = info.version
-                    replica_infos = serve_state.get_replica_infos(
-                        self._service_name)
-                    no_replica_of_removed_version = all([
-                        info.version != removed_version
-                        for info in replica_infos
-                    ])
-                    if (no_replica_of_removed_version and
-                            removed_version != latest_version):
-                        task_yaml = serve_utils.generate_task_yaml_file_name(
-                            self._service_name, removed_version)
-                        # Delete old version metadata.
-                        serve_state.delete_version(self._service_name,
-                                                   removed_version)
-                        # Delete storage buckets of older versions.
-                        service.cleanup_storage(task_yaml)
+        # Clean old version
+        replica_infos = serve_state.get_replica_infos(self._service_name)
+        least_recent_version = serve_state.get_least_recent_version(
+            self._service_name)
+        current_least_recent_version = min([
+            info.version for info in replica_infos
+        ]) if replica_infos else least_recent_version
+        if least_recent_version < current_least_recent_version:
+            for version in range(least_recent_version,
+                                 current_least_recent_version):
+                task_yaml = serve_utils.generate_task_yaml_file_name(
+                    self._service_name, version)
+                # Delete old version metadata.
+                serve_state.delete_version(self._service_name, version)
+                # Delete storage buckets of older versions.
+                service.cleanup_storage(task_yaml)
 
     def _process_pool_refresher(self) -> None:
         """Periodically refresh the launch/down process pool."""
