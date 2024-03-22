@@ -1,7 +1,7 @@
 #!/bin/bash
 
 rm -rf build docs
-script -q -c "make html" /tmp/build_docs.txt
+script -q /tmp/build_docs.txt bash -c "make html"
 
 # Check if the output contains "ERROR:" or "WARNING:"
 if grep -q -E "ERROR:|WARNING:" /tmp/build_docs.txt; then
