@@ -102,7 +102,7 @@ class SkyServeController:
                     controller_session != self._controller_session):
                 return fastapi.Response(
                     status_code=403,
-                    reason=('Controller session mismatch: '
+                    content=('Controller session mismatch: '
                             f'{controller_session} != '
                             f'{self._controller_session}. '
                             'Please restart the load balancer.'))
