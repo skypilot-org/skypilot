@@ -424,6 +424,14 @@ class ReplicaInfo:
         return f'{handle.head_ip}:{self.replica_port}'
 
     @property
+    def urls(self) -> Optional[List[str]]:
+        handle = self.handle()
+        if handle is None:
+            return None
+
+        return [f'{ip}:{self.replica_port}' for ip in handle.external_ips()]
+
+    @property
     def status(self) -> serve_state.ReplicaStatus:
         replica_status = self.status_property.to_replica_status()
         if replica_status == serve_state.ReplicaStatus.UNKNOWN:
@@ -472,45 +480,56 @@ class ReplicaInfo:
         Returns:
             Tuple of (self, is_ready, probe_time).
         """
-        replica_identity = f'replica {self.replica_id} with url {self.url}'
+        replica_identity = f'replica {self.replica_id} with urls {self.urls}'
         # TODO(tian): This requiring the clock on each replica to be aligned,
         # which may not be true when the GCP VMs have run for a long time. We
         # should have a better way to do this. See #2539 for more information.
+
+        # The cluster handle is None
+        if self.urls is None:
+            return self, False, 0
+
         probe_time = time.time()
-        try:
-            msg = ''
-            # TODO(tian): Support HTTPS in the future.
-            readiness_path = (f'http://{self.url}{readiness_path}')
-            if post_data is not None:
-                msg += 'POST'
-                response = requests.post(
-                    readiness_path,
-                    json=post_data,
-                    timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
-            else:
-                msg += 'GET'
-                response = requests.get(
-                    readiness_path,
-                    timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
-            msg += (f' request to {replica_identity} returned status '
-                    f'code {response.status_code}')
-            if response.status_code == 200:
-                msg += '.'
-                log_method = logger.info
-            else:
-                msg += f' and response {response.text}.'
-                msg = f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}'
-                log_method = logger.error
-            log_method(msg)
-            if response.status_code == 200:
-                logger.debug(f'{replica_identity.capitalize()} is ready.')
-                return self, True, probe_time
-        except requests.exceptions.RequestException as e:
-            logger.error(
-                f'{colorama.Fore.YELLOW}Error when probing {replica_identity}:'
-                f' {common_utils.format_exception(e)}.'
-                f'{colorama.Style.RESET_ALL}')
-        return self, False, probe_time
+        probe_success = True
+        for url in self.urls:
+            try:
+                msg = ''
+                # TODO(tian): Support HTTPS in the future.
+                readiness_full_path = (f'http://{url}{readiness_path}')
+                if post_data is not None:
+                    msg += 'POST'
+                    response = requests.post(
+                        readiness_full_path,
+                        json=post_data,
+                        timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
+                else:
+                    msg += 'GET'
+                    response = requests.get(
+                        readiness_full_path,
+                        timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
+                msg += (f' request to {replica_identity} returned status '
+                        f'code {response.status_code}')
+                if response.status_code == 200:
+                    msg += '.'
+                    log_method = logger.info
+                else:
+                    msg += f' and response {response.text}.'
+                    msg = (
+                        f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}'
+                    )
+                    log_method = logger.error
+                log_method(msg)
+                if response.status_code == 200:
+                    logger.debug(f'{replica_identity.capitalize()} is ready.')
+                else:
+                    probe_success = False
+            except requests.exceptions.RequestException as e:
+                logger.error(f'{colorama.Fore.YELLOW}Error when probing'
+                             f'{replica_identity}:'
+                             f' {common_utils.format_exception(e)}.'
+                             f'{colorama.Style.RESET_ALL}')
+                probe_success = False
+        return self, probe_success, probe_time
 
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""

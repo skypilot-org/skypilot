@@ -1,0 +1,25 @@
+# SkyServe YAML to launch a service where each replica is multi-node.
+# Preemption of one node will cause the replica to be down and new replica to be launched.
+
+service:
+  readiness_probe: /health
+  replica_policy:
+    min_replicas: 2
+    max_replicas: 2
+    target_qps_per_replica: 1
+
+num_nodes: 2
+
+resources:
+  cloud: gcp
+  ports: 8081
+  cpus: 2+
+  use_spot: true
+
+workdir: examples/serve/http_server
+
+run: |
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+      echo 'I am the master node'
+  fi
+  python3 server.py
