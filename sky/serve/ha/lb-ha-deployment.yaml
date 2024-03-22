@@ -2,18 +2,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sky-lb-ha-deployment
+  name: sky-lb-ha-deployment-{{service_name}}
   labels:
-    app: sky-lb-ha
+    app: sky-lb-ha-{{service_name}}
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: sky-lb-ha
+      app: sky-lb-ha-{{service_name}}
   template:
     metadata:
       labels:
-        app: sky-lb-ha
+        app: sky-lb-ha-{{service_name}}
     spec:
       affinity:
         podAntiAffinity:
@@ -25,10 +25,10 @@ spec:
                     - key: app
                       operator: In
                       values:
-                        - sky-lb-ha
+                        - sky-lb-ha-{{service_name}}
                 topologyKey: kubernetes.io/hostname
       containers:
-      - name: sky-lb-ha
+      - name: sky-lb-ha-{{service_name}}
         image: {{docker_image_path}}
         imagePullPolicy: Always
         command:
@@ -52,12 +52,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: sky-lb-ha-service
+  name: sky-lb-ha-service-{{service_name}}
   labels:
-    app: skypilot-lb
+    app: skypilot-lb-{{service_name}}
 spec:
   selector:
-    app: sky-lb-ha
+    app: sky-lb-ha-{{service_name}}
   ports:
   - protocol: TCP
     port: 8890
@@ -71,17 +71,17 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$2
-  name: sky-lb-ha-ingress
+  name: sky-lb-ha-ingress-{{service_name}}
   namespace: default
 spec:
   ingressClassName: nginx
   rules:
   - http:
       paths:
-      - path: /sky-lb-ha(/|$)(.*)
+      - path: /sky-lb-ha-{{service_name}}(/|$)(.*)
         pathType: ImplementationSpecific
         backend:
           service:
-            name: sky-lb-ha-service
+            name: sky-lb-ha-service-{{service_name}}
             port:
               number: 8890

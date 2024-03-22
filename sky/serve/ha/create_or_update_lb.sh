@@ -48,6 +48,7 @@ docker push $docker_image_path
 echo -e "\n\n=== Stage 3: Load Balancer Deployment ==="
 sed -e "s|{{docker_image_path}}|$docker_image_path|g" \
     -e "s|{{controller_endpoint}}|$controller_endpoint|g" \
+    -e "s|{{service_name}}|$service_name|g" \
     $base_dir/sky/serve/ha/lb-ha-deployment.yaml > $base_dir/sky/serve/ha/lb-ha-deployment.yaml.tmp
 
 # Apply the load balancer deployment file
