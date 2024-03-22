@@ -103,9 +103,9 @@ class SkyServeController:
                 return fastapi.Response(
                     status_code=403,
                     content=('Controller session mismatch: '
-                            f'{controller_session} != '
-                            f'{self._controller_session}. '
-                            'Please restart the load balancer.'))
+                             f'{controller_session} != '
+                             f'{self._controller_session}. '
+                             'Please restart the load balancer.'))
 
             # TODO(MaoZiming): Check aggregator type.
             replica_infos = serve_state.get_replica_infos(self._service_name)
@@ -127,10 +127,10 @@ class SkyServeController:
             chosen_replicas = filter(
                 lambda info: info.version == chosen_version, ready_replicas)
             ready_replica_urls = [info.url for info in chosen_replicas]
-            return {'ready_replica_urls': ready_replica_urls,
-                    'controller_session': self._controller_session
-                    
-                    }
+            return {
+                'ready_replica_urls': ready_replica_urls,
+                'controller_session': self._controller_session
+            }
 
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request):
