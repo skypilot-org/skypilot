@@ -29,15 +29,14 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
       - name: sky-lb-ha
-        image: berkeleyskypilot/skypilot-ha:v2
+        image: {{docker_image_path}}
         imagePullPolicy: Always
         command:
           - /bin/sh
           - -c
           - |
-            IP=$(env | grep 'SKYPILOT_SERVICE__20001_PORT_20001_TCP_ADDR' | cut -d'=' -f2) # This parsing is quite brittle. Instead use a better name for controller svc.
-            echo "Controller Service IP: ${IP}"
-            python -m sky.serve.load_balancer --controller-addr http://${IP}:20001 --load-balancer-port 8890
+            echo "Controller URL: {{controller_endpoint}}"
+            python -m sky.serve.load_balancer --controller-addr {{controller_endpoint}} --load-balancer-port 8890
         ports:
         - containerPort: 8890
         readinessProbe:
