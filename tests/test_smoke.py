@@ -700,7 +700,7 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky logs {name} 2 --no-follow | grep -P "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 3 --status',
-    ])
+    ], f'sky down -y {name}')
     run_one_test(test)
 
 
