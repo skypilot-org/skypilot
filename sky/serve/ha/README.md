@@ -17,47 +17,36 @@ maximize availability.
 
 ## How to run HA load balancer
 
-1. Build and push your custom load balancer image. All your changes in the local sky repo will be added to this image.
+1. Build and push your custom load balancer image, and start the load balancer deployment. All your changes in the local sky repo will be added to this image.
     ```
-    ./build_ha_image.sh IMAGE_NAME
+    ./create_or_update_lb.sh <service-name> <docker-repo>
     ```
-
-2. Edit `lb-ha-deployment.yaml` and change load balancer image and replica counts if desired.
-3. Deploy your SkyServe YAML
-    ```bash
-    sky serve up -n http http_server.yaml
-    ```
-4. Apply the HA load balancer deployment, service and ingress rule:
-    ```bash
-    kubectl apply -f lb-ha-deployment.yaml
-    ```
-5. Get the IP of your ingress using `kubectl get ingress sky-lb-ha-ingress` and test the load balancer by sending requests to the `/sky-lb-ha` ingress endpoint.
+2. Get the IP of your ingress using `kubectl get ingress sky-lb-ha-ingress-<service_name>` and test the load balancer by sending requests to the `/sky-lb-ha-<service_name>` ingress endpoint.
     ```console
-    curl -L http://<ingress-ip>/sky-lb-ha
+    curl -L http://<ingress-ip>/sky-lb-ha-<service_name>
     ```
    
 ## How to scale the load balancer
 
 You can scale the load balancer by changing the number of replicas in the deployment.
 ```bash
-kubectl scale deployment sky-lb-ha --replicas=3
+kubectl scale deployment sky-lb-ha-<service_name> --replicas=3
 ```
 
 ## How to perform a rolling update
 
-1. Make changes to your custom load balancer policies and rebuild the image with a new tag `./build_ha_image.sh myrepo/myimage:v2`.
-2. Update the deployment with the new image
-    ```bash
-    kubectl set image deployment/sky-lb-ha-deployment sky-lb-ha=myrepo/myimage:v2
+1. Make changes to your custom load balancer policies and rerun:
     ```
-3. Monitor the rolling update with `kubectl get pods -w` and `kubectl get deployment sky-lb-ha -w`. The load balancer will continue to serve traffic during the update.
+    ./create_or_update_lb.sh <service-name> <docker-repo>
+    ```
+2. Monitor the rolling update with `kubectl get pods -w` and `kubectl get deployment sky-lb-ha-<service_name> -w`. The load balancer will continue to serve traffic during the update.
 
 
-## How to test HA
+## How to test HA for the load balancer
 
 1. Send a request to the load balancer endpoint
     ```bash
-    curl -L http://<ingress-ip>/sky-lb-ha
+    curl -L http://<ingress-ip>/sky-lb-ha-<service_name>
     ```
    
 2. Delete one of the load balancer pods
@@ -67,8 +56,12 @@ kubectl scale deployment sky-lb-ha --replicas=3
    
 3. Send another request to the load balancer endpoint
     ```bash
-    curl -L http://<ingress-ip>/sky-lb-ha
+    curl -L http://<ingress-ip>/sky-lb-ha-<service_name>
     ```
+
+
+
+
 
 ## Caveats
 * Stateful load balancer policies are tricky. Some of them may work in an approximate manner - need to test.
