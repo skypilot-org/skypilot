@@ -46,7 +46,8 @@ class SkyServeController:
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.Autoscaler.from_spec(service_name, service_spec))
+            autoscalers.Autoscaler.from_spec(service_name, service_spec,
+                                             task_yaml))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -54,6 +55,27 @@ class SkyServeController:
         logger.info('Starting autoscaler.')
         while True:
             try:
+                # Updating the active/preemption locations in autoscaler with
+                # the latest information from the replica manager, so that the
+                # autoscaling decision made later will take the information into
+                # consideration.
+                if (isinstance(self._autoscaler,
+                               autoscalers.FallbackRequestRateAutoscaler) and
+                        isinstance(self._replica_manager,
+                                   replica_managers.SkyPilotReplicaManager)):
+                    if self._replica_manager.active_history:
+                        logger.info('Handle active history: '
+                                    f'{self._replica_manager.active_history}')
+                        self._autoscaler.handle_active_history(
+                            self._replica_manager.active_history)
+                        self._replica_manager.active_history.clear()
+                    if self._replica_manager.preemption_history:
+                        logger.info(
+                            'Handle preemption history: '
+                            f'{self._replica_manager.preemption_history}')
+                        self._autoscaler.handle_preemption_history(
+                            self._replica_manager.preemption_history)
+                        self._replica_manager.preemption_history.clear()
                 replica_infos = serve_state.get_replica_infos(
                     self._service_name)
                 logger.info(f'All replica info: {replica_infos}')
@@ -124,7 +146,7 @@ class SkyServeController:
                                                      service,
                                                      update_mode=update_mode)
                 new_autoscaler = autoscalers.Autoscaler.from_spec(
-                    self._service_name, service)
+                    self._service_name, service, latest_task_yaml)
                 if not isinstance(self._autoscaler, type(new_autoscaler)):
                     logger.info('Autoscaler type changed to '
                                 f'{type(new_autoscaler)}, updating autoscaler.')
@@ -134,6 +156,7 @@ class SkyServeController:
                         old_autoscaler.dump_dynamic_states())
                 self._autoscaler.update_version(version,
                                                 service,
+                                                latest_task_yaml,
                                                 update_mode=update_mode)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except

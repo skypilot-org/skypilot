@@ -26,6 +26,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
+from sky.serve import spot_placers
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -192,6 +193,21 @@ def _should_use_spot(task_yaml: str,
     # Either resources all use spot or none use spot.
     assert len(spot_use_resources) in [0, len(task.resources)]
     return spot_use_resources == len(task.resources)
+
+
+def _get_location(
+    resource_override: Optional[Dict[str,
+                                     Any]]) -> Optional[spot_placers.Location]:
+    """Get location override from resource_override."""
+    if resource_override is not None:
+        cloud = resource_override.get('cloud', None)
+        region = resource_override.get('region', None)
+        zone = resource_override.get('zone', None)
+        # For Azure, zone can be None.
+        if cloud is not None and region is not None:
+            location = spot_placers.Location(cloud, region, zone)
+            return location
+    return None
 
 
 def with_lock(func):
@@ -374,10 +390,11 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    _VERSION = 0
+    _VERSION = 1
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
-                 is_spot: bool, version: int) -> None:
+                 is_spot: bool, location: Optional[spot_placers.Location],
+                 version: int) -> None:
         self._version = self._VERSION
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
@@ -387,6 +404,7 @@ class ReplicaInfo:
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
         self.is_spot: bool = is_spot
+        self.location: Optional[spot_placers.Location] = location
 
     def handle(
         self,
@@ -524,6 +542,9 @@ class ReplicaInfo:
             # Treated similar to on-demand instances.
             self.is_spot = False
 
+        if version < 1:
+            self.location = None
+
         self.__dict__.update(state)
 
 
@@ -595,6 +616,9 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self._down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
+        self._use_spot_placer: bool = spec.use_spot_placer
+        self.active_history: List[spot_placers.Location] = []
+        self.preemption_history: List[spot_placers.Location] = []
 
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
@@ -628,9 +652,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _should_use_spot(self._task_yaml_path, resources_override)
+        location = _get_location(resources_override)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
-                           self.latest_version)
+                           location, self.latest_version)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -772,6 +797,11 @@ class SkyPilotReplicaManager(ReplicaManager):
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
+        if info.location is None:
+            logger.error(f'Cannot find location for replica {info.replica_id}. '
+                         'Skipping adding to preemption list.')
+        elif self._use_spot_placer:
+            self.preemption_history.append(info.location)
         self._terminate_replica(info.replica_id,
                                 sync_down_logs=False,
                                 replica_drain_delay_seconds=0)
@@ -823,6 +853,17 @@ class SkyPilotReplicaManager(ReplicaManager):
                     else:
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
+                    if info.is_spot:
+                        if info.location is None:
+                            logger.error(f'Cannot find zone for replica '
+                                         f'{replica_id}. Skipping adding '
+                                         'active or preemption history.')
+                        elif self._use_spot_placer:
+                            # If a spot fails to launch in a given zone.
+                            if p.exitcode != 0:
+                                self.preemption_history.append(info.location)
+                            else:
+                                self.active_history.append(info.location)
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if error_in_sky_launch:

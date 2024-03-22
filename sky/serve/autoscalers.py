@@ -11,6 +11,7 @@ from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.serve import spot_placers
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
@@ -57,8 +58,8 @@ class AutoscalerDecision:
 class Autoscaler:
     """Abstract class for autoscalers."""
 
-    def __init__(self, service_name: str,
-                 spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
+                 task_yaml_path: str) -> None:
         """Initialize the autoscaler.
 
         Variables:
@@ -68,6 +69,7 @@ class Autoscaler:
             target_num_replicas: Target number of replicas output by autoscaler.
             latest_version: latest version of the service.
         """
+        del task_yaml_path  # Unused.
         self._service_name: str = service_name
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = (spec.max_replicas if spec.max_replicas
@@ -78,7 +80,9 @@ class Autoscaler:
         self.update_mode = serve_utils.DEFAULT_UPDATE_MODE
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       task_yaml: str,
                        update_mode: serve_utils.UpdateMode) -> None:
+        del task_yaml  # Unused.
         if version <= self.latest_version:
             logger.error(f'Invalid version: {version}, '
                          f'latest version: {self.latest_version}')
@@ -105,13 +109,14 @@ class Autoscaler:
         raise NotImplementedError
 
     @classmethod
-    def from_spec(cls, service_name: str,
-                  spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
+    def from_spec(cls, service_name: str, spec: 'service_spec.SkyServiceSpec',
+                  task_yaml_path: str) -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
         if spec.use_ondemand_fallback:
-            return FallbackRequestRateAutoscaler(service_name, spec)
+            return FallbackRequestRateAutoscaler(service_name, spec,
+                                                 task_yaml_path)
         else:
-            return RequestRateAutoscaler(service_name, spec)
+            return RequestRateAutoscaler(service_name, spec, task_yaml_path)
 
     def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
@@ -130,8 +135,8 @@ class RequestRateAutoscaler(Autoscaler):
     either spot or on-demand, but not both.
     """
 
-    def __init__(self, service_name: str,
-                 spec: 'service_spec.SkyServiceSpec') -> None:
+    def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
+                 task_yaml_path: str) -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
@@ -143,7 +148,7 @@ class RequestRateAutoscaler(Autoscaler):
             scale_up_consecutive_periods: period for scaling up.
             scale_down_consecutive_periods: period for scaling down.
         """
-        super().__init__(service_name, spec)
+        super().__init__(service_name, spec, task_yaml_path)
         self.target_qps_per_replica: Optional[
             float] = spec.target_qps_per_replica
         self.qps_window_size: int = constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
@@ -176,8 +181,9 @@ class RequestRateAutoscaler(Autoscaler):
                                           target_num_replicas))
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       task_yaml: str,
                        update_mode: serve_utils.UpdateMode) -> None:
-        super().update_version(version, spec, update_mode)
+        super().update_version(version, spec, task_yaml, update_mode)
         self.target_qps_per_replica = spec.target_qps_per_replica
         upscale_delay_seconds = (
             spec.upscale_delay_seconds if spec.upscale_delay_seconds is not None
@@ -458,9 +464,12 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
     on-demand instance are used as dynamic fallback of spot.
     """
 
-    def __init__(self, service_name: str,
-                 spec: 'service_spec.SkyServiceSpec') -> None:
-        super().__init__(service_name, spec)
+    def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
+                 task_yaml_path: str) -> None:
+        super().__init__(service_name, spec, task_yaml_path)
+        self.spot_placer: Optional[spot_placers.SpotPlacer] = (
+            spot_placers.SpotPlacer.from_spec(
+                spec, task_yaml_path)) if spec.use_spot_placer else None
         self.base_ondemand_fallback_replicas: int = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
@@ -472,8 +481,14 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             if spec.dynamic_ondemand_fallback is not None else False)
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       task_yaml: str,
                        update_mode: serve_utils.UpdateMode) -> None:
-        super().update_version(version, spec, update_mode=update_mode)
+        super().update_version(version,
+                               spec,
+                               task_yaml,
+                               update_mode=update_mode)
+        self.spot_placer = (spot_placers.SpotPlacer.from_spec(spec, task_yaml)
+                            if spec.use_spot_placer else None)
         self.base_ondemand_fallback_replicas = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
@@ -484,9 +499,28 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                                           if spec.dynamic_ondemand_fallback
                                           is not None else False)
 
+    def handle_active_history(self,
+                              history: List[spot_placers.Location]) -> None:
+        if self.spot_placer is None:
+            return
+        for location in history:
+            self.spot_placer.set_active(location)
+
+    def handle_preemption_history(self,
+                                  history: List[spot_placers.Location]) -> None:
+        if self.spot_placer is None:
+            return
+        for location in history:
+            self.spot_placer.set_preempted(location)
+
     # spot_recovery field is checked earlier in core
-    def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
-        return {'use_spot': True}
+    def _get_spot_resources_override_dict(
+            self,
+            location: Optional[spot_placers.Location] = None) -> Dict[str, Any]:
+        return {
+            'use_spot': True,
+            **(location.to_dict() if location is not None else {})
+        }
 
     def _get_ondemand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False}
@@ -541,11 +575,27 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
                                     num_nonterminal_spot)
             logger.info('Number of spot instances to scale up: '
                         f'{num_spot_to_scale_up}')
-            for _ in range(num_spot_to_scale_up):
+            locations: List[Optional[spot_placers.Location]] = []
+            if self.spot_placer is not None:
+                latest_nonterminal_replicas = list(
+                    filter(
+                        lambda info: not info.is_terminal and info.version ==
+                        self.latest_version, replica_infos))
+                selected_locations = self.spot_placer.select(
+                    latest_nonterminal_replicas, num_spot_to_scale_up)
+                assert len(selected_locations) == num_spot_to_scale_up
+                for location in selected_locations:
+                    locations.append(location)
+                    logger.info(
+                        f'Chosen location {location} with {self.spot_placer}')
+            else:
+                locations = [None] * num_spot_to_scale_up
+            for target_location in locations:
                 scaling_options.append(
                     AutoscalerDecision(
                         AutoscalerDecisionOperator.SCALE_UP,
-                        target=self._get_spot_resources_override_dict()))
+                        target=self._get_spot_resources_override_dict(
+                            target_location)))
         elif num_nonterminal_spot > num_spot_to_provision:
             # Too many spot instances, scale down.
             # Get the replica to scale down with _select_replicas_to_scale_down

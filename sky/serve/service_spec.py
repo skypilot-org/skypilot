@@ -83,6 +83,8 @@ class SkyServiceSpec:
             self.dynamic_ondemand_fallback) or (
                 self.base_ondemand_fallback_replicas is not None and
                 self.base_ondemand_fallback_replicas > 0)
+        # TODO(tian): Expose this to users.
+        self.use_spot_placer: bool = True
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
