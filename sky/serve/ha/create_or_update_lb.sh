@@ -2,6 +2,8 @@
 
 set -e
 
+# Unset SKYPILOT_DEBUG to avoid string parsing issues
+export SKYPILOT_DEBUG=0
 service_name=$1
 docker_image_repo=$2
 new_service_name=$3
@@ -18,7 +20,10 @@ if [ -z "$new_service_name" ]; then
 else
     echo "Waiting for '$new_service_name' to be ready"
     sky serve status $new_service_name || { echo "Service $new_service_name not found" && exit 1; }
-    until sky serve status $new_service_name | grep -q READY; do sleep 5; done
+    until sky serve status $new_service_name | grep -q READY; do
+        echo "Waiting for '$new_service_name' to be ready...";
+        sleep 5;
+    done
     echo -e "\n\nPointing the load balancer for '$service_name' to the new service '$new_service_name'"
 fi
 

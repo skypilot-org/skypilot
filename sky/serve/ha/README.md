@@ -71,7 +71,7 @@ If the controller fails, the load balancer will continue to serve traffic by sen
     ```
     ./create_or_update_lb.sh <service-name> <docker-repo> <service-name>-v2
     ```
-3. Once the load balancer is pointed to the new service, delete the old replicas.
+3. Once the load balancer is pointed to the new service (by checking the rolling update as shown [here](#how-to-perform-a-rolling-update)), delete the old replicas.
     ```
     kubectl get pods | grep <service-name>
     # Find the old services in the list and delete them
