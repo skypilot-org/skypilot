@@ -262,7 +262,7 @@ class Task:
         self.outputs: Optional[str] = None
         self.estimated_inputs_size_gigabytes: Optional[float] = None
         self.estimated_outputs_size_gigabytes: Optional[float] = None
-        # Default to CPUNode
+        # Default to CPU VM
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
         self._service: Optional[service_spec.SkyServiceSpec] = None

@@ -75,7 +75,6 @@ class SkyServiceSpec:
             bool] = dynamic_ondemand_fallback
         self._base_ondemand_fallback_replicas: Optional[
             int] = base_ondemand_fallback_replicas
-        # _spot_locations will be set by set_spot_locations.
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
 

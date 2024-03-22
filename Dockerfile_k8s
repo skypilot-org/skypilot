@@ -28,7 +28,7 @@ USER sky
 # Install SkyPilot pip dependencies preemptively to speed up provisioning time
 RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install networkx oauth2client pandas pendulum PrettyTable && \
-    pip install ray[default]==2.4.0 rich tabulate filelock && \
+    pip install ray[default]==2.9.3 rich tabulate filelock && \
     pip install packaging 'protobuf<4.0.0' pulp && \
     pip install pycryptodome==3.12.0 && \
     pip install docker kubernetes==28.1.0

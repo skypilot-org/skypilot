@@ -12,24 +12,29 @@ ingress_spec:
     rules:
     - http:
         paths:
-        - path: /{{ path_prefix }}(/|$)(.*)
+        {% for service in service_names_and_ports %}
+        - path: /{{ service.path_prefix }}(/|$)(.*)
           pathType: ImplementationSpecific
           backend:
             service:
-              name: {{ service_name }}
+              name: {{ service.service_name }}
               port:
-                number: {{ service_port }}
-service_spec:
-  apiVersion: v1
-  kind: Service
-  metadata:
-    name: {{ service_name }}
-    labels:
-      parent: skypilot
-  spec:
-    type: ClusterIP
-    selector:
-      {{ selector_key }}: {{ selector_value }}
-    ports:
-    - port: {{ service_port }}
-      targetPort: {{ service_port }}
+                number: {{ service.service_port }}
+        {% endfor %}
+services_spec:
+  {% for service in service_names_and_ports %}
+  {{ service.service_name }}:
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: {{ service.service_name }}
+      labels:
+        parent: skypilot
+    spec:
+      type: ClusterIP
+      selector:
+        {{ selector_key }}: {{ selector_value }}
+      ports:
+      - port: {{ service.service_port }}
+        targetPort: {{ service.service_port }}
+  {% endfor %}

@@ -5,6 +5,7 @@ reservation-related functions here, so that the cache of the reservations can be
 shared across multiple clouds.GCP() objects.
 """
 
+import copy
 import dataclasses
 import json
 import time
@@ -139,6 +140,12 @@ def _list_reservations_for_instance_type(
     For example, if we have a specific reservation with n1-highmem-8
     in us-central1-c. `sky launch --gpus V100` will fail.
     """
+    prioritize_reservations = skypilot_config.get_nested(
+        ('gcp', 'prioritize_reservations'), False)
+    specific_reservations = skypilot_config.get_nested(
+        ('gcp', 'specific_reservations'), [])
+    if not prioritize_reservations and not specific_reservations:
+        return []
     logger.debug(f'Querying GCP reservations for instance {instance_type!r}')
     list_reservations_cmd = (
         'gcloud compute reservations list '
@@ -165,9 +172,15 @@ def _list_reservations_for_instance_type(
 
 
 def get_minimal_permissions() -> List[str]:
-    if skypilot_config.get_nested(('gcp', 'vpc_name'), None) is not None:
-        return constants.VM_MINIMAL_PERMISSIONS
-    # If custom VPC is not specified, permissions to modify network are
-    # required to ensure SkyPilot to be able to setup the network, and
-    # allow opening ports (e.g., via `resources.ports`).
-    return constants.VM_MINIMAL_PERMISSIONS + constants.FIREWALL_PERMISSIONS
+    permissions = copy.copy(constants.VM_MINIMAL_PERMISSIONS)
+    if skypilot_config.get_nested(('gcp', 'vpc_name'), None) is None:
+        # If custom VPC is not specified, permissions to modify network are
+        # required to ensure SkyPilot to be able to setup the network, and
+        # allow opening ports (e.g., via `resources.ports`).
+        permissions += constants.FIREWALL_PERMISSIONS
+
+    if (skypilot_config.get_nested(('gcp', 'prioritize_reservations'), False) or
+            skypilot_config.get_nested(('gcp', 'specific_reservations'), [])):
+        permissions += constants.RESERVATION_PERMISSIONS
+
+    return permissions
