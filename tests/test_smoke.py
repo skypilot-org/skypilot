@@ -683,6 +683,7 @@ def test_image_no_conda():
     run_one_test(test)
 
 
+@pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_custom_default_conda_env(generic_cloud: str):
     name = _get_cluster_name()
     test = Test('custom_default_conda_env', [
@@ -3027,6 +3028,7 @@ def test_skyserve_azure_http():
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_llm(generic_cloud: str):
     """Test skyserve with real LLM usecase"""
     name = _get_service_name()
@@ -3084,6 +3086,7 @@ def test_skyserve_spot_recovery():
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = Test(
@@ -3147,6 +3150,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -3180,6 +3184,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
@@ -3203,6 +3208,7 @@ def test_skyserve_load_balancer(generic_cloud: str):
 
 @pytest.mark.gcp
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
@@ -3244,6 +3250,7 @@ def test_skyserve_auto_restart():
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
@@ -3269,6 +3276,7 @@ def test_skyserve_cancel(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
@@ -3297,6 +3305,7 @@ def test_skyserve_update(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
     name = _get_service_name()
@@ -3333,6 +3342,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
@@ -3374,6 +3384,7 @@ def test_skyserve_fast_update(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     name = _get_service_name()
@@ -3411,6 +3422,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 
 @pytest.mark.serve
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
+@pytest.mark.no_kubernetes
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
     name = _get_service_name() + mode
