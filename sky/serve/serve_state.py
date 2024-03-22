@@ -515,6 +515,7 @@ def get_latest_version(service_name: str) -> int:
         return row[0]
     raise ValueError(f'No version found for service {service_name}')
 
+
 def get_least_recent_version(service_name: str) -> int:
     """Gets the least recent version of a service."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:

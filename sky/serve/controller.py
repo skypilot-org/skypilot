@@ -120,7 +120,8 @@ class SkyServeController:
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
-                latest_version = serve_state.get_latest_version()
+                latest_version = serve_state.get_latest_version(
+                    self._service_name)
                 if version != latest_version:
                     logger.error(f'Invalid version {version}, '
                                  f'latest version: {latest_version}.')
