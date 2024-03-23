@@ -68,12 +68,11 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'It may have been deleted externally.')
 
 
-def get_enabled_storage_clouds(
+def get_cached_enabled_storage_clouds_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[str]:
     # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
     # is resolved by implementing separate 'enabled_storage_clouds'
-    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-        raise_if_no_cloud_access=raise_if_no_cloud_access)
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
     enabled_clouds = [str(cloud) for cloud in enabled_clouds]
 
     enabled_storage_clouds = [
@@ -91,7 +90,7 @@ def get_enabled_storage_clouds(
 
 def _is_storage_cloud_enabled(cloud_name: str,
                               try_fix_with_sky_check: bool = True) -> bool:
-    enabled_storage_clouds = get_enabled_storage_clouds()
+    enabled_storage_clouds = get_cached_enabled_storage_clouds_or_refresh()
     if cloud_name in enabled_storage_clouds:
         return True
     if try_fix_with_sky_check:

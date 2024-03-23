@@ -168,7 +168,7 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     bucket_name = f'sky-bench-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
     # Select the bucket type.
-    enabled_clouds = storage_lib.get_enabled_storage_clouds(
+    enabled_clouds = storage_lib.get_cached_enabled_storage_clouds_or_refresh(
         raise_if_no_cloud_access=True)
     # Already checked by raise_if_no_cloud_access=True.
     assert enabled_clouds
