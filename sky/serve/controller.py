@@ -7,6 +7,7 @@ import threading
 import time
 import traceback
 from typing import Any, Dict, List
+import uuid
 
 import fastapi
 import uvicorn
@@ -49,6 +50,7 @@ class SkyServeController:
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.Autoscaler.from_spec(service_name, service_spec))
         self._port = port
+        self._controller_session = uuid.uuid4().hex
         self._app = fastapi.FastAPI()
 
     def _run_autoscaler(self):
@@ -95,6 +97,16 @@ class SkyServeController:
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
+            controller_session = request_data.get('controller_session', None)
+            if (controller_session is not None and
+                    controller_session != self._controller_session):
+                return fastapi.Response(
+                    status_code=403,
+                    content=('Controller session mismatch: '
+                             f'{controller_session} != '
+                             f'{self._controller_session}. '
+                             'Please restart the load balancer.'))
+
             # TODO(MaoZiming): Check aggregator type.
             replica_infos = serve_state.get_replica_infos(self._service_name)
             request_aggregator: Dict[str, Any] = request_data.get(
@@ -115,7 +127,10 @@ class SkyServeController:
             chosen_replicas = filter(
                 lambda info: info.version == chosen_version, ready_replicas)
             ready_replica_urls = [info.url for info in chosen_replicas]
-            return {'ready_replica_urls': ready_replica_urls}
+            return {
+                'ready_replica_urls': ready_replica_urls,
+                'controller_session': self._controller_session
+            }
 
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request):

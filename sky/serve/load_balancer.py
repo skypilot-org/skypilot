@@ -35,6 +35,7 @@ class SkyServeLoadBalancer:
         """
         self._app = fastapi.FastAPI()
         self._controller_url = controller_url
+        self._controller_session = None
         self._load_balancer_port = load_balancer_port
         self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
             lb_policies.RoundRobinPolicy())
@@ -61,7 +62,15 @@ class SkyServeLoadBalancer:
                         self._controller_url + '/controller/load_balancer_sync',
                         json={
                             'request_aggregator':
-                                self._request_aggregator.to_dict()
+                                self._request_aggregator.to_dict(),
+                            # This is used to verify the controller to be the
+                            # same one that the load balancer is connecting to,
+                            # avoiding the case that the controller is restarted
+                            # and the load balancer connects to the new
+                            # controller immediately, causing the service to be
+                            # unavailable, although the old replicas are still
+                            # in service.
+                            'controller_session': self._controller_session
                         },
                         timeout=5)
                     # Clean up after reporting request information to avoid OOM.
@@ -69,9 +78,13 @@ class SkyServeLoadBalancer:
                     response.raise_for_status()
                     ready_replica_urls = response.json().get(
                         'ready_replica_urls')
+                    controller_session = response.json().get(
+                        'controller_session')
                 except requests.RequestException as e:
                     print(f'An error occurred: {e}')
                 else:
+                    logger.info(f'Controller session: {controller_session}')
+                    self._controller_session = controller_session
                     logger.info(f'Available Replica URLs: {ready_replica_urls}')
                     self._load_balancing_policy.set_ready_replicas(
                         ready_replica_urls)
@@ -95,7 +108,21 @@ class SkyServeLoadBalancer:
         logger.info(f'Redirecting request to {path}')
         return fastapi.responses.RedirectResponse(url=path)
 
+    async def _get_urls(self, request: fastapi.Request):
+        del request  # Unused
+
+        ready_replica_urls = self._load_balancing_policy.ready_replicas
+        for i, ready_replica_url in enumerate(ready_replica_urls):
+            if not ready_replica_url.startswith('http'):
+                ready_replica_url = 'http://' + ready_replica_url
+            ready_replica_urls[i] = ready_replica_url
+        return fastapi.responses.JSONResponse(content={
+            'controller': self._controller_url,
+            'replicas': ready_replica_urls
+        })
+
     def run(self):
+        self._app.add_api_route('/-/urls', self._get_urls, methods=['GET'])
         self._app.add_api_route('/{path:path}',
                                 self._redirect_handler,
                                 methods=['GET', 'POST', 'PUT', 'DELETE'])
@@ -123,10 +150,13 @@ def run_load_balancer(controller_addr: str, load_balancer_port: int):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--controller-addr', required=True,
+    parser.add_argument('--controller-addr',
+                        required=True,
                         default='127.0.0.1',
                         help='The address of the controller.')
-    parser.add_argument('--load-balancer-port', type=int, required=True,
+    parser.add_argument('--load-balancer-port',
+                        type=int,
+                        required=True,
                         default=8890,
                         help='The port where the load balancer listens to.')
     args = parser.parse_args()
