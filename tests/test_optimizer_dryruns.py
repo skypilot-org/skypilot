@@ -738,7 +738,7 @@ def test_disk_tier_mismatch(enable_all_clouds):
             sky.Resources(cloud=cloud, disk_tier=tier)
         for unsupported_tier in (set(resources_utils.DiskTier) -
                                  cloud._SUPPORTED_DISK_TIERS):
-            with pytest.raises(exceptions.NotSupportedError) as e:
+            with pytest.raises(ValueError) as e:
                 sky.Resources(cloud=cloud, disk_tier=unsupported_tier)
             assert f'is not supported' in str(e.value), str(e.value)
 

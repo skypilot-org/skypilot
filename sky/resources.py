@@ -5,9 +5,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 
+from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
-from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
@@ -131,6 +131,10 @@ class Resources:
           _docker_login_config: the docker configuration to use. This include
             the docker username, password, and registry server. If None, skip
             docker login.
+
+        Raises:
+            ValueError: if some attributes are invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
         """
         self._version = self._VERSION
         self._cloud = cloud
@@ -546,6 +550,12 @@ class Resources:
 
     def _validate_and_set_region_zone(self, region: Optional[str],
                                       zone: Optional[str]) -> None:
+        """Try to validate and set the region and zone attribute.
+
+        Raises:
+            ValueError: if the attributes are invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
+        """
         if region is None and zone is None:
             return
 
@@ -553,7 +563,8 @@ class Resources:
             # Try to infer the cloud from region/zone, if unique. If 0 or >1
             # cloud corresponds to region/zone, errors out.
             valid_clouds = []
-            enabled_clouds = global_user_state.get_enabled_clouds()
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+                raise_if_no_cloud_access=True)
             cloud_to_errors = {}
             for cloud in enabled_clouds:
                 try:
@@ -650,6 +661,12 @@ class Resources:
         return filtered_regions
 
     def _try_validate_instance_type(self) -> None:
+        """Try to validate the instance type attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
+        """
         if self.instance_type is None:
             return
 
@@ -664,7 +681,8 @@ class Resources:
         else:
             # If cloud not specified
             valid_clouds = []
-            enabled_clouds = global_user_state.get_enabled_clouds()
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+                raise_if_no_cloud_access=True)
             for cloud in enabled_clouds:
                 if cloud.instance_type_exists(self._instance_type):
                     valid_clouds.append(cloud)
@@ -689,6 +707,11 @@ class Resources:
             self._cloud = valid_clouds[0]
 
     def _try_validate_cpus_mem(self) -> None:
+        """Try to validate the cpus and memory attributes.
+
+        Raises:
+            ValueError: if the attributes are invalid.
+        """
         if self.cpus is None and self.memory is None:
             return
         if self.instance_type is not None:
@@ -729,6 +752,11 @@ class Resources:
                             f'memory, but {self.memory} is requested.')
 
     def _try_validate_spot(self) -> None:
+        """Try to validate the spot related attributes.
+
+        Raises:
+            ValueError: if the attributes are invalid.
+        """
         if self._spot_recovery is None:
             return
         if not self._use_spot:
@@ -753,6 +781,11 @@ class Resources:
         return None
 
     def _try_validate_image_id(self) -> None:
+        """Try to validate the image_id attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
         if self._image_id is None:
             return
 
@@ -826,13 +859,30 @@ class Resources:
                         'image.')
 
     def _try_validate_disk_tier(self) -> None:
+        """Try to validate the disk_tier attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
         if self.disk_tier is None:
             return
         if self.cloud is not None:
-            self.cloud.check_disk_tier_enabled(self.instance_type,
-                                               self.disk_tier)
+            try:
+                self.cloud.check_disk_tier_enabled(self.instance_type,
+                                                   self.disk_tier)
+            except exceptions.NotSupportedError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Disk tier {self.disk_tier.value} is not supported '
+                        f'for instance type {self.instance_type}.') from None
 
     def _try_validate_ports(self) -> None:
+        """Try to validate the ports attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
+        """
         if self.ports is None:
             return
         if skypilot_config.get_nested(('aws', 'security_group_name'),
@@ -844,6 +894,22 @@ class Resources:
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
                 self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
+        else:
+            at_least_one_cloud_supports_ports = False
+            for cloud in sky_check.get_cached_enabled_clouds_or_refresh(
+                    raise_if_no_cloud_access=True):
+                try:
+                    cloud.check_features_are_supported(
+                        self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
+                    at_least_one_cloud_supports_ports = True
+                except exceptions.NotSupportedError:
+                    pass
+            if not at_least_one_cloud_supports_ports:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'No enabled clouds support opening ports. To fix: '
+                        'do not specify resources.ports, or enable a cloud '
+                        'that does support this feature.')
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
 

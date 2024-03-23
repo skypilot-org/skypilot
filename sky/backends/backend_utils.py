@@ -2620,23 +2620,6 @@ def stop_handler(signum, frame):
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
-def check_public_cloud_enabled():
-    """Checks if any of the public clouds is enabled.
-
-    Exceptions:
-        exceptions.NoCloudAccessError: if no public cloud is enabled.
-    """
-    if global_user_state.get_enabled_clouds():
-        return
-
-    sky_check.check(quiet=True)
-    if not global_user_state.get_enabled_clouds():
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NoCloudAccessError(
-                'Cloud access is not set up. Run: '
-                f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
-
-
 def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
                                        command: str,
                                        failure_message: str) -> str:
