@@ -140,13 +140,16 @@ class Azure(clouds.Cloud):
             # The region used here is only for where to send the query,
             # not the image location. Azure's image is globally available.
             region = 'eastus'
-        compute_client = azure.get_client('compute', cls.get_project_id())
+        if image_id.startswith('skypilot:'):
+            image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                             clouds='azure')
         image_id_splitted = image_id.split(':')
         if len(image_id_splitted) != 4:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid image id: {image_id}. Expected '
                                  'format: <publisher>:<offer>:<sku>:<version>')
         publisher, offer, sku, version = image_id_splitted
+        compute_client = azure.get_client('compute', cls.get_project_id())
         try:
             image = compute_client.virtual_machine_images.get(
                 region, publisher, offer, sku, version)
@@ -156,8 +159,15 @@ class Azure(clouds.Cloud):
         if image.os_disk_image is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Retrieve image size for {image_id} failed.')
-        size_in_bytes = image.os_disk_image.additional_properties.get(
-            'sizeInBytes')
+        ap = image.os_disk_image.additional_properties
+        size_in_gb = ap.get('sizeInGb')
+        if size_in_gb is not None:
+            return float(size_in_gb)
+        size_in_bytes = ap.get('sizeInBytes')
+        if size_in_bytes is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Retrieve image size for {image_id} failed. '
+                                 f'Got additional_properties: {ap}')
         size_in_gb = size_in_bytes / (1024**3)
         return size_in_gb
 
