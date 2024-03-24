@@ -123,7 +123,6 @@ html[data-theme="dark"] {
   --bs-navbar-nav-link-padding-x: 1rem;
 }
 
-/* Ray logo */
 .navbar-brand.logo>svg {
   width: 120px;
 }
@@ -155,14 +154,18 @@ html[data-theme="dark"] {
 }
 
 
-.bd-header .navbar-nav li.current a.nav-link:hover {
+.bd-header .navbar-nav li a.nav-link:hover {
   text-decoration: none;
-  /* Prevents underline for the current tab on hover */
 }
+
 /* Add transparent underline for the other tabs that are not active to avoid
 active tab to be moved up. */
 .nav-link {
   border-bottom: max(3px, .1875rem, .12em) solid transparent;
+}
+
+.nav-link:hover {
+  border-bottom: max(3px, .1875rem, .12em) solid;
 }
 
 /* Assuming your breakpoints are defined in pixels */
