@@ -50,13 +50,15 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
       resources: ["services"]
       verbs: ["list", "get"]
 
+Example Service Account YAML
+----------------------------
 
 To create a service account bound with these roles, you can use the following YAML:
 
 .. code-block:: yaml
 
     # create-sky-sa.yaml
-        kind: ServiceAccount
+    kind: ServiceAccount
     apiVersion: v1
     metadata:
       name: sky-sa
@@ -102,7 +104,10 @@ To create a service account bound with these roles, you can use the following YA
     rules:
     - apiGroups: [""]
       resources: ["services"]
-      verbs: ["list", "get"]
+      verbs: ["list", "get", "watch"]
+    - apiGroups: ["rbac.authorization.k8s.io"]
+      resources: ["roles", "rolebindings"]
+      verbs: ["list", "get", "watch"]
     ---
     # RoleBinding for accessing ingress resources
     apiVersion: rbac.authorization.k8s.io/v1
