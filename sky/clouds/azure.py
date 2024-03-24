@@ -75,9 +75,6 @@ class Azure(clouds.Cloud):
         features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
-            clouds.CloudImplementationFeatures.IMAGE_ID:
-                ('Specifying image ID is currently not supported on '
-                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -138,6 +135,36 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        if region is None:
+            # Seems like the region used here is only for where
+            # to send the query, not if the image in this region.
+            # TODO(tian): Investigate more.
+            region = 'eastus'
+            # with ux_utils.print_exception_no_traceback():
+            #     raise ValueError('Azure requires region to get image size.')
+        compute_client = azure.get_client('compute', cls.get_project_id())
+        image_id_splitted = image_id.split(':')
+        if len(image_id_splitted) != 4:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid image id: {image_id}. Expected '
+                                 'format: <publisher>:<offer>:<sku>:<version>')
+        publisher, offer, sku, version = image_id_splitted
+        try:
+            image = compute_client.virtual_machine_images.get(
+                region, publisher, offer, sku, version)
+        except azure.resources_not_found_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Image not found: {image_id}') from e
+        if image.os_disk_image is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Retrieve image size for {image_id} failed.')
+        size_in_bytes = image.os_disk_image.additional_properties.get(
+            'sizeInBytes')
+        size_in_gb = size_in_bytes / (1024**3)
+        return size_in_gb
+
+    @classmethod
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
@@ -149,7 +176,7 @@ class Azure(clouds.Cloud):
                                                          disk_tier=disk_tier,
                                                          clouds='azure')
 
-    def _get_image_config(self, gen_version, instance_type):
+    def _get_default_image_config(self, gen_version, instance_type):
         # TODO(tian): images for Azure is not well organized. We should refactor
         # it to images.csv like AWS.
         # az vm image list \
@@ -270,11 +297,32 @@ class Azure(clouds.Cloud):
             acc_count = str(sum(acc_dict.values()))
         else:
             custom_resources = None
-        # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import azure_catalog
-        gen_version = azure_catalog.get_gen_version_from_instance_type(
-            r.instance_type)
-        image_config = self._get_image_config(gen_version, r.instance_type)
+
+        if resources.image_id is None:
+            # pylint: disable=import-outside-toplevel
+            from sky.clouds.service_catalog import azure_catalog
+            gen_version = azure_catalog.get_gen_version_from_instance_type(
+                r.instance_type)
+            image_config = self._get_default_image_config(
+                gen_version, r.instance_type)
+        else:
+            if None in resources.image_id:
+                image_id = resources.image_id[None]
+            else:
+                assert region_name in resources.image_id, resources.image_id
+                image_id = resources.image_id[region_name]
+            if image_id.startswith('skypilot:'):
+                image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                                 clouds='azure')
+            # Already checked in resources.py
+            publisher, offer, sku, version = image_id.split(':')
+            image_config = {
+                'image_publisher': publisher,
+                'image_offer': offer,
+                'image_sku': sku,
+                'image_version': version,
+            }
+
         # Setup commands to eliminate the banner and restart sshd.
         # This script will modify /etc/ssh/sshd_config and add a bash script
         # into .bashrc. The bash script will restart sshd if it has not been

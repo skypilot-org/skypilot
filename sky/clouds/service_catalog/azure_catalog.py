@@ -21,6 +21,10 @@ _PULL_FREQUENCY_HOURS = 7
 _df = common.read_catalog('azure/vms.csv',
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
+# TODO(tian): Implement the image catalog for Azure.
+# _image_df = common.read_catalog('azure/images.csv',
+#                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
 # We will select from the following three instance families:
 _DEFAULT_INSTANCE_FAMILY = [
     # The latest general-purpose instance family as of Mar. 2023.
@@ -168,3 +172,17 @@ def list_accelerators(
     return common.list_accelerators_impl('Azure', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
                                          case_sensitive, all_regions)
+
+
+def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
+    """Returns the image id from the tag."""
+    # return common.get_image_id_from_tag_impl(_image_df, tag, region)
+    del tag, region  # Unused.
+    return None
+
+
+def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
+    """Returns whether the image tag is valid."""
+    # return common.is_image_tag_valid_impl(_image_df, tag, region)
+    del tag, region  # Unused.
+    return False
