@@ -137,12 +137,9 @@ class Azure(clouds.Cloud):
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if region is None:
-            # Seems like the region used here is only for where
-            # to send the query, not if the image in this region.
-            # TODO(tian): Investigate more.
+            # The region used here is only for where to send the query,
+            # not the image location. Azure's image is globally available.
             region = 'eastus'
-            # with ux_utils.print_exception_no_traceback():
-            #     raise ValueError('Azure requires region to get image size.')
         compute_client = azure.get_client('compute', cls.get_project_id())
         image_id_splitted = image_id.split(':')
         if len(image_id_splitted) != 4:
