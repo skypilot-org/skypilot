@@ -6,13 +6,14 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 import colorama
 
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
@@ -261,15 +262,18 @@ def shared_controller_vars_to_fill(
 
 def get_controller_resources(
     controller_type: str,
+    controller_name: str,
     controller_resources_config: Dict[str, Any],
-) -> 'resources.Resources':
+    task_resources: Iterable[resources.Resources],
+) -> Set[resources.Resources]:
     """Read the skypilot config and setup the controller resources.
 
     Returns:
-        A tuple of (vars_to_fill, controller_resources_config). `var_to_fill`
-        is a dict of variables that will be filled in the controller template.
-        The controller_resources_config is the resources config that will be
-        used to launch the controller.
+        A set of controller resources that will be used to launch the
+        controller. All fields are the same except for the cloud. If no
+        controller exists and the controller resources has no cloud
+        specified, the controller will be launched on one of the clouds
+        of the task resources for better connectivity.
     """
     controller_resources_config_copied: Dict[str, Any] = copy.copy(
         controller_resources_config)
@@ -300,7 +304,30 @@ def get_controller_resources(
                     err=f'Expected exactly one resource, got '
                     f'{len(controller_resources)} resources: '
                     f'{controller_resources}'))
-    return list(controller_resources)[0]
+    controller_resources_to_use: resources.Resources = list(
+        controller_resources)[0]
+
+    controller_exist = (global_user_state.get_cluster_from_name(controller_name)
+                        is not None)
+    if controller_exist or controller_resources_to_use.cloud is not None:
+        return {controller_resources_to_use}
+
+    # If the controller and replicas are from the same cloud, it should
+    # provide better connectivity. We will let the controller choose from
+    # the clouds of the resources if the controller does not exist.
+    # TODO(tian): Consider respecting the regions/zones specified for the
+    # resources as well.
+    requested_clouds: Set['clouds.Cloud'] = set()
+    for res in task_resources:
+        # cloud is an object and will not be able to be distinguished by set.
+        # Here we manually check if the cloud is in the set.
+        if res.cloud is not None and not clouds.cloud_in_iterable(
+                res.cloud, requested_clouds):
+            requested_clouds.add(res.cloud)
+    return {
+        controller_resources_to_use.copy(cloud=controller_cloud)
+        for controller_cloud in requested_clouds
+    }
 
 
 def _setup_proxy_command_on_controller(

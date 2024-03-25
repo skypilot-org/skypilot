@@ -1,6 +1,6 @@
 """Clouds in Sky."""
 from sky.clouds.cloud import Cloud
-from sky.clouds.cloud import cloud_in_list
+from sky.clouds.cloud import cloud_in_iterable
 from sky.clouds.cloud import CloudImplementationFeatures
 from sky.clouds.cloud import ProvisionerVersion
 from sky.clouds.cloud import Region
@@ -44,5 +44,5 @@ __all__ = [
     'StatusVersion',
     'Fluidstack',
     # Utility functions
-    'cloud_in_list',
+    'cloud_in_iterable',
 ]
