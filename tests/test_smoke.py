@@ -77,7 +77,7 @@ storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
     'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
     'touch ~/tmp-workdir/foo',
-    'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
+    '[ ! -e ~/tmp-workdir/circle-link ] && ln -s ~/tmp-workdir/ ~/tmp-workdir/circle-link || true',
     'touch ~/.ssh/id_rsa.pub'
 ]
 
@@ -683,6 +683,27 @@ def test_image_no_conda():
     run_one_test(test)
 
 
+@pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
+def test_custom_default_conda_env(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test('custom_default_conda_env', [
+        f'sky launch -c {name} -y --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
+        f'sky status -r {name} | grep "UP"',
+        f'sky logs {name} 1 --status',
+        f'sky logs {name} 1 --no-follow | grep -P "myenv\\s+\\*"',
+        f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
+        f'sky logs {name} 2 --status',
+        f'sky autostop -y -i 0 {name}',
+        'sleep 60',
+        f'sky status -r {name} | grep "STOPPED"',
+        f'sky start -y {name}',
+        f'sky logs {name} 2 --no-follow | grep -P "myenv\\s+\\*"',
+        f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
+        f'sky logs {name} 3 --status',
+    ], f'sky down -y {name}')
+    run_one_test(test)
+
+
 # ------------ Test stale job ------------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
@@ -942,6 +963,43 @@ def test_kubernetes_storage_mounts():
         ]
         test = Test(
             'kubernetes_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.parametrize(
+    "image_id",
+    [
+        "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
+        "docker:ubuntu:18.04",
+        # Test image with python 3.11 installed by default.
+        "docker:continuumio/miniconda3",
+    ])
+def test_docker_storage_mounts(generic_cloud: str, image_id: str):
+    # Tests bucket mounting on docker container
+    name = _get_cluster_name()
+    timestamp = str(time.time()).replace('.', '')
+    storage_name = f'sky-test-{timestamp}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls {storage_name}/hello.txt || '
+            f'gsutil ls gs://{storage_name}/hello.txt',
+        ]
+        test = Test(
+            'docker_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
@@ -3007,6 +3065,7 @@ def test_skyserve_azure_http():
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_llm(generic_cloud: str):
     """Test skyserve with real LLM usecase"""
     name = _get_service_name()
@@ -3064,6 +3123,7 @@ def test_skyserve_spot_recovery():
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = Test(
@@ -3127,6 +3187,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -3160,6 +3221,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
@@ -3183,6 +3245,7 @@ def test_skyserve_load_balancer(generic_cloud: str):
 
 @pytest.mark.gcp
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
@@ -3224,6 +3287,7 @@ def test_skyserve_auto_restart():
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
@@ -3249,6 +3313,7 @@ def test_skyserve_cancel(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
@@ -3277,6 +3342,7 @@ def test_skyserve_update(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
     name = _get_service_name()
@@ -3313,6 +3379,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
@@ -3354,6 +3421,7 @@ def test_skyserve_fast_update(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     name = _get_service_name()
@@ -3391,6 +3459,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 
 @pytest.mark.serve
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
+@pytest.mark.no_kubernetes
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
     name = _get_service_name() + mode
@@ -3462,15 +3531,6 @@ def test_user_ray_cluster(generic_cloud: str):
         f'sky down -y {name}',
     )
     run_one_test(test)
-
-
-_CODE_PREFIX = ['import sky']
-
-
-def _build(code: List[str]) -> str:
-    code = _CODE_PREFIX + code
-    code = ';'.join(code)
-    return f'python3 -u -c {shlex.quote(code)}'
 
 
 # ------- Testing the core API --------

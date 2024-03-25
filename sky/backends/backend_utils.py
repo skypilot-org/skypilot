@@ -850,7 +850,7 @@ def write_cluster_config(
 
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
-        f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
+        f'{constants.SKY_PYTHON_CMD} -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
@@ -902,7 +902,9 @@ def write_cluster_config(
                 'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
                 'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
                 'dump_port_command': dump_port_command,
-                # Ray version.
+                # Sky-internal constants.
+                'sky_ray_cmd': constants.SKY_RAY_CMD,
+                'sky_pip_cmd': constants.SKY_PIP_CMD,
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Command for waiting ray cluster to be ready on head.
                 'ray_head_wait_initialized_command':
@@ -934,6 +936,7 @@ def write_cluster_config(
     # Add kubernetes config fields from ~/.sky/config
     if isinstance(cloud, clouds.Kubernetes):
         kubernetes_utils.combine_pod_config_fields(tmp_yaml_path)
+        kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
@@ -2615,23 +2618,6 @@ def stop_handler(signum, frame):
           f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     with ux_utils.print_exception_no_traceback():
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
-
-
-def check_public_cloud_enabled():
-    """Checks if any of the public clouds is enabled.
-
-    Exceptions:
-        exceptions.NoCloudAccessError: if no public cloud is enabled.
-    """
-    if global_user_state.get_enabled_clouds():
-        return
-
-    sky_check.check(quiet=True)
-    if not global_user_state.get_enabled_clouds():
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NoCloudAccessError(
-                'Cloud access is not set up. Run: '
-                f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
 
 
 def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,

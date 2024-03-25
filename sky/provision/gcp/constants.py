@@ -196,6 +196,10 @@ FIREWALL_PERMISSIONS = [
     'compute.firewalls.delete',
 ]
 
+RESERVATION_PERMISSIONS = [
+    'compute.reservations.list',
+]
+
 TPU_MINIMAL_PERMISSIONS = [
     'tpu.nodes.create',
     'tpu.nodes.delete',

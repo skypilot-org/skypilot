@@ -616,6 +616,20 @@ def get_config_schema():
                     'required': [],
                     # Allow arbitrary keys since validating pod spec is hard
                     'additionalProperties': True,
+                },
+                'custom_metadata': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating metadata is hard
+                    'additionalProperties': True,
+                    # Disallow 'name' and 'namespace' keys in this dict
+                    'not': {
+                        'anyOf': [{
+                            'required': ['name']
+                        }, {
+                            'required': ['namespace']
+                        }]
+                    }
                 }
             }
         },

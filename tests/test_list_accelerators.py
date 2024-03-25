@@ -14,7 +14,7 @@ def test_list_accelerators():
     assert 'A100-80GB' in result, result
 
 
-def test_list_ccelerators_all():
+def test_list_accelerators_all():
     result = sky.list_accelerators(gpus_only=False)
     assert 'V100' in result, result
     assert 'tpu-v3' in result, result

@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 
 import colorama
 
+import sky
 from sky import clouds
 from sky import provision
 from sky import sky_logging
@@ -165,6 +166,8 @@ def bulk_provision(
 
     with provision_logging.setup_provision_logging(log_dir):
         try:
+            logger.debug(f'SkyPilot version: {sky.__version__}; '
+                         f'commit: {sky.__commit__}')
             logger.debug(_TITLE.format('Provisioning'))
             logger.debug(
                 'Provision config:\n'

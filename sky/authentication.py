@@ -415,10 +415,20 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         public_key = f.read()
         if not public_key.endswith('\n'):
             public_key += '\n'
-        secret_metadata = k8s.client.V1ObjectMeta(name=secret_name,
-                                                  labels={'parent': 'skypilot'})
+
+        # Generate metadata
+        secret_metadata = {
+            'name': secret_name,
+            'labels': {
+                'parent': 'skypilot'
+            }
+        }
+        custom_metadata = skypilot_config.get_nested(
+            ('kubernetes', 'custom_metadata'), {})
+        kubernetes_utils.merge_dicts(custom_metadata, secret_metadata)
+
         secret = k8s.client.V1Secret(
-            metadata=secret_metadata,
+            metadata=k8s.client.V1ObjectMeta(**secret_metadata),
             string_data={secret_field_name: public_key})
     if kubernetes_utils.check_secret_exists(secret_name, namespace):
         logger.debug(f'Key {secret_name} exists in the cluster, patching it...')

@@ -13,9 +13,7 @@ import yaml
 import sky
 from sky import clouds
 from sky import exceptions
-from sky import global_user_state
 from sky import sky_logging
-from sky.backends import backend_utils
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -874,10 +872,9 @@ class Task:
         # assert len(self.resources) == 1, self.resources
         storage_cloud = None
 
-        backend_utils.check_public_cloud_enabled()
-        enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
-        if not enabled_storage_clouds:
-            raise ValueError('No enabled cloud for storage, run: sky check')
+        enabled_storage_clouds = (
+            storage_lib.get_cached_enabled_storage_clouds_or_refresh(
+                raise_if_no_cloud_access=True))
 
         if self.best_resources is not None:
             storage_cloud = self.best_resources.cloud
