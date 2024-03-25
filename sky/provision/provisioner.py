@@ -261,6 +261,8 @@ def _ssh_probe_command(ip: str,
         '-o',
         'StrictHostKeyChecking=no',
         '-o',
+        'PasswordAuthentication=no',
+        '-o',
         'ConnectTimeout=10s',
         '-o',
         f'UserKnownHostsFile={os.devnull}',
@@ -349,18 +351,23 @@ def _wait_ssh_connection_indirect(ip: str,
     del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
-    logger.debug(f'Waiting for SSH using command: {_shlex_join(command)}')
-    proc = subprocess.run(command,
-                          shell=False,
-                          check=False,
-                          stdout=subprocess.DEVNULL,
-                          stderr=subprocess.PIPE)
-    if proc.returncode != 0:
-        stderr = proc.stderr.decode('utf-8')
-        stderr = f'Error: {stderr}'
-        logger.debug(
-            f'Waiting for SSH to {ip} with command: {_shlex_join(command)}\n'
-            f'{stderr}')
+    message = f'Waiting for SSH using command: {_shlex_join(command)}'
+    logger.debug(message)
+    try:
+        proc = subprocess.run(command,
+                              shell=False,
+                              check=False,
+                              timeout=10,
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode('utf-8')
+            stderr = f'Error: {stderr}'
+            logger.debug(f'{message}{stderr}')
+            return False, stderr
+    except subprocess.TimeoutExpired as e:
+        stderr = f'Error: {str(e)}'
+        logger.debug(f'{message}Error: {e}')
         return False, stderr
     return True, ''
 
