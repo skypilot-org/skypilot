@@ -47,13 +47,6 @@ class SkyServiceSpec:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('max_replicas must be set where '
                                      'target_qps_per_replica is set.')
-            if max_replicas == min_replicas:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Detect min_replicas equal to max_replicas while '
-                        'target_qps_per_replica is set. No autoscaling will '
-                        'be performed. Please set different min_replicas and '
-                        'max_replicas to enable autoscaling.')
         else:
             if max_replicas is not None and max_replicas != min_replicas:
                 with ux_utils.print_exception_no_traceback():
@@ -258,7 +251,8 @@ class SkyServiceSpec:
         # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
         return (f'Autoscaling from {self.min_replicas} to {self.max_replicas} '
-                f'replica{max_plural} (target QPS per replica: {self.target_qps_per_replica})')
+                f'replica{max_plural} (target QPS per replica: '
+                f'{self.target_qps_per_replica})')
 
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
