@@ -2595,6 +2595,26 @@ def test_spot_storage(generic_cloud: str):
     yaml_str = pathlib.Path(
         'examples/managed_spot_with_storage.yaml').read_text()
     storage_name = f'sky-test-{int(time.time())}'
+
+    # Also perform region testing for bucket creation to validate if buckets are
+    # created in the correct region and correctly mounted in spot jobs.
+    # However, we inject this testing for AWS and GCP since they are the
+    # supported object storage providers in SkyPilot.
+    region_flag = ''
+    region_validation_cmd = 'true'
+    if generic_cloud == 'aws':
+        region = 'us-west-2'
+        region_flag = f' --region {region}'
+        region_cmd = TestStorageWithCredentials.cli_region_cmd(storage_lib.StoreType.S3,
+                                                               storage_name)
+        region_validation_cmd = f'{region_cmd} | grep {region}'
+    elif generic_cloud == 'gcp':
+        region = 'us-west2'
+        region_flag = f' --region {region}'
+        region_cmd = TestStorageWithCredentials.cli_region_cmd(storage_lib.StoreType.GCS,
+                                                               storage_name)
+        region_validation_cmd = f'{region_cmd} | grep {region}'
+
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(yaml_str)
@@ -2604,8 +2624,9 @@ def test_spot_storage(generic_cloud: str):
             'spot_storage',
             [
                 *storage_setup_commands,
-                f'sky spot launch -n {name} --cloud {generic_cloud} {file_path} -y',
+                f'sky spot launch -n {name} --cloud {generic_cloud}{region_flag} {file_path} -y',
                 'sleep 60',  # Wait the spot queue to be updated
+                region_validation_cmd,  # Check if the bucket is created in the correct region
                 f'{_SPOT_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
@@ -4428,7 +4449,7 @@ class TestStorageWithCredentials:
                               'us-east-2', 'us-west-1', 'us-west-2'])
     def test_aws_regions(self, tmp_local_storage_obj, region):
         # This tests creation and upload to bucket in all AWS s3 regions
-        # To test full functionality, use the <TODO(ROMILB)> test above.
+        # To test full functionality, use test_spot_storage above.
         store_type = storage_lib.StoreType.S3
         tmp_local_storage_obj.add_store(store_type, region=region)
         bucket_name = tmp_local_storage_obj.name
@@ -4471,7 +4492,7 @@ class TestStorageWithCredentials:
                               'australia-southeast2', 'africa-south1'])
     def test_gcs_regions(self, tmp_local_storage_obj, region):
         # This tests creation and upload to bucket in all GCS regions
-        # To test full functionality, use the <TODO(ROMILB)> test above.
+        # To test full functionality, use test_spot_storage above.
         store_type = storage_lib.StoreType.GCS
         tmp_local_storage_obj.add_store(store_type, region=region)
         bucket_name = tmp_local_storage_obj.name
