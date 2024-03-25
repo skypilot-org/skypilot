@@ -2603,16 +2603,16 @@ def test_spot_storage(generic_cloud: str):
     region_flag = ''
     region_validation_cmd = 'true'
     if generic_cloud == 'aws':
-        region = 'us-west-2'
+        region = 'eu-central-1'
         region_flag = f' --region {region}'
-        region_cmd = TestStorageWithCredentials.cli_region_cmd(storage_lib.StoreType.S3,
-                                                               storage_name)
+        region_cmd = TestStorageWithCredentials.cli_region_cmd(
+            storage_lib.StoreType.S3, storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
     elif generic_cloud == 'gcp':
         region = 'us-west2'
         region_flag = f' --region {region}'
-        region_cmd = TestStorageWithCredentials.cli_region_cmd(storage_lib.StoreType.GCS,
-                                                               storage_name)
+        region_cmd = TestStorageWithCredentials.cli_region_cmd(
+            storage_lib.StoreType.GCS, storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
@@ -4440,13 +4440,12 @@ class TestStorageWithCredentials:
             storage_obj.delete()
 
     @pytest.mark.no_fluidstack
-    @pytest.mark.parametrize('region',
-                             ['ap-northeast-1', 'ap-northeast-2',
-                              'ap-northeast-3', 'ap-south-1', 'ap-southeast-1',
-                              'ap-southeast-2', 'eu-central-1',
-                              'eu-north-1', 'eu-west-1', 'eu-west-2',
-                              'eu-west-3', 'sa-east-1', 'us-east-1',
-                              'us-east-2', 'us-west-1', 'us-west-2'])
+    @pytest.mark.parametrize('region', [
+        'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3', 'ap-south-1',
+        'ap-southeast-1', 'ap-southeast-2', 'eu-central-1', 'eu-north-1',
+        'eu-west-1', 'eu-west-2', 'eu-west-3', 'sa-east-1', 'us-east-1',
+        'us-east-2', 'us-west-1', 'us-west-2'
+    ])
     def test_aws_regions(self, tmp_local_storage_obj, region):
         # This tests creation and upload to bucket in all AWS s3 regions
         # To test full functionality, use test_spot_storage above.
@@ -4460,7 +4459,7 @@ class TestStorageWithCredentials:
         output = out.decode('utf-8')
         expected_output_region = region
         if region == 'us-east-1':
-            expected_output_region = 'None' # us-east-1 is the default region
+            expected_output_region = 'None'  # us-east-1 is the default region
         assert expected_output_region in out.decode('utf-8'), (
             f'Bucket was not found in region {region} - '
             f'output of {region_cmd} was: {output}')
@@ -4473,23 +4472,18 @@ class TestStorageWithCredentials:
             f'tmp-file not found in bucket - output of {ls_cmd} was: {output}')
 
     @pytest.mark.no_fluidstack
-    @pytest.mark.parametrize('region',
-                             ['northamerica-northeast1',
-                              'northamerica-northeast2', 'us-central1',
-                              'us-east1', 'us-east4', 'us-east5', 'us-south1',
-                              'us-west1', 'us-west2', 'us-west3', 'us-west4',
-                              'southamerica-east1', 'southamerica-west1',
-                              'europe-central2', 'europe-north1',
-                              'europe-southwest1', 'europe-west1',
-                              'europe-west2', 'europe-west3', 'europe-west4',
-                              'europe-west6', 'europe-west8', 'europe-west9',
-                              'europe-west10', 'europe-west12', 'asia-east1',
-                              'asia-east2', 'asia-northeast1',
-                              'asia-northeast2', 'asia-northeast3',
-                              'asia-southeast1', 'asia-south1', 'asia-south2',
-                              'asia-southeast2', 'me-central1', 'me-central2',
-                              'me-west1', 'australia-southeast1',
-                              'australia-southeast2', 'africa-south1'])
+    @pytest.mark.parametrize('region', [
+        'northamerica-northeast1', 'northamerica-northeast2', 'us-central1',
+        'us-east1', 'us-east4', 'us-east5', 'us-south1', 'us-west1', 'us-west2',
+        'us-west3', 'us-west4', 'southamerica-east1', 'southamerica-west1',
+        'europe-central2', 'europe-north1', 'europe-southwest1', 'europe-west1',
+        'europe-west2', 'europe-west3', 'europe-west4', 'europe-west6',
+        'europe-west8', 'europe-west9', 'europe-west10', 'europe-west12',
+        'asia-east1', 'asia-east2', 'asia-northeast1', 'asia-northeast2',
+        'asia-northeast3', 'asia-southeast1', 'asia-south1', 'asia-south2',
+        'asia-southeast2', 'me-central1', 'me-central2', 'me-west1',
+        'australia-southeast1', 'australia-southeast2', 'africa-south1'
+    ])
     def test_gcs_regions(self, tmp_local_storage_obj, region):
         # This tests creation and upload to bucket in all GCS regions
         # To test full functionality, use test_spot_storage above.
