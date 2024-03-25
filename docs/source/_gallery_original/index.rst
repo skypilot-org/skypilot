@@ -5,7 +5,7 @@ AI Gallery
 AI Gallery is a collection of ready-to-run recipes for popular AI frameworks and AI models.
 It provides a simple way to **package**, **share**, and **run** AI projects using the simple interface of SkyPilot.
 
-Readers can directly execute the SkyPilot YAMLs on their own infrastructure, such as cloud VMs or Kubernetes.
+You can directly execute the SkyPilot YAMLs on your own infrastructure, such as :ref:`cloud VMs <installation>` or :ref:`Kubernetes <kubernetes-overview>`.
 
 .. image:: ../images/ai-gallery-cover.png
    :alt: AI Gallery
