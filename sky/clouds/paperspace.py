@@ -261,7 +261,7 @@ class Paperspace(clouds.Cloud):
                 'To configure credentials, follow the instructions at: '
                 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#paperspace\n    '
                 'Generate API key and create a json at `~/.paperspace/config.json` with \n     '
-                '    {"apiKey": "[YOUR API KEY]"}\n     '
+                '    {"apiKey": "[YOUR API KEY]"}\n    '
                 f'Reason: {str(e)}')
         except requests.exceptions.ConnectionError:
             return False, ('Failed to verify Paperspace Cloud credentials. '
