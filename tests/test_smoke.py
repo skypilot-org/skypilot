@@ -3758,6 +3758,20 @@ class TestStorageWithCredentials:
             return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
 
     @staticmethod
+    def cli_region_cmd(store_type, bucket_name):
+        if store_type == storage_lib.StoreType.S3:
+            return ('aws s3api get-bucket-location '
+                    f'--bucket {bucket_name} --output text')
+        if store_type == storage_lib.StoreType.GCS:
+            return (f'gsutil ls -L -b gs://{bucket_name}/ | '
+                    'grep "Location constraint" | '
+                    'awk \'{print tolower($NF)}\'')
+        if store_type == storage_lib.StoreType.R2:
+            raise NotImplementedError
+        if store_type == storage_lib.StoreType.IBM:
+            raise NotImplementedError
+
+    @staticmethod
     def cli_count_name_in_bucket(store_type, bucket_name, file_name, suffix=''):
         if store_type == storage_lib.StoreType.S3:
             if suffix:
@@ -4403,6 +4417,79 @@ class TestStorageWithCredentials:
             storage_obj.name)
         if handle:
             storage_obj.delete()
+
+    @pytest.mark.no_fluidstack
+    @pytest.mark.parametrize('region',
+                             ['ap-northeast-1', 'ap-northeast-2',
+                              'ap-northeast-3', 'ap-south-1', 'ap-southeast-1',
+                              'ap-southeast-2', 'eu-central-1',
+                              'eu-north-1', 'eu-west-1', 'eu-west-2',
+                              'eu-west-3', 'sa-east-1', 'us-east-1',
+                              'us-east-2', 'us-west-1', 'us-west-2'])
+    def test_aws_regions(self, tmp_local_storage_obj, region):
+        # This tests creation and upload to bucket in all AWS s3 regions
+        # To test full functionality, use the <TODO(ROMILB)> test above.
+        store_type = storage_lib.StoreType.S3
+        tmp_local_storage_obj.add_store(store_type, region=region)
+        bucket_name = tmp_local_storage_obj.name
+
+        # Confirm that the bucket was created in the correct region
+        region_cmd = self.cli_region_cmd(store_type, bucket_name)
+        out = subprocess.check_output(region_cmd, shell=True)
+        output = out.decode('utf-8')
+        expected_output_region = region
+        if region == 'us-east-1':
+            expected_output_region = 'None' # us-east-1 is the default region
+        assert expected_output_region in out.decode('utf-8'), (
+            f'Bucket was not found in region {region} - '
+            f'output of {region_cmd} was: {output}')
+
+        # Check if tmp_source/tmp-file exists in the bucket using cli
+        ls_cmd = self.cli_ls_cmd(store_type, bucket_name)
+        out = subprocess.check_output(ls_cmd, shell=True)
+        output = out.decode('utf-8')
+        assert 'tmp-file' in output, (
+            f'tmp-file not found in bucket - output of {ls_cmd} was: {output}')
+
+    @pytest.mark.no_fluidstack
+    @pytest.mark.parametrize('region',
+                             ['northamerica-northeast1',
+                              'northamerica-northeast2', 'us-central1',
+                              'us-east1', 'us-east4', 'us-east5', 'us-south1',
+                              'us-west1', 'us-west2', 'us-west3', 'us-west4',
+                              'southamerica-east1', 'southamerica-west1',
+                              'europe-central2', 'europe-north1',
+                              'europe-southwest1', 'europe-west1',
+                              'europe-west2', 'europe-west3', 'europe-west4',
+                              'europe-west6', 'europe-west8', 'europe-west9',
+                              'europe-west10', 'europe-west12', 'asia-east1',
+                              'asia-east2', 'asia-northeast1',
+                              'asia-northeast2', 'asia-northeast3',
+                              'asia-southeast1', 'asia-south1', 'asia-south2',
+                              'asia-southeast2', 'me-central1', 'me-central2',
+                              'me-west1', 'australia-southeast1',
+                              'australia-southeast2', 'africa-south1'])
+    def test_gcs_regions(self, tmp_local_storage_obj, region):
+        # This tests creation and upload to bucket in all GCS regions
+        # To test full functionality, use the <TODO(ROMILB)> test above.
+        store_type = storage_lib.StoreType.GCS
+        tmp_local_storage_obj.add_store(store_type, region=region)
+        bucket_name = tmp_local_storage_obj.name
+
+        # Confirm that the bucket was created in the correct region
+        region_cmd = self.cli_region_cmd(store_type, bucket_name)
+        out = subprocess.check_output(region_cmd, shell=True)
+        output = out.decode('utf-8')
+        assert region in out.decode('utf-8'), (
+            f'Bucket was not found in region {region} - '
+            f'output of {region_cmd} was: {output}')
+
+        # Check if tmp_source/tmp-file exists in the bucket using cli
+        ls_cmd = self.cli_ls_cmd(store_type, bucket_name)
+        out = subprocess.check_output(ls_cmd, shell=True)
+        output = out.decode('utf-8')
+        assert 'tmp-file' in output, (
+            f'tmp-file not found in bucket - output of {ls_cmd} was: {output}')
 
 
 # ---------- Testing YAML Specs ----------
