@@ -276,6 +276,18 @@ Available fields and semantics:
     # for details on deploying the NGINX ingress controller.
     ports: loadbalancer
 
+    # Attach custom metadata to Kubernetes objects created by SkyPilot
+    #
+    # Uses the same schema as Kubernetes metadata object: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#objectmeta-v1-meta
+    #
+    # Since metadata is applied to all all objects created by SkyPilot,
+    # specifying 'name' and 'namespace' fields here is not allowed.
+    custom_metadata:
+      labels:
+        mylabel: myvalue
+      annotations:
+        myannotation: myvalue
+
     # Additional fields to override the pod fields used by SkyPilot (optional)
     #
     # Any key:value pairs added here would get added to the pod spec used to

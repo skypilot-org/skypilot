@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils.resources_utils import port_ranges_to_set
 
@@ -46,6 +47,10 @@ def _open_ports_using_loadbalancer(
         selector_key='skypilot-cluster',
         selector_value=cluster_name_on_cloud,
     )
+
+    # Update metadata from config
+    kubernetes_utils.merge_custom_metadata(content['service_spec']['metadata'])
+
     network_utils.create_or_replace_namespaced_service(
         namespace=provider_config.get('namespace', 'default'),
         service_name=service_name,
@@ -93,12 +98,15 @@ def _open_ports_using_ingress(
 
     # Create or update services based on the generated specs
     for service_name, service_spec in content['services_spec'].items():
+        # Update metadata from config
+        kubernetes_utils.merge_custom_metadata(service_spec['metadata'])
         network_utils.create_or_replace_namespaced_service(
             namespace=provider_config.get('namespace', 'default'),
             service_name=service_name,
             service_spec=service_spec,
         )
 
+    kubernetes_utils.merge_custom_metadata(content['ingress_spec']['metadata'])
     # Create or update the single ingress for all services
     network_utils.create_or_replace_namespaced_ingress(
         namespace=provider_config.get('namespace', 'default'),
