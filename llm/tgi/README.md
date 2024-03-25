@@ -18,7 +18,6 @@ A user can access the model with the following command:
 ENDPOINT=$(sky status --endpoint 8080 tgi)
 
 curl -L $(sky serve status tgi --endpoint)/generate \
-    -X POST \
     -H 'Content-Type: application/json' \
     -d '{
       "inputs": "What is Deep Learning?",
@@ -53,7 +52,6 @@ After the service is launched, we can access the model with the following comman
 ENDPOINT=$(sky serve status --endpoint tgi)
 
 curl -L $ENDPOINT/generate \
-    -X POST \
     -H 'Content-Type: application/json' \
     -d '{
       "inputs": "What is Deep Learning?",
