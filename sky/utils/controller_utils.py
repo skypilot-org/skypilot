@@ -324,6 +324,8 @@ def get_controller_resources(
         if res.cloud is not None and not clouds.cloud_in_iterable(
                 res.cloud, requested_clouds):
             requested_clouds.add(res.cloud)
+    if not requested_clouds:
+        return {controller_resources_to_use}
     return {
         controller_resources_to_use.copy(cloud=controller_cloud)
         for controller_cloud in requested_clouds

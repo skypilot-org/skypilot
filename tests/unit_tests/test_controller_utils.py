@@ -52,8 +52,12 @@ def test_get_controller_resources_spot(controller_type,
     monkeypatch.setattr('sky.skypilot_config.get_nested',
                         get_custom_controller_resources)
 
-    controller_resources = controller_utils.get_controller_resources(
-        controller_type, controller_resources_config)
+    controller_resources = list(
+        controller_utils.get_controller_resources(
+            controller_type=controller_type,
+            controller_name='dummy',
+            controller_resources_config=controller_resources_config,
+            task_resources=[]))[0]
     controller_resources_config = controller_resources.to_yaml_config()
     for k, v in expected.items():
         assert controller_resources_config[k] == v, (
