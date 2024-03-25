@@ -263,7 +263,6 @@ class Kubernetes(clouds.Cloud):
 
         port_mode = network_utils.get_port_mode(None)
 
-        dshm_size_limit = skypilot_config.get_nested(('kubernetes', 'dshm_size_limit'), None)
         remote_identity = skypilot_config.get_nested(('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
         if remote_identity == 'LOCAL_CREDENTIALS':
             # SA name doesn't matter since automounting credentials will be turned off
@@ -295,7 +294,6 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_value': k8s_acc_label_value,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
-            'k8s_dshm_size_limit': dshm_size_limit,
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_service_account_token': k8s_automount_service_account_token,
             'image_id': image_id,

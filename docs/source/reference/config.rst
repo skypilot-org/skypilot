@@ -315,13 +315,6 @@ Available fields and semantics:
               medium: Memory
               sizeLimit: 3Gi    # Set a size limit for the /dev/shm volume
 
-    # Size of the /dev/shm shared memory for the pod (optional).
-    #
-    # Defaults to None, which means no size limits are set. If set, the value
-    # must be a string that is a valid Kubernetes quantity, e.g., "3Gi".
-    # https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/
-    dshm_size_limit: 3Gi
-
   # Advanced OCI configurations (optional).
   oci:
     # A dict mapping region names to region-specific configurations, or
