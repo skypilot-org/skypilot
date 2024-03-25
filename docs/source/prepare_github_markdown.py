@@ -1,4 +1,16 @@
 # Modified from: https://github.com/ray-project/ray/blob/master/doc/source/preprocess_github_markdown.py
+# This file process the markdown files in the _gallery_original/ folder and
+# generate the new files in gallery/ folder to support the different
+# requirements for the examples in GitHub and our gallery page by:
+# 1.removing the text between the <!-- $REMOVE --> and <!-- $END_REMOVE -->.
+# For example:
+# <!-- $REMOVE -->  
+# Code Llama: Serve Your Private Code Model with API, Chat, and VSCode Access  
+# <!-- $END_REMOVE -->  
+# 2. uncommenting all <!-- --> comments in which opening tag is immediately
+# succeeded by $UNCOMMENT
+# For example:
+# <!-- $UNCOMMENT# Code Llama: Serve Your Private Code Model -->  
 import pathlib
 import re
 import shutil

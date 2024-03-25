@@ -12,7 +12,7 @@ The followings are the demos of Code Llama 70B hosted by SkyPilot Serve (aka Sky
 <center>
 <img src="https://imgur.com/fguAmP0.gif" width="60%" title="Coding Assistant: Connect to hosted Code Llama with Tabby in VScode" />
 
-<figcaptuion>Coding Assistant: Connect to hosted Code Llama with Tabby in VScode</figcaption>
+<figcaption>Coding Assistant: Connect to hosted Code Llama with Tabby in VScode</figcaption>
 </figure>
 
 <figure>

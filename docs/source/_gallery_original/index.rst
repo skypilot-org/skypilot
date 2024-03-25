@@ -3,11 +3,11 @@ AI Gallery
 
 
 AI Gallery is a collection of ready-to-run recipes for popular AI frameworks and AI models.
-It provides a simple way to **package**, **share**, and **distribute** AI projects using the simple interface of SkyPilot.
+It provides a simple way to **package**, **share**, and **run** AI projects using the simple interface of SkyPilot.
 
 Readers can directly execute the SkyPilot YAMLs on their own infrastructure, such as cloud VMs or Kubernetes.
 
-.. image:: https://imgur.com/oHPjeCi.png
+.. image:: https://imgur.com/POFdmiEx.png
    :alt: AI Gallery
    :align: center
 
@@ -55,7 +55,7 @@ We welcome contributions from the community. If you would like to contribute, pl
 
 1. Fork the `SkyPilot repository <https://github.com/skypilot-org/skypilot>`__ on GitHub.
 2. Create a new folder for your own framework, LLM model, or tutorial under `llm/ <https://github.com/skypilot-org/skypilot/tree/master/llm>`__.
-3. Add a README.md, a SkyPilot YAML, and other necessary files to run the AI project.
+3. Add a README.md, a SkyPilot YAML, and other necessary files to run the AI project. (Relative paths are not supported. Please use GitHub URLs for the references to the files.)
 4. Create a soft link in `docs/source/_gallery_original <https://github.com/skypilot-org/skypilot/blob/master/docs/source/_gallery_original>`__ to the README file in one of the subfolders (frameworks, llms, tutorials), e.g., :code:`cd docs/source/_gallery_original/llms; ln -s ../../llm/mixtral/README.md mixtral.md`.
 5. Add the file path to the ``toctree`` above on this page.
 6. Create a pull request to the `SkyPilot repository <https://github.com/skypilot-org/skypilot/compare>`__.
