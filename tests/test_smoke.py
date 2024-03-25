@@ -2625,8 +2625,8 @@ def test_spot_storage(generic_cloud: str):
             [
                 *storage_setup_commands,
                 f'sky spot launch -n {name} --cloud {generic_cloud}{region_flag} {file_path} -y',
-                'sleep 60',  # Wait the spot queue to be updated
                 region_validation_cmd,  # Check if the bucket is created in the correct region
+                'sleep 60',  # Wait the spot queue to be updated
                 f'{_SPOT_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
