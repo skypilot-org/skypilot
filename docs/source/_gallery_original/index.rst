@@ -49,7 +49,7 @@ Contents
 
 
 
-Contributing
+Adding an Example to the Gallery
 ------------
 We welcome contributions from the community. If you would like to contribute, please follow the guidelines below.
 
