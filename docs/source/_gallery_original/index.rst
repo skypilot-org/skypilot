@@ -2,9 +2,10 @@ AI Gallery
 ====================
 
 
-AI Gallery is a collection of popular AI frameworks, LLM models, and Tutorials.
-It aims to speed up the evolution of AI by providing a simple way to **package**, **share**, and **distribute** AI using the simple interface of SkyPilot.
-Readers can directly take the YAML files and use them to run AI on their own infrastructure, such as clouds or Kubernetes.
+AI Gallery is a collection of ready-to-run recipes for popular AI frameworks and AI models.
+It provides a simple way to **package**, **share**, and **distribute** AI projects using the simple interface of SkyPilot.
+
+Readers can directly execute the SkyPilot YAMLs on their own infrastructure, such as cloud VMs or Kubernetes.
 
 .. image:: https://imgur.com/dA0Llxh.png
    :alt: AI Gallery
