@@ -1386,7 +1386,9 @@ class S3Store(AbstractStore):
                 s3_client.create_bucket(Bucket=bucket_name)
             else:
                 if region == 'us-east-1':
-                    # If default us-east-1 region is used, the LocationConstraint must not be specified. https://stackoverflow.com/a/51912090
+                    # If default us-east-1 region is used, the
+                    # LocationConstraint must not be specified.
+                    # https://stackoverflow.com/a/51912090
                     s3_client.create_bucket(Bucket=bucket_name)
                 else:
                     location = {'LocationConstraint': region}

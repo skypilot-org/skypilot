@@ -855,7 +855,8 @@ class Task:
         task_storage_mounts.update(storage_mounts)
         return self.set_storage_mounts(task_storage_mounts)
 
-    def get_preferred_store(self) -> Tuple[storage_lib.StoreType, Optional[str]]:
+    def get_preferred_store(
+            self) -> Tuple[storage_lib.StoreType, Optional[str]]:
         """Returns the preferred store type and region for this task."""
         # TODO(zhwu, romilb): The optimizer should look at the source and
         #  destination to figure out the right stores to use. For now, we
@@ -891,7 +892,7 @@ class Task:
             storage_cloud = clouds.CLOUD_REGISTRY.from_str(
                 enabled_storage_clouds[0])
             assert storage_cloud is not None, enabled_storage_clouds[0]
-            storage_region = None   # Use default region in the Store class
+            storage_region = None  # Use default region in the Store class
 
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
         return store_type, storage_region
