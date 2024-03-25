@@ -4,13 +4,13 @@
 # requirements for the examples in GitHub and our gallery page by:
 # 1.removing the text between the <!-- $REMOVE --> and <!-- $END_REMOVE -->.
 # For example:
-# <!-- $REMOVE -->  
-# Code Llama: Serve Your Private Code Model with API, Chat, and VSCode Access  
-# <!-- $END_REMOVE -->  
+# <!-- $REMOVE -->
+# Code Llama: Serve Your Private Code Model with API, Chat, and VSCode Access
+# <!-- $END_REMOVE -->
 # 2. uncommenting all <!-- --> comments in which opening tag is immediately
 # succeeded by $UNCOMMENT
 # For example:
-# <!-- $UNCOMMENT# Code Llama: Serve Your Private Code Model -->  
+# <!-- $UNCOMMENT# Code Llama: Serve Your Private Code Model -->
 import pathlib
 import re
 import shutil
