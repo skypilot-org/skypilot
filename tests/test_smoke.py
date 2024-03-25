@@ -1115,6 +1115,7 @@ def test_scp_logs():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue instead
 @pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
+@pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
@@ -1146,6 +1147,7 @@ def test_job_queue(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support docker for now
 @pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
+@pytest.mark.no_paperspace  # Paperspace doesn't have T4 GPUs
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
@@ -1265,6 +1267,7 @@ def test_scp_job_queue():
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
+@pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
@@ -1431,6 +1434,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 # ---------- Submitting multiple tasks to the same cluster. ----------
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
+@pytest.mark.no_paperspace  # Paperspace does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
@@ -1691,6 +1695,23 @@ def test_kubernetes_http_server_with_custom_ports():
             f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
             # Retry a few times to avoid flakiness in ports being open.
             f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); success=false; for i in $(seq 1 100); do if curl $ip | grep "<h1>This is a demo HTML page.</h1>"; then success=true; break; fi; sleep 5; done; if [ "$success" = false ]; then exit 1; fi'
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Web apps with custom ports on Paperspace. ----------
+@pytest.mark.paperspace
+def test_paperspace_http_server_with_custom_ports():
+    name = _get_cluster_name()
+    test = Test(
+        'paperspace_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --cloud paperspace examples/http_server_with_custom_ports/task.yaml',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            # Retry a few times to avoid flakiness in ports being open.
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); success=false; for i in $(seq 1 5); do if curl $ip | grep "<h1>This is a demo HTML page.</h1>"; then success=true; break; fi; sleep 10; done; if [ "$success" = false ]; then exit 1; fi',
         ],
         f'sky down -y {name}',
     )
@@ -1962,6 +1983,7 @@ def test_cancel_azure():
 
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
+@pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
@@ -2015,6 +2037,7 @@ def test_cancel_ibm():
 @pytest.mark.no_fluidstack  # FluidStack does not support spot instances
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
@@ -2069,6 +2092,7 @@ def test_stop_gcp_spot():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_paperspace  # Papperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
@@ -2104,6 +2128,7 @@ def test_spot(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_pipeline(generic_cloud: str):
@@ -2145,6 +2170,7 @@ def test_spot_pipeline(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_failed_setup(generic_cloud: str):
@@ -2170,6 +2196,7 @@ def test_spot_failed_setup(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_pipeline_failed_setup(generic_cloud: str):
@@ -2364,6 +2391,7 @@ def test_spot_pipeline_recovery_gcp():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
@@ -2586,6 +2614,7 @@ def test_spot_cancellation_gcp():
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
@@ -2595,6 +2624,26 @@ def test_spot_storage(generic_cloud: str):
     yaml_str = pathlib.Path(
         'examples/managed_spot_with_storage.yaml').read_text()
     storage_name = f'sky-test-{int(time.time())}'
+
+    # Also perform region testing for bucket creation to validate if buckets are
+    # created in the correct region and correctly mounted in spot jobs.
+    # However, we inject this testing only for AWS and GCP since they are the
+    # supported object storage providers in SkyPilot.
+    region_flag = ''
+    region_validation_cmd = 'true'
+    if generic_cloud == 'aws':
+        region = 'eu-central-1'
+        region_flag = f' --region {region}'
+        region_cmd = TestStorageWithCredentials.cli_region_cmd(
+            storage_lib.StoreType.S3, storage_name)
+        region_validation_cmd = f'{region_cmd} | grep {region}'
+    elif generic_cloud == 'gcp':
+        region = 'us-west2'
+        region_flag = f' --region {region}'
+        region_cmd = TestStorageWithCredentials.cli_region_cmd(
+            storage_lib.StoreType.GCS, storage_name)
+        region_validation_cmd = f'{region_cmd} | grep {region}'
+
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(yaml_str)
@@ -2604,7 +2653,8 @@ def test_spot_storage(generic_cloud: str):
             'spot_storage',
             [
                 *storage_setup_commands,
-                f'sky spot launch -n {name} --cloud {generic_cloud} {file_path} -y',
+                f'sky spot launch -n {name} --cloud {generic_cloud}{region_flag} {file_path} -y',
+                region_validation_cmd,  # Check if the bucket is created in the correct region
                 'sleep 60',  # Wait the spot queue to be updated
                 f'{_SPOT_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
@@ -2645,6 +2695,7 @@ def test_spot_tpu():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
@@ -3758,6 +3809,19 @@ class TestStorageWithCredentials:
             return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
 
     @staticmethod
+    def cli_region_cmd(store_type, bucket_name):
+        if store_type == storage_lib.StoreType.S3:
+            return ('aws s3api get-bucket-location '
+                    f'--bucket {bucket_name} --output text')
+        elif store_type == storage_lib.StoreType.GCS:
+            return (f'gsutil ls -L -b gs://{bucket_name}/ | '
+                    'grep "Location constraint" | '
+                    'awk \'{print tolower($NF)}\'')
+        else:
+            raise NotImplementedError(f'Region command not implemented for '
+                                      f'{store_type}')
+
+    @staticmethod
     def cli_count_name_in_bucket(store_type, bucket_name, file_name, suffix=''):
         if store_type == storage_lib.StoreType.S3:
             if suffix:
@@ -4404,6 +4468,73 @@ class TestStorageWithCredentials:
         if handle:
             storage_obj.delete()
 
+    @pytest.mark.no_fluidstack
+    @pytest.mark.parametrize('region', [
+        'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3', 'ap-south-1',
+        'ap-southeast-1', 'ap-southeast-2', 'eu-central-1', 'eu-north-1',
+        'eu-west-1', 'eu-west-2', 'eu-west-3', 'sa-east-1', 'us-east-1',
+        'us-east-2', 'us-west-1', 'us-west-2'
+    ])
+    def test_aws_regions(self, tmp_local_storage_obj, region):
+        # This tests creation and upload to bucket in all AWS s3 regions
+        # To test full functionality, use test_spot_storage above.
+        store_type = storage_lib.StoreType.S3
+        tmp_local_storage_obj.add_store(store_type, region=region)
+        bucket_name = tmp_local_storage_obj.name
+
+        # Confirm that the bucket was created in the correct region
+        region_cmd = self.cli_region_cmd(store_type, bucket_name)
+        out = subprocess.check_output(region_cmd, shell=True)
+        output = out.decode('utf-8')
+        expected_output_region = region
+        if region == 'us-east-1':
+            expected_output_region = 'None'  # us-east-1 is the default region
+        assert expected_output_region in out.decode('utf-8'), (
+            f'Bucket was not found in region {region} - '
+            f'output of {region_cmd} was: {output}')
+
+        # Check if tmp_source/tmp-file exists in the bucket using cli
+        ls_cmd = self.cli_ls_cmd(store_type, bucket_name)
+        out = subprocess.check_output(ls_cmd, shell=True)
+        output = out.decode('utf-8')
+        assert 'tmp-file' in output, (
+            f'tmp-file not found in bucket - output of {ls_cmd} was: {output}')
+
+    @pytest.mark.no_fluidstack
+    @pytest.mark.parametrize('region', [
+        'northamerica-northeast1', 'northamerica-northeast2', 'us-central1',
+        'us-east1', 'us-east4', 'us-east5', 'us-south1', 'us-west1', 'us-west2',
+        'us-west3', 'us-west4', 'southamerica-east1', 'southamerica-west1',
+        'europe-central2', 'europe-north1', 'europe-southwest1', 'europe-west1',
+        'europe-west2', 'europe-west3', 'europe-west4', 'europe-west6',
+        'europe-west8', 'europe-west9', 'europe-west10', 'europe-west12',
+        'asia-east1', 'asia-east2', 'asia-northeast1', 'asia-northeast2',
+        'asia-northeast3', 'asia-southeast1', 'asia-south1', 'asia-south2',
+        'asia-southeast2', 'me-central1', 'me-central2', 'me-west1',
+        'australia-southeast1', 'australia-southeast2', 'africa-south1'
+    ])
+    def test_gcs_regions(self, tmp_local_storage_obj, region):
+        # This tests creation and upload to bucket in all GCS regions
+        # To test full functionality, use test_spot_storage above.
+        store_type = storage_lib.StoreType.GCS
+        tmp_local_storage_obj.add_store(store_type, region=region)
+        bucket_name = tmp_local_storage_obj.name
+
+        # Confirm that the bucket was created in the correct region
+        region_cmd = self.cli_region_cmd(store_type, bucket_name)
+        out = subprocess.check_output(region_cmd, shell=True)
+        output = out.decode('utf-8')
+        assert region in out.decode('utf-8'), (
+            f'Bucket was not found in region {region} - '
+            f'output of {region_cmd} was: {output}')
+
+        # Check if tmp_source/tmp-file exists in the bucket using cli
+        ls_cmd = self.cli_ls_cmd(store_type, bucket_name)
+        out = subprocess.check_output(ls_cmd, shell=True)
+        output = out.decode('utf-8')
+        assert 'tmp-file' in output, (
+            f'tmp-file not found in bucket - output of {ls_cmd} was: {output}')
+
 
 # ---------- Testing YAML Specs ----------
 # Our sky storage requires credentials to check the bucket existance when
@@ -4464,6 +4595,7 @@ class TestYamlSpecs:
 
 # ---------- Testing Multiple Accelerators ----------
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
+@pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
 def test_multiple_accelerators_ordered():
     name = _get_cluster_name()
     test = Test(
@@ -4479,6 +4611,7 @@ def test_multiple_accelerators_ordered():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
+@pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 def test_multiple_accelerators_ordered_with_default():
     name = _get_cluster_name()
     test = Test(
@@ -4494,6 +4627,7 @@ def test_multiple_accelerators_ordered_with_default():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
+@pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 def test_multiple_accelerators_unordered():
     name = _get_cluster_name()
     test = Test(
@@ -4508,6 +4642,7 @@ def test_multiple_accelerators_unordered():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
+@pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 def test_multiple_accelerators_unordered_with_default():
     name = _get_cluster_name()
     test = Test(
@@ -4538,6 +4673,7 @@ def test_multiple_resources():
 
 # ---------- Sky Benchmark ----------
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
+@pytest.mark.no_paperspace  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
 def test_sky_bench(generic_cloud: str):
     name = _get_cluster_name()
