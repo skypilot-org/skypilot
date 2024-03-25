@@ -3,6 +3,59 @@
 Kubernetes
 ==========
 
+When running outside your Kubernetes cluster, SkyPilot uses your local ``~/.kube/config`` file
+for authentication and creating resources on your Kubernetes cluster.
+
+When running inside your Kubernetes cluster (e.g., as a Spot controller or Serve controller),
+SkyPilot can operate using either of the following three authentication methods:
+
+1. **Using your local kubeconfig file**: In this case, SkyPilot will
+   copy your local ``~/.kube/config`` file to the controller pod and use it for
+   authentication. This is the default method when running inside the cluster,
+   and no additional configuration is required.
+
+   .. note::
+
+       If your cluster uses exec based authentication in your ``~/.kube/config`` file,
+       SkyPilot may not be able to authenticate using this method. In this case,
+       consider using the service account methods below.
+
+2. **Creating a service account**: SkyPilot can automatically create the service
+   account and roles for itself to manage resources in the Kubernetes cluster.
+   To use this method, set ``remote_identity: SERVICE_ACCOUNT`` to your
+   Kubernetes configuration in the ``~/.sky/config.yaml`` file:
+
+   .. code-block:: yaml
+
+       kubernetes:
+         remote_identity: SERVICE_ACCOUNT
+
+   For details on the permissions that are granted to the service account,
+   refer to the `Permissions required by SkyPilot`_ section below.
+
+3. **Using a custom service account**: If you have a custom service account
+   with the `necessary permissions <k8s-permissions_>`__, you can configure
+   SkyPilot to use it by adding this to your ``~/.sky/config.yaml`` file:
+
+   .. code-block:: yaml
+
+       kubernetes:
+         remote_identity: your-service-account-name
+
+.. note::
+
+    Service account based authentication applies only when the SkyPiolt
+    controller is running inside the Kubernetes cluster. When running outside
+    the cluster (e.g., on AWS), SkyPilot will use the local ``~/.kube/config``
+    file for authentication.
+
+Below are the permissions required by SkyPilot and an example service account YAML that you can use to create a service account with the necessary permissions.
+
+.. _k8s-permissions:
+
+Permissions required by SkyPilot
+--------------------------------
+
 SkyPilot requires permissions equivalent to the following roles to be able to manage the resources in the Kubernetes cluster:
 
 .. code-block:: yaml
@@ -50,10 +103,13 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
       resources: ["services"]
       verbs: ["list", "get"]
 
-Example Service Account YAML
-----------------------------
 
-To create a service account bound with these roles, you can use the following YAML:
+.. _k8s-sa-example:
+
+Example using Custom Service Account
+------------------------------------
+
+To create a service account that has the necessary permissions for SkyPilot, you can use the following YAML:
 
 .. code-block:: yaml
 
@@ -163,20 +219,15 @@ To create a service account bound with these roles, you can use the following YA
         name: sky-sa-cluster-role
         apiGroup: rbac.authorization.k8s.io
 
+Create the service account using the following command:
+
 .. code-block:: bash
 
-    kubectl apply -f create-sky-sa.yaml
+    $ kubectl apply -f create-sky-sa.yaml
 
-After creating the service account, you can configure SkyPilot to use it through ``~/.sky/config.yaml``:
+After creating the service account, configure SkyPilot to use it through ``~/.sky/config.yaml``:
 
 .. code-block:: yaml
 
     kubernetes:
       remote_identity: sky-sa   # Or your service account name
-
-If you would like SkyPilot to automatically create the service account and roles, you can use the following config:
-
-.. code-block:: yaml
-
-    kubernetes:
-      remote_identity: SERVICE_ACCOUNT  # Will automatically create the service account and roles
