@@ -264,8 +264,8 @@ def get_controller_resources(
     controller_type: str,
     controller_name: str,
     controller_resources_config: Dict[str, Any],
-    task_resources: Iterable[resources.Resources],
-) -> Set[resources.Resources]:
+    task_resources: Iterable['resources.Resources'],
+) -> Set['resources.Resources']:
     """Read the skypilot config and setup the controller resources.
 
     Returns:
