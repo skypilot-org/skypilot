@@ -16,8 +16,8 @@ SkyPilot can operate using either of the following three authentication methods:
 
    .. note::
 
-       If your cluster uses exec based authentication in your ``~/.kube/config`` file,
-       SkyPilot may not be able to authenticate using this method. In this case,
+       If your cluster uses exec based authentication in your ``~/.kube/config`` file
+       (e.g., GKE uses exec auth by default), SkyPilot may not be able to authenticate using this method. In this case,
        consider using the service account methods below.
 
 2. **Creating a service account**: SkyPilot can automatically create the service
