@@ -4,8 +4,6 @@ import os
 import pathlib
 import sys
 
-import yaml
-
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
 sys.path.insert(0, os.path.abspath('../../'))
@@ -89,18 +87,18 @@ html_theme_options = {
     'logo': {
         'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
     },
-    "icon_links": [{
-        "name": "Slack",
-        "url": "https://slack.skypilot.co/",
-        "icon": "fab fa-slack",
+    'icon_links': [{
+        'name': 'Slack',
+        'url': 'https://slack.skypilot.co/',
+        'icon': 'fab fa-slack',
     }, {
-        "name": "Twitter",
-        "url": "https://twitter.com/skypilot_org",
-        "icon": "fab fa-twitter",
+        'name': 'Twitter',
+        'url': 'https://twitter.com/skypilot_org',
+        'icon': 'fab fa-twitter',
     }, {
-        "name": "GitHub",
-        "url": "https://github.com/skypilot-org/skypilot/",
-        "icon": "fab fa-github",
+        'name': 'GitHub',
+        'url': 'https://github.com/skypilot-org/skypilot/',
+        'icon': 'fab fa-github',
     }],
     'use_edit_page_button': True,
     'announcement': None,

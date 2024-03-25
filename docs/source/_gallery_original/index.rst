@@ -50,7 +50,7 @@ Contents
 
 
 Adding an Example to the Gallery
-------------
+--------------------------------
 We welcome contributions from the community. If you would like to contribute, please follow the guidelines below.
 
 1. Fork the `SkyPilot repository <https://github.com/skypilot-org/skypilot>`__ on GitHub.

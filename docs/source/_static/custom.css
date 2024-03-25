@@ -161,11 +161,11 @@ html[data-theme="dark"] {
 /* Add transparent underline for the other tabs that are not active to avoid
 active tab to be moved up. */
 .nav-link {
-  border-bottom: max(3px, .1875rem, .12em) solid transparent;
+  border-bottom: none;
 }
 
-.nav-link:hover {
-  border-bottom: max(3px, .1875rem, .12em) solid;
+.bd-header .navbar-nav>.current>.nav-link {
+  border-bottom: none;
 }
 
 /* Assuming your breakpoints are defined in pixels */
