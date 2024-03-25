@@ -2598,7 +2598,7 @@ def test_spot_storage(generic_cloud: str):
 
     # Also perform region testing for bucket creation to validate if buckets are
     # created in the correct region and correctly mounted in spot jobs.
-    # However, we inject this testing for AWS and GCP since they are the
+    # However, we inject this testing only for AWS and GCP since they are the
     # supported object storage providers in SkyPilot.
     region_flag = ''
     region_validation_cmd = 'true'
