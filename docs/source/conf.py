@@ -81,9 +81,7 @@ html_theme_options = {
         'theme-switcher',
         'navbar-icon-links',
     ],
-    'navbar_persistent': [
-        'search-button-field',
-    ],
+    'navbar_persistent': ['search-button-field'],
     'logo': {
         'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
     },
