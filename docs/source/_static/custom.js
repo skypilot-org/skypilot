@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.caption-text', text: 'SkyServe: Model Serving' },
-        { selector: '.toctree-l1 > a', text: 'Running on Kubernetes' }
+        { selector: '.toctree-l1 > a', text: 'Running on Kubernetes' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

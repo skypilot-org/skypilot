@@ -16,7 +16,6 @@ Welcome to SkyPilot!
 
    Docs <docs/index>
    gallery/index
-   developers/index
    Blog <https://blog.skypilot.co/>
    Community <https://blog.skypilot.co/community/>
 

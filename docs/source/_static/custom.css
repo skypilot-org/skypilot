@@ -171,7 +171,6 @@ active tab to be moved up. */
 /* Assuming your breakpoints are defined in pixels */
 @media (min-width: 959.98px) {
 
-  /* Replace 768px with the actual value of $breakpoint-sidebar-primary */
   .bd-sidebar-primary {
     width: 20% !important;
   }
