@@ -3783,14 +3783,13 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.S3:
             return ('aws s3api get-bucket-location '
                     f'--bucket {bucket_name} --output text')
-        if store_type == storage_lib.StoreType.GCS:
+        elif store_type == storage_lib.StoreType.GCS:
             return (f'gsutil ls -L -b gs://{bucket_name}/ | '
                     'grep "Location constraint" | '
                     'awk \'{print tolower($NF)}\'')
-        if store_type == storage_lib.StoreType.R2:
-            raise NotImplementedError
-        if store_type == storage_lib.StoreType.IBM:
-            raise NotImplementedError
+        else:
+            raise NotImplementedError(f'Region command not implemented for '
+                                      f'{store_type}')
 
     @staticmethod
     def cli_count_name_in_bucket(store_type, bucket_name, file_name, suffix=''):

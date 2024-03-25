@@ -90,7 +90,7 @@ def split_cos_path(s3_path: str) -> Tuple[str, str, str]:
     return bucket_name, data_path, region
 
 
-def create_s3_client(region: Optional[str] = 'us-east-1') -> Client:
+def create_s3_client(region: Optional[str] = None) -> Client:
     """Helper method that connects to Boto3 client for S3 Bucket
 
     Args:
