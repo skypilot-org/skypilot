@@ -20,8 +20,10 @@ from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
 from sky.skylet import constants
+from sky.spot import constants as spot_constants
 from sky.spot import spot_utils
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -262,8 +264,6 @@ def shared_controller_vars_to_fill(
 
 def get_controller_resources(
     controller_type: str,
-    controller_name: str,
-    controller_resources_config: Dict[str, Any],
     task_resources: Iterable['resources.Resources'],
 ) -> Set['resources.Resources']:
     """Read the skypilot config and setup the controller resources.
@@ -275,6 +275,13 @@ def get_controller_resources(
         specified, the controller will be launched on one of the clouds
         of the task resources for better connectivity.
     """
+    if controller_type == 'spot':
+        controller_name = spot_utils.SPOT_CONTROLLER_NAME
+        controller_resources_config = spot_constants.CONTROLLER_RESOURCES
+    else:
+        assert controller_type == 'serve'
+        controller_name = serve_utils.SKY_SERVE_CONTROLLER_NAME
+        controller_resources_config = serve_constants.CONTROLLER_RESOURCES
     controller_resources_config_copied: Dict[str, Any] = copy.copy(
         controller_resources_config)
     if skypilot_config.loaded():

@@ -37,10 +37,6 @@ def test_get_controller_resources_spot(controller_type,
                                        custom_controller_resources_config,
                                        expected, enable_all_clouds,
                                        monkeypatch):
-    if controller_type == 'spot':
-        controller_resources_config = spot_constants.CONTROLLER_RESOURCES
-    else:
-        controller_resources_config = serve_constants.CONTROLLER_RESOURCES
 
     def get_custom_controller_resources(keys, default):
         if keys == (controller_type, 'controller', 'resources'):
@@ -54,10 +50,7 @@ def test_get_controller_resources_spot(controller_type,
 
     controller_resources = list(
         controller_utils.get_controller_resources(
-            controller_type=controller_type,
-            controller_name='dummy',
-            controller_resources_config=controller_resources_config,
-            task_resources=[]))[0]
+            controller_type=controller_type, task_resources=[]))[0]
     controller_resources_config = controller_resources.to_yaml_config()
     for k, v in expected.items():
         assert controller_resources_config[k] == v, (

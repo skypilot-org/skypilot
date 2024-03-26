@@ -138,11 +138,7 @@ def up(
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
         controller_resources = controller_utils.get_controller_resources(
-            controller_type='serve',
-            controller_name=controller_name,
-            controller_resources_config=serve_constants.CONTROLLER_RESOURCES,
-            task_resources=task.resources,
-        )
+            controller_type='serve', task_resources=task.resources)
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,

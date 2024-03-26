@@ -668,13 +668,7 @@ def spot_launch(
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         controller_resources = controller_utils.get_controller_resources(
             controller_type='spot',
-            controller_name=controller_name,
-            controller_resources_config=spot.constants.CONTROLLER_RESOURCES,
-            task_resources=sum(
-                [list(task_.resources) for task_ in dag.tasks],
-                [],
-            ),
-        )
+            task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
