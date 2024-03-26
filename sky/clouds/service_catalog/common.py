@@ -19,9 +19,9 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_CATALOG_DIR = os.path.join(os.path.expanduser(constants.CATALOG_DIR),
-                            constants.CATALOG_SCHEMA_VERSION)
-os.makedirs(_CATALOG_DIR, exist_ok=True)
+_ABSOLUTE_VERSIONED_CATALOG_DIR = os.path.join(os.path.expanduser(constants.CATALOG_DIR),
+                                               constants.CATALOG_SCHEMA_VERSION)
+os.makedirs(_ABSOLUTE_VERSIONED_CATALOG_DIR, exist_ok=True)
 
 
 class InstanceTypeInfo(NamedTuple):
@@ -52,17 +52,17 @@ class InstanceTypeInfo(NamedTuple):
 
 
 def get_catalog_path(filename: str) -> str:
-    return os.path.join(_CATALOG_DIR, filename)
+    return os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, filename)
 
 
 def is_catalog_modified(filename: str) -> bool:
     # Check the md5 of the file to see if it has changed.
     catalog_path = get_catalog_path(filename)
-    meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
-    with open(catalog_path, 'rb') as f:
-        file_md5 = hashlib.md5(f.read()).hexdigest()
+    meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
     md5_filepath = meta_path + '.md5'
     if os.path.exists(md5_filepath):
+        with open(catalog_path, 'rb') as f:
+            file_md5 = hashlib.md5(f.read()).hexdigest()
         with open(md5_filepath, 'r', encoding='utf-8') as f:
             last_md5 = f.read()
         return file_md5 != last_md5
@@ -87,7 +87,7 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
         """Returns a list of modified catalogs relative to the catalog dir."""
         modified_catalogs = []
         for cloud_name in constants.ALL_CLOUDS:
-            cloud_catalog_dir = os.path.join(_CATALOG_DIR, cloud_name)
+            cloud_catalog_dir = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, cloud_name)
             if not os.path.exists(cloud_catalog_dir):
                 continue
             # Iterate over all csvs cloud's catalog directory
@@ -102,6 +102,7 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
     modified_catalog_list = _get_modified_catalogs()
     modified_catalog_path_map = {}  # Map of remote: local catalog paths
     for catalog in modified_catalog_list:
+        # Use relative paths for remote to handle varying usernames on the cloud
         remote_path = os.path.join(constants.CATALOG_DIR,
                                    constants.CATALOG_SCHEMA_VERSION, catalog)
         local_path = os.path.expanduser(remote_path)
@@ -126,7 +127,7 @@ def read_catalog(filename: str,
     catalog_path = get_catalog_path(filename)
     cloud = cloud_registry.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
 
-    meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
+    meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)
 
     # Atomic check, to avoid conflicts with other processes.
@@ -140,6 +141,8 @@ def read_catalog(filename: str,
             if pull_frequency_hours is None:
                 return False
             if is_catalog_modified(filename):
+                # If the catalog is modified by a user manually, we should
+                # avoid overwriting the catalog by fetching from GitHub.
                 return False
 
             last_update = os.path.getmtime(catalog_path)
