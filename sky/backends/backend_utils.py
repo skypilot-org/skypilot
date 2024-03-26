@@ -2723,7 +2723,8 @@ def get_endpoints(
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Cluster does not have any ports '
                                      'to be exposed.')
-            # Else wait for the ports to be exposed
+            # Else ports have not been exposed even though they exist.
+            # In this case, ask the user to retry.
             else:
                 error_msg = (f'No endpoints exposed yet. '
                              f'{_ENDPOINTS_RETRY_MESSAGE} ')
