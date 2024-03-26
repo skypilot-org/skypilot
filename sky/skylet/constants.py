@@ -30,13 +30,15 @@ SKY_REMOTE_RAY_VERSION = '2.9.3'
 # used for installing SkyPilot runtime (ray and skypilot).
 SKY_PYTHON_PATH_FILE = '~/.sky/python_path'
 SKY_RAY_PATH_FILE = '~/.sky/ray_path'
-SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
+SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
+                           f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
                            'which python3')
 # Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # Ray executable, e.g., /opt/conda/bin/ray
-SKY_RAY_CMD = f'$([ -s {SKY_RAY_PATH_FILE} ] && cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)'
+SKY_RAY_CMD = (f'$([ -s {SKY_RAY_PATH_FILE} ] && '
+               f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
