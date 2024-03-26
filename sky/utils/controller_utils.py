@@ -46,6 +46,14 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
 # The placeholder for the local skypilot config path in file mounts.
 LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 
+# Black list for clouds only contains GPU instances. We might
+# not want to launch controller on expensive GPU instances.
+_CONTROLLER_CLOUD_BLACKLIST: List[clouds.Cloud] = [
+    clouds.Lambda(),
+    clouds.RunPod(),
+    clouds.Fluidstack(),
+]
+
 
 @dataclasses.dataclass
 class _ControllerSpec:
@@ -330,7 +338,9 @@ def get_controller_resources(
         # Here we manually check if the cloud is in the set.
         if res.cloud is not None and not clouds.cloud_in_iterable(
                 res.cloud, requested_clouds):
-            requested_clouds.add(res.cloud)
+            if not clouds.cloud_in_iterable(res.cloud,
+                                            _CONTROLLER_CLOUD_BLACKLIST):
+                requested_clouds.add(res.cloud)
     if not requested_clouds:
         return {controller_resources_to_use}
     return {
