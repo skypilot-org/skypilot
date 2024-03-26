@@ -1,6 +1,7 @@
 """User interface with the SkyServe."""
 import base64
 import enum
+import hashlib
 import os
 import pathlib
 import pickle
@@ -20,9 +21,11 @@ import psutil
 import requests
 
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import status_lib
+from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.serve import constants
 from sky.serve import serve_state
@@ -37,6 +40,18 @@ if typing.TYPE_CHECKING:
 
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
+
+# If the user is specifically using kubernetes as a controller,
+# we need to add current kubernetes identity to the controller name to avoid
+# TODO(skypilot): This is a hack till https://github.com/skypilot-org/skypilot/issues/3371 is resolved  # pylint: disable=line-too-long
+cloud = skypilot_config.get_nested(['serve', 'controller', 'resources', 'cloud'], None)
+if cloud and cloud == 'kubernetes':
+    id = clouds.Kubernetes().get_current_user_identity_str()
+    if id is not None:
+        id_hash = hashlib.md5(id.encode()).hexdigest()[:3]  # Limit to 3 char
+        SKY_SERVE_CONTROLLER_NAME = (
+            f'{SKY_SERVE_CONTROLLER_NAME}-{id_hash}')
+
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
                          constants.CONTROLLER_MEMORY_USAGE_GB)
