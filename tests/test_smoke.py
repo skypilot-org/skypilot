@@ -444,6 +444,24 @@ def test_gcp_images():
     run_one_test(test)
 
 
+@pytest.mark.azure
+def test_azure_images():
+    name = _get_cluster_name()
+    test = Test(
+        'azure_images',
+        [
+            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-2204 --cloud azure tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky launch -c {name} --image-id skypilot:v1-ubuntu-2004 --cloud azure tests/test_yamls/minimal.yaml && exit 1 || true',
+            f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 @pytest.mark.aws
 def test_aws_image_id_dict():
     name = _get_cluster_name()

@@ -46,6 +46,13 @@ def http_error_exception():
     return exceptions.HttpResponseError
 
 
+@import_package
+def resources_not_found_exception():
+    """ResourceNotFoundError exception."""
+    from azure.core import exceptions
+    return exceptions.ResourceNotFoundError
+
+
 @functools.lru_cache()
 @import_package
 def get_client(name: str, subscription_id: str):
