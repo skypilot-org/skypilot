@@ -37,6 +37,9 @@ _CREDENTIAL_FILES = [
 
 _MAX_IDENTITY_FETCH_RETRY = 10
 
+_DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB = 30
+_DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB = 150
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -140,7 +143,9 @@ class Azure(clouds.Cloud):
             # The region used here is only for where to send the query,
             # not the image location. Azure's image is globally available.
             region = 'eastus'
+        is_skypilot_image_tag = False
         if image_id.startswith('skypilot:'):
+            is_skypilot_image_tag = True
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
         image_id_splitted = image_id.split(':')
@@ -149,6 +154,12 @@ class Azure(clouds.Cloud):
                 raise ValueError(f'Invalid image id: {image_id}. Expected '
                                  'format: <publisher>:<offer>:<sku>:<version>')
         publisher, offer, sku, version = image_id_splitted
+        if is_skypilot_image_tag:
+            if offer == 'ubuntu-hpc':
+                return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
+            else:
+                assert offer == 'ubuntu-2004', offer
+                return _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB
         compute_client = azure.get_client('compute', cls.get_project_id())
         try:
             image = compute_client.virtual_machine_images.get(
@@ -183,33 +194,13 @@ class Azure(clouds.Cloud):
                                                          disk_tier=disk_tier,
                                                          clouds='azure')
 
-    def _get_default_image_config(self, gen_version, instance_type):
-        # TODO(tian): images for Azure is not well organized. We should refactor
-        # it to images.csv like AWS.
-        # az vm image list \
-        #  --publisher microsoft-dsvm --all --output table
-        # nvidia-driver: 535.54.03, cuda: 12.2
-        # see: https://github.com/Azure/azhpc-images/releases/tag/ubuntu-hpc-20230803
-        # All A100 instances is of gen2, so it will always use
-        # the latest ubuntu-hpc:2204 image.
-        image_config = {
-            'image_publisher': 'microsoft-dsvm',
-            'image_offer': 'ubuntu-hpc',
-            'image_sku': '2204',
-            'image_version': '22.04.2023080201'
-        }
-
+    def _get_default_image_tag(self, gen_version, instance_type) -> str:
         # ubuntu-2004 v21.08.30, K80 requires image with old NVIDIA driver version
         acc = self.get_accelerators_from_instance_type(instance_type)
         if acc is not None:
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
-                image_config = {
-                    'image_publisher': 'microsoft-dsvm',
-                    'image_offer': 'ubuntu-2004',
-                    'image_sku': '2004-gen2',
-                    'image_version': '21.08.30'
-                }
+                return 'skypilot:k80-ubuntu-2004'
 
         # ubuntu-2004 v21.11.04, the previous image we used in the past for
         # V1 HyperV instance before we change default image to ubuntu-hpc.
@@ -218,14 +209,13 @@ class Azure(clouds.Cloud):
         # (Basic_A, Standard_D, ...) are V1 instance. For these instances,
         # we use the previous image.
         if gen_version == 'V1':
-            image_config = {
-                'image_publisher': 'microsoft-dsvm',
-                'image_offer': 'ubuntu-2004',
-                'image_sku': '2004',
-                'image_version': '21.11.04'
-            }
+            return 'skypilot:v1-ubuntu-2004'
 
-        return image_config
+        # nvidia-driver: 535.54.03, cuda: 12.2
+        # see: https://github.com/Azure/azhpc-images/releases/tag/ubuntu-hpc-20230803
+        # All A100 instances is of gen2, so it will always use
+        # the latest ubuntu-hpc:2204 image.
+        return 'skypilot:gpu-ubuntu-2204'
 
     @classmethod
     def regions_with_offering(cls, instance_type: str,
@@ -310,25 +300,24 @@ class Azure(clouds.Cloud):
             from sky.clouds.service_catalog import azure_catalog
             gen_version = azure_catalog.get_gen_version_from_instance_type(
                 r.instance_type)
-            image_config = self._get_default_image_config(
-                gen_version, r.instance_type)
+            image_id = self._get_default_image_tag(gen_version, r.instance_type)
         else:
             if None in resources.image_id:
                 image_id = resources.image_id[None]
             else:
                 assert region_name in resources.image_id, resources.image_id
                 image_id = resources.image_id[region_name]
-            if image_id.startswith('skypilot:'):
-                image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                                 clouds='azure')
-            # Already checked in resources.py
-            publisher, offer, sku, version = image_id.split(':')
-            image_config = {
-                'image_publisher': publisher,
-                'image_offer': offer,
-                'image_sku': sku,
-                'image_version': version,
-            }
+        if image_id.startswith('skypilot:'):
+            image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                             clouds='azure')
+        # Already checked in resources.py
+        publisher, offer, sku, version = image_id.split(':')
+        image_config = {
+            'image_publisher': publisher,
+            'image_offer': offer,
+            'image_sku': sku,
+            'image_version': version,
+        }
 
         # Setup commands to eliminate the banner and restart sshd.
         # This script will modify /etc/ssh/sshd_config and add a bash script
