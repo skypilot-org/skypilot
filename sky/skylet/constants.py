@@ -121,19 +121,20 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # latest ray port 6380, but those existing cluster launched before #1790
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
+    'echo PATH=$PATH; '
     f'{SKY_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
-    f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION} | tee /tmp/skypilot_ray_installation.log;'  # pylint: disable=line-too-long
+    f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION} | tee /tmp/skypilot_ray_installation.log; '  # pylint: disable=line-too-long
     # Add missing PATH to make sure ray is in the PATH, when the
     # previous ray installation happens in user's `~/.local` directory.
     'bin_path=$(grep "WARNING: The scripts ray,.* are installed in" '
     '/tmp/skypilot_ray_installation.log | '
-    r'sed "s/.*installed in \'\(.*\)\' which is not on PATH.*/\1/");'
+    'sed "s/.*installed in \'\\(.*\\)\' which is not on PATH.*/\\1/");'
     # Writes ray path to file if it does not exist or the file is empty.
-    f'[ -s {SKY_RAY_PATH_FILE} ] || {{ [ -n $bin_path ] && '
-    f'printf $bin_path > {SKY_RAY_PATH_FILE} || '
-    f'which ray > {SKY_RAY_PATH_FILE}; }};'
+    f'[ -s {SKY_RAY_PATH_FILE} ] || {{ [ -n "$bin_path" ] && '
+    f'echo $bin_path > {SKY_RAY_PATH_FILE} || '
+    f'which ray > {SKY_RAY_PATH_FILE}; }}; '
     # END ray package check and installation
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
