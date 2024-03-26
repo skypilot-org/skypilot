@@ -137,3 +137,53 @@ This allows you directly to SSH into the worker nodes, if required.
   # Worker nodes.
   $ ssh mycluster-worker1
   $ ssh mycluster-worker2
+
+
+Executing a Distributed Ray Program
+------------------------------------
+To execute a distributed Ray program on many VMs, you can download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `task yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
+
+.. code-block:: console
+
+  $ wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/distributed_ray_train/train.py
+  $ sky launch ray_train.yaml
+
+.. code-block:: yaml
+  
+    resources:
+      accelerators: L4:2
+      memory: 64+
+  
+    num_nodes: 2
+
+    workdir: .
+
+    setup: |
+      conda activate ray
+      if [ $? -ne 0 ]; then
+        conda create -n ray python=3.10 -y
+        conda activate ray
+      fi
+      
+      pip install "ray[train]"
+      pip install tqdm
+      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+  
+    run: |
+      sudo chmod 777 -R /var/tmp
+      head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+      num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+      if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+        ps aux | grep ray | grep 6379 &> /dev/null || ray start --head  --disable-usage-stats --port 6379
+        sleep 5
+        python train.py --num-workers $num_nodes
+      else
+        sleep 5
+        ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $head_ip:6379 --disable-usage-stats
+      fi
+
+.. warning:: 
+  **Avoid Installing Ray in Base Environment**: Before proceeding with the execution of a distributed Ray program, it is crucial to ensure that Ray is **not** installed in the *base* environment. Installing a different version of Ray in the base environment can lead to abnormal cluster status.
+
+  It is highly recommended to **create a dedicated virtual environment** (as above) for Ray and its dependencies, and avoid calling `ray stop` as that will also cause issue with the cluster.
+

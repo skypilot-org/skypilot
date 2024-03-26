@@ -51,7 +51,6 @@ from sky.core import job_status
 from sky.core import queue
 from sky.core import spot_cancel
 from sky.core import spot_queue
-from sky.core import spot_status
 from sky.core import start
 from sky.core import status
 from sky.core import stop
@@ -82,6 +81,7 @@ Lambda = clouds.Lambda
 SCP = clouds.SCP
 Kubernetes = clouds.Kubernetes
 OCI = clouds.OCI
+Paperspace = clouds.Paperspace
 RunPod = clouds.RunPod
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
@@ -97,6 +97,7 @@ __all__ = [
     'Kubernetes',
     'Lambda',
     'OCI',
+    'Paperspace',
     'RunPod',
     'SCP',
     'Vsphere',
@@ -135,7 +136,6 @@ __all__ = [
     'job_status',
     # core APIs Spot Job Management
     'spot_queue',
-    'spot_status',  # Deprecated (alias for spot_queue)
     'spot_cancel',
     # core APIs Storage Management
     'storage_ls',

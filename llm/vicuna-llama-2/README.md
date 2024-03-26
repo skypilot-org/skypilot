@@ -11,7 +11,7 @@ In this recipe, we will show how to train your own Vicuna on Llama 2, using SkyP
 
 [^1]: Technically, as long as you don't have 700M monthly active users. See [license](https://github.com/facebookresearch/llama/blob/main/LICENSE).
 
-### Prerequisites
+## Prerequisites
 
 1. Apply for access to the Llama-2 model
 
@@ -28,7 +28,7 @@ git clone https://github.com/skypilot-org/skypilot.git
 cd skypilot/llm/vicuna-llama-2
 ```
 
-Paste the access token into [train.yaml](train.yaml):
+Paste the access token into [train.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/train.yaml):
 ```yaml
 envs:
   HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token
@@ -39,9 +39,9 @@ envs:
 
 ### Training data and model identity
 
-  By default, we use the [ShareGPT data](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json) and the identity questions in [hardcoded_questions.py](./scripts/hardcoded_questions.py).
+  By default, we use the [ShareGPT data](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json) and the identity questions in [hardcoded_questions.py](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/scripts/hardcoded_questions.py).
 
-  **Optional**: To use custom data, you can change the following line in [train.yaml](train.yaml):
+  **Optional**: To use custom data, you can change the following line in [train.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/train.yaml):
 
   ```yaml
   setup: |
@@ -67,7 +67,7 @@ envs:
   },
   ```
 
-  **Optional**: To make the model know about its identity, you can change the hardcoded questions [hardcoded_questions.py](./scripts/hardcoded_questions.py)
+  **Optional**: To make the model know about its identity, you can change the hardcoded questions [hardcoded_questions.py](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/scripts/hardcoded_questions.py)
 
   > **Note**: Models trained on ShareGPT data may have restrictions on commercial usage. Swap it out with your own data for commercial use.
 
@@ -120,7 +120,7 @@ sky launch --no-use-spot ...
 
 ### Reducing costs by 3x with spot instances
 
-[SkyPilot Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html) is a library built on top of SkyPilot that helps users run jobs on spot instances without worrying about interruptions. That is the tool used by the LMSYS organization to train the first version of Vicuna (more details can be found in their [launch blog post](https://lmsys.org/blog/2023-03-30-vicuna/) and [example](../vicuna)). With this, the training cost can be reduced from $1000 to **\$300**.
+[SkyPilot Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html) is a library built on top of SkyPilot that helps users run jobs on spot instances without worrying about interruptions. That is the tool used by the LMSYS organization to train the first version of Vicuna (more details can be found in their [launch blog post](https://lmsys.org/blog/2023-03-30-vicuna/) and [example](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna)). With this, the training cost can be reduced from $1000 to **\$300**.
 
 To use SkyPilot Managed Spot, you can simply replace `sky launch` with `sky spot launch` in the above command:
 
@@ -137,7 +137,7 @@ After the training is done, you can serve your model in your own cloud environme
 ```bash
 sky launch -c serve serve.yaml --env MODEL_CKPT=<your-model-checkpoint>/chatbot/7b
 ```
-In [serve.yaml](./serve.yaml), we specified launching a Gradio server that serves the model checkpoint at `<your-model-checkpoint>/chatbot/7b`.
+In [serve.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/serve.yaml), we specified launching a Gradio server that serves the model checkpoint at `<your-model-checkpoint>/chatbot/7b`.
 
 ![Vicuna-Llama-2](https://imgur.com/McZWg6z.gif "Serving the resulting model with Gradio.")
 

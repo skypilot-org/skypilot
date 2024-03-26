@@ -144,6 +144,7 @@ def _get_cluster_config_template(cloud):
         clouds.IBM: 'ibm-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
+        clouds.Paperspace: 'paperspace-ray.yml.j2',
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
@@ -285,7 +286,6 @@ class RayCodeGen:
                 # next job can be scheduled on the released resources immediately.
                 ray_util.remove_placement_group(pg)
                 sys.stdout.flush()
-                sys.stderr.flush()
                 return returncodes
 
             run_fn = None
@@ -372,14 +372,12 @@ class RayCodeGen:
                 message = {_CTRL_C_TIP_MESSAGE!r} + '\\n'
                 message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
                 print(message,
-                      file=sys.stderr,
                       flush=True)
                 # FIXME: This will print the error message from autoscaler if
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
                 print('INFO: All task resources reserved.',
-                      file=sys.stderr,
                       flush=True)
                 """)
         ]
@@ -427,7 +425,6 @@ class RayCodeGen:
                     print('ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with '
                         'return code list:{colorama.Style.RESET_ALL}',
                         setup_returncodes,
-                        file=sys.stderr,
                         flush=True)
                     # Need this to set the job status in ray job to be FAILED.
                     sys.exit(1)
@@ -543,10 +540,6 @@ class RayCodeGen:
             sky_env_vars_dict_str += [
                 f'sky_env_vars_dict[{constants.TASK_ID_ENV_VAR!r}]'
                 f' = {job_run_id!r}',
-                # TODO(zhwu): remove this deprecated env var in later release
-                # (after 0.5).
-                f'sky_env_vars_dict[{constants.TASK_ID_ENV_VAR_DEPRECATED!r}]'
-                f' = {job_run_id!r}'
             ]
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
@@ -623,7 +616,6 @@ class RayCodeGen:
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
                       reason,
-                      file=sys.stderr,
                       flush=True)
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
@@ -1942,7 +1934,7 @@ class RetryingVmProvisioner(object):
                 require_outputs=True)
         if returncode == 0:
             return
-        backend.run_on_head(handle, 'ray stop')
+        backend.run_on_head(handle, f'{constants.SKY_RAY_CMD} stop')
 
         # Runs `ray up <kwargs>` with our monkey-patched launch hash
         # calculation. See the monkey patch file for why.
@@ -3104,7 +3096,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         codegen: str,
         job_id: int,
-        executable: str,
         detach_run: bool = False,
         spot_dag: Optional['dag.Dag'] = None,
     ) -> None:
@@ -3131,15 +3122,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
-        assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
         job_submit_cmd = (
-            'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
-            f'{cd} && ray job submit '
+            f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
+            f'{cd} && {constants.SKY_RAY_CMD} job submit '
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
-            f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
+            # Redirect stderr to /dev/null to avoid distracting error from ray.
+            f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} 2> /dev/null"'
+        )
 
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
@@ -3334,7 +3326,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   handle: CloudVmRayResourceHandle,
                   terminate: bool,
                   purge: bool = False):
-        """Tear down/ Stop the cluster.
+        """Tear down or stop the cluster.
 
         Args:
             handle: The handle to the cluster.
@@ -3437,13 +3429,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.cancel_jobs(jobs, cancel_all)
 
         # All error messages should have been redirected to stdout.
-        returncode, stdout, stderr = self.run_on_head(handle,
-                                                      code,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
-        # TODO(zongheng): remove after >=0.5.0, 2 minor versions after.
-        backend_utils.check_stale_runtime_on_remote(returncode, stdout + stderr,
-                                                    handle.cluster_name)
+        returncode, stdout, _ = self.run_on_head(handle,
+                                                 code,
+                                                 stream_logs=False,
+                                                 require_outputs=True)
         subprocess_utils.handle_returncode(
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
@@ -3697,7 +3686,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # We do not check the return code, since Ray returns
                 # non-zero return code when calling Ray stop,
                 # even when the command was executed successfully.
-                self.run_on_head(handle, 'ray stop --force')
+                self.run_on_head(handle,
+                                 f'{constants.SKY_RAY_CMD} stop --force')
             except exceptions.FetchIPError:
                 # This error is expected if the previous cluster IP is
                 # failed to be found,
@@ -4053,7 +4043,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if returncode == 0:
             return common_utils.decode_payload(stdout)
-        logger.debug(f'Failed to check if cluster is autostopping: {stderr}')
+        logger.debug('Failed to check if cluster is autostopping with '
+                     f'{returncode}: {stdout+stderr}\n'
+                     f'Command: {code}')
         return False
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
@@ -4591,7 +4583,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
-                                executable='python3',
                                 detach_run=detach_run,
                                 spot_dag=task.spot_dag)
 
@@ -4655,6 +4646,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,
-                                executable='python3',
                                 detach_run=detach_run,
                                 spot_dag=task.spot_dag)

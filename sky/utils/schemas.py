@@ -327,12 +327,22 @@ def get_service_schema():
                 'properties': {
                     'min_replicas': {
                         'type': 'integer',
+                        'minimum': 0,
                     },
                     'max_replicas': {
                         'type': 'integer',
+                        'minimum': 0,
                     },
                     'target_qps_per_replica': {
                         'type': 'number',
+                        'minimum': 0,
+                    },
+                    'dynamic_ondemand_fallback': {
+                        'type': 'boolean',
+                    },
+                    'base_ondemand_fallback_replicas': {
+                        'type': 'integer',
+                        'minimum': 0,
                     },
                     'upscale_delay_seconds': {
                         'type': 'number',
@@ -569,6 +579,9 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'prioritize_reservations': {
+                    'type': 'boolean',
+                },
                 'specific_reservations': {
                     'type': 'array',
                     'items': {
@@ -603,6 +616,20 @@ def get_config_schema():
                     'required': [],
                     # Allow arbitrary keys since validating pod spec is hard
                     'additionalProperties': True,
+                },
+                'custom_metadata': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating metadata is hard
+                    'additionalProperties': True,
+                    # Disallow 'name' and 'namespace' keys in this dict
+                    'not': {
+                        'anyOf': [{
+                            'required': ['name']
+                        }, {
+                            'required': ['namespace']
+                        }]
+                    }
                 }
             }
         },
