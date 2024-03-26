@@ -30,13 +30,15 @@ SKY_REMOTE_RAY_VERSION = '2.9.3'
 # used for installing SkyPilot runtime (ray and skypilot).
 SKY_PYTHON_PATH_FILE = '~/.sky/python_path'
 SKY_RAY_PATH_FILE = '~/.sky/ray_path'
-SKY_GET_PYTHON_PATH_CMD = (f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
+SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
+                           f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
                            'which python3')
 # Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # Ray executable, e.g., /opt/conda/bin/ray
-SKY_RAY_CMD = f'$(cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)'
+SKY_RAY_CMD = (f'$([ -s {SKY_RAY_PATH_FILE} ] && '
+               f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
@@ -121,12 +123,16 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # latest ray port 6380, but those existing cluster launched before #1790
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
+    'echo PATH=$PATH; '
     f'{SKY_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
-    f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION};'  # pylint: disable=line-too-long
+    f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    # Add missing PATH to make sure ray is in the PATH, when the
+    # previous ray installation happens in user's `~/.local` directory.
+    'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
-    f'[ -s {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE};'
+    f'[ -s {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE}; '
     # END ray package check and installation
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
