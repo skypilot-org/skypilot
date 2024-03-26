@@ -1,4 +1,4 @@
-# A example yaml for serving Gemma model from Mistral.ai with an OpenAI API.
+# A example yaml for serving Gemma model from Google with an OpenAI API.
 # Usage:
 #  1. Launch on a single instance: `sky launch -c gemma ./serve.yaml`
 #  2. Scale up to multiple instances with a single endpoint:
