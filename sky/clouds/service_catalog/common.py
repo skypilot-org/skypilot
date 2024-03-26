@@ -19,8 +19,8 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_ABSOLUTE_VERSIONED_CATALOG_DIR = os.path.join(os.path.expanduser(constants.CATALOG_DIR),
-                                               constants.CATALOG_SCHEMA_VERSION)
+_ABSOLUTE_VERSIONED_CATALOG_DIR = os.path.join(
+    os.path.expanduser(constants.CATALOG_DIR), constants.CATALOG_SCHEMA_VERSION)
 os.makedirs(_ABSOLUTE_VERSIONED_CATALOG_DIR, exist_ok=True)
 
 
@@ -87,7 +87,8 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
         """Returns a list of modified catalogs relative to the catalog dir."""
         modified_catalogs = []
         for cloud_name in constants.ALL_CLOUDS:
-            cloud_catalog_dir = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, cloud_name)
+            cloud_catalog_dir = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR,
+                                             cloud_name)
             if not os.path.exists(cloud_catalog_dir):
                 continue
             # Iterate over all csvs cloud's catalog directory
