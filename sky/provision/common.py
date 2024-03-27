@@ -238,17 +238,11 @@ class HTTPSEndpoint(SocketEndpoint):
 
 def query_ports_passthrough(
     ports: List[str],
-    cluster_info: ClusterInfo,
+    head_ip: Optional[str],
 ) -> Dict[int, List[Endpoint]]:
-    """Common function to query ports for AWS, GCP and Azure.
+    """Common function to get endpoints for AWS, GCP and Azure.
 
-    Returns a list of socket endpoint with empty host and the input ports."""
-    assert cluster_info.head_instance_id is not None, cluster_info
-    head_instance = cluster_info.instances.get(cluster_info.head_instance_id)
-    if head_instance is None:
-        return {}
-    head_ip = head_instance[0].external_ip
-    assert head_ip is not None, head_instance
+    Returns a list of socket endpoint using head_ip and ports."""
     ports = list(resources_utils.port_ranges_to_set(ports))
     result: Dict[int, List[Endpoint]] = {}
     for port in ports:

@@ -1962,7 +1962,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             if show_endpoints:
                 if endpoint:
                     cluster_endpoint = backend_utils.get_endpoints(
-                        cluster_record['name'], endpoint)
+                        cluster_record['name'], endpoint)[endpoint]
                     click.echo(cluster_endpoint)
                 else:
                     cluster_endpoints = backend_utils.get_endpoints(

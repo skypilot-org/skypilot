@@ -620,11 +620,9 @@ def cleanup_ports(
 def query_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
+    head_ip: Optional[str] = None,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None
-    cluster_info = get_cluster_info(provider_config['region'],
-                                    cluster_name_on_cloud,
-                                    provider_config=provider_config)
-    return common.query_ports_passthrough(ports, cluster_info)
+    del provider_config, cluster_name_on_cloud  # unused
+    return common.query_ports_passthrough(ports, head_ip)

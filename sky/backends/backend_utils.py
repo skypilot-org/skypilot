@@ -2644,14 +2644,16 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
 def get_endpoints(
         cluster: str,
         endpoint: Optional[Union[int,
-                                 str]] = None) -> Union[str, Dict[int, str]]:
+                                 str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
         cluster: The name of the cluster.
-        endpoint: The port number to get the endpoint for. If None, all
+        endpoint: The port number to get the endpoint for. If None, ports for
+            all endpoints are returned.
 
-    Returns: Endpoint URL if endpoint is not None, else a dictionary of all
+    Returns: A dictionary of port numbers to endpoints. If endpoint is None,
+        the dictionary will contain all ports:endpoints exposed on the cluster.
 
     Raises:
         ValueError: if the cluster is not UP or the endpoint is not exposed.
@@ -2694,10 +2696,12 @@ def get_endpoints(
     port_details = provision_lib.query_ports(repr(cloud),
                                              handle.cluster_name_on_cloud,
                                              handle.launched_resources.ports,
-                                             config['provider'])
+                                             head_ip=handle.head_ip,
+                                             provider_config=config['provider'])
 
+    # Validation before returning the endpoints
     if endpoint is not None:
-        # If cluster had no ports to be exposed
+        # If the requested endpoint was not to be exposed
         port_set = resources_utils.port_ranges_to_set(
             handle.launched_resources.ports)
         if endpoint not in port_set:
@@ -2705,7 +2709,7 @@ def get_endpoints(
                 raise ValueError(f'Port {endpoint} is not exposed '
                                  'on cluster '
                                  f'{cluster_record["name"]!r}.')
-        # If the user requested a specific port endpoint
+        # If the user requested a specific port endpoint, check if it is exposed
         if endpoint not in port_details:
             error_msg = (f'Port {endpoint} not exposed yet. '
                          f'{_ENDPOINTS_RETRY_MESSAGE} ')
@@ -2715,7 +2719,7 @@ def get_endpoints(
                 error_msg += (kubernetes_utils.get_endpoint_debug_message())
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(error_msg)
-        return port_details[endpoint][0].url()
+        return {endpoint: port_details[endpoint][0].url()}
     else:
         if not port_details:
             # If cluster had no ports to be exposed

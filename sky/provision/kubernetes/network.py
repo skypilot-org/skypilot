@@ -154,9 +154,11 @@ def _cleanup_ports_for_ingress(
 def query_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
+    head_ip: Optional[str] = None,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
+    del head_ip  # unused
     assert provider_config is not None, 'provider_config is required'
     port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None))

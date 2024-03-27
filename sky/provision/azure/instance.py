@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import azure
+from sky.provision import common
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -93,3 +94,14 @@ def cleanup_ports(
     # Azure will automatically cleanup network security groups when cleanup
     # resource group. So we don't need to do anything here.
     del cluster_name_on_cloud, ports, provider_config  # Unused.
+
+
+def query_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    head_ip: Optional[str] = None,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[common.Endpoint]]:
+    """See sky/provision/__init__.py"""
+    del provider_config, cluster_name_on_cloud  # unused
+    return common.query_ports_passthrough(ports, head_ip)

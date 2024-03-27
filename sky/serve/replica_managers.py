@@ -420,7 +420,7 @@ class ReplicaInfo:
             return None
         try:
             endpoint = backend_utils.get_endpoints(handle.cluster_name,
-                                                   self.replica_port)
+                                                   self.replica_port)[self.replica_port]
             assert isinstance(endpoint, str)
             return endpoint
         except RuntimeError:
