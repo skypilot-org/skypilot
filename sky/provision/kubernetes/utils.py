@@ -1038,15 +1038,29 @@ def check_port_forward_mode_dependencies() -> None:
                            stderr=subprocess.DEVNULL,
                            check=True)
         except (FileNotFoundError, subprocess.CalledProcessError):
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'`{name}` is required to setup Kubernetes cloud with '
-                    f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-                    'default networking mode and it is not installed. '
-                    'On Debian/Ubuntu, install it with:\n'
-                    f'  $ sudo apt install {install_cmd}\n'
-                    f'On MacOS, install it with: \n'
-                    f'  $ brew install {install_cmd}') from None
+            mac_nc_error = name == 'nc' and (os.path.exists('/usr/bin/nc') or
+                                             os.path.exists('/usr/bin/netcat'))
+            current_nc_path = (os.path.exists('/usr/bin/nc') and
+                               '/usr/bin/nc') or '/usr/bin/netcat'
+            if mac_nc_error:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'The default MacOS `nc` is installed at '
+                        f'{current_nc_path}. However, for '
+                        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+                        'default networking mode, GNU netcat is required. '
+                        f'On MacOS, install it with: \n'
+                        f'  $ brew install {install_cmd}') from None
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'`{name}` is required to setup Kubernetes cloud with '
+                        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+                        'default networking mode and it is not installed. '
+                        'On Debian/Ubuntu, install it with:\n'
+                        f'  $ sudo apt install {install_cmd}\n'
+                        f'On MacOS, install it with: \n'
+                        f'  $ brew install {install_cmd}') from None
 
 
 def get_endpoint_debug_message() -> str:
