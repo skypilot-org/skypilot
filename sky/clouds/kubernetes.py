@@ -32,8 +32,6 @@ class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
-    SKY_SSH_KEY_SECRET_FIELD_NAME = \
-        f'ssh-publickey-{common_utils.get_user_hash()}'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
     SKY_DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
@@ -77,6 +75,14 @@ class Kubernetes(clouds.Cloud):
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
+    @property
+    def ssh_key_secret_field_name(self):
+        # Use a fresh user hash to avoid conflicts in the secret object naming.
+        # This can happen when the controller is reusing the same user hash
+        # through USER_ID_ENV_VAR but has a different SSH key.
+        fresh_user_hash = common_utils.get_user_hash(force_fresh_hash=True)
+        return f'ssh-publickey-{fresh_user_hash}'
 
     @classmethod
     def _unsupported_features_for_resources(
