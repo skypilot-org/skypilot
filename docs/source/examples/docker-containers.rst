@@ -201,4 +201,4 @@ We suggest setting the :code:`SKYPILOT_DOCKER_PASSWORD` environment variable thr
   $ # Or cloud registry password:
   $ export SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1)
   $ # Pass --env:
-  $ sky launch my.yaml --env SKYPILOT_DOCKER_PASSWORD
+  $ sky launch task.yaml --env SKYPILOT_DOCKER_PASSWORD
