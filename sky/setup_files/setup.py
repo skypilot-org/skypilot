@@ -236,6 +236,7 @@ extras_require: Dict[str, List[str]] = {
     'runpod': ['runpod>=1.5.1'],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.8'],
+    'paperspace': [],  # No dependencies needed for paperspace
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have

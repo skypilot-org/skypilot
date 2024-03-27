@@ -30,6 +30,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[lambda]"
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
+          pip install "skypilot-nightly[paperspace]"
           pip install "skypilot-nightly[cudo]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
@@ -56,6 +57,7 @@ Install SkyPilot using pip:
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
           pip install "skypilot[fluidstack]"
+          pip install "skypilot[paperspace]"
           pip install "skypilot[cudo]"
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
@@ -85,6 +87,7 @@ Install SkyPilot using pip:
           pip install -e ".[lambda]"
           pip install -e ".[runpod]"
           pip install -e ".[fluidstack]"
+          pip install -e ".[paperspace]"
           pip install -e ".[cudo]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
@@ -166,7 +169,7 @@ section :ref:`below <cloud-account-setup>`.
 Cloud account setup
 -------------------
 
-SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidstack, Cudo,
+SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidstack, Paperspace, Cudo,
 IBM, SCP, VMware vSphere and Cloudflare (for R2 object store).
 
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
