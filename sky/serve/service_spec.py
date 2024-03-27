@@ -37,27 +37,37 @@ class SkyServiceSpec:
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'max_replicas must be greater than or equal to min_replicas'
-                )
+                raise ValueError('max_replicas must be greater than or '
+                                 'equal to min_replicas. Found: '
+                                 f'min_replicas={min_replicas}, '
+                                 f'max_replicas={max_replicas}')
 
-        if target_qps_per_replica is not None and max_replicas is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('max_replicas must be set where '
-                                 'target_qps_per_replica is set.')
+        if target_qps_per_replica is not None:
+            if max_replicas is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('max_replicas must be set where '
+                                     'target_qps_per_replica is set.')
+        else:
+            if max_replicas is not None and max_replicas != min_replicas:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Detected different min_replicas and max_replicas '
+                        'while target_qps_per_replica is not set. To enable '
+                        'autoscaling, please set target_qps_per_replica.')
 
         if not readiness_path.startswith('/'):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
 
+        # TODO(tian): Following field are deprecated. Remove after 2 minor
+        # release, i.e. 0.6.0.
         if qps_upper_threshold is not None or qps_lower_threshold is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Field `qps_upper_threshold` and `qps_lower_threshold`'
                     'under `replica_policy` are deprecated. '
                     'Please use target_qps_per_replica instead.')
-
         if auto_restart is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -236,10 +246,13 @@ class SkyServiceSpec:
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
             return f'Fixed {self.min_replicas} replica{min_plural}'
+        # Already checked in __init__.
+        assert self.target_qps_per_replica is not None
         # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
-        return (f'Autoscaling from {self.min_replicas} to '
-                f'{self.max_replicas} replica{max_plural}')
+        return (f'Autoscaling from {self.min_replicas} to {self.max_replicas} '
+                f'replica{max_plural} (target QPS per replica: '
+                f'{self.target_qps_per_replica})')
 
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\

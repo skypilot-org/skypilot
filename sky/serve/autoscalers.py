@@ -217,6 +217,8 @@ class RequestRateAutoscaler(Autoscaler):
         index = bisect.bisect_left(self.request_timestamps,
                                    current_time - self.qps_window_size)
         self.request_timestamps = self.request_timestamps[index:]
+        logger.info(f'Num of requests in the last {self.qps_window_size} '
+                    f'seconds: {len(self.request_timestamps)}')
 
     def _set_target_num_replica_with_hysteresis(self) -> None:
         """Set target_num_replicas based on request rate with hysteresis."""

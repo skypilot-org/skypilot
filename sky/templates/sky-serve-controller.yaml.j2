@@ -17,6 +17,9 @@ setup: |
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
   {{remote_user_config_path}}: skypilot:local_skypilot_config_path
+  {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
+  {{remote_catalog_path}}: {{local_catalog_path}}
+  {%- endfor %}
 
 run: |
   # Start sky serve service.
