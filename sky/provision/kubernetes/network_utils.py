@@ -22,11 +22,14 @@ def get_port_mode(
     """Get the port mode from the provider config."""
 
     curr_kube_config = kubernetes_utils.get_current_kube_config_context_name()
-    running_kind =  curr_kube_config == kubernetes_utils.KIND_CONTEXT_NAME
-    
-    mode_str = mode_str or skypilot_config.get_nested(('kubernetes', 'ports'), kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
-    mode_str = (running_kind and kubernetes_enums.KubernetesPortMode.INGRESS.value) or mode_str
-    
+    running_kind = curr_kube_config == kubernetes_utils.KIND_CONTEXT_NAME
+
+    mode_str = mode_str or skypilot_config.get_nested(
+        ('kubernetes', 'ports'),
+        kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
+    mode_str = (running_kind and
+                kubernetes_enums.KubernetesPortMode.INGRESS.value) or mode_str
+
     try:
         port_mode = kubernetes_enums.KubernetesPortMode(mode_str)
     except ValueError as e:
