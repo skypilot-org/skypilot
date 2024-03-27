@@ -71,13 +71,14 @@ def _open_ports_using_ingress(
         )
 
     # Prepare service names, ports,  for template rendering
-    service_details = [
-        (f'{cluster_name_on_cloud}-skypilot-service--{port}', port,
-         _PATH_PREFIX.format(cluster_name_on_cloud=cluster_name_on_cloud,
-                             port=port,
-                             namespace=kubernetes_utils.get_current_kube_config_context_namespace()).rstrip('/').lstrip('/'))
-        for port in ports
-    ]
+    service_details = [(f'{cluster_name_on_cloud}-skypilot-service--{port}',
+                        port,
+                        _PATH_PREFIX.format(
+                            cluster_name_on_cloud=cluster_name_on_cloud,
+                            port=port,
+                            namespace=kubernetes_utils.
+                            get_current_kube_config_context_namespace()).rstrip(
+                                '/').lstrip('/')) for port in ports]
 
     # Generate ingress and services specs
     # We batch ingress rule creation because each rule triggers a hot reload of
@@ -233,8 +234,10 @@ def _query_ports_for_ingress(
     result: Dict[int, List[common.Endpoint]] = {}
     for port in ports:
         path_prefix = _PATH_PREFIX.format(
-            cluster_name_on_cloud=cluster_name_on_cloud, port=port,
-            namespace=kubernetes_utils.get_current_kube_config_context_namespace())
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            port=port,
+            namespace=kubernetes_utils.
+            get_current_kube_config_context_namespace())
 
         http_port, https_port = external_ports \
             if external_ports is not None else (None, None)
