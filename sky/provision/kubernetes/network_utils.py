@@ -26,7 +26,6 @@ def get_port_mode(
     
     mode_str = mode_str or skypilot_config.get_nested(('kubernetes', 'ports'), kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
     mode_str = (running_kind and kubernetes_enums.KubernetesPortMode.INGRESS.value) or mode_str
-    import pdb; pdb.set_trace()
     
     try:
         port_mode = kubernetes_enums.KubernetesPortMode(mode_str)
