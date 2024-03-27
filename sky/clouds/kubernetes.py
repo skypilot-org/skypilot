@@ -98,6 +98,11 @@ class Kubernetes(clouds.Cloud):
                 clouds.CloudImplementationFeatures.OPEN_PORTS] = (
                     'Opening ports is not supported in Kubernetes when '
                     'using local kind cluster.')
+
+        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
+        if is_exec_auth:
+            unsupported_features[
+                clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
         return unsupported_features
 
     @classmethod
@@ -273,15 +278,15 @@ class Kubernetes(clouds.Cloud):
         if remote_identity == 'LOCAL_CREDENTIALS':
             # SA name doesn't matter since automounting credentials is disabled
             k8s_service_account_name = 'default'
-            k8s_automount_service_account_token = 'false'
+            k8s_automount_sa_token = 'false'
         elif remote_identity == 'SERVICE_ACCOUNT':
             # Use the default service account
             k8s_service_account_name = self.SKY_DEFAULT_SERVICE_ACCOUNT_NAME
-            k8s_automount_service_account_token = 'true'
+            k8s_automount_sa_token = 'true'
         else:
             # User specified a custom service account
             k8s_service_account_name = remote_identity
-            k8s_automount_service_account_token = 'true'
+            k8s_automount_sa_token = 'true'
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -300,8 +305,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
-            'k8s_automount_service_account_token':
-                k8s_automount_service_account_token,
+            'k8s_automount_sa_token': k8s_automount_sa_token,
             'image_id': image_id,
         }
 

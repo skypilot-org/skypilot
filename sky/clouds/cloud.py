@@ -41,6 +41,7 @@ class CloudImplementationFeatures(enum.Enum):
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
     OPEN_PORTS = 'open_ports'
+    HOST_CONTROLLERS = 'host_controllers'
 
 
 class Region(collections.namedtuple('Region', ['name'])):
