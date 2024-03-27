@@ -8,7 +8,7 @@ import urllib.request
 _SKYPILOT_COMMIT_SHA = '{{SKYPILOT_COMMIT_SHA}}'
 
 
-def get_git_commit():
+def _get_git_commit():
     if 'SKYPILOT_COMMIT_SHA' not in _SKYPILOT_COMMIT_SHA:
         # This is a release build, so we don't need to get the commit hash from
         # git, as it's already been set.
@@ -34,13 +34,13 @@ def get_git_commit():
         return _SKYPILOT_COMMIT_SHA
 
 
-__commit__ = get_git_commit()
+__commit__ = _get_git_commit()
 __version__ = '1.0.0-dev0'
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 
 # ---------------------- Proxy Configuration ---------------------- #
-def set_http_proxy_env_vars() -> None:
+def _set_http_proxy_env_vars() -> None:
     urllib_proxies = dict(urllib.request.getproxies())
 
     def set_proxy_env_var(proxy_var: str, urllib_var: Optional[str]):
@@ -74,7 +74,7 @@ def set_http_proxy_env_vars() -> None:
     set_proxy_env_var('all_proxy', None)
 
 
-set_http_proxy_env_vars()
+_set_http_proxy_env_vars()
 # ----------------------------------------------------------------- #
 
 # Keep this order to avoid cyclic imports
