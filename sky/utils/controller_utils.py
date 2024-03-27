@@ -139,18 +139,14 @@ def _get_cloud_dependencies_installation_commands(
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
     # AWS
-    if any(
-            cloud.is_same_cloud(clouds.AWS())
-            for cloud in enabled_clouds):
+    if clouds.cloud_in_list(clouds.AWS(), enabled_clouds):
         commands.append(
             'pip list | grep boto3 > /dev/null 2>&1 || '
             'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
             'boto3>=1.26.1 > /dev/null 2>&1'
         )
     # GCP
-    if any(
-            cloud.is_same_cloud(clouds.GCP())
-            for cloud in enabled_clouds):
+    if clouds.cloud_in_list(clouds.GCP(), enabled_clouds):
         commands.extend(
             ['pip list | grep google-api-python-client > /dev/null 2>&1 || '
             'pip install google-api-python-client>=2.69.0 google-cloud-storage '
@@ -158,17 +154,13 @@ def _get_cloud_dependencies_installation_commands(
             f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}']
         )
     # Azure
-    if any(
-            cloud.is_same_cloud(clouds.Azure())
-            for cloud in global_user_state.get_enabled_clouds()):
+    if clouds.cloud_in_list(clouds.Azure(), enabled_clouds):
         commands.append(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
             'azure-mgmt-network > /dev/null 2>&1')
     # Kubernetes
-    if any(
-            cloud.is_same_cloud(clouds.Kubernetes())
-            for cloud in global_user_state.get_enabled_clouds()):
+    if clouds.cloud_in_list(clouds.Kubernetes(), enabled_clouds):
         commands.append(
             # Install k8s + skypilot dependencies
             'sudo bash -c "if '
@@ -184,9 +176,7 @@ def _get_cloud_dependencies_installation_commands(
     if controller_type == 'spot':
         # oci doesn't support open port yet, so we don't install oci
         # dependencies for sky serve controller.
-        if any(
-                cloud.is_same_cloud(clouds.OCI())
-                for cloud in enabled_clouds):
+        if clouds.cloud_in_list(clouds.OCI(), enabled_clouds):
             commands.append(
                 'pip list | grep oci > /dev/null 2>&1 || '
                 'pip install oci > /dev/null 2>&1'
