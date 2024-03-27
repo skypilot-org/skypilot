@@ -300,7 +300,8 @@ class Kubernetes(clouds.Cloud):
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
-            'k8s_automount_service_account_token': k8s_automount_service_account_token,
+            'k8s_automount_service_account_token':
+                k8s_automount_service_account_token,
             'image_id': image_id,
         }
 
