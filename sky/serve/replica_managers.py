@@ -419,9 +419,13 @@ class ReplicaInfo:
         if handle is None:
             return None
         try:
+            replica_port_int = int(self.replica_port)
             endpoint = backend_utils.get_endpoints(handle.cluster_name,
-                                                   self.replica_port)[self.replica_port]
+                                                   replica_port_int)[replica_port_int]
             assert isinstance(endpoint, str)
+            # If replica doesn't start with http or https, add http://
+            if not endpoint.startswith('http'):
+                endpoint = 'http://' + endpoint
             return endpoint
         except RuntimeError:
             return None
@@ -474,8 +478,6 @@ class ReplicaInfo:
                 logger.info(f'Error when probing {replica_identity}: '
                             'Cannot get the endpoint.')
                 return self, False, probe_time
-            elif not url.startswith('http://'):
-                url = f'http://{url}'
             readiness_path = (f'{url}{readiness_path}')
             logger.info(f'Probing {replica_identity} with {readiness_path}.')
             if post_data is not None:
