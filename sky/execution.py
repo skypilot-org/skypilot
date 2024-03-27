@@ -210,6 +210,12 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+    try:
+        backend_utils.check_network_connection()
+    except exceptions.NetworkError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NetworkError(
+                'Failed to launch - Network seems down.') from e
     dag = _convert_to_dag(entrypoint)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
