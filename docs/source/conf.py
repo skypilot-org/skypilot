@@ -112,6 +112,7 @@ html_theme_options = {
     'footer_center': [],
     'footer_end': [],
     'header_links_before_dropdown': 6,
+    'article_header_start': None,  # Disable breadcrumbs.
 }
 
 html_context = {
