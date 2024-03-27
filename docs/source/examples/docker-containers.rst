@@ -190,7 +190,7 @@ you can provide the registry authentication details using :ref:`task environment
             # Values used in: docker login -u <user> -p <password> <registry server>
             SKYPILOT_DOCKER_USERNAME: AWS
             SKYPILOT_DOCKER_PASSWORD: <password>
-            SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.us-east-1.amazonaws.com
+            SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.<region>.amazonaws.com
 
 We suggest setting the :code:`SKYPILOT_DOCKER_PASSWORD` environment variable through the CLI (see :ref:`passing secrets <passing-secrets>`):
 
