@@ -15,7 +15,6 @@ from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
 
-
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
@@ -269,9 +268,10 @@ class Kubernetes(clouds.Cloud):
 
         port_mode = network_utils.get_port_mode(None)
 
-        remote_identity = skypilot_config.get_nested(('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+        remote_identity = skypilot_config.get_nested(
+            ('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
         if remote_identity == 'LOCAL_CREDENTIALS':
-            # SA name doesn't matter since automounting credentials will be turned off
+            # SA name doesn't matter since automounting credentials is disabled
             k8s_service_account_name = 'default'
             k8s_automount_service_account_token = 'false'
         elif remote_identity == 'SERVICE_ACCOUNT':
@@ -282,7 +282,6 @@ class Kubernetes(clouds.Cloud):
             # User specified a custom service account
             k8s_service_account_name = remote_identity
             k8s_automount_service_account_token = 'true'
-
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -382,9 +381,7 @@ class Kubernetes(clouds.Cloud):
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
-            return {
-                DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH
-            }
+            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
         else:
             return {}
 

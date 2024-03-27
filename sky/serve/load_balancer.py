@@ -115,13 +115,17 @@ def run_load_balancer(controller_addr: str, load_balancer_port: int):
                                          load_balancer_port=load_balancer_port)
     load_balancer.run()
 
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--controller-addr', required=True,
+    parser.add_argument('--controller-addr',
+                        required=True,
                         default='127.0.0.1',
                         help='The address of the controller.')
-    parser.add_argument('--load-balancer-port', type=int, required=True,
+    parser.add_argument('--load-balancer-port',
+                        type=int,
+                        required=True,
                         default=8890,
                         help='The port where the load balancer listens to.')
     args = parser.parse_args()

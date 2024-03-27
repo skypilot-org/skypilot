@@ -536,6 +536,7 @@ _REMOTE_IDENTITY_SCHEMA = {
 
 REMOTE_IDENTITY_DEFAULT = 'LOCAL_CREDENTIALS'
 
+
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
     from sky.utils import kubernetes_enums

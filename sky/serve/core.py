@@ -7,7 +7,6 @@ import colorama
 
 import sky
 from sky import backends
-from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging

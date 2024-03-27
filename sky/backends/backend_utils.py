@@ -48,10 +48,10 @@ from sky.utils import controller_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.utils import schemas
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -801,7 +801,8 @@ def write_cluster_config(
     assert cluster_name is not None
     excluded_clouds = []
     remote_identity = skypilot_config.get_nested(
-        (str(cloud).lower(), 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+        (str(cloud).lower(), 'remote_identity'),
+        schemas.REMOTE_IDENTITY_DEFAULT)
     # For Kubernetes, remote_identity can be 'SERVICE_ACCOUNT',
     # 'LOCAL_CREDENTIALS' or a string for the service account to use.
     if remote_identity != 'LOCAL_CREDENTIALS':
@@ -2641,10 +2642,8 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
                     f'\n--- Details ---\n{stderr.strip()}\n')
 
 
-def get_endpoints(
-        cluster: str,
-        endpoint: Optional[Union[int,
-                                 str]] = None) -> Dict[int, str]:
+def get_endpoints(cluster: str,
+                  endpoint: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -2670,7 +2669,6 @@ def get_endpoints(
     cluster_records = get_clusters(include_controller=True,
                                    refresh=False,
                                    cluster_names=[cluster])
-    #TODO(romilb): Add error message for > 1 cluster records here before merging.
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         with ux_utils.print_exception_no_traceback():

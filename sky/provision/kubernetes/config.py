@@ -32,22 +32,35 @@ def bootstrap_instances(
         # If not, set up the roles and bindings for skypilot-service-account
         # here.
         _configure_autoscaler_service_account(namespace, config.provider_config)
-        _configure_autoscaler_role(namespace, config.provider_config, role_field='autoscaler_role')
-        _configure_autoscaler_role_binding(namespace, config.provider_config, binding_field='autoscaler_role_binding')
+        _configure_autoscaler_role(namespace,
+                                   config.provider_config,
+                                   role_field='autoscaler_role')
+        _configure_autoscaler_role_binding(
+            namespace,
+            config.provider_config,
+            binding_field='autoscaler_role_binding')
         _configure_autoscaler_cluster_role(namespace, config.provider_config)
-        _configure_autoscaler_cluster_role_binding(namespace, config.provider_config)
+        _configure_autoscaler_cluster_role_binding(namespace,
+                                                   config.provider_config)
         if config.provider_config.get('port_mode', 'loadbalancer') == 'ingress':
-            logger.info('Port mode is set to ingress, setting up ingress role and role binding')
+            logger.info('Port mode is set to ingress, setting up ingress role '
+                        'and role binding.')
             try:
-                _configure_autoscaler_role(namespace, config.provider_config, role_field='autoscaler_ingress_role')
-                _configure_autoscaler_role_binding(namespace, config.provider_config, binding_field='autoscaler_ingress_role_binding')
+                _configure_autoscaler_role(namespace,
+                                           config.provider_config,
+                                           role_field='autoscaler_ingress_role')
+                _configure_autoscaler_role_binding(
+                    namespace,
+                    config.provider_config,
+                    binding_field='autoscaler_ingress_role_binding')
             except kubernetes.api_exception() as e:
                 # If namespace is not found, we will ignore the error
                 if e.status == 404:
-                    logger.info(f'Namespace not found - is your nginx ingress installed? Skipping ingress role and role binding setup.')
+                    logger.info(
+                        'Namespace not found - is your nginx ingress installed?'
+                        ' Skipping ingress role and role binding setup.')
                 else:
                     raise e
-
 
     elif requested_service_account != 'default':
         logger.info(f'Using service account {requested_service_account!r}, '
@@ -230,8 +243,7 @@ def _configure_autoscaler_service_account(
                 f'{created_msg(account_field, name)}')
 
 
-def _configure_autoscaler_role(namespace: str,
-                               provider_config: Dict[str, Any],
+def _configure_autoscaler_role(namespace: str, provider_config: Dict[str, Any],
                                role_field: str) -> None:
     """ Reads the role from the provider config, creates if it does not exist.
 
@@ -315,7 +327,9 @@ def _configure_autoscaler_role_binding(namespace: str,
     logger.info('_configure_autoscaler_role_binding: '
                 f'{created_msg(binding_field, name)}')
 
-def _configure_autoscaler_cluster_role(namespace, provider_config: Dict[str, Any]) -> None:
+
+def _configure_autoscaler_cluster_role(namespace,
+                                       provider_config: Dict[str, Any]) -> None:
     role_field = 'autoscaler_cluster_role'
     if role_field not in provider_config:
         logger.info('_configure_autoscaler_cluster_role: '
@@ -341,10 +355,12 @@ def _configure_autoscaler_cluster_role(namespace, provider_config: Dict[str, Any
     logger.info('_configure_autoscaler_cluster_role: '
                 f'{not_found_msg(role_field, name)}')
     kubernetes.auth_api().create_cluster_role(role)
-    logger.info(f'_configure_autoscaler_cluster_role: {created_msg(role_field, name)}')
+    logger.info(
+        f'_configure_autoscaler_cluster_role: {created_msg(role_field, name)}')
 
 
-def _configure_autoscaler_cluster_role_binding(namespace, provider_config: Dict[str, Any]) -> None:
+def _configure_autoscaler_cluster_role_binding(
+        namespace, provider_config: Dict[str, Any]) -> None:
     binding_field = 'autoscaler_cluster_role_binding'
     if binding_field not in provider_config:
         logger.info('_configure_autoscaler_cluster_role_binding: '
@@ -379,6 +395,7 @@ def _configure_autoscaler_cluster_role_binding(namespace, provider_config: Dict[
     kubernetes.auth_api().create_cluster_role_binding(binding)
     logger.info('_configure_autoscaler_cluster_role_binding: '
                 f'{created_msg(binding_field, name)}')
+
 
 def _configure_ssh_jump(namespace, config: common.ProvisionConfig):
     """Creates a SSH jump pod to connect to the cluster.

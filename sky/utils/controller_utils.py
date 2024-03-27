@@ -143,16 +143,14 @@ def _get_cloud_dependencies_installation_commands(
         commands.append(
             'pip list | grep boto3 > /dev/null 2>&1 || '
             'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
-            'boto3>=1.26.1 > /dev/null 2>&1'
-        )
+            'boto3>=1.26.1 > /dev/null 2>&1')
     # GCP
     if clouds.cloud_in_list(clouds.GCP(), enabled_clouds):
-        commands.extend(
-            ['pip list | grep google-api-python-client > /dev/null 2>&1 || '
+        commands.extend([
+            'pip list | grep google-api-python-client > /dev/null 2>&1 || '
             'pip install google-api-python-client>=2.69.0 google-cloud-storage '
-            '> /dev/null 2>&1',
-            f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}']
-        )
+            '> /dev/null 2>&1', f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}'
+        ])
     # Azure
     if clouds.cloud_in_list(clouds.Azure(), enabled_clouds):
         commands.append(
@@ -170,17 +168,18 @@ def _get_cloud_dependencies_installation_commands(
             'then apt update && apt install curl socat netcat -y; '
             'fi" && '
             # Install kubectl
-            '(command -v kubectl &>/dev/null || (curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl)) && '
-        )
+            '(command -v kubectl &>/dev/null || '
+            '(curl -LO "https://dl.k8s.io/release/$(curl -L -s '
+            'https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && '
+            'sudo install -o root -g root -m 0755 '
+            'kubectl /usr/local/bin/kubectl)) && ')
     # OCI
     if controller_type == 'spot':
         # oci doesn't support open port yet, so we don't install oci
         # dependencies for sky serve controller.
         if clouds.cloud_in_list(clouds.OCI(), enabled_clouds):
-            commands.append(
-                'pip list | grep oci > /dev/null 2>&1 || '
-                'pip install oci > /dev/null 2>&1'
-            )
+            commands.append('pip list | grep oci > /dev/null 2>&1 || '
+                            'pip install oci > /dev/null 2>&1')
     # ibm doesn't support open port and spot instance yet, so we don't
     # install them for either controller.
     return commands

@@ -521,7 +521,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     try:
         k8s.config.load_kube_config()
     except kubernetes.config_exception():
-        pass    # Using service account token or other auth methods, continue
+        pass  # Using service account token or other auth methods, continue
     else:
         # Get active context and user from kubeconfig using k8s api
         _, current_context = k8s.config.list_kube_config_contexts()
@@ -530,26 +530,35 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         # K8s api does not provide a mechanism to get the user details from the
         # context. We need to load the kubeconfig file and parse it to get the
         # user details.
-        kubeconfig_path = os.path.expanduser(os.getenv('KUBECONFIG',
-                                    k8s.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION))
+        kubeconfig_path = os.path.expanduser(
+            os.getenv('KUBECONFIG',
+                      k8s.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION))
         # Load the kubeconfig file as a dictionary
-        with open(kubeconfig_path, 'r') as f:
+        with open(kubeconfig_path, 'r', encoding='utf-8') as f:
             kubeconfig = yaml.safe_load(f)
 
         user_details = kubeconfig['users']
 
         # Find user matching the target username
-        user_details = next(user for user in user_details if user['name'] == target_username)
+        user_details = next(
+            user for user in user_details if user['name'] == target_username)
 
-        remote_identity = skypilot_config.get_nested(('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+        remote_identity = skypilot_config.get_nested(
+            ('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
         if ('exec' in user_details.get('user', {}) and
                 remote_identity == 'LOCAL_CREDENTIALS'):
             ctx_name = current_context['name']
-            exec_msg = ('exec-based authentication is used for '
-                        f'Kubernetes context {ctx_name!r}.'
-                        ' This may cause issues when running Managed Spot '
-                        'or SkyServe controller on Kubernetes. To fix, configure SkyPilot to create a service account for running pods by adding '
-                        'the following in ~/.sky/config.yaml:\n    kubernetes:\n      remote_identity: SERVICE_ACCOUNT\n    More: https://skypilot.readthedocs.io/en/latest/reference/config.html')
+            exec_msg = (
+                'exec-based authentication is used for '
+                f'Kubernetes context {ctx_name!r}.'
+                ' This may cause issues when running Managed Spot '
+                'or SkyServe controller on Kubernetes. To fix, configure '
+                'SkyPilot to create a service account for running pods by '
+                'adding the following in ~/.sky/config.yaml:\n'
+                '    kubernetes:\n'
+                '      remote_identity: SERVICE_ACCOUNT\n'
+                '    More: https://skypilot.readthedocs.io/en/latest/'
+                'reference/config.html')
 
     # We now check if GPUs are available and labels are set correctly on the
     # cluster, and if not we return hints that may help debug any issues.
@@ -570,6 +579,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         return True, gpu_msg or exec_msg
     else:
         return True, None
+
 
 def get_current_kube_config_context_name() -> Optional[str]:
     """Get the current kubernetes context from the kubeconfig file

@@ -243,6 +243,7 @@ def query_ports_passthrough(
     """Common function to get endpoints for AWS, GCP and Azure.
 
     Returns a list of socket endpoint using head_ip and ports."""
+    assert head_ip is not None, head_ip
     ports = list(resources_utils.port_ranges_to_set(ports))
     result: Dict[int, List[Endpoint]] = {}
     for port in ports:
