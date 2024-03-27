@@ -116,13 +116,6 @@ class SkyLocalUpLineProcessor(LineProcessor):
         if 'SkyPilot CPU image loaded into kind cluster' in log_line:
             logger.info(f'{colorama.Fore.GREEN}SkyPilot CPU image pulled.'
                         f'{colorama.Style.RESET_ALL}')
-        if 'Updating Kubernetes port configuration...' in log_line:
-            self.status_display.update(
-                '[bold cyan]Updating Kubernetes port configuration...')
-        if 'Kubernetes port configuration updated' in log_line:
-            logger.info(
-                f'{colorama.Fore.GREEN}Kubernetes port configuration updated.'
-                f'{colorama.Style.RESET_ALL}')
         if 'Starting installation of Nginx Ingress Controller...' in log_line:
             self.status_display.update(
                 '[bold cyan]Creating Nginx Ingress Controller')
