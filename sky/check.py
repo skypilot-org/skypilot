@@ -99,10 +99,13 @@ def check(
 
         # Pretty print for UX.
         if not quiet:
-            enabled_clouds_for_output = [
-                cloud for cloud in enabled_clouds
-                if len(clouds_set) == 0 or cloud.lower() in clouds_set
-            ]
+            if len(clouds_set) == 0:
+                enabled_clouds_for_output = enabled_clouds
+            else:
+                enabled_clouds_for_output = [
+                    cloud for cloud in enabled_clouds
+                    if cloud.lower() in clouds_set
+                ]
             enabled_clouds_str = '\n  :heavy_check_mark: '.join(
                 [''] + sorted(enabled_clouds_for_output))
             rich.print('\n[green]:tada: Enabled clouds :tada:'
