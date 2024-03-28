@@ -75,7 +75,7 @@ You can play with the model via
 To curl `/v1/chat/completions`:
 ```console
 IP=$(sky status --ip dbrx)
-curl $IP:8081/v1/models
+
 curl http://$IP:8081/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -95,16 +95,16 @@ curl http://$IP:8081/v1/chat/completions \
 
 To use the Gradio UI, open the URL shown in the logs:
 ```console
-(task, pid=17415) Running on local URL:  http://127.0.0.1:8811
-...
-(task, pid=17415) Running on public URL: https://0000xxxxxxxx.gradio.live
-...
-(task, pid=17415) INFO 03-28 03:56:36 metrics.py:218] Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Swapped: 0 reqs, Pending: 0 reqs, GPU KV cache usage: 0.0%, CPU KV cache usage: 0.0%
-(task, pid=17415) INFO 03-28 03:56:46 metrics.py:218] Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Swapped: 0 reqs, Pending: 0 reqs, GPU KV cache usage: 0.0%, CPU KV cache usage: 0.0%
-...
+(task, pid=17433) Running on local URL:  http://127.0.0.1:8811
+(task, pid=17433) Running on public URL: https://xxxxxxxxxx.gradio.live
 ```
 
 <img src="https://i.imgur.com/BZszerX.png" alt="Gradio UI serving DBRX" style="height: 600px;">
+
+To stop the instance:
+```console
+sky stop dbrx
+```
 
 To shut down all resources:
 ```console
