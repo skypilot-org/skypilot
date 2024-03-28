@@ -101,6 +101,7 @@ class Kubernetes(clouds.Cloud):
 
         is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
         if is_exec_auth:
+            assert isinstance(message, str), message
             unsupported_features[
                 clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
         return unsupported_features

@@ -515,7 +515,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     # We now do softer checks to check if exec based auth is used and to
     # see if the cluster is GPU-enabled.
 
-    is_exec_auth, exec_msg = is_kubeconfig_exec_auth()
+    _, exec_msg = is_kubeconfig_exec_auth()
 
     # We now check if GPUs are available and labels are set correctly on the
     # cluster, and if not we return hints that may help debug any issues.
@@ -584,17 +584,16 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
     if ('exec' in user_details.get('user', {}) and
             remote_identity == 'LOCAL_CREDENTIALS'):
         ctx_name = current_context['name']
-        exec_msg = (
-            'exec-based authentication is used for '
-            f'Kubernetes context {ctx_name!r}.'
-            ' This may cause issues when running Managed Spot '
-            'or SkyServe controller on Kubernetes. To fix, configure '
-            'SkyPilot to create a service account for running pods by '
-            'adding the following in ~/.sky/config.yaml:\n'
-            '    kubernetes:\n'
-            '      remote_identity: SERVICE_ACCOUNT\n'
-            '    More: https://skypilot.readthedocs.io/en/latest/'
-            'reference/config.html')
+        exec_msg = ('exec-based authentication is used for '
+                    f'Kubernetes context {ctx_name!r}.'
+                    ' This may cause issues when running Managed Spot '
+                    'or SkyServe controller on Kubernetes. To fix, configure '
+                    'SkyPilot to create a service account for running pods by '
+                    'adding the following in ~/.sky/config.yaml:\n'
+                    '    kubernetes:\n'
+                    '      remote_identity: SERVICE_ACCOUNT\n'
+                    '    More: https://skypilot.readthedocs.io/en/latest/'
+                    'reference/config.html')
         return True, exec_msg
     return False, None
 

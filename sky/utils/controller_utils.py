@@ -548,7 +548,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 else:
                     data_src = 'workdir'
             store_enabled_clouds = ', '.join(storage_lib.STORE_ENABLED_CLOUDS)
-            with (ux_utils.print_exception_no_traceback()):
+            with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
                     f'Unable to use {data_src} - no cloud with object store '
                     'is enabled. Please enable at least one cloud with '
