@@ -20,7 +20,7 @@ See the full YAML file [here](https://github.com/skypilot-org/skypilot/tree/mast
 
 ## Serving DBRX: single instance
 
-Launch a single spot instance of DBRX on your infra:
+Launch a single spot instance ($4.1/hour up) to serve DBRX on your infra:
 ```console
 HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
 ```
@@ -49,7 +49,7 @@ I 03-27 21:08:53 optimizer.py:906] ---------------------------------------------
 
 </details>
 
-> To use an on-demand instance instead, pass `--use-spot False` to the above command.
+> To run on K8s or use an on-demand instance, pass `--use-spot False` to the above command.
 
 Wait until the model is ready (this can take 10+ minutes), as indicated by these lines:
 ```console
@@ -124,6 +124,22 @@ Wait until the service is ready:
 ```console
 watch -n10 sky serve status dbrx
 ```
+
+<details>
+<summary>Example outputs:</summary>
+
+```console
+Services
+NAME  VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
+dbrx  1        35s     READY   2/2       xx.yy.zz.100:30001
+
+Service Replicas
+SERVICE_NAME  ID  VERSION  IP            LAUNCHED     RESOURCES                       STATUS  REGION
+dbrx          1   1        xx.yy.zz.121  18 mins ago  1x GCP([Spot]{'A100-80GB': 4})  READY   us-east4
+dbrx          2   1        xx.yy.zz.245  18 mins ago  1x GCP([Spot]{'A100-80GB': 4})  READY   us-east4
+```
+</details>
+
 
 Get a single endpoint that load-balances across replicas:
 ```console
