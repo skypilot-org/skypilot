@@ -14,6 +14,10 @@ In this recipe, you will serve `databricks/dbrx-instruct` on your own infra  -- 
 - Check that you have installed SkyPilot ([docs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)).
 - Check that `sky check` shows clouds or Kubernetes are enabled.
 
+## SkyPilot YAML
+
+See the full YAML file [here](https://github.com/skypilot-org/skypilot/tree/master/llm/dbrx/dbrx.yaml).
+
 ## Serving DBRX: single instance
 
 Launch a single spot instance of DBRX on your infra:
@@ -47,12 +51,22 @@ I 03-27 21:08:53 optimizer.py:906] ---------------------------------------------
 
 > To use an on-demand instance instead, pass `--use-spot False` to the above command.
 
-Wait until the model is ready, indicated by these lines:
+Wait until the model is ready (this can take 10+ minutes), as indicated by these lines:
 ```console
 ...
 (task, pid=17433) Waiting for vllm api server to start...
+...
+(task, pid=17433) INFO:     Started server process [20621]
+(task, pid=17433) INFO:     Waiting for application startup.
+(task, pid=17433) INFO:     Application startup complete.
+(task, pid=17433) INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
+...
+(task, pid=17433) Running on local URL:  http://127.0.0.1:8811
+(task, pid=17433) Running on public URL: https://xxxxxxxxxx.gradio.live
+...
+(task, pid=17433) INFO 03-28 04:32:50 metrics.py:218] Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Swapped: 0 reqs, Pending: 0 reqs, GPU KV cache usage: 0.0%, CPU KV cache usage: 0.0%
 ```
-:tada: Congratulations! You have now launched the DBRX Instruct LLM on your infra.
+:tada: **Congratulations!** :tada: You have now launched the DBRX Instruct LLM on your infra.
 
 You can play with the model via
 - Standard OpenAPI-compatible endpoints (e.g., `/v1/chat/completions`)
