@@ -368,6 +368,18 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'https': {
+                'type': 'object',
+                'additionalProperties': False,
+                'properties': {
+                    'key': {
+                        'type': 'string',
+                    },
+                    'cert': {
+                        'type': 'string',
+                    },
+                },
+            },
         }
     }
 

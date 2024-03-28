@@ -23,6 +23,8 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
+        https_key: Optional[str] = None,
+        https_cert: Optional[str] = None,
         dynamic_ondemand_fallback: Optional[bool] = None,
         base_ondemand_fallback_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
@@ -75,12 +77,22 @@ class SkyServiceSpec:
                     'Currently, SkyServe will cleanup failed replicas'
                     'and auto restart it to keep the service running.')
 
+        if (https_key is not None and
+                https_cert is None) or (https_key is None and
+                                        https_cert is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Both https_key and https_cert must be set if one of them '
+                    'is set.')
+
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
         self._min_replicas: int = min_replicas
         self._max_replicas: Optional[int] = max_replicas
         self._target_qps_per_replica: Optional[float] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
+        self._https_key: Optional[str] = https_key
+        self._https_cert: Optional[str] = https_cert
         self._dynamic_ondemand_fallback: Optional[
             bool] = dynamic_ondemand_fallback
         self._base_ondemand_fallback_replicas: Optional[
@@ -164,6 +176,11 @@ class SkyServiceSpec:
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
 
+        https_section = config.get('https', None)
+        if https_section is not None:
+            service_config['https_key'] = https_section.get('key', None)
+            service_config['https_cert'] = https_section.get('cert', None)
+
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -216,6 +233,8 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
+        add_if_not_none('https', 'key', self.https_key)
+        add_if_not_none('https', 'cert', self.https_cert)
         return config
 
     def probe_str(self):
@@ -286,6 +305,14 @@ class SkyServiceSpec:
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
+
+    @property
+    def https_key(self) -> Optional[str]:
+        return self._https_key
+
+    @property
+    def https_cert(self) -> Optional[str]:
+        return self._https_cert
 
     @property
     def base_ondemand_fallback_replicas(self) -> Optional[int]:

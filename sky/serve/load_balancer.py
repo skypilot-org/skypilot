@@ -1,7 +1,9 @@
 """LoadBalancer: redirect any incoming request to an endpoint replica."""
 import logging
 import threading
+import os
 import time
+from typing import Optional
 
 import fastapi
 import requests
@@ -26,7 +28,9 @@ class SkyServeLoadBalancer:
     `curl -L`.
     """
 
-    def __init__(self, controller_url: str, load_balancer_port: int) -> None:
+    def __init__(self, controller_url: str, load_balancer_port: int,
+                 https_key_file: Optional[str],
+                 https_cert_file: Optional[str]) -> None:
         """Initialize the load balancer.
 
         Args:
@@ -40,6 +44,8 @@ class SkyServeLoadBalancer:
             lb_policies.RoundRobinPolicy())
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
+        self._https_key_file = https_key_file
+        self._https_cert_file = https_cert_file
 
     def _sync_with_controller(self):
         """Sync with controller periodically.
@@ -87,7 +93,8 @@ class SkyServeLoadBalancer:
                                         'Use "sky serve status [SERVICE_NAME]" '
                                         'to check the replica status.')
 
-        path = f'http://{ready_replica_url}{request.url.path}'
+        schema = 'https' if self._https_key_file is not None else 'http'
+        path = f'{schema}://{ready_replica_url}{request.url.path}'
         logger.info(f'Redirecting request to {path}')
         return fastapi.responses.RedirectResponse(url=path)
 
@@ -104,13 +111,27 @@ class SkyServeLoadBalancer:
 
         threading.Thread(target=self._sync_with_controller, daemon=True).start()
 
+        schema = 'https' if self._https_key_file is not None else 'http'
         logger.info('SkyServe Load Balancer started on '
-                    f'http://0.0.0.0:{self._load_balancer_port}')
+                    f'{schema}://0.0.0.0:{self._load_balancer_port}')
 
-        uvicorn.run(self._app, host='0.0.0.0', port=self._load_balancer_port)
+        https_kwargs = {} if self._https_key_file is None else {
+            'ssl_keyfile': os.path.expanduser(self._https_key_file),
+            'ssl_certfile': os.path.expanduser(self._https_cert_file),
+            # TODO(tian): Pass this in service YAML as well.
+            'ssl_keyfile_password': 'passphrase',
+        }
+        uvicorn.run(self._app,
+                    host='0.0.0.0',
+                    port=self._load_balancer_port,
+                    **https_kwargs)
 
 
-def run_load_balancer(controller_addr: str, load_balancer_port: int):
+def run_load_balancer(controller_addr: str, load_balancer_port: int,
+                      https_key_file: Optional[str],
+                      https_cert_file: Optional[str]):
     load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
-                                         load_balancer_port=load_balancer_port)
+                                         load_balancer_port=load_balancer_port,
+                                         https_key_file=https_key_file,
+                                         https_cert_file=https_cert_file)
     load_balancer.run()

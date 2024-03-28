@@ -137,12 +137,22 @@ def up(
             serve_utils.generate_remote_config_yaml_file_name(service_name))
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
+        remote_https_key_path = (
+            serve_utils.generate_remote_https_key_file_name(service_name))
+        remote_https_cert_path = (
+            serve_utils.generate_remote_https_cert_file_name(service_name))
         controller_resources = controller_utils.get_controller_resources(
             controller_type='serve', task_resources=task.resources)
 
+        spec = task.service
+        assert spec is not None
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
             'local_task_yaml_path': service_file.name,
+            'remote_https_key_path': remote_https_key_path,
+            'local_https_key_path': spec.https_key,
+            'remote_https_cert_path': remote_https_cert_path,
+            'local_https_cert_path': spec.https_cert,
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
