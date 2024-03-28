@@ -18,8 +18,8 @@ HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
 ```
 
 <details>
-<summary>Click to expand!</summary>
-Example outputs:
+<summary>Example outputs:</summary>
+
 ```console
 I 03-27 21:08:53 optimizer.py:690] == Optimizer ==
 I 03-27 21:08:53 optimizer.py:701] Target: minimizing cost
@@ -36,6 +36,7 @@ I 03-27 21:08:53 optimizer.py:906]  GCP     a2-ultragpu-8g[Spot]   96      1360 
 I 03-27 21:08:53 optimizer.py:906]  GCP     a2-megagpu-16g[Spot]   96      1360      A100:16        us-central1-a   22.30
 I 03-27 21:08:53 optimizer.py:906] -----------------------------------------------------------------------------------------------------
 ```
+
 </details>
 
 You can interact with the model via
@@ -73,7 +74,7 @@ To use the Gradio UI, open the URL shown in the logs:
 (task, pid=17415) INFO 03-28 03:56:46 metrics.py:218] Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Swapped: 0 reqs, Pending: 0 reqs, GPU KV cache usage: 0.0%, CPU KV cache usage: 0.0%
 ...
 ```
-![Gradio UI serving DBRX](https://imgur.com/BZszerX)
+![Gradio UI serving DBRX](https://i.imgur.com/BZszerX.png)
 
 To shut down all resources:
 ```console
