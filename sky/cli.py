@@ -47,7 +47,7 @@ import yaml
 import sky
 from sky import backends
 from sky import check as sky_check
-from sky import clouds
+from sky import clouds as sky_clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
@@ -478,7 +478,7 @@ def _parse_override_params(
         if cloud.lower() == 'none':
             override_params['cloud'] = None
         else:
-            override_params['cloud'] = clouds.CLOUD_REGISTRY.from_str(cloud)
+            override_params['cloud'] = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
         if region.lower() == 'none':
             override_params['region'] = None
@@ -1566,7 +1566,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 try:
                     cloud.check_features_are_supported(
                         launched_resources,
-                        {clouds.CloudImplementationFeatures.OPEN_PORTS})
+                        {sky_clouds.CloudImplementationFeatures.OPEN_PORTS})
                 except exceptions.NotSupportedError:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError('Querying endpoints is not supported '
@@ -1591,7 +1591,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                         error_msg = (f'Port {endpoint} not exposed yet. '
                                      f'{_ENDPOINTS_RETRY_MESSAGE} ')
                         if handle.launched_resources.cloud.is_same_cloud(
-                                clouds.Kubernetes()):
+                                sky_clouds.Kubernetes()):
                             # Add Kubernetes specific debugging info
                             error_msg += (
                                 kubernetes_utils.get_endpoint_debug_message())
@@ -1611,7 +1611,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                         error_msg = (f'No endpoints exposed yet. '
                                      f'{_ENDPOINTS_RETRY_MESSAGE} ')
                         if handle.launched_resources.cloud.is_same_cloud(
-                                clouds.Kubernetes()):
+                                sky_clouds.Kubernetes()):
                             # Add Kubernetes specific debugging info
                             error_msg += \
                                 kubernetes_utils.get_endpoint_debug_message()
@@ -2793,23 +2793,27 @@ def _down_or_stop_clusters(
 
 
 @cli.command()
+@click.argument('clouds', required=False, type=str, nargs=-1)
 @click.option('--verbose',
               '-v',
               is_flag=True,
               default=False,
               help='Show the activated account for each cloud.')
 @usage_lib.entrypoint
-def check(verbose: bool):
+def check(clouds: Tuple[str], verbose: bool):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
     cloud is detected to be inaccessible, the reason and correction steps will
     be shown.
 
+    If CLOUDS are specified, checks credentials for only those clouds.
+
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
     """
-    sky_check.check(verbose=verbose)
+    clouds_arg = clouds if len(clouds) > 0 else None
+    sky_check.check(verbose=verbose, clouds=clouds_arg)
 
 
 @cli.command()
@@ -2888,7 +2892,7 @@ def show_gpus(
             '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
-    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and accelerator_str is not None:
@@ -2915,7 +2919,7 @@ def show_gpus(
             )
 
             if (len(result) == 0 and cloud_obj is not None and
-                    cloud_obj.is_same_cloud(clouds.Kubernetes())):
+                    cloud_obj.is_same_cloud(sky_clouds.Kubernetes())):
                 yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
                 return
 
@@ -2923,7 +2927,7 @@ def show_gpus(
             # If cloud is kubernetes, we want to show all GPUs here, even if
             # they are not listed as common in SkyPilot.
             if (cloud_obj is not None and
-                    cloud_obj.is_same_cloud(clouds.Kubernetes())):
+                    cloud_obj.is_same_cloud(sky_clouds.Kubernetes())):
                 for gpu, _ in sorted(result.items()):
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             else:

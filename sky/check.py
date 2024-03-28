@@ -5,7 +5,7 @@ import click
 import colorama
 import rich
 
-from sky import clouds
+from sky import clouds as sky_clouds
 from sky import exceptions
 from sky import global_user_state
 from sky.adaptors import cloudflare
@@ -13,13 +13,23 @@ from sky.utils import ux_utils
 
 
 # TODO(zhwu): add check for a single cloud to improve performance
-def check(quiet: bool = False, verbose: bool = False) -> None:
+def check(
+    quiet: bool = False,
+    verbose: bool = False,
+    clouds: Optional[Tuple[str]] = None,
+) -> None:
+    clouds_set = set()
+    if clouds is not None:
+        for cloud in clouds:
+            sky_clouds.CLOUD_REGISTRY.from_str(cloud)  # verify cloud
+            clouds_set.add(cloud.lower())
+
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
-
     enabled_clouds = []
+    disabled_clouds = []
 
-    def check_one_cloud(cloud_tuple: Tuple[str, clouds.Cloud]) -> None:
+    def check_one_cloud(cloud_tuple: Tuple[str, sky_clouds.Cloud]) -> None:
         cloud_repr, cloud = cloud_tuple
         echo(f'  Checking {cloud_repr}...', nl=False)
         ok, reason = cloud.check_credentials()
@@ -37,22 +47,36 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
             if reason is not None:
                 echo(f'    Hint: {reason}')
         else:
+            disabled_clouds.append(cloud_repr)
             echo(f'    Reason: {reason}')
 
     clouds_to_check = [
-        (repr(cloud), cloud) for cloud in clouds.CLOUD_REGISTRY.values()
+        (repr(cloud), cloud) for cloud in sky_clouds.CLOUD_REGISTRY.values()
     ]
     clouds_to_check.append(('Cloudflare, for R2 object store', cloudflare))
 
     for cloud_tuple in sorted(clouds_to_check):
-        check_one_cloud(cloud_tuple)
+        cloud_repr = cloud_tuple[0].lower()
+        if clouds is None or cloud_repr in clouds_set:
+            check_one_cloud(cloud_tuple)
 
-    # Cloudflare is not a real cloud in clouds.CLOUD_REGISTRY, and should not be
-    # inserted into the DB (otherwise `sky launch` and other code would error
-    # out when it's trying to look it up in the registry).
+    # Cloudflare is not a real cloud in sky_clouds.CLOUD_REGISTRY, and should
+    # not be inserted into the DB (otherwise `sky launch` and other code would
+    # error out when it's trying to look it up in the registry).
     enabled_clouds = [
         cloud for cloud in enabled_clouds if not cloud.startswith('Cloudflare')
     ]
+    disabled_clouds = [
+        cloud for cloud in disabled_clouds if not cloud.startswith('Cloudflare')
+    ]
+    previously_enabled_clouds = [
+        repr(cloud) for cloud in global_user_state.get_cached_enabled_clouds()
+    ]
+    for cloud in previously_enabled_clouds:
+        is_not_duplicate = cloud not in enabled_clouds
+        is_not_disabled = cloud not in disabled_clouds
+        if is_not_duplicate and is_not_disabled:
+            enabled_clouds.append(cloud)
     global_user_state.set_enabled_clouds(enabled_clouds)
 
     if len(enabled_clouds) == 0:
@@ -75,14 +99,21 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
 
         # Pretty print for UX.
         if not quiet:
+            if len(clouds_set) == 0:
+                enabled_clouds_for_output = enabled_clouds
+            else:
+                enabled_clouds_for_output = [
+                    cloud for cloud in enabled_clouds
+                    if cloud.lower() in clouds_set
+                ]
             enabled_clouds_str = '\n  :heavy_check_mark: '.join(
-                [''] + sorted(enabled_clouds))
+                [''] + sorted(enabled_clouds_for_output))
             rich.print('\n[green]:tada: Enabled clouds :tada:'
                        f'{enabled_clouds_str}[/green]')
 
 
 def get_cached_enabled_clouds_or_refresh(
-        raise_if_no_cloud_access: bool = False) -> List[clouds.Cloud]:
+        raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
     """Returns cached enabled clouds and if no cloud is enabled, refresh.
 
     This function will perform a refresh if no public cloud is enabled.
@@ -114,7 +145,8 @@ def get_cached_enabled_clouds_or_refresh(
 
 
 def get_cloud_credential_file_mounts(
-        excluded_clouds: Optional[Iterable[clouds.Cloud]]) -> Dict[str, str]:
+        excluded_clouds: Optional[Iterable[sky_clouds.Cloud]]
+) -> Dict[str, str]:
     """Returns the files necessary to access all enabled clouds.
 
     Returns a dictionary that will be added to a task's file mounts
@@ -124,7 +156,7 @@ def get_cloud_credential_file_mounts(
     file_mounts = {}
     for cloud in enabled_clouds:
         if (excluded_clouds is not None and
-                clouds.cloud_in_list(cloud, excluded_clouds)):
+                sky_clouds.cloud_in_list(cloud, excluded_clouds)):
             continue
         cloud_file_mounts = cloud.get_credential_file_mounts()
         file_mounts.update(cloud_file_mounts)
