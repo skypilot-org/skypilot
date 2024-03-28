@@ -115,7 +115,7 @@ sky down dbrx
 
 After playing with the model, you can deploy the model with autoscaling and load-balancing using SkyServe.
 
-With no change to the YAML, launch a service on your infra:
+With no change to the YAML, launch a fully managed service on your infra:
 ```console
 HF_TOKEN=xxx sky serve up dbrx.yaml -n dbrx --env HF_TOKEN
 ```
@@ -127,7 +127,28 @@ watch -n10 sky serve status dbrx
 
 Get a single endpoint that load-balances across replicas:
 ```console
-sky serve status --endpoint dbrx
+ENDPOINT=$(sky serve status --endpoint dbrx)
+```
+
+> **Tip:** SkyServe fully manages the lifecycle of your replicas. For example, if a spot replica is preempted, the controller will automatically replace it. This significantly reduces the operational burden while saving costs.
+
+To curl the endpoint:
+```console
+curl $ENDPOINT/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "databricks/dbrx-instruct",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful assistant."
+      },
+      {
+        "role": "user",
+        "content": "Who are you?"
+      }
+    ]
+  }'
 ```
 
 To shut down all resources:
