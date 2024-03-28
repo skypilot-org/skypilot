@@ -150,6 +150,7 @@ To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest
 <!-- Keep this section in sync with index.rst in SkyPilot Docs -->
 Runnable examples:
 - LLMs on SkyPilot
+  - [Databricks DBRX](./llm/dbrx/)
   - [Gemma](./llm/gemma/)
   - [Mixtral 8x7B](./llm/mixtral/); [Mistral 7B](https://docs.mistral.ai/self-deployment/skypilot/) (from official Mistral team)
   - [Code Llama](./llm/codellama/)
