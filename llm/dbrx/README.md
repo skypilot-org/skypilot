@@ -38,6 +38,8 @@ service:
 
 resources:
   accelerators: {A100-80GB:8, A100-80GB:4, A100:8, A100:16}
+  cpus: 32+
+  memory: 512+
   use_spot: True
   disk_size: 512  # Ensure model checkpoints (~246GB) can fit.
   disk_tier: best
@@ -88,7 +90,7 @@ You can also get the full YAML file [here](https://github.com/skypilot-org/skypi
 
 ## Serving DBRX: single instance
 
-Launch a single spot instance to serve DBRX on your infra (spot `A100:8` starts at $4.1/hour):
+Launch a single spot instance to serve DBRX on your infra:
 ```console
 HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
 ```
@@ -98,26 +100,61 @@ HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
 
 ```console
 ...
-I 03-27 21:08:53 optimizer.py:690] == Optimizer ==
-I 03-27 21:08:53 optimizer.py:701] Target: minimizing cost
-I 03-27 21:08:53 optimizer.py:713] Estimated cost: $4.1 / hour
-I 03-27 21:08:53 optimizer.py:713]
-I 03-27 21:08:53 optimizer.py:836] Considered resources (1 node):
-I 03-27 21:08:53 optimizer.py:906] -----------------------------------------------------------------------------------------------------
-I 03-27 21:08:53 optimizer.py:906]  CLOUD   INSTANCE               vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN
-I 03-27 21:08:53 optimizer.py:906] -----------------------------------------------------------------------------------------------------
-I 03-27 21:08:53 optimizer.py:906]  AWS     p4d.24xlarge[Spot]     96      1152      A100:8         us-east-2b      4.13          ✔
-I 03-27 21:08:53 optimizer.py:906]  GCP     a2-ultragpu-4g[Spot]   48      680       A100-80GB:4    us-east4-c      7.39
-I 03-27 21:08:53 optimizer.py:906]  GCP     a2-highgpu-8g[Spot]    96      680       A100:8         us-central1-a   11.75
-I 03-27 21:08:53 optimizer.py:906]  GCP     a2-ultragpu-8g[Spot]   96      1360      A100-80GB:8    us-east4-c      14.79
-I 03-27 21:08:53 optimizer.py:906]  GCP     a2-megagpu-16g[Spot]   96      1360      A100:16        us-central1-a   22.30
-I 03-27 21:08:53 optimizer.py:906] -----------------------------------------------------------------------------------------------------
+I 03-28 08:40:47 optimizer.py:690] == Optimizer ==
+I 03-28 08:40:47 optimizer.py:701] Target: minimizing cost
+I 03-28 08:40:47 optimizer.py:713] Estimated cost: $2.44 / hour
+I 03-28 08:40:47 optimizer.py:713]
+I 03-28 08:40:47 optimizer.py:836] Considered resources (1 node):
+I 03-28 08:40:47 optimizer.py:906] ----------------------------------------------------------------------------------------------------------------------
+I 03-28 08:40:47 optimizer.py:906]  CLOUD        INSTANCE                          vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE      COST ($)   CHOSEN   
+I 03-28 08:40:47 optimizer.py:906] ----------------------------------------------------------------------------------------------------------------------
+I 03-28 08:40:47 optimizer.py:906]  Azure        Standard_NC96ads_A100_v4[Spot]    96      880       A100-80GB:4    eastus           2.44          ✔      
+I 03-28 08:40:47 optimizer.py:906]  AWS          p4d.24xlarge[Spot]                96      1152      A100:8         us-east-2b       4.15                
+I 03-28 08:40:47 optimizer.py:906]  Azure        Standard_ND96asr_v4[Spot]         96      900       A100:8         eastus           4.82                
+I 03-28 08:40:47 optimizer.py:906]  Azure        Standard_ND96amsr_A100_v4[Spot]   96      1924      A100-80GB:8    southcentralus   5.17                
+I 03-28 08:40:47 optimizer.py:906]  GCP          a2-ultragpu-4g[Spot]              48      680       A100-80GB:4    us-east4-c       7.39                
+I 03-28 08:40:47 optimizer.py:906]  GCP          a2-highgpu-8g[Spot]               96      680       A100:8         us-central1-a    11.75               
+I 03-28 08:40:47 optimizer.py:906]  GCP          a2-ultragpu-8g[Spot]              96      1360      A100-80GB:8    us-east4-c       14.79               
+I 03-28 08:40:47 optimizer.py:906]  GCP          a2-megagpu-16g[Spot]              96      1360      A100:16        us-central1-a    22.30               
+I 03-28 08:40:47 optimizer.py:906] ----------------------------------------------------------------------------------------------------------------------
 ...
 ```
 
 </details>
 
-> To run on K8s or use an on-demand instance, pass `--use-spot False` to the above command.
+To run on Kubernetes or use an on-demand instance, pass `--no-use-spot` to the above command.
+
+<details>
+<summary>Example outputs with Kubernetes / on-demand instances:</summary>
+
+```console
+$ HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN --no-use-spot
+...
+I 03-28 08:47:27 optimizer.py:690] == Optimizer ==
+I 03-28 08:47:27 optimizer.py:701] Target: minimizing cost
+I 03-28 08:47:27 optimizer.py:713] Estimated cost: $0.0 / hour
+I 03-28 08:47:27 optimizer.py:713] 
+I 03-28 08:47:27 optimizer.py:836] Considered resources (1 node):
+I 03-28 08:47:27 optimizer.py:906] ------------------------------------------------------------------------------------------------------------------
+I 03-28 08:47:27 optimizer.py:906]  CLOUD        INSTANCE                    vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE        COST ($)   CHOSEN   
+I 03-28 08:47:27 optimizer.py:906] ------------------------------------------------------------------------------------------------------------------
+I 03-28 08:47:27 optimizer.py:906]  Kubernetes   32CPU--512GB--8A100         32      512       A100:8         kubernetes         0.00          ✔     
+I 03-28 08:47:27 optimizer.py:906]  Azure        Standard_NC96ads_A100_v4    96      880       A100-80GB:4    eastus             14.69               
+I 03-28 08:47:27 optimizer.py:906]  Fluidstack   recUYj6oGJCvAvCXC7KQo5Fc7   252     960       A100-80GB:8    generic_1_canada   19.79               
+I 03-28 08:47:27 optimizer.py:906]  GCP          a2-ultragpu-4g              48      680       A100-80GB:4    us-central1-a      20.11               
+I 03-28 08:47:27 optimizer.py:906]  Paperspace   A100-80Gx8                  96      640       A100-80GB:8    East Coast (NY2)   25.44               
+I 03-28 08:47:27 optimizer.py:906]  Azure        Standard_ND96asr_v4         96      900       A100:8         eastus             27.20               
+I 03-28 08:47:27 optimizer.py:906]  GCP          a2-highgpu-8g               96      680       A100:8         us-central1-a      29.39               
+I 03-28 08:47:27 optimizer.py:906]  Azure        Standard_ND96amsr_A100_v4   96      1924      A100-80GB:8    eastus             32.77               
+I 03-28 08:47:27 optimizer.py:906]  AWS          p4d.24xlarge                96      1152      A100:8         us-east-1          32.77               
+I 03-28 08:47:27 optimizer.py:906]  GCP          a2-ultragpu-8g              96      1360      A100-80GB:8    us-central1-a      40.22               
+I 03-28 08:47:27 optimizer.py:906]  AWS          p4de.24xlarge               96      1152      A100-80GB:8    us-east-1          40.97               
+I 03-28 08:47:27 optimizer.py:906]  GCP          a2-megagpu-16g              96      1360      A100:16        us-central1-a      55.74               
+I 03-28 08:47:27 optimizer.py:906] ------------------------------------------------------------------------------------------------------------------
+...
+```
+
+</details>
 
 Wait until the model is ready (this can take 10+ minutes), as indicated by these lines:
 ```console
