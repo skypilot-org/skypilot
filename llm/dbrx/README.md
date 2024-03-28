@@ -1,6 +1,8 @@
 # Databricks DBRX: A State-of-the-Art Open LLM
 
-<img src="https://www.databricks.com/en-blog-assets/static/2fe1a0af1ee0f6605024a810b604079c/dbrx-blog-header-optimized.png" style="height: 200px;">
+<p align="center">
+  <img src="https://www.databricks.com/en-blog-assets/static/2fe1a0af1ee0f6605024a810b604079c/dbrx-blog-header-optimized.png" alt="DBRX Blog Header" height="200">
+</p>
 
 [DBRX](https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm) is an open, general-purpose LLM created by Databricks. It uses a mixture-of-experts (MoE) architecture with 132B total parameters of which 36B parameters are active on any input.
 
@@ -18,11 +20,10 @@ Launch a single spot instance of DBRX on your infra:
 ```console
 HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
 ```
+> To use an on-demand instance instead, pass `--use-spot False` to the above command.
 
 <details>
 <summary>Example outputs:</summary>
-
-> To use an on-demand instance instead, pass `--use-spot False` to the above command.
 
 ```console
 ...
