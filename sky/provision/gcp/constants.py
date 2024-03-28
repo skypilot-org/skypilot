@@ -165,7 +165,10 @@ VM_MINIMAL_PERMISSIONS = [
     'compute.projects.get',
     'compute.zoneOperations.get',
     'iam.roles.get',
-    'iam.serviceAccounts.actAs',
+    # We now skip the check for `iam.serviceAccounts.actAs` permission for
+    # simplicity as it can be granted at the service-account level.
+    # Check: sky.provision.gcp.config::_is_permission_satisfied
+    # 'iam.serviceAccounts.actAs',
     'iam.serviceAccounts.get',
     'serviceusage.services.enable',
     'serviceusage.services.list',
@@ -174,9 +177,27 @@ VM_MINIMAL_PERMISSIONS = [
     'resourcemanager.projects.getIamPolicy',
 ]
 
+# Permissions implied by GCP built-in roles. We hardcode these here, as we
+# cannot get the permissions of built-in role from the GCP Python API.
+# The lists are not exhaustive, but should cover the permissions listed in
+# VM_MINIMAL_PERMISSIONS.
+# Check: sky.provision.gcp.config::_is_permission_satisfied
+BUILTIN_ROLE_TO_PERMISSIONS = {
+    'roles/iam.serviceAccountUser': ['iam.serviceAccounts.actAs'],
+    'roles/iam.serviceAccountViewer': [
+        'iam.serviceAccounts.get', 'iam.serviceAccounts.getIamPolicy'
+    ],
+    # TODO(zhwu): Add more built-in roles to make the permission check more
+    # robust.
+}
+
 FIREWALL_PERMISSIONS = [
     'compute.firewalls.create',
     'compute.firewalls.delete',
+]
+
+RESERVATION_PERMISSIONS = [
+    'compute.reservations.list',
 ]
 
 TPU_MINIMAL_PERMISSIONS = [

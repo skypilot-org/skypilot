@@ -71,8 +71,9 @@ _quotas_df = common.read_catalog('aws/instance_quota_mapping.csv',
 
 
 def _get_az_mappings(aws_user_hash: str) -> Optional[pd.DataFrame]:
-    az_mapping_path = common.get_catalog_path(
-        f'aws/az_mappings-{aws_user_hash}.csv')
+    filename = f'aws/az_mappings-{aws_user_hash}.csv'
+    az_mapping_path = common.get_catalog_path(filename)
+    az_mapping_md5_path = common.get_catalog_path(f'.meta/{filename}.md5')
     if not os.path.exists(az_mapping_path):
         az_mappings = None
         if aws_user_hash != 'default':
@@ -85,6 +86,12 @@ def _get_az_mappings(aws_user_hash: str) -> Optional[pd.DataFrame]:
         else:
             return None
         az_mappings.to_csv(az_mapping_path, index=False)
+        # Write md5 of the az_mapping file to a file so we can check it for
+        # any changes when uploading to the controller
+        with open(az_mapping_path, 'r', encoding='utf-8') as f:
+            az_mapping_hash = hashlib.md5(f.read().encode()).hexdigest()
+        with open(az_mapping_md5_path, 'w', encoding='utf-8') as f:
+            f.write(az_mapping_hash)
     else:
         az_mappings = pd.read_csv(az_mapping_path)
     return az_mappings

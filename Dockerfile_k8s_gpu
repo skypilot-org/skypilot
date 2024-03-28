@@ -1,7 +1,7 @@
 # TODO(romilb) - The base image used here (ray) is very large (11.4GB).
 #  as a result, this built image is about 13.5GB. We need to pick a lighter base
 #  image.
-FROM rayproject/ray:2.4.0-py310-gpu
+FROM rayproject/ray:2.9.3-py310-gpu
 
 # Initialize conda for root user, install ssh and other local dependencies
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
@@ -39,8 +39,7 @@ RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install rich tabulate filelock && \
     pip install packaging 'protobuf<4.0.0' pulp && \
     pip install pycryptodome==3.12.0 && \
-    pip install docker kubernetes==28.1.0 && \
-    pip install -U boto3==1.34.46 # Ray base image has a stale boto3 version - https://github.com/skypilot-org/skypilot/issues/3158
+    pip install docker kubernetes==28.1.0
 
 # Add /home/sky/.local/bin/ to PATH
 RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc

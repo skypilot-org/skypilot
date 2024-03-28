@@ -5,6 +5,9 @@ name: {{dag_name}}
 file_mounts:
   {{remote_user_yaml_path}}: {{user_yaml_path}}
   {{remote_user_config_path}}: skypilot:local_skypilot_config_path
+  {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
+  {{remote_catalog_path}}: {{local_catalog_path}}
+  {%- endfor %}
 
 setup: |
   {%- for cmd in cloud_dependencies_installation_commands %}
@@ -18,7 +21,7 @@ setup: |
 
   # Dashboard.
   pip list | grep flask  > /dev/null 2>&1 || pip install flask 2>&1 > /dev/null
-  ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.spot.dashboard.dashboard") || (nohup python3 -m sky.spot.dashboard.dashboard >> ~/.sky/spot-dashboard.log 2>&1 &));
+  ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.spot.dashboard.dashboard") || (nohup {{ sky_python_cmd }} -m sky.spot.dashboard.dashboard >> ~/.sky/spot-dashboard.log 2>&1 &));
 
 run: |
   # Start the controller for the current spot job.

@@ -20,6 +20,7 @@ from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds.service_catalog import common as service_catalog_common
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -274,8 +275,11 @@ def _execute(
                                               task)
 
     if not cluster_exists:
+        # If spot is launched by skyserve controller or managed spot controller,
+        # We don't need to print out the logger info.
         if (Stage.PROVISION in stages and task.use_spot and
-                not _is_launched_by_spot_controller):
+                not _is_launched_by_spot_controller and
+                not _is_launched_by_sky_serve_controller):
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
@@ -675,6 +679,9 @@ def spot_launch(
             'dag_name': dag.name,
             'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
+            'sky_python_cmd': constants.SKY_PYTHON_CMD,
+            'modified_catalogs':
+                service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
                 'spot',
                 remote_user_config_path=remote_user_config_path,

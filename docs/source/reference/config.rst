@@ -190,10 +190,29 @@ Available fields and semantics:
 
 
     # Reserved capacity (optional).
+    # 
+    # Whether to prioritize reserved instance types/locations (considered as 0
+    # cost) in the optimizer.
+    # 
+    # If you have "automatically consumed" reservations in your GCP project:
+    # Setting this to true guarantees the optimizer will pick any matching
+    # reservation and GCP will auto consume your reservation, and setting to
+    # false means optimizer uses regular, non-zero pricing in optimization (if
+    # by chance any matching reservation is selected, GCP still auto consumes
+    # the reservation).
+    # 
+    # If you have "specifically targeted" reservations (set by the
+    # `specific_reservations` field below): This field will automatically be set
+    # to true.
+    # 
+    # Default: false.
+    prioritize_reservations: false
     #
-    # The specific reservation to be considered when provisioning clusters on GCP.
-    # SkyPilot will automatically prioritize this reserved capacity (considered as
-    # zero cost) if the requested resources matches the reservation.
+    # The "specifically targeted" reservations to be considered when provisioning
+    # clusters on GCP. SkyPilot will automatically prioritize this reserved
+    # capacity (considered as zero cost) if the requested resources matches the
+    # reservation.
+    #
     # Ref: https://cloud.google.com/compute/docs/instances/reservations-overview#consumption-type
     specific_reservations:
       - projects/my-project/reservations/my-reservation1
@@ -257,6 +276,18 @@ Available fields and semantics:
     # for details on deploying the NGINX ingress controller.
     ports: loadbalancer
 
+    # Attach custom metadata to Kubernetes objects created by SkyPilot
+    #
+    # Uses the same schema as Kubernetes metadata object: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#objectmeta-v1-meta
+    #
+    # Since metadata is applied to all all objects created by SkyPilot,
+    # specifying 'name' and 'namespace' fields here is not allowed.
+    custom_metadata:
+      labels:
+        mylabel: myvalue
+      annotations:
+        myannotation: myvalue
+
     # Additional fields to override the pod fields used by SkyPilot (optional)
     #
     # Any key:value pairs added here would get added to the pod spec used to
@@ -286,6 +317,10 @@ Available fields and semantics:
             hostPath:
               path: /tmp
               type: Directory
+          - name: dshm          # Use this to modify the /dev/shm volume mounted by SkyPilot
+            emptyDir:
+              medium: Memory
+              sizeLimit: 3Gi    # Set a size limit for the /dev/shm volume
 
   # Advanced OCI configurations (optional).
   oci:
