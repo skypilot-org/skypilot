@@ -47,6 +47,8 @@ service:
 
 resources:
   accelerators: {A100-80GB:8, A100-80GB:4, A100:8, A100:16}
+  cpus: 32+
+  memory: 512+
   use_spot: True
   disk_size: 512  # Ensure model checkpoints (~246GB) can fit.
   disk_tier: best
