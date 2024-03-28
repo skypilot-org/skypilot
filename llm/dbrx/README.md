@@ -164,6 +164,7 @@ curl http://$IP:8081/v1/chat/completions \
 To use the Gradio UI, open the URL shown in the logs:
 ```console
 (task, pid=17433) Running on public URL: https://xxxxxxxxxx.gradio.live
+```
 
 <p align="center">
 <img src="https://i.imgur.com/lTfaRpN.gif" alt="Gradio UI serving DBRX" style="height: 600px;">
