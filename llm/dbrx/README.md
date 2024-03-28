@@ -12,7 +12,7 @@ In this recipe, you will serve `databricks/dbrx-instruct` on your own infra -- e
 
 ## Serving DBRX: single instance
 
-Launch a single instance of DBRX on your infra:
+Launch a single spot instance of DBRX on your infra:
 ```console
 HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
 ```
@@ -20,7 +20,10 @@ HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
 <details>
 <summary>Example outputs:</summary>
 
+> To use an on-demand instance instead, pass `--use-spot False` to the above command.
+
 ```console
+...
 I 03-27 21:08:53 optimizer.py:690] == Optimizer ==
 I 03-27 21:08:53 optimizer.py:701] Target: minimizing cost
 I 03-27 21:08:53 optimizer.py:713] Estimated cost: $4.1 / hour
@@ -35,11 +38,12 @@ I 03-27 21:08:53 optimizer.py:906]  GCP     a2-highgpu-8g[Spot]    96      680  
 I 03-27 21:08:53 optimizer.py:906]  GCP     a2-ultragpu-8g[Spot]   96      1360      A100-80GB:8    us-east4-c      14.79
 I 03-27 21:08:53 optimizer.py:906]  GCP     a2-megagpu-16g[Spot]   96      1360      A100:16        us-central1-a   22.30
 I 03-27 21:08:53 optimizer.py:906] -----------------------------------------------------------------------------------------------------
+...
 ```
 
 </details>
 
-You can interact with the model via
+You can play with the model via
 - Standard OpenAPI-compatible endpoints (e.g., `/v1/chat/completions`)
 - Gradio UI (automatically launched)
 
@@ -75,6 +79,7 @@ To use the Gradio UI, open the URL shown in the logs:
 ...
 ```
 ![Gradio UI serving DBRX](https://i.imgur.com/BZszerX.png)
+<img src="https://i.imgur.com/BZszerX.png" alt="Gradio UI serving DBRX" style="height: 100px;">
 
 To shut down all resources:
 ```console
@@ -83,14 +88,21 @@ sky down dbrx
 
 ## Serving DBRX: scaling up with SkyServe
 
-With no change to the YAML, launch an auto-managed deployment on your infra:
+After playing with the model, you can deploy the model with autoscaling and load-balancing using SkyServe.
+
+With no change to the YAML, launch a service on your infra:
 ```console
 HF_TOKEN=xxx sky serve up dbrx.yaml -n dbrx --env HF_TOKEN
 ```
 
-Get a single endpoint that auto-load-balances across replicas:
+Get a single endpoint that load-balances across replicas:
 ```console
 sky serve status --endpoint dbrx
+```
+
+To shut down all resources:
+```console
+sky serve down dbrx
 ```
 
 See more details in [SkyServe docs](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html).
