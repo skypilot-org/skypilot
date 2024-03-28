@@ -122,7 +122,7 @@ I 03-28 08:40:47 optimizer.py:906] ---------------------------------------------
 
 </details>
 
-> To run on Kubernetes or use an on-demand instance, pass `--no-use-spot` to the above command.
+To run on Kubernetes or use an on-demand instance, pass `--no-use-spot` to the above command.
 
 <details>
 <summary>Example outputs with on-demand instances</summary>
