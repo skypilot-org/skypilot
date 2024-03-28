@@ -70,7 +70,7 @@ def check(
         cloud for cloud in disabled_clouds if not cloud.startswith('Cloudflare')
     ]
     previously_enabled_clouds = [
-        repr(cloud) for cloud in global_user_state.get_enabled_clouds()
+        repr(cloud) for cloud in global_user_state.get_cached_enabled_clouds()
     ]
     for cloud in previously_enabled_clouds:
         is_not_duplicate = cloud not in enabled_clouds
@@ -106,7 +106,7 @@ def check(
 
 
 def get_cached_enabled_clouds_or_refresh(
-        raise_if_no_cloud_access: bool = False) -> List[clouds.Cloud]:
+        raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
     """Returns cached enabled clouds and if no cloud is enabled, refresh.
 
     This function will perform a refresh if no public cloud is enabled.
