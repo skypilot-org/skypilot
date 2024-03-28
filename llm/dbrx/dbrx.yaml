@@ -34,8 +34,16 @@ envs:
   HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token, or use --env to pass.
 
 service:
-  readiness_probe: /v1/models
   replicas: 2
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
 
 resources:
   accelerators: {A100-80GB:8, A100-80GB:4, A100:8, A100:16}
