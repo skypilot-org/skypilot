@@ -4,6 +4,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import click
 import colorama
 import rich
+import traceback
 
 from sky import clouds
 from sky import exceptions
@@ -22,7 +23,12 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     def check_one_cloud(cloud_tuple: Tuple[str, clouds.Cloud]) -> None:
         cloud_repr, cloud = cloud_tuple
         echo(f'  Checking {cloud_repr}...', nl=False)
-        ok, reason = cloud.check_credentials()
+        try:
+            ok, reason = cloud.check_credentials()
+        except Exception as e:  # pylint: disable=broad-except
+            # Catch all exceptions to prevent a single cloud from blocking the
+            # check for other clouds.
+            ok, reason = False, str(traceback.format_exc())
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
