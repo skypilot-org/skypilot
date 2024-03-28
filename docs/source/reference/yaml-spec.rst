@@ -19,6 +19,9 @@ Available fields:
     #
     # Commands in "setup" and "run" will be executed under it.
     #
+    # If a relative path is used, it's evaluated relative to the location from 
+    # which `sky` is called.
+    #
     # If a .gitignore file (or a .git/info/exclude file) exists in the working
     # directory, files and directories listed in it will be excluded from syncing.
     workdir: ~/my-task-code
@@ -251,6 +254,9 @@ Available fields:
 
     file_mounts:
       # Uses rsync to sync local files/directories to all nodes of the cluster.
+      #
+      # If a relative path is used, it's evaluated relative to the location from
+      # which `sky` is called.
       #
       # If symlinks are present, they are copied as symlinks, and their targets
       # must also be synced using file_mounts to ensure correctness.

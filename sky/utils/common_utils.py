@@ -253,7 +253,6 @@ def get_pretty_entry_point() -> str:
 
     Example return values:
         $ sky launch app.yaml  # 'sky launch app.yaml'
-        $ sky gpunode  # 'sky gpunode'
         $ python examples/app.py  # 'app.py'
     """
     argv = sys.argv

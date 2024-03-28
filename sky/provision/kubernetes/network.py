@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils.resources_utils import port_ranges_to_set
 
@@ -46,6 +47,10 @@ def _open_ports_using_loadbalancer(
         selector_key='skypilot-cluster',
         selector_value=cluster_name_on_cloud,
     )
+
+    # Update metadata from config
+    kubernetes_utils.merge_custom_metadata(content['service_spec']['metadata'])
+
     network_utils.create_or_replace_namespaced_service(
         namespace=provider_config.get('namespace', 'default'),
         service_name=service_name,
@@ -65,7 +70,7 @@ def _open_ports_using_ingress(
             'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
         )
 
-    # Prepare service names, ports,  for template rendering
+    # Prepare service names, ports, for template rendering
     service_details = [
         (f'{cluster_name_on_cloud}-skypilot-service--{port}', port,
          _PATH_PREFIX.format(cluster_name_on_cloud=cluster_name_on_cloud,
@@ -74,6 +79,15 @@ def _open_ports_using_ingress(
     ]
 
     # Generate ingress and services specs
+    # We batch ingress rule creation because each rule triggers a hot reload of
+    # the nginx controller. If the ingress rules are created sequentially,
+    # it could lead to multiple reloads of the Nginx-Ingress-Controller within
+    # a brief period. Consequently, the Nginx-Controller pod might spawn an
+    # excessive number of sub-processes. This surge triggers Kubernetes to kill
+    # and restart the Nginx due to the podPidsLimit parameter, which is
+    # typically set to a default value like 1024.
+    # To avoid this, we change ingress creation into one object containing
+    # multiple rules.
     content = network_utils.fill_ingress_template(
         namespace=provider_config.get('namespace', 'default'),
         service_details=service_details,
@@ -84,12 +98,15 @@ def _open_ports_using_ingress(
 
     # Create or update services based on the generated specs
     for service_name, service_spec in content['services_spec'].items():
+        # Update metadata from config
+        kubernetes_utils.merge_custom_metadata(service_spec['metadata'])
         network_utils.create_or_replace_namespaced_service(
             namespace=provider_config.get('namespace', 'default'),
             service_name=service_name,
             service_spec=service_spec,
         )
 
+    kubernetes_utils.merge_custom_metadata(content['ingress_spec']['metadata'])
     # Create or update the single ingress for all services
     network_utils.create_or_replace_namespaced_ingress(
         namespace=provider_config.get('namespace', 'default'),

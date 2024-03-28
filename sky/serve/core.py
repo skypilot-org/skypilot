@@ -1,7 +1,8 @@
 """SkyServe core APIs."""
 import re
 import tempfile
-from typing import Any, Dict, List, Optional, Union
+import typing
+from typing import Any, Dict, List, Optional, Set, Union
 
 import colorama
 
@@ -10,9 +11,9 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds.service_catalog import common as service_catalog_common
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -24,6 +25,9 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import clouds
 
 logger = sky_logging.init_logger(__name__)
 
@@ -123,6 +127,14 @@ def up(
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
 
+    # If the controller and replicas are from the same cloud, it should
+    # provide better connectivity. We will let the controller choose from
+    # the clouds of the resources if the controller does not exist.
+    requested_clouds: Set['clouds.Cloud'] = set()
+    for resources in task.resources:
+        if resources.cloud is not None:
+            requested_clouds.add(resources.cloud)
+
     with tempfile.NamedTemporaryFile(
             prefix=f'service-task-{service_name}-',
             mode='w',
@@ -139,9 +151,11 @@ def up(
             serve_utils.generate_remote_config_yaml_file_name(service_name))
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
-        controller_resources = (controller_utils.get_controller_resources(
-            controller_type='serve',
-            controller_resources_config=serve_constants.CONTROLLER_RESOURCES))
+        controller_resources_in_config = (
+            controller_utils.get_controller_resources(
+                controller_type='serve',
+                controller_resources_config=serve_constants.CONTROLLER_RESOURCES
+            ))
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
@@ -149,6 +163,8 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
+            'modified_catalogs':
+                service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
                 'serve',
                 remote_user_config_path=remote_config_yaml_path,
@@ -161,17 +177,21 @@ def up(
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
             is not None)
-        requested_cloud = list(task.resources)[0].cloud
-        controller_cloud = (requested_cloud if not controller_exist and
-                            controller_resources.cloud is None else
-                            controller_resources.cloud)
+        if (not controller_exist and
+                controller_resources_in_config.cloud is None):
+            controller_clouds = requested_clouds
+        else:
+            controller_clouds = {controller_resources_in_config.cloud}
         # TODO(tian): Probably run another sky.launch after we get the load
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
         # any connection to the unregistered ports.
-        controller_resources = controller_resources.copy(
-            cloud=controller_cloud,
-            ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+        controller_resources = {
+            controller_resources_in_config.copy(
+                cloud=controller_cloud,
+                ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+            for controller_cloud in controller_clouds
+        }
         controller_task.set_resources(controller_resources)
 
         # # Set service_name so the backend will know to modify default ray
@@ -298,7 +318,10 @@ def up(
 
 
 @usage_lib.entrypoint
-def update(task: 'sky.Task', service_name: str) -> None:
+def update(
+        task: 'sky.Task',
+        service_name: str,
+        mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
     """Update an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
@@ -308,7 +331,7 @@ def update(task: 'sky.Task', service_name: str) -> None:
         service_name: Name of the service.
     """
     _validate_service_task(task)
-    cluster_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'Service controller is stopped. There is no service to update. '
@@ -318,14 +341,6 @@ def update(task: 'sky.Task', service_name: str) -> None:
         'To spin up a new service, '
         f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
-
-    if handle is None or handle.head_ip is None:
-        # The error message is already printed in
-        # backend_utils.is_controller_up
-        # TODO(zhwu): Move the error message into the exception.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(message='',
-                                               cluster_status=cluster_status)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -412,7 +427,8 @@ def update(task: 'sky.Task', service_name: str) -> None:
                                  storage_mounts=None)
 
         code = serve_utils.ServeCodeGen.update_service(service_name,
-                                                       current_version)
+                                                       current_version,
+                                                       mode=mode.value)
         returncode, _, stderr = backend.run_on_head(handle,
                                                     code,
                                                     require_outputs=True,
@@ -459,16 +475,9 @@ def down(
         service_names = []
     if isinstance(service_names, str):
         service_names = [service_names]
-    cluster_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have terminated.')
-    if handle is None or handle.head_ip is None:
-        # The error message is already printed in
-        # backend_utils.is_controller_up
-        # TODO(zhwu): Move the error message into the exception.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(message='',
-                                               cluster_status=cluster_status)
 
     service_names_str = ','.join(service_names)
     if sum([len(service_names) > 0, all]) != 1:
@@ -519,6 +528,7 @@ def status(
 
         {
             'name': (str) service name,
+            'active_versions': (List[int]) a list of versions that are active,
             'controller_job_id': (int) the job id of the controller,
             'uptime': (int) uptime in seconds,
             'status': (sky.ServiceStatus) service status,
@@ -571,21 +581,10 @@ def status(
             raise RuntimeError(
                 'Failed to refresh service status due to network error.') from e
 
-    # TODO(tian): This is so slow... It will take ~10s to refresh the status
-    # of controller. Can we optimize this?
-    controller_status, handle = backend_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No service is found.')
-
-    if handle is None or handle.head_ip is None:
-        # When the controller is STOPPED, the head_ip will be None, as
-        # it will be set in global_user_state.remove_cluster().
-        # We do not directly check for UP because the controller may be
-        # in INIT state during another `sky serve up`, but still have
-        # head_ip available. In this case, we can still try to ssh
-        # into the controller and fetch the job table.
-        raise exceptions.ClusterNotUpError('Sky serve controller is not up.',
-                                           cluster_status=controller_status)
+    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+    handle = backend_utils.is_controller_accessible(
+        controller_type=controller_type,
+        stopped_message=controller_type.value.default_hint_if_non_existent)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -667,15 +666,11 @@ def tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
-    controller_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='No service is found.')
-    if handle is None or handle.head_ip is None:
-        msg = 'No service is found.'
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg = ''
-        raise exceptions.ClusterNotUpError(msg,
-                                           cluster_status=controller_status)
+        stopped_message=(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
+                         value.default_hint_if_non_existent))
+
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     backend.tail_serve_logs(handle,

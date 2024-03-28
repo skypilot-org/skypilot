@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Optional
 
 import colorama
 
+from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
-from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
@@ -51,10 +51,11 @@ class _ControllerSpec:
     cluster_name: str
     in_progress_hint: str
     decline_cancel_hint: str
-    decline_down_in_init_status_hint: str
+    decline_down_when_failed_to_fetch_status_hint: str
     decline_down_for_dirty_controller_hint: str
     check_cluster_name_hint: str
     default_hint_if_non_existent: str
+    connection_error_hint: str
 
 
 class Controllers(enum.Enum):
@@ -71,7 +72,7 @@ class Controllers(enum.Enum):
             'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
             f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
             f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
-        decline_down_in_init_status_hint=(
+        decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the spot controller while '
             'it is in INIT state is not supported (this means a spot launch '
             'is in progress or the previous launch failed), as we cannot '
@@ -85,17 +86,19 @@ class Controllers(enum.Enum):
             f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
         check_cluster_name_hint=(
             f'Cluster {spot_utils.SPOT_CONTROLLER_NAME} is reserved for '
-            'managed spot controller. '),
-        default_hint_if_non_existent='No managed spot jobs are found.')
+            'managed spot controller.'),
+        default_hint_if_non_existent='No in-progress spot jobs.',
+        connection_error_hint=(
+            'Failed to connect to spot controller, please try again later.'))
     SKY_SERVE_CONTROLLER = _ControllerSpec(
-        name='sky serve controller',
+        name='serve controller',
         cluster_name=serve_utils.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status -a{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
-        decline_down_in_init_status_hint=(
+        decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the sky serve controller '
             'while it is in INIT state is not supported (this means a sky '
             'serve up is in progress or the previous launch failed), as we '
@@ -112,8 +115,10 @@ class Controllers(enum.Enum):
             f'{colorama.Style.RESET_ALL}.'),
         check_cluster_name_hint=(
             f'Cluster {serve_utils.SKY_SERVE_CONTROLLER_NAME} is reserved for '
-            'sky serve controller. '),
-        default_hint_if_non_existent='No service is found.')
+            'sky serve controller.'),
+        default_hint_if_non_existent='No live services.',
+        connection_error_hint=(
+            'Failed to connect to serve controller, please try again later.'))
 
     @classmethod
     def from_name(cls, name: Optional[str]) -> Optional['Controllers']:
@@ -135,7 +140,7 @@ class Controllers(enum.Enum):
 def _get_cloud_dependencies_installation_commands(
         controller_type: str) -> List[str]:
     commands = []
-    enabled_clouds = global_user_state.get_enabled_clouds()
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
     # AWS
