@@ -39,7 +39,7 @@ service:
 resources:
   accelerators: {A100-80GB:8, A100-80GB:4, A100:8, A100:16}
   cpus: 32+
-  memory: 256+
+  memory: 512+
   use_spot: True
   disk_size: 512  # Ensure model checkpoints (~246GB) can fit.
   disk_tier: best
@@ -138,8 +138,7 @@ I 03-28 08:47:27 optimizer.py:836] Considered resources (1 node):
 I 03-28 08:47:27 optimizer.py:906] ------------------------------------------------------------------------------------------------------------------
 I 03-28 08:47:27 optimizer.py:906]  CLOUD        INSTANCE                    vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE        COST ($)   CHOSEN   
 I 03-28 08:47:27 optimizer.py:906] ------------------------------------------------------------------------------------------------------------------
-I 03-28 08:47:27 optimizer.py:906]  Kubernetes   32CPU--256GB--8A100         32      256       A100:8         kubernetes         0.00          ✔     
-I 03-28 08:47:27 optimizer.py:906]  Fluidstack   recWGm4oJ9AB3XVPxzRaujgbx   126     480       A100-80GB:4    generic_1_canada   9.89                
+I 03-28 08:47:27 optimizer.py:906]  Kubernetes   32CPU--512GB--8A100         32      512       A100:8         kubernetes         0.00          ✔     
 I 03-28 08:47:27 optimizer.py:906]  Azure        Standard_NC96ads_A100_v4    96      880       A100-80GB:4    eastus             14.69               
 I 03-28 08:47:27 optimizer.py:906]  Fluidstack   recUYj6oGJCvAvCXC7KQo5Fc7   252     960       A100-80GB:8    generic_1_canada   19.79               
 I 03-28 08:47:27 optimizer.py:906]  GCP          a2-ultragpu-4g              48      680       A100-80GB:4    us-central1-a      20.11               
