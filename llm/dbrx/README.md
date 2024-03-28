@@ -1,8 +1,10 @@
 # Databricks DBRX: A State-of-the-Art Open LLM
 
-TODO: image
+![](https://www.databricks.com/en-blog-assets/static/2fe1a0af1ee0f6605024a810b604079c/dbrx-blog-header-optimized.png)
 
-In this recipe, you will serve `databricks/dbrx-instruct` on your own infra -- existing Kubernetes cluster or cloud VMs.
+[DBRX](https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm) is an open, general-purpose LLM created by Databricks. It uses a mixture-of-experts (MoE) architecture with 132B total parameters of which 36B parameters are active on any input.
+
+In this recipe, you will serve `databricks/dbrx-instruct` on your own infra  -- existing Kubernetes cluster or cloud VMs -- with one command.
 
 ## Prerequisites
 
