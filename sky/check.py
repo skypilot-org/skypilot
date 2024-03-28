@@ -1,10 +1,10 @@
 """Credential checks: check cloud credentials and enable clouds."""
+import traceback
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import click
 import colorama
 import rich
-import traceback
 
 from sky import clouds
 from sky import exceptions

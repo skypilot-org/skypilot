@@ -1066,7 +1066,7 @@ class Task:
             })
         return config
 
-    def get_requested_features(self) -> Set[str]:
+    def get_requested_features(self) -> Set[clouds.CloudImplementationFeatures]:
         """Returns the requested features for this task.
 
         INTERNAL: this method is internal-facing.
@@ -1075,10 +1075,11 @@ class Task:
 
         # Multi-node
         if self.num_nodes > 1:
-            requested_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
+            requested_features.add(
+                clouds.CloudImplementationFeatures.MULTI_NODE)
 
         # Storage mounting
-        for path, storage_mount in self.storage_mounts.items():
+        for _, storage_mount in self.storage_mounts.items():
             if storage_mount.mode == storage_lib.StorageMode.MOUNT:
                 requested_features.add(
                     clouds.CloudImplementationFeatures.STORAGE_MOUNTING)
