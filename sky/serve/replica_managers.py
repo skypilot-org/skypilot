@@ -479,18 +479,20 @@ class ReplicaInfo:
         probe_time = time.time()
         try:
             msg = ''
-            # TODO(tian): Support HTTPS in the future.
-            readiness_path = (f'http://{self.url}{readiness_path}')
+            # TODO(tian): Change schema according to service.
+            readiness_path = (f'https://{self.url}{readiness_path}')
+            # TODO(tian): Remove verify=False. This is a hack to self-assigned
+            # SSL certificates.
             if post_data is not None:
                 msg += 'POST'
                 response = requests.post(
                     readiness_path,
-                    json=post_data,
+                    json=post_data, verify=False,
                     timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
             else:
                 msg += 'GET'
                 response = requests.get(
-                    readiness_path,
+                    readiness_path, verify=False,
                     timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
             msg += (f' request to {replica_identity} returned status '
                     f'code {response.status_code}')

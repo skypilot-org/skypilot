@@ -1,0 +1,24 @@
+# SkyServe YAML to run an HTTPS server.
+#
+# Usage:
+#   sky serve up -n https examples/serve/https/service.yaml
+# The endpoint will be printed in the console. You
+# could also check the endpoint by running:
+#   sky serve status --endpoint https
+
+service:
+  readiness_probe:
+    path: /
+    initial_delay_seconds: 1200
+  replicas: 1
+  https:
+    key: examples/serve/https/key.pem
+    cert: examples/serve/https/cert.pem
+
+resources:
+  ports: 8080
+  cpus: 2+
+
+workdir: examples/serve/https
+
+run: python3 server.py

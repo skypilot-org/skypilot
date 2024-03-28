@@ -20,6 +20,10 @@ file_mounts:
   {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}
+{%- if local_https_key_path is not none %}
+  {{remote_https_key_path}}: {{local_https_key_path}}
+  {{remote_https_cert_path}}: {{local_https_cert_path}}
+{%- endif %}
 
 run: |
   # Start sky serve service.
@@ -27,6 +31,10 @@ run: |
     --service-name {{service_name}} \
     --task-yaml {{remote_task_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID \
+{%- if local_https_key_path is not none %}
+    --https-key-file {{remote_https_key_path}} \
+    --https-cert-file {{remote_https_cert_path}} \
+{%- endif %}
     >> {{controller_log_file}} 2>&1
 
 envs:
