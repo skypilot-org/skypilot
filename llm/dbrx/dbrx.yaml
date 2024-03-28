@@ -47,7 +47,9 @@ service:
 
 resources:
   accelerators: {A100-80GB:8, A100-80GB:4, A100:8, A100:16}
-  use_spot: True
+  cpus: 32+
+  memory: 256+
+  use_spot: true
   disk_size: 512  # Ensure model checkpoints (~246GB) can fit.
   disk_tier: best
   ports: 8081  # Expose to internet traffic.
