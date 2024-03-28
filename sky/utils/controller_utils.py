@@ -554,8 +554,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                     'is enabled. Please enable at least one cloud with '
                     f'object store support ({store_enabled_clouds}) by running '
                     f'`sky check`, or remove {data_src} from your task.'
-                    '\nHint: If you do not have any cloud access, you may '
-                    'download data and code from the network using wget or '
+                    '\nHint: If you do not have any cloud access, you may still'
+                    ' download data and code over the network using curl or '
                     'other tools in the `setup` section of the task.') from None
 
     # Step 5: Add the file download into the file mounts, such as
