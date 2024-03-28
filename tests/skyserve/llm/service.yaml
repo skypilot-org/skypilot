@@ -16,7 +16,7 @@ resources:
   ports: 8087
   cloud: gcp
   accelerators: T4
-  memory: 32+
+  memory: 20+
 
 setup: |
   conda activate chatbot
