@@ -28,7 +28,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         except Exception:  # pylint: disable=broad-except
             # Catch all exceptions to prevent a single cloud from blocking the
             # check for other clouds.
-            ok, reason = False, str(traceback.format_exc())
+            ok, reason = False, traceback.format_exc()
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
