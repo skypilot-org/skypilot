@@ -79,7 +79,7 @@ To use the Gradio UI, open the URL shown in the logs:
 ...
 ```
 ![Gradio UI serving DBRX](https://i.imgur.com/BZszerX.png)
-<img src="https://i.imgur.com/BZszerX.png" alt="Gradio UI serving DBRX" style="height: 100px;">
+<img src="https://i.imgur.com/BZszerX.png" alt="Gradio UI serving DBRX" style="height: 300px;">
 
 To shut down all resources:
 ```console
