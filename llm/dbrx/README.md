@@ -78,8 +78,8 @@ To use the Gradio UI, open the URL shown in the logs:
 (task, pid=17415) INFO 03-28 03:56:46 metrics.py:218] Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Swapped: 0 reqs, Pending: 0 reqs, GPU KV cache usage: 0.0%, CPU KV cache usage: 0.0%
 ...
 ```
-![Gradio UI serving DBRX](https://i.imgur.com/BZszerX.png)
-<img src="https://i.imgur.com/BZszerX.png" alt="Gradio UI serving DBRX" style="height: 300px;">
+<!-- ![Gradio UI serving DBRX](https://i.imgur.com/BZszerX.png) -->
+<img src="https://i.imgur.com/BZszerX.png" alt="Gradio UI serving DBRX" style="height: 600px;">
 
 To shut down all resources:
 ```console
