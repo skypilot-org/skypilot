@@ -125,7 +125,7 @@ I 03-28 08:40:47 optimizer.py:906] ---------------------------------------------
 To run on Kubernetes or use an on-demand instance, pass `--no-use-spot` to the above command.
 
 <details>
-<summary>Example outputs with on-demand instances</summary>
+<summary>Example outputs with on-demand instances:</summary>
 
 ```console
 $ HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN --no-use-spot
