@@ -152,7 +152,7 @@ class SkyServeController:
         logger.info('SkyServe Controller started on '
                     f'http://localhost:{self._port}')
 
-        uvicorn.run(self._app, host='localhost', port=self._port)
+        uvicorn.run(self._app, host='0.0.0.0', port=self._port)
 
 
 # TODO(tian): Probably we should support service that will stop the VM in

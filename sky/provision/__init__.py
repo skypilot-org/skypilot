@@ -141,9 +141,14 @@ def query_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
     ports: List[str],
+    head_ip: Optional[str] = None,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
     """Query details about ports on a cluster.
+
+    If head_ip is provided, it may be used by the cloud implementation to
+    return the endpoint without querying the cloud provider. If head_ip is not
+    provider, the cloud provider will be queried to get the endpoint info.
 
     Returns a dict with port as the key and a list of common.Endpoint.
     """

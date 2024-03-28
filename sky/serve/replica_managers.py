@@ -421,7 +421,17 @@ class ReplicaInfo:
         handle = self.handle()
         if handle is None:
             return None
-        return f'{handle.head_ip}:{self.replica_port}'
+        try:
+            replica_port_int = int(self.replica_port)
+            endpoint = backend_utils.get_endpoints(
+                handle.cluster_name, replica_port_int)[replica_port_int]
+            assert isinstance(endpoint, str)
+            # If replica doesn't start with http or https, add http://
+            if not endpoint.startswith('http'):
+                endpoint = 'http://' + endpoint
+            return endpoint
+        except RuntimeError:
+            return None
 
     @property
     def status(self) -> serve_state.ReplicaStatus:
@@ -439,6 +449,7 @@ class ReplicaInfo:
             'name': self.cluster_name,
             'status': self.status,
             'version': self.version,
+            'endpoint': self.url,
             'is_spot': self.is_spot,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
@@ -480,7 +491,13 @@ class ReplicaInfo:
         try:
             msg = ''
             # TODO(tian): Support HTTPS in the future.
-            readiness_path = (f'http://{self.url}{readiness_path}')
+            url = self.url
+            if url is None:
+                logger.info(f'Error when probing {replica_identity}: '
+                            'Cannot get the endpoint.')
+                return self, False, probe_time
+            readiness_path = (f'{url}{readiness_path}')
+            logger.info(f'Probing {replica_identity} with {readiness_path}.')
             if post_data is not None:
                 msg += 'POST'
                 response = requests.post(
