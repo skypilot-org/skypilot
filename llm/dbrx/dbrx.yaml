@@ -34,9 +34,7 @@ envs:
   HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token, or use --env to pass.
 
 service:
-  # Specifying the path to the endpoint to check the readiness of the service.
   readiness_probe: /v1/models
-  # How many replicas to manage.
   replicas: 2
 
 resources:

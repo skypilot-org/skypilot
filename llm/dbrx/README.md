@@ -20,7 +20,6 @@ Launch a single spot instance of DBRX on your infra:
 ```console
 HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
 ```
-> To use an on-demand instance instead, pass `--use-spot False` to the above command.
 
 <details>
 <summary>Example outputs:</summary>
@@ -45,6 +44,15 @@ I 03-27 21:08:53 optimizer.py:906] ---------------------------------------------
 ```
 
 </details>
+
+> To use an on-demand instance instead, pass `--use-spot False` to the above command.
+
+Wait until the model is ready, indicated by these lines:
+```console
+...
+(task, pid=17433) Waiting for vllm api server to start...
+```
+:tada: Congratulations! You have now launched the DBRX Instruct LLM on your infra.
 
 You can play with the model via
 - Standard OpenAPI-compatible endpoints (e.g., `/v1/chat/completions`)
@@ -96,6 +104,11 @@ After playing with the model, you can deploy the model with autoscaling and load
 With no change to the YAML, launch a service on your infra:
 ```console
 HF_TOKEN=xxx sky serve up dbrx.yaml -n dbrx --env HF_TOKEN
+```
+
+Wait until the service is ready:
+```console
+watch -n10 sky serve status dbrx
 ```
 
 Get a single endpoint that load-balances across replicas:
