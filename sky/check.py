@@ -1,10 +1,10 @@
 """Credential checks: check cloud credentials and enable clouds."""
+import traceback
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import click
 import colorama
 import rich
-import traceback
 
 from sky import clouds
 from sky import exceptions
@@ -25,7 +25,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         echo(f'  Checking {cloud_repr}...', nl=False)
         try:
             ok, reason = cloud.check_credentials()
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except
             # Catch all exceptions to prevent a single cloud from blocking the
             # check for other clouds.
             ok, reason = False, str(traceback.format_exc())
