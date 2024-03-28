@@ -308,10 +308,14 @@ def _get_gpus_for_zone(zone: str) -> pd.DataFrame:
                 continue
             if gpu_name.startswith('TPU-'):
                 continue
+            gpu_info = _gpu_info_from_name(gpu_name)
+            if gpu_info is None:
+                # Prevent `show-gpus` from not showing GPUs without GPU info.
+                gpu_info = gpu_name
             new_gpus.append({
                 'AcceleratorName': gpu_name,
                 'AcceleratorCount': count,
-                'GpuInfo': _gpu_info_from_name(gpu_name),
+                'GpuInfo': gpu_info,
                 'Region': zone.rpartition('-')[0],
                 'AvailabilityZone': zone,
             })
@@ -331,6 +335,7 @@ def _gpu_info_from_name(name: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
         'P4': 8 * 1024,
         'T4': 16 * 1024,
         'V100': 16 * 1024,
+        'P100': 16 * 1024,
         # End of life:
         'K80': 12 * 1024,
     }
