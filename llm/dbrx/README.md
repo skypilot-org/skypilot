@@ -88,7 +88,7 @@ You can also get the full YAML file [here](https://github.com/skypilot-org/skypi
 
 ## Serving DBRX: single instance
 
-Launch a single spot instance (starts from $4.1/hour) to serve DBRX on your infra:
+Launch a single spot instance to serve DBRX on your infra (spot `A100:8` starts at $4.1/hour):
 ```console
 HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
 ```
@@ -166,7 +166,7 @@ To use the Gradio UI, open the URL shown in the logs:
 (task, pid=17433) Running on public URL: https://xxxxxxxxxx.gradio.live
 
 <p align="center">
-<img src="https://i.imgur.com/BZszerX.png" alt="Gradio UI serving DBRX" style="height: 600px;">
+<img src="https://i.imgur.com/lTfaRpN.gif" alt="Gradio UI serving DBRX" style="height: 600px;">
 </p>
 
 To stop the instance:
