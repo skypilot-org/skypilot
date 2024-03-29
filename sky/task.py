@@ -1066,7 +1066,8 @@ class Task:
             })
         return config
 
-    def get_required_cloud_features(self) -> Set[clouds.CloudImplementationFeatures]:
+    def get_required_cloud_features(
+            self) -> Set[clouds.CloudImplementationFeatures]:
         """Returns the required features for this task (but not for resources).
 
         Features required by the resources are checked separately in
@@ -1078,8 +1079,7 @@ class Task:
 
         # Multi-node
         if self.num_nodes > 1:
-            required_features.add(
-                clouds.CloudImplementationFeatures.MULTI_NODE)
+            required_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
 
         # Storage mounting
         for _, storage_mount in self.storage_mounts.items():
