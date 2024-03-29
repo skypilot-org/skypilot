@@ -1067,7 +1067,10 @@ class Task:
         return config
 
     def get_required_cloud_features(self) -> Set[clouds.CloudImplementationFeatures]:
-        """Returns the required features for this task.
+        """Returns the required features for this task (but not for resources).
+
+        Features required by the resources are checked separately in
+        cloud.get_feasible_launchable_resources().
 
         INTERNAL: this method is internal-facing.
         """
