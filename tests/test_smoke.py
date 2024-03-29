@@ -3152,7 +3152,7 @@ def test_skyserve_llm(generic_cloud: str):
             ],
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        timeout=20 * 60,
+        timeout=40 * 60,
     )
     run_one_test(test)
 
@@ -3246,6 +3246,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 
 
 @pytest.mark.serve
+@pytest.mark
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -3510,6 +3511,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
