@@ -20,6 +20,7 @@ from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds.service_catalog import common as service_catalog_common
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -679,6 +680,8 @@ def spot_launch(
             'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
             'sky_python_cmd': constants.SKY_PYTHON_CMD,
+            'modified_catalogs':
+                service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
                 'spot',
                 remote_user_config_path=remote_user_config_path,

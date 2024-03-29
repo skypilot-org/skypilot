@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
-from sky import global_user_state
+from sky import check as sky_check
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
@@ -44,7 +44,8 @@ def list_accelerators(
     del all_regions, require_price  # Unused.
     k8s_cloud = Kubernetes()
     if not any(
-            map(k8s_cloud.is_same_cloud, global_user_state.get_enabled_clouds())
+            map(k8s_cloud.is_same_cloud,
+                sky_check.get_cached_enabled_clouds_or_refresh())
     ) or not kubernetes_utils.check_credentials()[0]:
         return {}
 

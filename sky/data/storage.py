@@ -11,7 +11,7 @@ import urllib.parse
 
 import colorama
 
-from sky import check
+from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -68,14 +68,34 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'It may have been deleted externally.')
 
 
+def get_cached_enabled_storage_clouds_or_refresh(
+        raise_if_no_cloud_access: bool = False) -> List[str]:
+    # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
+    # is resolved by implementing separate 'enabled_storage_clouds'
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
+
+    enabled_storage_clouds = [
+        cloud for cloud in enabled_clouds if cloud in STORE_ENABLED_CLOUDS
+    ]
+    r2_is_enabled, _ = cloudflare.check_credentials()
+    if r2_is_enabled:
+        enabled_storage_clouds.append(cloudflare.NAME)
+    if raise_if_no_cloud_access and not enabled_storage_clouds:
+        raise exceptions.NoCloudAccessError(
+            'No cloud access available for storage. '
+            'Please check your cloud credentials.')
+    return enabled_storage_clouds
+
+
 def _is_storage_cloud_enabled(cloud_name: str,
                               try_fix_with_sky_check: bool = True) -> bool:
-    enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+    enabled_storage_clouds = get_cached_enabled_storage_clouds_or_refresh()
     if cloud_name in enabled_storage_clouds:
         return True
     if try_fix_with_sky_check:
         # TODO(zhwu): Only check the specified cloud to speed up.
-        check.check(quiet=True)
+        sky_check.check(quiet=True)
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)
     return False
@@ -791,7 +811,9 @@ class Storage(object):
 
         return storage_obj
 
-    def add_store(self, store_type: Union[str, StoreType]) -> AbstractStore:
+    def add_store(self,
+                  store_type: Union[str, StoreType],
+                  region: Optional[str] = None) -> AbstractStore:
         """Initializes and adds a new store to the storage.
 
         Invoked by the optimizer after it has selected a store to
@@ -799,6 +821,8 @@ class Storage(object):
 
         Args:
           store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
+          region: str; Region to place the bucket in. Caller must ensure that
+            the region is valid for the chosen store_type.
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -826,6 +850,7 @@ class Storage(object):
             store = store_cls(
                 name=self.name,
                 source=self.source,
+                region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
@@ -1310,7 +1335,7 @@ class S3Store(AbstractStore):
         # Store object is being reconstructed for deletion or re-mount with
         # sky start, and error is raised instead.
         if self.sync_on_reconstruction:
-            bucket = self._create_s3_bucket(self.name)
+            bucket = self._create_s3_bucket(self.name, self.region)
             return bucket, True
         else:
             # Raised when Storage object is reconstructed for sky storage
@@ -1360,9 +1385,15 @@ class S3Store(AbstractStore):
             if region is None:
                 s3_client.create_bucket(Bucket=bucket_name)
             else:
-                location = {'LocationConstraint': region}
-                s3_client.create_bucket(Bucket=bucket_name,
-                                        CreateBucketConfiguration=location)
+                if region == 'us-east-1':
+                    # If default us-east-1 region is used, the
+                    # LocationConstraint must not be specified.
+                    # https://stackoverflow.com/a/51912090
+                    s3_client.create_bucket(Bucket=bucket_name)
+                else:
+                    location = {'LocationConstraint': region}
+                    s3_client.create_bucket(Bucket=bucket_name,
+                                            CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
@@ -1736,7 +1767,7 @@ class GcsStore(AbstractStore):
                 # is being reconstructed for deletion or re-mount with
                 # sky start, and error is raised instead.
                 if self.sync_on_reconstruction:
-                    bucket = self._create_gcs_bucket(self.name)
+                    bucket = self._create_gcs_bucket(self.name, self.region)
                     return bucket, True
                 else:
                     # This is raised when Storage object is reconstructed for

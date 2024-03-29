@@ -1,4 +1,5 @@
 """Clouds in Sky."""
+
 from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import cloud_in_list
 from sky.clouds.cloud import CloudImplementationFeatures
@@ -19,6 +20,7 @@ from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.oci import OCI
+from sky.clouds.paperspace import Paperspace
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
 from sky.clouds.vsphere import Vsphere
@@ -31,6 +33,7 @@ __all__ = [
     'Cudo',
     'GCP',
     'Lambda',
+    'Paperspace',
     'SCP',
     'RunPod',
     'OCI',
