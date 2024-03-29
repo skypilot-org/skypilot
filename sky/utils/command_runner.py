@@ -533,7 +533,6 @@ class SSHCommandRunner(CommandRunner):
                                            stream_logs=stream_logs)
 
 
-
 class KubernetesCommandRunner(CommandRunner):
     """Runner for Kubernetes commands."""
 

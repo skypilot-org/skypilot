@@ -381,14 +381,14 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
 
     for new_node in new_nodes:
-        runner = command_runner.KubernetesCommandRunner(
-            (namespace, new_node.metadata.name))
+        pod_name = new_node.metadata.name
+        runner = command_runner.KubernetesCommandRunner((namespace, pod_name))
         logger.info(f'{"-"*20}Start: Set up SSH in pod {pod_name!r} {"-"*20}')
         rc, stdout, _ = runner.run(set_k8s_ssh_cmd,
                                    require_outputs=True,
                                    stream_logs=False)
-        _raise_command_running_error('setup ssh', set_k8s_ssh_cmd,
-                                     new_node.metadata.name, rc, stdout)
+        _raise_command_running_error('setup ssh', set_k8s_ssh_cmd, pod_name, rc,
+                                     stdout)
         logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
 
 

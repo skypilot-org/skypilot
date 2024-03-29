@@ -2302,9 +2302,8 @@ def is_controller_accessible(
                                                    handle.docker_user,
                                                    handle.ssh_user)
 
-        runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                 **ssh_credentials,
-                                                 port=handle.head_ssh_port)
+        runner = command_runner.SSHCommandRunner(
+            (handle.head_ip, handle.head_ssh_port), **ssh_credentials)
         if not runner.check_connection():
             error_msg = controller_type.value.connection_error_hint
     else:
