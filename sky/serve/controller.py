@@ -120,8 +120,14 @@ class SkyServeController:
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
-                self._replica_manager.update_version(version,
-                                                     service,
+                latest_version = serve_state.get_latest_version(
+                    self._service_name)
+                if version != latest_version:
+                    logger.error(f'Invalid version {version}, '
+                                 f'latest version: {latest_version}.')
+                    return
+
+                self._replica_manager.update_version(service,
                                                      update_mode=update_mode)
                 new_autoscaler = autoscalers.Autoscaler.from_spec(
                     self._service_name, service)
@@ -132,8 +138,7 @@ class SkyServeController:
                     self._autoscaler = new_autoscaler
                     self._autoscaler.load_dynamic_states(
                         old_autoscaler.dump_dynamic_states())
-                self._autoscaler.update_version(version,
-                                                service,
+                self._autoscaler.update_version(service,
                                                 update_mode=update_mode)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
