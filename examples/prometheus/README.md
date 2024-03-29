@@ -2,7 +2,7 @@
 
 <img src="https://i.imgur.com/25CYKcD.png" alt="Prometheus Screenshot" width="1000"/>
 
-This README showcases as simple example of how metrics can be extracted from 
+This README showcases a simple example of how metrics can be extracted from 
 SkyPilot and exported to Prometheus.
 
 In `skypilot_prometheus_server.py`, we use the `prometheus_client` library to create a Prometheus client that 
