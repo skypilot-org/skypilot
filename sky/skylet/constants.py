@@ -130,6 +130,8 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
     # Add missing PATH to make sure ray is in the PATH, when the
     # previous ray installation happens in user's `~/.local` directory.
+    # ~/.local/bin is added to the end of PATH to avoid conflicts with ray just
+    # installed in the conda environment.
     'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE}; '
