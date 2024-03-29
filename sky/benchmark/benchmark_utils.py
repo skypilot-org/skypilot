@@ -26,6 +26,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
+from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -167,19 +168,11 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     bucket_name = f'sky-bench-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
     # Select the bucket type.
-    enabled_clouds = global_user_state.get_enabled_clouds()
-    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
-    if 'AWS' in enabled_clouds:
-        bucket_type = data.StoreType.S3.value
-    elif 'GCP' in enabled_clouds:
-        bucket_type = data.StoreType.GCS.value
-    elif 'AZURE' in enabled_clouds:
-        raise RuntimeError(
-            'Azure Blob Storage is not supported yet. '
-            'Please enable another cloud to create a benchmark bucket.')
-    else:
-        raise RuntimeError('No cloud is enabled. '
-                           'Please enable at least one cloud.')
+    enabled_clouds = storage_lib.get_cached_enabled_storage_clouds_or_refresh(
+        raise_if_no_cloud_access=True)
+    # Already checked by raise_if_no_cloud_access=True.
+    assert enabled_clouds
+    bucket_type = data.StoreType.from_cloud(enabled_clouds[0])
 
     # Create a benchmark bucket.
     logger.info(f'Creating a bucket {bucket_name} to save the benchmark logs.')

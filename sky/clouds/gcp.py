@@ -445,7 +445,9 @@ class GCP(clouds.Cloud):
                 # https://cloud.google.com/compute/docs/gpus
                 if acc in ('A100-80GB', 'L4'):
                     # A100-80GB and L4 have a different name pattern.
-                    resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
+                    resources_vars['gpu'] = f'nvidia-{acc.lower()}'
+                elif acc == 'H100':
+                    resources_vars['gpu'] = f'nvidia-{acc.lower()}-80gb'
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
@@ -741,13 +743,13 @@ class GCP(clouds.Cloud):
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
-        service = googleapiclient.discovery.build('cloudresourcemanager',
-                                                  'v1',
-                                                  credentials=credentials)
+        crm = googleapiclient.discovery.build('cloudresourcemanager',
+                                              'v1',
+                                              credentials=credentials)
         gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
         permissions = {'permissions': gcp_minimal_permissions}
-        request = service.projects().testIamPermissions(resource=project,
-                                                        body=permissions)
+        request = crm.projects().testIamPermissions(resource=project,
+                                                    body=permissions)
         ret_permissions = request.execute().get('permissions', [])
 
         diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
@@ -765,20 +767,23 @@ class GCP(clouds.Cloud):
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
         # We only add the existing credential files. It should be safe to ignore
-        # the missing files, as we successfully created the VM at this point,
-        # meaning the authentication is successful.
+        # the missing files, as we have checked the cloud credentials in
+        # `check_credentials()` when the user calls `sky check`.
         credentials = {
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
             if os.path.exists(os.path.expanduser(
                 f'~/.config/gcloud/{filename}'))
         }
-        application_key_path = self._find_application_key_path()
-        if os.path.exists(os.path.expanduser(application_key_path)):
+        try:
+            application_key_path = self._find_application_key_path()
             # Upload the application key path to the default path, so that
             # autostop and GCS can be accessed on the remote cluster.
             credentials[DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH] = (
                 application_key_path)
+        except FileNotFoundError:
+            # Skip if the application key path is not found.
+            pass
         return credentials
 
     @classmethod

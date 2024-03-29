@@ -11,14 +11,12 @@ import networkx as nx
 import numpy as np
 import prettytable
 
-from sky import check
+from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
-from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
-from sky.backends import backend_utils
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import ux_utils
@@ -334,7 +332,8 @@ class Optimizer:
                 # If Kubernetes was included in the search space, then
                 # mention "kubernetes cluster" and/instead of "catalog"
                 # in the error message.
-                enabled_clouds = global_user_state.get_enabled_clouds()
+                enabled_clouds = (
+                    sky_check.get_cached_enabled_clouds_or_refresh())
                 if clouds.cloud_in_list(clouds.Kubernetes(), enabled_clouds):
                     if any(orig_resources.cloud is None
                            for orig_resources in node.resources):
@@ -1157,8 +1156,8 @@ def _fill_in_launchable_resources(
         Dict mapping Cloud to a list of feasible Resources (for printing),
         Sorted list of fuzzy candidates (alternative GPU names).
     """
-    backend_utils.check_public_cloud_enabled()
-    enabled_clouds = global_user_state.get_enabled_clouds()
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        raise_if_no_cloud_access=True)
     launchable = collections.defaultdict(list)
     all_fuzzy_candidates = set()
     cloud_candidates: _PerCloudCandidates = collections.defaultdict(
@@ -1170,7 +1169,7 @@ def _fill_in_launchable_resources(
                 not clouds.cloud_in_list(resources.cloud, enabled_clouds)):
             if try_fix_with_sky_check:
                 # Explicitly check again to update the enabled cloud list.
-                check.check(quiet=True)
+                sky_check.check(quiet=True)
                 return _fill_in_launchable_resources(task, blocked_resources,
                                                      False)
             with ux_utils.print_exception_no_traceback():

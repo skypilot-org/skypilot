@@ -2,6 +2,7 @@
 from concurrent import futures
 import functools
 import hashlib
+import json
 import os
 import resource
 import time
@@ -14,6 +15,7 @@ from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
+from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -23,7 +25,7 @@ logger = sky_logging.init_logger(__name__)
 _START_TITLE = '\n' + '-' * 20 + 'Start: {} ' + '-' * 20
 _END_TITLE = '-' * 20 + 'End:   {} ' + '-' * 20 + '\n'
 
-_MAX_RETRY = 5
+_MAX_RETRY = 6
 
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
@@ -33,33 +35,34 @@ _RAY_PRLIMIT = (
     'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
 
 _DUMP_RAY_PORTS = (
-    'python -c \'import json, os; '
+    f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
     f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
     f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
     'encoding="utf-8"))\';')
 
 _RAY_PORT_COMMAND = (
-    'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
-    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
-    'python -c "from sky.utils import common_utils; '
+    f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
+    '"from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
+    '2> /dev/null || echo 6379);'
+    f'{constants.SKY_PYTHON_CMD} -c "from sky.utils import common_utils; '
     'print(common_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
 
 # Command that calls `ray status` with SkyPilot's Ray port set.
 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     f'{_RAY_PORT_COMMAND}; '
-    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
+    f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_RAY_CMD} status')
 
 # Command that waits for the ray status to be initialized. Otherwise, a later
 # `sky status -r` may fail due to the ray cluster not being ready.
 RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
-    f'while `RAY_ADDRESS=127.0.0.1:{constants.SKY_REMOTE_RAY_PORT} '
-    'ray status | grep -q "No cluster status."`; do '
+    f'while `{constants.RAY_STATUS} | grep -q "No cluster status."`; do '
     'sleep 0.5; '
     'echo "Waiting ray cluster to be initialized"; '
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet;'
+MAYBE_SKYLET_RESTART_CMD = (f'{constants.SKY_PYTHON_CMD} -m '
+                            'sky.skylet.attempt_skylet;')
 
 
 def _auto_retry(func):
@@ -192,6 +195,23 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                                                     stream_logs=False,
                                                     log_path=log_path,
                                                     require_outputs=True)
+            retry_cnt = 0
+            while returncode == 255 and retry_cnt < _MAX_RETRY:
+                # Got network connection issue occur during setup. This could
+                # happen when a setup step requires a reboot, e.g. nvidia-driver
+                # installation (happens for fluidstack). We should retry for it.
+                logger.info('Network connection issue during setup, this is '
+                            'likely due to the reboot of the instance. '
+                            'Retrying setup in 10 seconds.')
+                time.sleep(10)
+                retry_cnt += 1
+                returncode, stdout, stderr = runner.run(cmd,
+                                                        stream_logs=False,
+                                                        log_path=log_path,
+                                                        require_outputs=True)
+                if not returncode:
+                    break
+
             if returncode:
                 raise RuntimeError(
                     'Failed to run setup commands on an instance. '
@@ -205,6 +225,22 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                              digest=digest,
                              cluster_info=cluster_info,
                              ssh_credentials=ssh_credentials)
+
+
+def _ray_gpu_options(custom_resource: str) -> str:
+    """Returns GPU options for the ray start command.
+
+    For some cases (e.g., within docker container), we need to explicitly set
+    --num-gpus to have ray clusters recognize the schedulable GPUs.
+    """
+    acc_dict = json.loads(custom_resource)
+    assert len(acc_dict) == 1, acc_dict
+    acc_name, acc_count = list(acc_dict.items())[0]
+    if accelerator_registry.is_schedulable_non_gpu_accelerator(acc_name):
+        return ''
+    # We need to manually set the number of GPUs, as it may not automatically
+    # detect the GPUs within the container.
+    return f' --num-gpus={acc_count}'
 
 
 @_log_start_end
@@ -230,6 +266,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += _ray_gpu_options(custom_resource)
 
     if cluster_info.custom_ray_options:
         if 'use_external_ip' in cluster_info.custom_ray_options:
@@ -244,10 +281,11 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     # the same credentials. Otherwise, `ray status` will fail to fetch the
     # available nodes.
     # Reference: https://github.com/skypilot-org/skypilot/issues/2441
-    cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
+    cmd = (f'{constants.SKY_RAY_CMD} stop; '
+           'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-           f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
-           _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
+           f'{constants.SKY_RAY_CMD} start --head {ray_options} || exit 1;' +
+           _RAY_PRLIMIT + _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = head_runner.run(cmd,
@@ -256,7 +294,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                                                  require_outputs=True)
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
-                           f'(exit code {returncode}). Error: '
+                           f'(exit code {returncode}). Error: \n'
                            f'===== stdout ===== \n{stdout}\n'
                            f'===== stderr ====={stderr}')
 
@@ -302,6 +340,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += _ray_gpu_options(custom_resource)
 
     if cluster_info.custom_ray_options:
         for key, value in cluster_info.custom_ray_options.items():
@@ -309,10 +348,11 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 
     # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY, see the comment in
     # `start_ray_on_head_node`.
-    cmd = (f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
-           'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-           f'ray start --disable-usage-stats {ray_options} || exit 1;' +
-           _RAY_PRLIMIT)
+    cmd = (
+        f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
+        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+        f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options} || '
+        'exit 1;' + _RAY_PRLIMIT)
     if no_restart:
         # We do not use ray status to check whether ray is running, because
         # on worker node, if the user started their own ray cluster, ray status

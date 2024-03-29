@@ -101,6 +101,9 @@ class CommandRunner:
                          **kwargs) -> List[CommandRunner]:
         ...
 
+    def check_connection(self) -> bool:
+        ...
+
 
 class SSHCommandRunner(CommandRunner):
     ip: str

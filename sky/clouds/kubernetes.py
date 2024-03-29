@@ -28,8 +28,10 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
-    SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
-    SKY_SSH_JUMP_NAME = f'sky-ssh-jump-{common_utils.get_user_hash()}'
+    SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
+    SKY_SSH_KEY_SECRET_FIELD_NAME = \
+        f'ssh-publickey-{common_utils.get_user_hash()}'
+    SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
         'kubernetes-port-forward-proxy-command.sh.j2'
     PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
@@ -144,8 +146,15 @@ class Kubernetes(clouds.Cloud):
         # exactly the requested resources.
         instance_cpus = float(
             cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
-        instance_mem = float(memory.strip('+')) if memory is not None else \
-            instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
+        if memory is not None:
+            if memory.endswith('+'):
+                instance_mem = float(memory[:-1])
+            elif memory.endswith('x'):
+                instance_mem = float(memory[:-1]) * instance_cpus
+            else:
+                instance_mem = float(memory)
+        else:
+            instance_mem = instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
         virtual_instance_type = kubernetes_utils.KubernetesInstanceType(
             instance_cpus, instance_mem).name
         return virtual_instance_type
@@ -225,8 +234,9 @@ class Kubernetes(clouds.Cloud):
 
         if resources.image_id is not None:
             # Use custom image specified in resources
-            image_id_with_region = resources.image_id['kubernetes']
-            image_id = image_id_with_region.lstrip('docker:')
+            image_id = resources.image_id['kubernetes']
+            if image_id.startswith('docker:'):
+                image_id = image_id[len('docker:'):]
         else:
             # Select image based on whether we are using GPUs or not.
             image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU

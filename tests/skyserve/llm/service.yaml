@@ -6,6 +6,7 @@ service:
       messages:
         - role: user
           content: How to print hello world?
+      max_tokens: 1
   replicas: 1
 
 envs:
