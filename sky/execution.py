@@ -235,7 +235,7 @@ def _execute(
     requested_features = set()
 
     # Add requested features from the task
-    requested_features |= task.get_requested_features()
+    requested_features |= task.get_required_cloud_features()
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):

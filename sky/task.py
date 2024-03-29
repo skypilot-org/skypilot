@@ -1066,26 +1066,26 @@ class Task:
             })
         return config
 
-    def get_requested_features(self) -> Set[clouds.CloudImplementationFeatures]:
-        """Returns the requested features for this task.
+    def get_required_cloud_features(self) -> Set[clouds.CloudImplementationFeatures]:
+        """Returns the required features for this task.
 
         INTERNAL: this method is internal-facing.
         """
-        requested_features = set()
+        required_features = set()
 
         # Multi-node
         if self.num_nodes > 1:
-            requested_features.add(
+            required_features.add(
                 clouds.CloudImplementationFeatures.MULTI_NODE)
 
         # Storage mounting
         for _, storage_mount in self.storage_mounts.items():
             if storage_mount.mode == storage_lib.StorageMode.MOUNT:
-                requested_features.add(
+                required_features.add(
                     clouds.CloudImplementationFeatures.STORAGE_MOUNTING)
                 break
 
-        return requested_features
+        return required_features
 
     def __rshift__(self, b):
         sky.dag.get_current_dag().add_edge(self, b)
