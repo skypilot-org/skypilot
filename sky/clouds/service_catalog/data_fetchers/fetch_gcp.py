@@ -308,14 +308,42 @@ def _get_gpus_for_zone(zone: str) -> pd.DataFrame:
                 continue
             if gpu_name.startswith('TPU-'):
                 continue
+            gpu_info = _gpu_info_from_name(gpu_name)
+            if gpu_info is None:
+                # Prevent `show-gpus` from not showing GPUs without GPU info.
+                gpu_info = gpu_name
             new_gpus.append({
                 'AcceleratorName': gpu_name,
                 'AcceleratorCount': count,
-                'GpuInfo': None,
+                'GpuInfo': gpu_info,
                 'Region': zone.rpartition('-')[0],
                 'AvailabilityZone': zone,
             })
     return pd.DataFrame(new_gpus).reset_index(drop=True)
+
+
+def _gpu_info_from_name(name: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+    """Hard-codes the GPU memory info for certain GPUs.
+
+    Reference: https://cloud.google.com/compute/docs/gpus
+    """
+    name_to_gpu_memory_in_mib = {
+        'L4': 24 * 1024,
+        'A100-80GB': 80 * 1024,
+        'A100': 40 * 1024,
+        'H100': 80 * 1024,
+        'P4': 8 * 1024,
+        'T4': 16 * 1024,
+        'V100': 16 * 1024,
+        'P100': 16 * 1024,
+        # End of life:
+        'K80': 12 * 1024,
+    }
+    gpu_memory_in_mib = name_to_gpu_memory_in_mib.get(name)
+    if gpu_memory_in_mib is not None:
+        return {'Gpus': [{'MemoryInfo': {'SizeInMiB': gpu_memory_in_mib}}]}
+    print('Warning: GPU memory info not found for', name)
+    return None
 
 
 def _get_gpus(region_prefix: str) -> pd.DataFrame:
@@ -376,7 +404,6 @@ def get_gpu_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
     df = df.reset_index(drop=True)
     df = df.sort_values(
         ['AcceleratorName', 'AcceleratorCount', 'Region', 'AvailabilityZone'])
-    df['GpuInfo'] = df['AcceleratorName']
     return df
 
 
