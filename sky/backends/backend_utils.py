@@ -327,7 +327,7 @@ class FileMountHelper(object):
     def make_safe_symlink_command(cls, *, source: str, target: str) -> str:
         """Returns a command that safely symlinks 'source' to 'target'.
 
-        All intermediate directories of 'source' will be owned by $USER,
+        All intermediate directories of 'source' will be owned by $(whoami),
         excluding the root directory (/).
 
         'source' must be an absolute path; both 'source' and 'target' must not
@@ -354,17 +354,17 @@ class FileMountHelper(object):
                                                                        target)
         # Below, use sudo in case the symlink needs sudo access to create.
         # Prepare to create the symlink:
-        #  1. make sure its dir(s) exist & are owned by $USER.
+        #  1. make sure its dir(s) exist & are owned by $(whoami).
         dir_of_symlink = os.path.dirname(source)
         commands = [
             # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
-            # chown $USER on it so user can use these intermediate dirs
+            # chown $(whoami) on it so user can use these intermediate dirs
             # (excluding /).
             f'sudo mkdir -p {dir_of_symlink}',
             # p: path so far
             ('(p=""; '
              f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
-             'p=${p}/${w}; sudo chown $USER $p; done)')
+             'p=${p}/${w}; sudo chown $(whoami) $p; done)')
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a
@@ -380,7 +380,7 @@ class FileMountHelper(object):
             # Link.
             f'sudo ln -s {target} {source}',
             # chown.  -h to affect symlinks only.
-            f'sudo chown -h $USER {source}',
+            f'sudo chown -h $(whoami) {source}',
         ]
         return ' && '.join(commands)
 
