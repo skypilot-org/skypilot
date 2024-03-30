@@ -598,7 +598,6 @@ class KubernetesCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
-        stream_logs = True
         assert port_forward is None, ('port_forward is not supported for k8s '
                                       f'for now, but got: {port_forward}')
 
