@@ -1092,7 +1092,7 @@ def wait_until_ray_cluster_ready(
     try:
         head_ip = _query_head_ip_with_retries(
             cluster_config_file, max_attempts=WAIT_HEAD_NODE_IP_MAX_ATTEMPTS)
-    except exceptions.FetchIPError as e:
+    except exceptions.FetchClusterInfoError as e:
         logger.error(common_utils.format_exception(e))
         return False, None  # failed
 
@@ -1343,8 +1343,8 @@ def _query_head_ip_with_retries(cluster_yaml: str,
             break
         except subprocess.CalledProcessError as e:
             if i == max_attempts - 1:
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD) from e
+                raise exceptions.FetchClusterInfoError(
+                    reason=exceptions.FetchClusterInfoError.Reason.HEAD) from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
             time.sleep(backoff.current_backoff())
@@ -1390,11 +1390,12 @@ def get_node_ips(cluster_yaml: str,
                 'Failed to get cluster info for '
                 f'{ray_config["cluster_name"]} from the new provisioner '
                 f'with {common_utils.format_exception(e)}.')
-            raise exceptions.FetchIPError(
-                exceptions.FetchIPError.Reason.HEAD) from e
+            raise exceptions.FetchClusterInfoError(
+                exceptions.FetchClusterInfoError.Reason.HEAD) from e
         if len(metadata.instances) < expected_num_nodes:
             # Simulate the exception when Ray head node is not up.
-            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+            raise exceptions.FetchClusterInfoError(
+                exceptions.FetchClusterInfoError.Reason.HEAD)
         return metadata.get_feasible_ips(get_internal_ips)
 
     if get_internal_ips:
@@ -1424,8 +1425,8 @@ def get_node_ips(cluster_yaml: str,
                 break
             except subprocess.CalledProcessError as e:
                 if retry_cnt == worker_ip_max_attempts - 1:
-                    raise exceptions.FetchIPError(
-                        exceptions.FetchIPError.Reason.WORKER) from e
+                    raise exceptions.FetchClusterInfoError(
+                        exceptions.FetchClusterInfoError.Reason.WORKER) from e
                 # Retry if the ssh is not ready for the workers yet.
                 backoff_time = backoff.current_backoff()
                 logger.debug('Retrying to get worker ip '
@@ -1450,8 +1451,8 @@ def get_node_ips(cluster_yaml: str,
                                f'detected IP(s): {worker_ips[-n:]}.')
                 worker_ips = worker_ips[-n:]
             else:
-                raise exceptions.FetchIPError(
-                    exceptions.FetchIPError.Reason.WORKER)
+                raise exceptions.FetchClusterInfoError(
+                    exceptions.FetchClusterInfoError.Reason.WORKER)
     else:
         worker_ips = []
     return head_ip_list + worker_ips
@@ -1760,7 +1761,7 @@ def _update_cluster_status_no_lock(
                 f'Refreshing status ({cluster_name!r}): ray status not showing '
                 f'all nodes ({ready_head + ready_workers}/'
                 f'{total_nodes}); output: {output}; stderr: {stderr}')
-        except exceptions.FetchIPError:
+        except exceptions.FetchClusterInfoError:
             logger.debug(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         except RuntimeError as e:

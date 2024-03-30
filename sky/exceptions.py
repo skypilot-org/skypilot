@@ -189,7 +189,7 @@ class StorageExternalDeletionError(StorageBucketGetError):
     pass
 
 
-class FetchIPError(Exception):
+class FetchClusterInfoError(Exception):
     """Raised when fetching the IP fails."""
 
     class Reason(enum.Enum):

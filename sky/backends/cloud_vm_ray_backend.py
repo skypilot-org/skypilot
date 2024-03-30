@@ -1474,11 +1474,12 @@ class RetryingVmProvisioner(object):
             if zones and len(zones) == 1:
                 launched_resources = launched_resources.copy(zone=zones[0].name)
 
-            prev_cluster_ips, prev_ssh_ports, prev_cluster_info = None, None, None
+            prev_cluster_ips, prev_ssh_ports, prev_cluster_info = (None, None,
+                                                                   None)
             if prev_handle is not None:
                 prev_cluster_ips = prev_handle.stable_internal_external_ips
                 prev_ssh_ports = prev_handle.stable_ssh_ports
-                prev_cluster_info = prev_handle.cluster_info
+                prev_cluster_info = prev_handle.cached_cluster_info
             # Record early, so if anything goes wrong, 'sky status' will show
             # the cluster name and users can appropriately 'sky down'.  It also
             # means a second 'sky launch -c <name>' will attempt to reuse.
@@ -1580,14 +1581,14 @@ class RetryingVmProvisioner(object):
                 # manually or by the cloud provider.
                 # Optimize the case where the cluster's head IPs can be parsed
                 # from the output of 'ray up'.
-                kwargs = {}
                 if handle.launched_nodes == 1:
-                    kwargs = {
-                        'internal_ips': [head_internal_ip],
-                        'external_ips': [head_external_ip]
-                    }
-                handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
-                                          **kwargs)
+                    handle.update_cluster_ips(
+                        max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                        internal_ips=[head_internal_ip],
+                        external_ips=[head_external_ip])
+                else:
+                    handle.update_cluster_ips(
+                        max_attempts=_FETCH_IP_MAX_ATTEMPTS)
                 handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
                 if cluster_exists:
                     # Guard against the case where there's an existing cluster
@@ -2143,7 +2144,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # internal or external ips, depending on the use_internal_ips flag.
         self.stable_internal_external_ips = stable_internal_external_ips
         self.stable_ssh_ports = stable_ssh_ports
-        self.cluster_info = cluster_info
+        self.cached_cluster_info = cluster_info
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
@@ -2210,16 +2211,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         Use this method to use any cloud-specific port fetching logic.
         """
         del max_attempts  # Unused.
-        if self.cluster_info is not None:
-            self.stable_ssh_ports = self.cluster_info.get_ssh_ports()
-            return
-        if isinstance(self.launched_resources.cloud, clouds.RunPod):
-            self.cluster_info = provision_lib.get_cluster_info(
-                str(self.launched_resources.cloud).lower(),
-                region=self.launched_resources.region,
-                cluster_name_on_cloud=self.cluster_name_on_cloud,
-                provider_config=None)
-            self.stable_ssh_ports = self.cluster_info.get_ssh_ports()
+        if self.cached_cluster_info is not None:
+            self.stable_ssh_ports = self.cached_cluster_info.get_ssh_ports()
             return
 
         head_ssh_port = 22
@@ -2227,11 +2220,33 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             [head_ssh_port] + [22] *
             (self.num_ips_per_node * self.launched_nodes - 1))
 
+    def _update_cluster_info(self):
+        if (self.launched_resources.cloud.PROVISIONER_VERSION >=
+                clouds.ProvisionerVersion.SKYPILOT):
+            provider_name = str(self.launched_resources.cloud).lower()
+            config = common_utils.read_yaml(self.cluster_yaml)
+            try:
+                self.cached_cluster_info = provision_lib.get_cluster_info(
+                    provider_name,
+                    region=self.launched_resources.region,
+                    cluster_name_on_cloud=self.cluster_name_on_cloud,
+                    provider_config=config.get('provider', None))
+            except Exception as e:  # pylint: disable=broad-except
+                # This could happen when the VM is not fully launched, and a
+                # user is trying to terminate it with `sky down`.
+                logger.debug('Failed to get cluster info for '
+                             f'{self.cluster_name} from the new provisioner '
+                             f'with {common_utils.format_exception(e)}.')
+                raise exceptions.FetchClusterInfoError(
+                    exceptions.FetchClusterInfoError.Reason.HEAD) from e
+
     def update_cluster_ips(
             self,
             max_attempts: int = 1,
             internal_ips: Optional[List[Optional[str]]] = None,
-            external_ips: Optional[List[Optional[str]]] = None) -> None:
+            external_ips: Optional[List[Optional[str]]] = None,
+            cluster_info: Optional[provision_common.ClusterInfo] = None
+    ) -> None:
         """Updates the cluster IPs cached in the handle.
 
         We cache the cluster IPs in the handle to avoid having to retrieve
@@ -2260,58 +2275,73 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             exceptions.FetchIPError: if we failed to get the IPs. e.reason is
                 HEAD or WORKER.
         """
-
-        def is_provided_ips_valid(ips: Optional[List[Optional[str]]]) -> bool:
-            return (ips is not None and
-                    len(ips) == self.num_ips_per_node * self.launched_nodes and
-                    all(ip is not None for ip in ips))
-
-        use_internal_ips = self._use_internal_ips()
-
-        # cluster_feasible_ips is the list of IPs of the nodes in the cluster
-        # which can be used to connect to the cluster. It is a list of external
-        # IPs if the cluster is assigned public IPs, otherwise it is a list of
-        # internal IPs.
-        cluster_feasible_ips: List[str]
-        if is_provided_ips_valid(external_ips):
-            logger.debug(f'Using provided external IPs: {external_ips}')
-            cluster_feasible_ips = typing.cast(List[str], external_ips)
+        self.cached_cluster_info = cluster_info
+        if self.cached_cluster_info is None:
+            self._update_cluster_info()
+        if self.cached_cluster_info is not None:
+            use_internal_ips = self._use_internal_ips()
+            cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips(
+                use_internal_ips)
+            cluster_internal_ips = self.cached_cluster_info.get_feasible_ips(
+                force_internal_ips=True)
         else:
-            cluster_feasible_ips = backend_utils.get_node_ips(
-                self.cluster_yaml,
-                self.launched_nodes,
-                head_ip_max_attempts=max_attempts,
-                worker_ip_max_attempts=max_attempts,
-                get_internal_ips=use_internal_ips)
+            # For clouds that do not support the SkyPilot Provisioner API.
+            # TODO(zhwu): once all the clouds are migrated to SkyPilot
+            # Provisioner API, we should remove this else block
+            def is_provided_ips_valid(
+                    ips: Optional[List[Optional[str]]]) -> bool:
+                return (ips is not None and len(ips)
+                        == self.num_ips_per_node * self.launched_nodes and
+                        all(ip is not None for ip in ips))
 
-        if self.cached_external_ips == cluster_feasible_ips:
-            logger.debug('Skipping the fetching of internal IPs as the cached '
-                         'external IPs matches the newly fetched ones.')
-            # Optimization: If the cached external IPs are the same as the
-            # retrieved feasible IPs, then we can skip retrieving internal
-            # IPs since the cached IPs are up-to-date.
-            return
-        logger.debug(
-            'Cached external IPs do not match with the newly fetched ones: '
-            f'cached ({self.cached_external_ips}), new ({cluster_feasible_ips})'
-        )
+            use_internal_ips = self._use_internal_ips()
 
-        if use_internal_ips:
-            # Optimization: if we know use_internal_ips is True (currently
-            # only exposed for AWS and GCP), then our provisioner is guaranteed
-            # to not assign public IPs, thus the first list of IPs returned
-            # above are already private IPs. So skip the second query.
-            cluster_internal_ips = list(cluster_feasible_ips)
-        elif is_provided_ips_valid(internal_ips):
-            logger.debug(f'Using provided internal IPs: {internal_ips}')
-            cluster_internal_ips = typing.cast(List[str], internal_ips)
-        else:
-            cluster_internal_ips = backend_utils.get_node_ips(
-                self.cluster_yaml,
-                self.launched_nodes,
-                head_ip_max_attempts=max_attempts,
-                worker_ip_max_attempts=max_attempts,
-                get_internal_ips=True)
+            # cluster_feasible_ips is the list of IPs of the nodes in the
+            # cluster which can be used to connect to the cluster. It is a list
+            # of external IPs if the cluster is assigned public IPs, otherwise
+            # it is a list of internal IPs.
+            if is_provided_ips_valid(external_ips):
+                logger.debug(f'Using provided external IPs: {external_ips}')
+                cluster_feasible_ips = typing.cast(List[str], external_ips)
+            else:
+                cluster_feasible_ips = backend_utils.get_node_ips(
+                    self.cluster_yaml,
+                    self.launched_nodes,
+                    head_ip_max_attempts=max_attempts,
+                    worker_ip_max_attempts=max_attempts,
+                    get_internal_ips=use_internal_ips)
+
+            if self.cached_external_ips == cluster_feasible_ips:
+                logger.debug(
+                    'Skipping the fetching of internal IPs as the cached '
+                    'external IPs matches the newly fetched ones.')
+                # Optimization: If the cached external IPs are the same as the
+                # retrieved feasible IPs, then we can skip retrieving internal
+                # IPs since the cached IPs are up-to-date.
+                return
+
+            logger.debug(
+                'Cached external IPs do not match with the newly fetched ones: '
+                f'cached ({self.cached_external_ips}), new '
+                f'({cluster_feasible_ips})')
+
+            if use_internal_ips:
+                # Optimization: if we know use_internal_ips is True (currently
+                # only exposed for AWS and GCP), then our provisioner is
+                # guaranteed to not assign public IPs, thus the first list of
+                # IPs returned above are already private IPs. So skip the second
+                # query.
+                cluster_internal_ips = list(cluster_feasible_ips)
+            elif is_provided_ips_valid(internal_ips):
+                logger.debug(f'Using provided internal IPs: {internal_ips}')
+                cluster_internal_ips = typing.cast(List[str], internal_ips)
+            else:
+                cluster_internal_ips = backend_utils.get_node_ips(
+                    self.cluster_yaml,
+                    self.launched_nodes,
+                    head_ip_max_attempts=max_attempts,
+                    worker_ip_max_attempts=max_attempts,
+                    get_internal_ips=True)
 
         assert len(cluster_feasible_ips) == len(cluster_internal_ips), (
             f'Cluster {self.cluster_name!r}:'
@@ -2355,14 +2385,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return runners
         provider_name = str(self.launched_resources.cloud).lower()
         config = common_utils.read_yaml(self.cluster_yaml)
-        if self.cluster_info is None:
-            self.cluster_info = provision_lib.get_cluster_info(
+        if self.cached_cluster_info is None:
+            self.cached_cluster_info = provision_lib.get_cluster_info(
                 provider_name,
                 region=self.launched_resources.region,
                 cluster_name_on_cloud=self.cluster_name_on_cloud,
                 provider_config=config.get('provider', None))
         runners = provision_lib.get_command_runners(provider_name,
-                                                    self.cluster_info,
+                                                    self.cached_cluster_info,
                                                     **ssh_credentials)
         return runners
 
@@ -2433,8 +2463,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     @property
     def ssh_user(self):
-        if self.cluster_info is not None:
-            return self.cluster_info.ssh_user
+        if self.cached_cluster_info is not None:
+            return self.cached_cluster_info.ssh_user
         return None
 
     @property
@@ -2483,7 +2513,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             state['cluster_name_on_cloud'] = state['cluster_name']
 
         if version < 8:
-            self.cluster_info = None
+            self.cached_cluster_info = None
 
         self.__dict__.update(state)
 
@@ -2493,7 +2523,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version < 3 and head_ip is not None:
             try:
                 self.update_cluster_ips()
-            except exceptions.FetchIPError:
+            except exceptions.FetchClusterInfoError:
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
@@ -2782,22 +2812,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     provision_record=provision_record,
                     custom_resource=resources_vars.get('custom_resources'),
                     log_dir=self.log_dir)
-                # We must query the IPs from the cloud provider, when the
-                # provisioning is done, to make sure the cluster IPs are
-                # up-to-date.
+                # We use the IPs from the cluster_info to update_cluster_ips,
+                # when the provisioning is done, to make sure the cluster IPs
+                # are up-to-date.
                 # The staled IPs may be caused by the node being restarted
                 # manually or by the cloud provider.
                 # Optimize the case where the cluster's IPs can be retrieved
                 # from cluster_info.
-                internal_ips, external_ips = zip(*cluster_info.ip_tuples())
-                if not cluster_info.has_external_ips():
-                    external_ips = internal_ips
-                handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
-                                          internal_ips=list(internal_ips),
-                                          external_ips=list(external_ips))
-                handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
                 handle.docker_user = cluster_info.docker_user
-                handle.cluster_info = cluster_info
+                handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                                          cluster_info=cluster_info)
+                handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
 
                 # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
@@ -3142,7 +3167,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
-        create_script_code = f'{{ echo {shlex.quote(codegen)} > {script_path}; }}'
+        create_script_code = (f'{{ echo {shlex.quote(codegen)} > '
+                              f'{script_path}; }}')
         job_submit_cmd = (
             f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
@@ -3697,7 +3723,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # even when the command was executed successfully.
                 self.run_on_head(handle,
                                  f'{constants.SKY_RAY_CMD} stop --force')
-            except exceptions.FetchIPError:
+            except exceptions.FetchClusterInfoError:
                 # This error is expected if the previous cluster IP is
                 # failed to be found,
                 # i.e., the cluster is already stopped/terminated.
