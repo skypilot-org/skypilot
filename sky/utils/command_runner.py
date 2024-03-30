@@ -148,6 +148,7 @@ class CommandRunner:
         process_stream: bool,
         separate_stderr: bool,
         skip_lines: int,
+        source_bashrc: bool = False,
     ) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
@@ -158,14 +159,19 @@ class CommandRunner:
             'bash',
             '--login',
             '-c',
-            # Need this `-i` option to make sure `source ~/.bashrc` work.
-            '-i',
         ]
-
-        command += [
-            shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                        f'PYTHONWARNINGS=ignore && ({cmd})'),
-        ]
+        if source_bashrc:
+            command += [
+                # Need this `-i` option to make sure `source ~/.bashrc` work.
+                '-i',
+                shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                            f'PYTHONWARNINGS=ignore && ({cmd})'),
+            ]
+        else:
+            # Optimization: this reduces the time for connecting to the remote
+            # cluster by 1 second.
+            # sourcing ~/.bashrc is not required for internal executions
+            command += [shlex.quote(cmd)]
         if not separate_stderr:
             command.append('2>&1')
         if not process_stream and skip_lines:
@@ -195,6 +201,7 @@ class CommandRunner:
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
+            source_bashrc: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -372,6 +379,7 @@ class SSHCommandRunner(CommandRunner):
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
+            source_bashrc: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -413,7 +421,8 @@ class SSHCommandRunner(CommandRunner):
             # A hack to remove the following bash warnings (twice):
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
-            skip_lines=0 if ssh_mode != SshMode.NON_INTERACTIVE else 5)
+            skip_lines=4 if source_bashrc else 0,
+            source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -581,6 +590,7 @@ class KubernetesCommandRunner(CommandRunner):
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
+            source_bashrc: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -621,10 +631,10 @@ class KubernetesCommandRunner(CommandRunner):
         # Ignore ssh_mode for k8s.
         assert port_forward is None, ('port_forward is not supported for k8s, '
                                       f'but got: {port_forward}')
-        kubectl_base_command = ['kubectl', 'exec', '-i']
+        kubectl_base_command = ['kubectl', 'exec']
 
         if ssh_mode == SshMode.INTERACTIVE:
-            kubectl_base_command.append('-tt')
+            kubectl_base_command.append('-i')
         kubectl_base_command += ['-n', self.namespace, self.pod_name, '--']
 
         command_str = self._get_command_to_run(
@@ -632,10 +642,11 @@ class KubernetesCommandRunner(CommandRunner):
             process_stream,
             separate_stderr,
             # A hack to remove the following bash warnings:
-            #  Unable to use a TTY - input is not a terminal or the right kind of file
+            #  Unable to use a TTY - input is not a terminal or the right kind of file # pylint: disable=line-too-long
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
-            skip_lines=4)
+            skip_lines=4 if source_bashrc else 0,
+            source_bashrc=source_bashrc)
         command = kubectl_base_command + [command_str]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -653,6 +664,7 @@ class KubernetesCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
+        print(' '.join(command))
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
