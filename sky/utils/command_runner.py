@@ -209,7 +209,7 @@ class CommandRunner:
             A tuple of (returncode, stdout, stderr).
         """
         raise NotImplementedError
-    
+
     @timeline.event
     def rsync(
         self,

@@ -1499,7 +1499,7 @@ class RetryingVmProvisioner(object):
                 stable_internal_external_ips=prev_cluster_ips,
                 stable_ssh_ports=prev_ssh_ports,
                 cluster_info=prev_cluster_info,
-                )
+            )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.INIT)
 
@@ -2126,7 +2126,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             stable_internal_external_ips: Optional[List[Tuple[str,
                                                               str]]] = None,
             stable_ssh_ports: Optional[List[int]] = None,
-            cluster_info: Optional[provision_lib.common.ClusterInfo],
+            cluster_info: Optional[provision_common.ClusterInfo],
             # The following 2 fields are deprecated. SkyPilot new provisioner
             # API handles the TPU node creation/deletion.
             # Backward compatibility for TPU nodes created before #2943.
@@ -2211,15 +2211,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """
         del max_attempts  # Unused.
         if self.cluster_info is not None:
-            self.stable_ssh_ports = cluster_info.get_ssh_ports()
+            self.stable_ssh_ports = self.cluster_info.get_ssh_ports()
             return
         if isinstance(self.launched_resources.cloud, clouds.RunPod):
-            cluster_info = provision_lib.get_cluster_info(
+            self.cluster_info = provision_lib.get_cluster_info(
                 str(self.launched_resources.cloud).lower(),
                 region=self.launched_resources.region,
                 cluster_name_on_cloud=self.cluster_name_on_cloud,
                 provider_config=None)
-            self.stable_ssh_ports = cluster_info.get_ssh_ports()
+            self.stable_ssh_ports = self.cluster_info.get_ssh_ports()
             return
 
         head_ssh_port = 22
@@ -2361,7 +2361,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 region=self.launched_resources.region,
                 cluster_name_on_cloud=self.cluster_name_on_cloud,
                 provider_config=config.get('provider', None))
-        runners = provision_lib.get_command_runners(provider_name, self.cluster_info,
+        runners = provision_lib.get_command_runners(provider_name,
+                                                    self.cluster_info,
                                                     **ssh_credentials)
         return runners
 
@@ -3132,7 +3133,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Executes generated code on the head node."""
         style = colorama.Style
         fore = colorama.Fore
-        
+
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
