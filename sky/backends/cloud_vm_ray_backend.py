@@ -9,6 +9,7 @@ import math
 import os
 import pathlib
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -3116,24 +3117,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Executes generated code on the head node."""
         style = colorama.Style
         fore = colorama.Fore
-        runners = handle.get_command_runners()
-        head_runner = runners[0]
-        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-            fp.write(codegen)
-            fp.flush()
-            script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
-            # We choose to sync code + exec, because the alternative of 'ray
-            # submit' may not work as it may use system python (python2) to
-            # execute the script.  Happens for AWS.
-            head_runner.rsync(source=fp.name,
-                              target=script_path,
-                              up=True,
-                              stream_logs=False)
+        
+        script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
+        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
+                      f'touch {remote_log_path}')
+        create_script_code = f'{{ echo {shlex.quote(codegen)} > {script_path}; }}'
         job_submit_cmd = (
             f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
@@ -3143,10 +3136,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} 2> /dev/null"'
         )
 
-        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
-                      f'touch {remote_log_path}')
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-        job_submit_cmd = mkdir_code + ' && ' + code
+        job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
         if spot_dag is not None:
             # Add the spot job to spot queue table.

@@ -12,13 +12,18 @@ import logging
 import re
 import time
 import traceback
+import typing
 from typing import Optional
 
-import pandas as pd
-
+from sky.adaptors import common as adaptor_common
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
 from sky.skylet.providers.oci import utils
+
+if typing.TYPE_CHECKING:
+    import pandas as pd
+else:
+    pd = adaptor_common.LazyImport('pandas')
 
 logger = logging.getLogger(__name__)
 
