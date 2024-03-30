@@ -14,6 +14,8 @@ import urllib
 import numpy as np
 import requests
 
+from sky.adaptors import common as adaptor_common
+
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:

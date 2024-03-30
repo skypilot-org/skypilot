@@ -17,6 +17,7 @@ import google.auth
 from googleapiclient import discovery
 import numpy as np
 
+from sky.adaptors import common as adaptor_common
 from sky.adaptors import gcp
 
 if typing.TYPE_CHECKING:
