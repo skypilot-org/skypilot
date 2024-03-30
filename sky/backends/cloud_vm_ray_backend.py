@@ -2324,6 +2324,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.stable_internal_external_ips = stable_internal_external_ips
 
     @functools.lru_cache()
+    @timeline.event
     def get_command_runners(
             self,
             avoid_ssh_control: bool = False
