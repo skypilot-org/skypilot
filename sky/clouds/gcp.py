@@ -435,6 +435,9 @@ class GCP(clouds.Cloud):
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='gcp')
 
+        # Skydentity Hack - set image to ubuntu since debian doesn't support cloudinit
+        image_id = 'projects/deeplearning-platform-release/global/images/common-cpu-v20211105-ubuntu-1804'
+
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
         resources_vars['machine_image'] = None

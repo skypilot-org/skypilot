@@ -180,69 +180,69 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                      'Please check your network connection.')
         raise
 
-    project_oslogin: str = next(  # type: ignore
-        (item for item in project['commonInstanceMetadata'].get('items', [])
-         if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
-
-    if project_oslogin.lower() == 'true':
-        logger.info(
-            f'OS Login is enabled for GCP project {project_id}. Running '
-            'additional authentication steps.')
-
-        # Try to get the os-login user from `gcloud`, as this is the most
-        # accurate way to figure out how this gcp user is meant to log in.
-        proc = subprocess.run(
-            'gcloud compute os-login describe-profile --format yaml',
-            shell=True,
-            stdout=subprocess.PIPE,
-            check=False)
-        os_login_username = None
-        if proc.returncode == 0:
-            try:
-                profile = yaml.safe_load(proc.stdout)
-                username = profile['posixAccounts'][0]['username']
-                if username:
-                    os_login_username = username
-            except Exception as e:  # pylint: disable=broad-except
-                logger.debug('Failed to parse gcloud os-login profile.\n'
-                             f'{common_utils.format_exception(e)}')
-                pass
-
-        if os_login_username is None:
-            # As a fallback, read the account information from the credential
-            # file. This works most of the time, but fails if the user's
-            # os-login username is not a straightforward translation of their
-            # email address, for example because their email address changed
-            # within their google workspace after the os-login credentials
-            # were established.
-            config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
-            sky_backup_config_path = os.path.expanduser(
-                clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
-            assert os.path.exists(sky_backup_config_path), (
-                'GCP credential backup file '
-                f'{sky_backup_config_path!r} does not exist.')
-
-            with open(sky_backup_config_path, 'r') as infile:
-                for line in infile:
-                    if line.startswith('account'):
-                        account = line.split('=')[1].strip()
-                        break
-                else:
-                    with ux_utils.print_exception_no_traceback():
-                        raise RuntimeError(
-                            'GCP authentication failed, as the oslogin is '
-                            f'enabled but the file {config_path} does not '
-                            'contain the account information.')
-            os_login_username = account.replace('@', '_').replace('.', '_')
-        config['auth']['ssh_user'] = os_login_username
-
-        # Add ssh key to GCP with oslogin
-        subprocess.run(
-            'gcloud compute os-login ssh-keys add '
-            f'--key-file={public_key_path}',
-            check=True,
-            shell=True,
-            stdout=subprocess.DEVNULL)
+    # project_oslogin: str = next(  # type: ignore
+    #     (item for item in project['commonInstanceMetadata'].get('items', [])
+    #      if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
+    #
+    # if project_oslogin.lower() == 'true':
+    #     logger.info(
+    #         f'OS Login is enabled for GCP project {project_id}. Running '
+    #         'additional authentication steps.')
+    #
+    #     # Try to get the os-login user from `gcloud`, as this is the most
+    #     # accurate way to figure out how this gcp user is meant to log in.
+    #     proc = subprocess.run(
+    #         'gcloud compute os-login describe-profile --format yaml',
+    #         shell=True,
+    #         stdout=subprocess.PIPE,
+    #         check=False)
+    #     os_login_username = None
+    #     if proc.returncode == 0:
+    #         try:
+    #             profile = yaml.safe_load(proc.stdout)
+    #             username = profile['posixAccounts'][0]['username']
+    #             if username:
+    #                 os_login_username = username
+    #         except Exception as e:  # pylint: disable=broad-except
+    #             logger.debug('Failed to parse gcloud os-login profile.\n'
+    #                          f'{common_utils.format_exception(e)}')
+    #             pass
+    #
+    #     if os_login_username is None:
+    #         # As a fallback, read the account information from the credential
+    #         # file. This works most of the time, but fails if the user's
+    #         # os-login username is not a straightforward translation of their
+    #         # email address, for example because their email address changed
+    #         # within their google workspace after the os-login credentials
+    #         # were established.
+    #         config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
+    #         sky_backup_config_path = os.path.expanduser(
+    #             clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
+    #         assert os.path.exists(sky_backup_config_path), (
+    #             'GCP credential backup file '
+    #             f'{sky_backup_config_path!r} does not exist.')
+    #
+    #         with open(sky_backup_config_path, 'r') as infile:
+    #             for line in infile:
+    #                 if line.startswith('account'):
+    #                     account = line.split('=')[1].strip()
+    #                     break
+    #             else:
+    #                 with ux_utils.print_exception_no_traceback():
+    #                     raise RuntimeError(
+    #                         'GCP authentication failed, as the oslogin is '
+    #                         f'enabled but the file {config_path} does not '
+    #                         'contain the account information.')
+    #         os_login_username = account.replace('@', '_').replace('.', '_')
+    #     config['auth']['ssh_user'] = os_login_username
+    #
+    #     # Add ssh key to GCP with oslogin
+    #     subprocess.run(
+    #         'gcloud compute os-login ssh-keys add '
+    #         f'--key-file={public_key_path}',
+    #         check=True,
+    #         shell=True,
+    #         stdout=subprocess.DEVNULL)
         # Enable ssh port for all the instances
         enable_ssh_cmd = ('gcloud compute firewall-rules create '
                           'allow-ssh-ingress-from-iap '

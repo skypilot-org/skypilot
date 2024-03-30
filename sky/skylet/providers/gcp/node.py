@@ -542,6 +542,44 @@ class GCPCompute(GCPResource):
             }
         )
 
+        metadata = config.get('metadata', dict())
+        metadata_items = metadata.get('items', dict())
+
+        logger.info('Metadata : %s', str(metadata))
+
+        for i, item in enumerate(metadata_items):
+            if item['key'] == 'ssh-keys':
+                ssh_key = item['value']
+                break
+
+        if ssh_key.startswith('gcpuser:'):
+            ssh_key = ssh_key[len('gcpuser:'):]
+
+
+        cloud_init_config = """#cloud-config
+        users:
+          - name: gcpuser
+            sudo: ['ALL=(ALL) NOPASSWD:ALL']
+            groups: sudo
+            shell: /bin/bash
+            ssh_authorized_keys:
+              - {0}
+        """.format(ssh_key)
+
+        logger.info('Cloud init config: %s', cloud_init_config)
+
+        metadata_items[i]['key'] = 'user-data'
+        metadata_items[i]['value'] = cloud_init_config
+
+        # Prevent the project from adding SSH keys to the instance
+        metadata_items.append({
+            'key': 'block-project-ssh-keys',
+            'value': 'true'
+        })
+
+        metadata['items'] = metadata_items
+        config['metadata'] = metadata
+
         # Allow Google Compute Engine instance templates.
         #
         # Config example:
