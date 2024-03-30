@@ -142,9 +142,13 @@ class CommandRunner:
         del node, kwargs
         self.node_id = node_id
 
-    def _get_command_to_run(self, cmd: Union[str,
-                                             List[str]], process_stream: bool,
-                            separate_stderr: bool, skip_lines: int) -> str:
+    def _get_command_to_run(
+        self,
+        cmd: Union[str, List[str]],
+        process_stream: bool,
+        separate_stderr: bool,
+        skip_lines: int,
+    ) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
             cmd = ' '.join(cmd)
