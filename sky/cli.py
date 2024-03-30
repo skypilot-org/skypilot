@@ -56,6 +56,7 @@ from sky import serve as serve_lib
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky import status_lib
+from sky.adaptors import common as adaptor_common
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
@@ -80,6 +81,7 @@ from sky.utils.cli_utils import status_utils
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 
+pd = adaptor_common.LazyImport('pandas')
 logger = sky_logging.init_logger(__name__)
 
 _CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
@@ -2994,7 +2996,6 @@ def show_gpus(
             yield 'to show available accelerators.'
             return
 
-        import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table_headers = [
                 'GPU',

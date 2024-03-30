@@ -7,7 +7,6 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import colorama
-import networkx as nx
 import numpy as np
 import prettytable
 
@@ -17,13 +16,17 @@ from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.adaptors import common as adaptor_common
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    # pylint: disable=ungrouped-imports
+    import networkx as nx
+
     from sky import dag as dag_lib
+else:
+    nx = adaptor_common.LazyImport('networkx')
 
 logger = sky_logging.init_logger(__name__)
 
