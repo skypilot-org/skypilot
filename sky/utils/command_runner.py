@@ -164,8 +164,9 @@ class CommandRunner:
             command += [
                 # Need this `-i` option to make sure `source ~/.bashrc` work.
                 '-i',
-                shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                            f'PYTHONWARNINGS=ignore && ({cmd})'),
+                shlex.quote(
+                    f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                    f'PYTHONWARNINGS=ignore && ({cmd})'),
             ]
         else:
             # Optimization: this reduces the time for connecting to the remote
