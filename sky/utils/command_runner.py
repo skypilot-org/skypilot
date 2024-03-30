@@ -12,6 +12,7 @@ from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
@@ -177,6 +178,7 @@ class CommandRunner:
         command_str = ' '.join(command)
         return command_str
 
+    @timeline.event
     def run(
             self,
             cmd: Union[str, List[str]],
@@ -207,7 +209,8 @@ class CommandRunner:
             A tuple of (returncode, stdout, stderr).
         """
         raise NotImplementedError
-
+    
+    @timeline.event
     def rsync(
         self,
         source: str,
@@ -350,6 +353,7 @@ class SSHCommandRunner(CommandRunner):
                 f'{self.ssh_user}@{self.ip}'
             ]
 
+    @timeline.event
     def run(
             self,
             cmd: Union[str, List[str]],
@@ -429,6 +433,7 @@ class SSHCommandRunner(CommandRunner):
                                     executable=executable,
                                     **kwargs)
 
+    @timeline.event
     def rsync(
         self,
         source: str,
@@ -555,6 +560,7 @@ class KubernetesCommandRunner(CommandRunner):
         self.namespace, self.pod_name = node
         super().__init__(self.pod_name, node)
 
+    @timeline.event
     def run(
             self,
             cmd: Union[str, List[str]],
@@ -592,6 +598,7 @@ class KubernetesCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
+        stream_logs = True
         assert port_forward is None, ('port_forward is not supported for k8s '
                                       f'for now, but got: {port_forward}')
 
@@ -645,6 +652,7 @@ class KubernetesCommandRunner(CommandRunner):
                                     executable=executable,
                                     **kwargs)
 
+    @timeline.event
     def rsync(
         self,
         source: str,
