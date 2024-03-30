@@ -144,7 +144,7 @@ class CommandRunner:
 
     def _get_command_to_run(self, cmd: Union[str,
                                              List[str]], process_stream: bool,
-                            separate_stderr: bool, interactive: bool) -> str:
+                            separate_stderr: bool, skip_lines: int) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
             cmd = ' '.join(cmd)
@@ -164,12 +164,12 @@ class CommandRunner:
         ]
         if not separate_stderr:
             command.append('2>&1')
-        if not process_stream and not interactive:
+        if not process_stream and skip_lines:
             command += [
                 # A hack to remove the following bash warnings (twice):
                 #  bash: cannot set terminal process group
                 #  bash: no job control in this shell
-                '| stdbuf -o0 tail -n +5',
+                f'| stdbuf -o0 tail -n +{skip_lines}',
                 # This is required to make sure the executor of command can get
                 # correct returncode, since linux pipe is used.
                 '; exit ${PIPESTATUS[0]}'
@@ -406,7 +406,10 @@ class SSHCommandRunner(CommandRunner):
             cmd,
             process_stream,
             separate_stderr,
-            interactive=(ssh_mode != SshMode.NON_INTERACTIVE))
+            # A hack to remove the following bash warnings (twice):
+            #  bash: cannot set terminal process group
+            #  bash: no job control in this shell
+            skip_lines=0 if ssh_mode != SshMode.NON_INTERACTIVE else 5)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -617,14 +620,18 @@ class KubernetesCommandRunner(CommandRunner):
         kubectl_base_command = ['kubectl', 'exec', '-i']
 
         if ssh_mode == SshMode.INTERACTIVE:
-            kubectl_base_command.append('-t')
+            kubectl_base_command.append('-tt')
         kubectl_base_command += ['-n', self.namespace, self.pod_name, '--']
 
         command_str = self._get_command_to_run(
             cmd,
             process_stream,
             separate_stderr,
-            interactive=ssh_mode != SshMode.NON_INTERACTIVE)
+            # A hack to remove the following bash warnings:
+            #  Unable to use a TTY - input is not a terminal or the right kind of file
+            #  bash: cannot set terminal process group
+            #  bash: no job control in this shell
+            skip_lines=4)
         command = kubectl_base_command + [command_str]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
