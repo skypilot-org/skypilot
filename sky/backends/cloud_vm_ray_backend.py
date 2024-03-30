@@ -1474,10 +1474,11 @@ class RetryingVmProvisioner(object):
             if zones and len(zones) == 1:
                 launched_resources = launched_resources.copy(zone=zones[0].name)
 
-            prev_cluster_ips, prev_ssh_ports = None, None
+            prev_cluster_ips, prev_ssh_ports, prev_cluster_info = None, None, None
             if prev_handle is not None:
                 prev_cluster_ips = prev_handle.stable_internal_external_ips
                 prev_ssh_ports = prev_handle.stable_ssh_ports
+                prev_cluster_info = prev_handle.cluster_info
             # Record early, so if anything goes wrong, 'sky status' will show
             # the cluster name and users can appropriately 'sky down'.  It also
             # means a second 'sky launch -c <name>' will attempt to reuse.
@@ -1496,7 +1497,9 @@ class RetryingVmProvisioner(object):
                 # optimize the case where the cluster is restarted, i.e., no
                 # need to query IPs and ports from the cloud provider.
                 stable_internal_external_ips=prev_cluster_ips,
-                stable_ssh_ports=prev_ssh_ports)
+                stable_ssh_ports=prev_ssh_ports,
+                cluster_info=prev_cluster_info,
+                )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.INIT)
 
@@ -2110,7 +2113,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 7
+    _VERSION = 8
 
     def __init__(
             self,
@@ -2123,6 +2126,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             stable_internal_external_ips: Optional[List[Tuple[str,
                                                               str]]] = None,
             stable_ssh_ports: Optional[List[int]] = None,
+            cluster_info: Optional[provision_lib.common.ClusterInfo],
             # The following 2 fields are deprecated. SkyPilot new provisioner
             # API handles the TPU node creation/deletion.
             # Backward compatibility for TPU nodes created before #2943.
@@ -2139,10 +2143,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # internal or external ips, depending on the use_internal_ips flag.
         self.stable_internal_external_ips = stable_internal_external_ips
         self.stable_ssh_ports = stable_ssh_ports
+        self.cluster_info = cluster_info
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
-        self.ssh_user: Optional[str] = None
         # Deprecated. SkyPilot new provisioner API handles the TPU node
         # creation/deletion.
         # Backward compatibility for TPU nodes created before #2943.
@@ -2206,6 +2210,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         Use this method to use any cloud-specific port fetching logic.
         """
         del max_attempts  # Unused.
+        if self.cluster_info is not None:
+            self.stable_ssh_ports = cluster_info.get_ssh_ports()
+            return
         if isinstance(self.launched_resources.cloud, clouds.RunPod):
             cluster_info = provision_lib.get_cluster_info(
                 str(self.launched_resources.cloud).lower(),
@@ -2348,12 +2355,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return runners
         provider_name = str(self.launched_resources.cloud).lower()
         config = common_utils.read_yaml(self.cluster_yaml)
-        cluster_info = provision_lib.get_cluster_info(
-            provider_name,
-            region=self.launched_resources.region,
-            cluster_name_on_cloud=self.cluster_name_on_cloud,
-            provider_config=config.get('provider', None))
-        runners = provision_lib.get_command_runners(provider_name, cluster_info,
+        if self.cluster_info is None:
+            self.cluster_info = provision_lib.get_cluster_info(
+                provider_name,
+                region=self.launched_resources.region,
+                cluster_name_on_cloud=self.cluster_name_on_cloud,
+                provider_config=config.get('provider', None))
+        runners = provision_lib.get_command_runners(provider_name, self.cluster_info,
                                                     **ssh_credentials)
         return runners
 
@@ -2423,6 +2431,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         return os.path.expanduser(self._cluster_yaml)
 
     @property
+    def ssh_user(self):
+        if self.cluster_info is not None:
+            return self.cluster_info.ssh_user
+        return None
+
+    @property
     def head_ip(self):
         external_ips = self.cached_external_ips
         if external_ips is not None:
@@ -2467,8 +2481,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version < 6:
             state['cluster_name_on_cloud'] = state['cluster_name']
 
-        if version < 7:
-            self.ssh_user = None
+        if version < 8:
+            self.cluster_info = None
 
         self.__dict__.update(state)
 
@@ -2782,7 +2796,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                           external_ips=list(external_ips))
                 handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
                 handle.docker_user = cluster_info.docker_user
-                handle.ssh_user = cluster_info.ssh_user
+                handle.cluster_info = cluster_info
 
                 # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
