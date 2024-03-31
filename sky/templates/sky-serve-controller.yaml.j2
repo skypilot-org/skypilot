@@ -11,8 +11,10 @@ setup: |
   {%- endfor %}
 
   # Install serve dependencies.
+  # TODO(tian): Gather those into serve constants.
   pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
   pip list | grep fastapi > /dev/null 2>&1 || pip install fastapi > /dev/null 2>&1
+  pip list | grep httpx > /dev/null 2>&1 || pip install httpx > /dev/null 2>&1
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}

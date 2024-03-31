@@ -1,9 +1,12 @@
 """LoadBalancer: redirect any incoming request to an endpoint replica."""
+import asyncio
 import logging
 import threading
 import time
+from typing import Optional
 
 import fastapi
+import httpx
 import requests
 import uvicorn
 
@@ -11,19 +14,17 @@ from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
 
 class SkyServeLoadBalancer:
-    """SkyServeLoadBalancer: redirect incoming traffic.
+    """SkyServeLoadBalancer: proxy incoming traffic.
 
-    This class accept any traffic to the controller and redirect it
+    This class accept any traffic to the controller and proxies it
     to the appropriate endpoint replica according to the load balancing
     policy.
-
-    NOTE: HTTP redirect is used. Thus, when using `curl`, be sure to use
-    `curl -L`.
     """
 
     def __init__(self, controller_url: str, load_balancer_port: int) -> None:
@@ -77,23 +78,64 @@ class SkyServeLoadBalancer:
                         ready_replica_urls)
             time.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
 
-    async def _redirect_handler(self, request: fastapi.Request):
+    async def _proxy_request_to(
+            self, url: str,
+            request: fastapi.Request) -> Optional[fastapi.responses.Response]:
+        """Proxy the request to the specified URL.
+
+        Returns:
+            The response from the endpoint replica. None if anything goes wrong.
+        """
+        method = request.method
+        headers = {key: value for key, value in request.headers.items()}
+        body = await request.body()
+        path = f'http://{url}{request.url.path}'
+        logger.info(f'Proxy request to {path}')
+        try:
+            async with httpx.AsyncClient() as client:
+                # TODO(tian): Support streaming.
+                response = await client.request(method,
+                                                url,
+                                                headers=headers,
+                                                content=body)
+                response.raise_for_status()
+                return fastapi.responses.Response(
+                    content=response.content,
+                    status_code=response.status_code,
+                    headers=dict(response.headers))
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            logger.error(f'Error when proxy request to {path}: '
+                         f'{common_utils.format_exception(e)}')
+            return None
+
+    async def _proxy_with_retries(
+            self, request: fastapi.Request) -> fastapi.responses.Response:
+        """Try to proxy the request to the endpoint replica with retries."""
         self._request_aggregator.add(request)
-        ready_replica_url = self._load_balancing_policy.select_replica(request)
-
-        if ready_replica_url is None:
-            raise fastapi.HTTPException(status_code=503,
-                                        detail='No ready replicas. '
-                                        'Use "sky serve status [SERVICE_NAME]" '
-                                        'to check the replica status.')
-
-        path = f'http://{ready_replica_url}{request.url.path}'
-        logger.info(f'Redirecting request to {path}')
-        return fastapi.responses.RedirectResponse(url=path)
+        # TODO(tian): Finetune backoff parameters.
+        backoff = common_utils.Backoff(initial_backoff=1)
+        # SkyServe supports serving on Spot Instances. To avoid preemptions
+        # during request handling, we add a retry here.
+        # TODO(tian): Max number of retries.
+        while True:
+            ready_replica_url = self._load_balancing_policy.select_replica(
+                request)
+            if ready_replica_url is None:
+                raise fastapi.HTTPException(
+                    status_code=503,
+                    detail='No ready replicas. '
+                    'Use "sky serve status [SERVICE_NAME]" '
+                    'to check the replica status.')
+            response = await self._proxy_request_to(ready_replica_url, request)
+            if response is not None:
+                return response
+            current_backoff = backoff.current_backoff()
+            logger.error(f'Retry in {current_backoff} seconds.')
+            await asyncio.sleep(current_backoff)
 
     def run(self):
         self._app.add_api_route('/{path:path}',
-                                self._redirect_handler,
+                                self._proxy_with_retries,
                                 methods=['GET', 'POST', 'PUT', 'DELETE'])
 
         @self._app.on_event('startup')
