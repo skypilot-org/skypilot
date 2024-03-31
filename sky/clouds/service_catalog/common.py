@@ -19,9 +19,9 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_CATALOG_DIR = os.path.join(constants.LOCAL_CATALOG_DIR,
-                            constants.CATALOG_SCHEMA_VERSION)
-os.makedirs(_CATALOG_DIR, exist_ok=True)
+_ABSOLUTE_VERSIONED_CATALOG_DIR = os.path.join(
+    os.path.expanduser(constants.CATALOG_DIR), constants.CATALOG_SCHEMA_VERSION)
+os.makedirs(_ABSOLUTE_VERSIONED_CATALOG_DIR, exist_ok=True)
 
 
 class InstanceTypeInfo(NamedTuple):
@@ -52,7 +52,63 @@ class InstanceTypeInfo(NamedTuple):
 
 
 def get_catalog_path(filename: str) -> str:
-    return os.path.join(_CATALOG_DIR, filename)
+    return os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, filename)
+
+
+def is_catalog_modified(filename: str) -> bool:
+    # Check the md5 of the file to see if it has changed.
+    catalog_path = get_catalog_path(filename)
+    meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
+    md5_filepath = meta_path + '.md5'
+    if os.path.exists(md5_filepath):
+        with open(catalog_path, 'rb') as f:
+            file_md5 = hashlib.md5(f.read()).hexdigest()
+        with open(md5_filepath, 'r', encoding='utf-8') as f:
+            last_md5 = f.read()
+        return file_md5 != last_md5
+    else:
+        # If the md5 file does not exist, it means the catalog was manually
+        # populated instead of being fetched from the cloud.
+        return True
+
+
+def get_modified_catalog_file_mounts() -> Dict[str, str]:
+    """Returns a dict of catalogs which have been modified locally.
+
+    The dictionary maps the remote catalog path (relative) to the local path of
+    the modified catalog (absolute). Can be used directly as file_mounts for a
+    Task.
+
+    Used to determine which catalogs to upload to the controllers when they
+    are provisioned.
+    """
+
+    def _get_modified_catalogs() -> List[str]:
+        """Returns a list of modified catalogs relative to the catalog dir."""
+        modified_catalogs = []
+        for cloud_name in constants.ALL_CLOUDS:
+            cloud_catalog_dir = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR,
+                                             cloud_name)
+            if not os.path.exists(cloud_catalog_dir):
+                continue
+            # Iterate over all csvs cloud's catalog directory
+            for file in os.listdir(cloud_catalog_dir):
+                if file.endswith('.csv'):
+                    filename = os.path.join(cloud_name,
+                                            file)  # e.g., aws/vms.csv
+                    if is_catalog_modified(filename):
+                        modified_catalogs.append(filename)
+        return modified_catalogs
+
+    modified_catalog_list = _get_modified_catalogs()
+    modified_catalog_path_map = {}  # Map of remote: local catalog paths
+    for catalog in modified_catalog_list:
+        # Use relative paths for remote to handle varying usernames on the cloud
+        remote_path = os.path.join(constants.CATALOG_DIR,
+                                   constants.CATALOG_SCHEMA_VERSION, catalog)
+        local_path = os.path.expanduser(remote_path)
+        modified_catalog_path_map[remote_path] = local_path
+    return modified_catalog_path_map
 
 
 def read_catalog(filename: str,
@@ -72,7 +128,7 @@ def read_catalog(filename: str,
     catalog_path = get_catalog_path(filename)
     cloud = cloud_registry.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
 
-    meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
+    meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)
 
     # Atomic check, to avoid conflicts with other processes.
@@ -85,16 +141,10 @@ def read_catalog(filename: str,
                 return True
             if pull_frequency_hours is None:
                 return False
-            # Check the md5 of the file to see if it has changed.
-            with open(catalog_path, 'rb') as f:
-                file_md5 = hashlib.md5(f.read()).hexdigest()
-            md5_filepath = meta_path + '.md5'
-            if os.path.exists(md5_filepath):
-                with open(md5_filepath, 'r') as f:
-                    last_md5 = f.read()
-                if file_md5 != last_md5:
-                    # Do not update the file if the user modified it.
-                    return False
+            if is_catalog_modified(filename):
+                # If the catalog is modified by a user manually, we should
+                # avoid overwriting the catalog by fetching from GitHub.
+                return False
 
             last_update = os.path.getmtime(catalog_path)
             return last_update + pull_frequency_hours * 3600 < time.time()
@@ -127,9 +177,9 @@ def read_catalog(filename: str,
                 else:
                     # Download successful, save the catalog to a local file.
                     os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-                    with open(catalog_path, 'w') as f:
+                    with open(catalog_path, 'w', encoding='utf-8') as f:
                         f.write(r.text)
-                    with open(meta_path + '.md5', 'w') as f:
+                    with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
                         f.write(hashlib.md5(r.text.encode()).hexdigest())
 
     try:
@@ -445,15 +495,15 @@ def get_instance_type_for_accelerator_impl(
 
 
 def list_accelerators_impl(
-    cloud: str,
-    df: pd.DataFrame,
-    gpus_only: bool,
-    name_filter: Optional[str],
-    region_filter: Optional[str],
-    quantity_filter: Optional[int],
-    case_sensitive: bool = True,
-    all_regions: bool = False,
-) -> Dict[str, List[InstanceTypeInfo]]:
+        cloud: str,
+        df: pd.DataFrame,
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        quantity_filter: Optional[int],
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
     `name_filter` is a regular expression used to filter accelerator names
@@ -462,6 +512,7 @@ def list_accelerators_impl(
     Returns a mapping from the canonical names of accelerators to a list of
     instance types offered by this cloud.
     """
+    del require_price  # Unused.
     if gpus_only:
         df = df[~df['GpuInfo'].isna()]
     df = df.copy()  # avoid column assignment warning
@@ -502,20 +553,18 @@ def list_accelerators_impl(
     grouped = df.groupby('AcceleratorName')
 
     def make_list_from_df(rows):
+
+        sort_key = ['Price', 'SpotPrice']
+        subset = [
+            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
+            'MemoryGiB'
+        ]
         if all_regions:
-            # Keep all regions.
-            rows = rows.groupby([
-                'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-                'MemoryGiB', 'Region'
-            ],
-                                dropna=False).aggregate('min').reset_index()
-        else:
-            # Only keep the lowest prices across regions.
-            rows = rows.groupby([
-                'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-                'MemoryGiB'
-            ],
-                                dropna=False).aggregate('min').reset_index()
+            sort_key.append('Region')
+            subset.append('Region')
+
+        rows = rows.sort_values(by=sort_key).drop_duplicates(subset=subset,
+                                                             keep='first')
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
                 cloud,
@@ -531,8 +580,11 @@ def list_accelerators_impl(
             ),
             axis='columns',
         ).tolist()
-        ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
-                                   if info.cpu_count is not None else 0))
+        # Sort by price and region as well.
+        ret.sort(
+            key=lambda info: (info.accelerator_count, info.instance_type, info.
+                              cpu_count if not pd.isna(info.cpu_count) else 0,
+                              info.price, info.spot_price, info.region))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}
@@ -555,39 +607,6 @@ def get_region_zones(df: pd.DataFrame,
         for region in regions:
             region.set_zones(zones_in_region[region.name])
     return regions
-
-
-def _accelerator_in_region(df: pd.DataFrame, acc_name: str, acc_count: int,
-                           region: str) -> bool:
-    """Returns True if the accelerator is in the region."""
-    return len(df[(df['AcceleratorName'] == acc_name) &
-                  (df['AcceleratorCount'] == acc_count) &
-                  (df['Region'].str.lower() == region.lower())]) > 0
-
-
-def _accelerator_in_zone(df: pd.DataFrame, acc_name: str, acc_count: int,
-                         zone: str) -> bool:
-    """Returns True if the accelerator is in the zone."""
-    return len(df[(df['AcceleratorName'] == acc_name) &
-                  (df['AcceleratorCount'] == acc_count) &
-                  (df['AvailabilityZone'] == zone)]) > 0
-
-
-def accelerator_in_region_or_zone_impl(
-    df: pd.DataFrame,
-    accelerator_name: str,
-    acc_count: int,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
-) -> bool:
-    """Returns True if the accelerator is in the region or zone."""
-    assert region is not None or zone is not None, (
-        'Both region and zone are None.')
-    if zone is None:
-        assert region is not None
-        return _accelerator_in_region(df, accelerator_name, acc_count, region)
-    else:
-        return _accelerator_in_zone(df, accelerator_name, acc_count, zone)
 
 
 # Images

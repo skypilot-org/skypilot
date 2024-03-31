@@ -43,7 +43,7 @@ def _handle_signal(service_name: str) -> None:
         # Filelock is needed to prevent race condition with concurrent
         # signal writing.
         with filelock.FileLock(str(signal_file) + '.lock'):
-            with signal_file.open(mode='r') as f:
+            with signal_file.open(mode='r', encoding='utf-8') as f:
                 user_signal_text = f.read().strip()
                 try:
                     user_signal = serve_utils.UserSignal(user_signal_text)
@@ -83,7 +83,7 @@ def cleanup_storage(task_yaml: str) -> bool:
     return True
 
 
-def _cleanup(service_name: str, task_yaml: str) -> bool:
+def _cleanup(service_name: str) -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
@@ -101,12 +101,10 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
             replica_managers.ProcessStatus.RUNNING)
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
         logger.info(f'Terminating replica {info.replica_id} ...')
-    versions = set()
     for info, p in info2proc.items():
         p.join()
         if p.exitcode == 0:
             serve_state.remove_replica(service_name, info.replica_id)
-            versions.add(info.version)
             logger.info(f'Replica {info.replica_id} terminated successfully.')
         else:
             # Set replica status to `FAILED_CLEANUP`
@@ -116,13 +114,14 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
+    versions = serve_state.get_service_versions(service_name)
     serve_state.remove_service_versions(service_name)
     success = True
     for version in versions:
+        task_yaml: str = serve_utils.generate_task_yaml_file_name(
+            service_name, version)
         logger.info(f'Cleaning up storage for version {version}, '
                     f'task_yaml: {task_yaml}')
-        task_yaml = serve_utils.generate_task_yaml_file_name(
-            service_name, version)
         success = success and cleanup_storage(task_yaml)
     if not success:
         failed = True
@@ -147,8 +146,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     success = serve_state.add_service(
         service_name,
         controller_job_id=job_id,
-        policy=service_spec.policy_str(),
-        version=constants.INITIAL_VERSION,
+        policy=service_spec.autoscaling_policy_str(),
         requested_resources_str=backend_utils.get_task_resources_str(task),
         status=serve_state.ServiceStatus.CONTROLLER_INIT)
     # Directly throw an error here. See sky/serve/api.py::up
@@ -214,8 +212,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             _handle_signal(service_name)
             time.sleep(1)
     except exceptions.ServeUserTerminatedError:
-        serve_state.set_service_status(service_name,
-                                       serve_state.ServiceStatus.SHUTTING_DOWN)
+        serve_state.set_service_status_and_active_versions(
+            service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
     finally:
         process_to_kill: List[multiprocessing.Process] = []
         if load_balancer_process is not None:
@@ -228,9 +226,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             [process.pid for process in process_to_kill], force=True)
         for process in process_to_kill:
             process.join()
-        failed = _cleanup(service_name, task_yaml)
+        failed = _cleanup(service_name)
         if failed:
-            serve_state.set_service_status(
+            serve_state.set_service_status_and_active_versions(
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
             logger.error(f'Service {service_name} failed to clean up.')
         else:

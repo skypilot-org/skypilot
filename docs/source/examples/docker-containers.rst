@@ -83,7 +83,7 @@ The :code:`echo_app` `example <https://github.com/skypilot-org/skypilot/tree/mas
 In this example, the Dockerfile and build context are contained in :code:`./echo_app`.
 The :code:`setup` phase of the task builds the image, and the :code:`run` phase runs the container.
 The inputs to the app are copied to SkyPilot using :code:`file_mounts` and mounted into the container using docker volume mounts (:code:`--volume` flag).
-The output of the app produced at :code:`/outputs` path in the container is also volume mounted to :code:`/outputs` on the VM, which gets directly written to a S3 bucket through SkyPilot Storage mounting.
+The output of the app produced at :code:`/outputs` path in the container is also volume mounted to :code:`/outputs` on the VM, which gets directly written to a S3 bucket through :ref:`bucket mounting <sky-storage>`.
 
 Our GitHub repository has more examples, including running `Detectron2 in a Docker container <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_ via SkyPilot.
 
@@ -162,22 +162,43 @@ Private Registries
 When using this mode, to access Docker images hosted on private registries,
 you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
 
-.. code-block:: yaml
+.. tab-set::
 
-  # ecr_private_docker.yaml
-  resources:
-    image_id: docker:<your-user-id>.dkr.ecr.us-east-1.amazonaws.com/<your-private-image>:<tag>
-    # the following shorthand is also supported:
-    # image_id: docker:<your-private-image>:<tag>
+    .. tab-item:: Docker Hub
+        :sync: docker-hub-tab
 
-  envs:
-    SKYPILOT_DOCKER_USERNAME: AWS
-    # SKYPILOT_DOCKER_PASSWORD: <password>
-    SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.us-east-1.amazonaws.com
+        .. code-block:: yaml
+
+          resources:
+            image_id: docker:<user>/<your-docker-hub-repo>:<tag>
+
+          envs:
+            # Values used in: docker login -u <user> -p <password> <registry server>
+            SKYPILOT_DOCKER_USERNAME: <user>
+            SKYPILOT_DOCKER_PASSWORD: <password>
+            SKYPILOT_DOCKER_SERVER: docker.io
+
+    .. tab-item:: Cloud Provider Registry (e.g., ECR)
+        :sync: csp-registry-tab
+
+        .. code-block:: yaml
+
+          resources:
+            image_id: docker:<your-ecr-repo>:<tag>
+
+          envs:
+            # Values used in: docker login -u <user> -p <password> <registry server>
+            SKYPILOT_DOCKER_USERNAME: AWS
+            SKYPILOT_DOCKER_PASSWORD: <password>
+            SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.<region>.amazonaws.com
 
 We suggest setting the :code:`SKYPILOT_DOCKER_PASSWORD` environment variable through the CLI (see :ref:`passing secrets <passing-secrets>`):
 
 .. code-block:: console
 
+  $ # Docker Hub password:
+  $ export SKYPILOT_DOCKER_PASSWORD=...
+  $ # Or cloud registry password:
   $ export SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1)
-  $ sky launch ecr_private_docker.yaml --env SKYPILOT_DOCKER_PASSWORD
+  $ # Pass --env:
+  $ sky launch task.yaml --env SKYPILOT_DOCKER_PASSWORD

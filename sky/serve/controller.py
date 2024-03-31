@@ -2,11 +2,11 @@
 
 Responsible for autoscaling and replica management.
 """
-
 import logging
 import threading
 import time
 import traceback
+from typing import Any, Dict, List
 
 import fastapi
 import uvicorn
@@ -18,7 +18,6 @@ from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.utils import common_utils
-from sky.utils import env_options
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -47,7 +46,7 @@ class SkyServeController:
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.RequestRateAutoscaler(service_spec))
+            autoscalers.Autoscaler.from_spec(service_name, service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -55,15 +54,11 @@ class SkyServeController:
         logger.info('Starting autoscaler.')
         while True:
             try:
-                replica_info = serve_state.get_replica_infos(self._service_name)
-                replica_info_dicts = [
-                    info.to_info_dict(
-                        with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
-                    for info in replica_info
-                ]
-                logger.info(f'All replica info: {replica_info_dicts}')
+                replica_infos = serve_state.get_replica_infos(
+                    self._service_name)
+                logger.info(f'All replica info: {replica_infos}')
                 scaling_options = self._autoscaler.evaluate_scaling(
-                    replica_info)
+                    replica_infos)
                 for scaling_option in scaling_options:
                     logger.info(f'Scaling option received: {scaling_option}')
                     if (scaling_option.operator ==
@@ -94,13 +89,15 @@ class SkyServeController:
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
-            request_aggregator = request_data.get('request_aggregator')
-            logger.info(
-                f'Received inflight request information: {request_aggregator}')
+            # TODO(MaoZiming): Check aggregator type.
+            request_aggregator: Dict[str, Any] = request_data.get(
+                'request_aggregator', {})
+            timestamps: List[int] = request_aggregator.get('timestamps', [])
+            logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
             return {
                 'ready_replica_urls':
-                    self._replica_manager.get_ready_replica_urls()
+                    self._replica_manager.get_active_replica_urls()
             }
 
         @self._app.post('/controller/update_service')
@@ -110,6 +107,11 @@ class SkyServeController:
                 version = request_data.get('version', None)
                 if version is None:
                     return {'message': 'Error: version is not specified.'}
+                update_mode_str = request_data.get(
+                    'mode', serve_utils.DEFAULT_UPDATE_MODE.value)
+                update_mode = serve_utils.UpdateMode(update_mode_str)
+                logger.info(f'Update to new version {version} with '
+                            f'update_mode {update_mode}.')
                 # The yaml with the name latest_task_yaml will be synced
                 # See sky/serve/core.py::update
                 latest_task_yaml = serve_utils.generate_task_yaml_file_name(
@@ -118,8 +120,21 @@ class SkyServeController:
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
-                self._replica_manager.update_version(version, service)
-                self._autoscaler.update_version(version, service)
+                self._replica_manager.update_version(version,
+                                                     service,
+                                                     update_mode=update_mode)
+                new_autoscaler = autoscalers.Autoscaler.from_spec(
+                    self._service_name, service)
+                if not isinstance(self._autoscaler, type(new_autoscaler)):
+                    logger.info('Autoscaler type changed to '
+                                f'{type(new_autoscaler)}, updating autoscaler.')
+                    old_autoscaler = self._autoscaler
+                    self._autoscaler = new_autoscaler
+                    self._autoscaler.load_dynamic_states(
+                        old_autoscaler.dump_dynamic_states())
+                self._autoscaler.update_version(version,
+                                                service,
+                                                update_mode=update_mode)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in update_service: '

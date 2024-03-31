@@ -15,6 +15,15 @@ docker:
     {%- if gpu is not none %}
       --gpus all
     {%- endif %}
+{%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password}}
+    server: |-
+      {{docker_login_config.server}}
+{%- endif %}
 {%- endif %}
 
 provider:
@@ -37,15 +46,6 @@ provider:
 {% if firewall_rule is not none %}
   firewall_rule: {{firewall_rule}}
 {% endif %}
-{%- if docker_login_config is not none %}
-  # We put docker login config in provider section because ray's schema disabled
-  # additionalProperties for docker config.
-  # See: https://github.com/ray-project/ray/blob/d2fc4823126927b2c54f89ec72fa3d24b442e6a3/python/ray/autoscaler/ray-schema.json#L227
-  docker_login_config:
-    username: {{docker_login_config.username}}
-    password: {{docker_login_config.password}}
-    server: {{docker_login_config.server}}
-{%- endif %}
   use_internal_ips: {{use_internal_ips}}
 {%- if tpu_vm %}
   _has_tpus: True
@@ -76,6 +76,9 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
+      {%- for tag_key, tag_value in instance_tags.items() %}
+        {{ tag_key }}: {{ tag_value }}
+      {%- endfor %}
       {%- if specific_reservations %}
       reservationAffinity:
         consumeReservationType: SPECIFIC_RESERVATION
@@ -130,6 +133,10 @@ available_node_types:
   {%- if use_spot or gpu is not none %}
       scheduling:
   {%- if use_spot %}
+        automaticRestart: false
+        instanceTerminationAction: DELETE
+        onHostMaintenance: TERMINATE
+        provisioningModel: SPOT
         preemptible: true
   {%- endif %}
   {%- if gpu is not none %}
@@ -181,19 +188,15 @@ setup_commands:
     sudo dpkg --configure --force-overwrite -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
-    (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
-    (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
     source ~/.bashrc;
   {%- if tpu_vm %}
     test -f ~/miniconda3/etc/profile.d/conda.sh && source ~/miniconda3/etc/profile.d/conda.sh && conda activate base || true;
-    pip3 install --upgrade google-api-python-client;
+    {{ sky_pip_cmd }} install --upgrade google-api-python-client;
   {%- endif %}
   {%- if tpu_node_name %}
     grep "export TPU_NAME=" ~/.bashrc && echo "TPU_NAME already set" || echo "export TPU_NAME={{tpu_node_name}}" >> ~/.bashrc;
   {%- endif %}
-    mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
-    pip3 list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null || pip3 install --exists-action w -U ray[default]=={{ray_version}};
-    (pip3 list | grep "skypilot " && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[gcp, remote]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
+    {{ ray_skypilot_installation_commands }}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
@@ -201,7 +204,6 @@ setup_commands:
     sudo systemctl disable jupyter > /dev/null 2>&1 || true;
     {%- endif %}
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
-    python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.

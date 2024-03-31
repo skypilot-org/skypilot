@@ -193,8 +193,8 @@ And under the same directory, we have an :code:`index.html`:
 
 .. note::
 
-  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to
-  :ref:`SkyPilot Storage <sky-storage>`. Cloud bucket will be created, and cleaned up after the service is terminated.
+  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to a
+  :ref:`cloud bucket <sky-storage>`. The bucket will be created, and cleaned up after the service is terminated.
 
 Notice that task YAML already has a running HTTP endpoint at 8080, and exposed
 through the :code:`ports` section under :code:`resources`. Suppose we want to
@@ -369,11 +369,11 @@ Send a request using the following cURL command:
 
     $ curl -L http://<endpoint-url>/v1/chat/completions \
         -X POST \
-        -d '{"model":"vicuna-13b-v1.3","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Who are you?"}],"temperature":0}' \
+        -d '{"model":"vicuna-7b-v1.3","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Who are you?"}],"temperature":0}' \
         -H 'Content-Type: application/json'
 
     # Example output:
-    {"id":"chatcmpl-gZ8SfgUwcm9Xjbuv4xfefq","object":"chat.completion","created":1702082533,"model":"vicuna-13b-v1.3","choices":[{"index":0,"message":{"role":"assistant","content":"I am Vicuna, a language model trained by researchers from Large Model Systems Organization (LMSYS)."},"finish_reason":"stop"}],"usage":{"prompt_tokens":19,"total_tokens":43,"completion_tokens":24}}
+    {"id":"chatcmpl-gZ8SfgUwcm9Xjbuv4xfefq","object":"chat.completion","created":1702082533,"model":"vicuna-7b-v1.3","choices":[{"index":0,"message":{"role":"assistant","content":"I am Vicuna, a language model trained by researchers from Large Model Systems Organization (LMSYS)."},"finish_reason":"stop"}],"usage":{"prompt_tokens":19,"total_tokens":43,"completion_tokens":24}}
 
 You can also use a simple chatbot Python script to send requests:
 

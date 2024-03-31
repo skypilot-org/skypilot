@@ -22,7 +22,7 @@ import pytest
 # --managed-spot.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes', 'vsphere'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace'
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -39,7 +39,10 @@ cloud_to_pytest_keyword = {
     'scp': 'scp',
     'oci': 'oci',
     'kubernetes': 'kubernetes',
-    'vsphere': 'vsphere'
+    'vsphere': 'vsphere',
+    'fluidstack': 'fluidstack',
+    'cudo': 'cudo',
+    'paperspace': 'paperspace',
 }
 
 
@@ -58,7 +61,7 @@ def pytest_addoption(parser):
                      action='store_true',
                      default=False,
                      help='Only run tests for managed spot.')
-    parser.addoption('--sky-serve',
+    parser.addoption('--serve',
                      action='store_true',
                      default=False,
                      help='Only run tests for sky serve.')
@@ -114,8 +117,8 @@ def pytest_collection_modifyitems(config, items):
     skip_marks['slow'] = pytest.mark.skip(reason='need --runslow option to run')
     skip_marks['managed_spot'] = pytest.mark.skip(
         reason='skipped, because --managed-spot option is set')
-    skip_marks['sky_serve'] = pytest.mark.skip(
-        reason='skipped, because --sky-serve option is set')
+    skip_marks['serve'] = pytest.mark.skip(
+        reason='skipped, because --serve option is set')
     skip_marks['tpu'] = pytest.mark.skip(
         reason='skipped, because --tpu option is set')
     for cloud in all_clouds_in_smoke_tests:
@@ -146,9 +149,8 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['managed_spot'])
         if (not 'tpu' in item.keywords) and config.getoption('--tpu'):
             item.add_marker(skip_marks['tpu'])
-        if (not 'sky_serve'
-                in item.keywords) and config.getoption('--sky-serve'):
-            item.add_marker(skip_marks['sky_serve'])
+        if (not 'serve' in item.keywords) and config.getoption('--serve'):
+            item.add_marker(skip_marks['serve'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its

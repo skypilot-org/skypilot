@@ -62,6 +62,7 @@ TPU_V4_HOST_DF = pd.read_csv(
 # Unsupported Series: 'f1', 'm2'
 SERIES_TO_DISCRIPTION = {
     'a2': 'A2 Instance',
+    'a3': 'A3 Instance',
     'c2': 'Compute optimized',
     'c2d': 'C2D AMD Instance',
     'c3': 'C3 Instance',
@@ -298,18 +299,51 @@ def _get_gpus_for_zone(zone: str) -> pd.DataFrame:
             gpu_name = gpu_name.replace('nvidia-', '')
             gpu_name = gpu_name.replace('tesla-', '')
             gpu_name = gpu_name.upper()
+            if 'H100-80GB' in gpu_name:
+                gpu_name = 'H100'
+                if count != 8:
+                    # H100 only has 8 cards.
+                    continue
             if 'VWS' in gpu_name:
                 continue
             if gpu_name.startswith('TPU-'):
                 continue
+            gpu_info = _gpu_info_from_name(gpu_name)
+            if gpu_info is None:
+                # Prevent `show-gpus` from not showing GPUs without GPU info.
+                gpu_info = gpu_name
             new_gpus.append({
                 'AcceleratorName': gpu_name,
                 'AcceleratorCount': count,
-                'GpuInfo': None,
+                'GpuInfo': gpu_info,
                 'Region': zone.rpartition('-')[0],
                 'AvailabilityZone': zone,
             })
     return pd.DataFrame(new_gpus).reset_index(drop=True)
+
+
+def _gpu_info_from_name(name: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+    """Hard-codes the GPU memory info for certain GPUs.
+
+    Reference: https://cloud.google.com/compute/docs/gpus
+    """
+    name_to_gpu_memory_in_mib = {
+        'L4': 24 * 1024,
+        'A100-80GB': 80 * 1024,
+        'A100': 40 * 1024,
+        'H100': 80 * 1024,
+        'P4': 8 * 1024,
+        'T4': 16 * 1024,
+        'V100': 16 * 1024,
+        'P100': 16 * 1024,
+        # End of life:
+        'K80': 12 * 1024,
+    }
+    gpu_memory_in_mib = name_to_gpu_memory_in_mib.get(name)
+    if gpu_memory_in_mib is not None:
+        return {'Gpus': [{'MemoryInfo': {'SizeInMiB': gpu_memory_in_mib}}]}
+    print('Warning: GPU memory info not found for', name)
+    return None
 
 
 def _get_gpus(region_prefix: str) -> pd.DataFrame:
@@ -344,6 +378,8 @@ def get_gpu_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
             gpu_name = row['AcceleratorName']
             if gpu_name == 'A100-80GB':
                 gpu_name = 'A100 80GB'
+            if gpu_name == 'H100':
+                gpu_name = 'H100 80GB'
             if f'{gpu_name} GPU' not in sku['description']:
                 continue
 
@@ -368,7 +404,6 @@ def get_gpu_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
     df = df.reset_index(drop=True)
     df = df.sort_values(
         ['AcceleratorName', 'AcceleratorCount', 'Region', 'AvailabilityZone'])
-    df['GpuInfo'] = df['AcceleratorName']
     return df
 
 
@@ -421,10 +456,21 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
     if df.empty:
         return df
 
-    def get_tpu_price(row: pd.Series, spot: bool) -> float:
+    def get_tpu_price(row: pd.Series, spot: bool) -> Optional[float]:
+        assert row['AcceleratorCount'] == 1, row
         tpu_price = None
+        tpu_region = row['Region']
+        tpu_name = row['AcceleratorName']
+        tpu_version = tpu_name.split('-')[1]
+        num_cores = int(tpu_name.split('-')[2])
+        # For TPU-v2 and TPU-v3, the pricing API provides the prices
+        # of 8 TPU cores. The prices can be different based on
+        # whether the TPU is a single device or a pod.
+        # For TPU-v4, the pricing is uniform, and thus the pricing API
+        # only provides the price of TPU-v4 pods.
+        is_pod = num_cores > 8 or tpu_version == 'v4'
+
         for sku in skus:
-            tpu_region = row['Region']
             if tpu_region not in sku['serviceRegions']:
                 continue
             description = sku['description']
@@ -435,16 +481,6 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
             else:
                 if 'Preemptible' in description:
                     continue
-
-            tpu_name = row['AcceleratorName']
-            tpu_version = tpu_name.split('-')[1]
-            num_cores = int(tpu_name.split('-')[2])
-            # For TPU-v2 and TPU-v3, the pricing API provides the prices
-            # of 8 TPU cores. The prices can be different based on
-            # whether the TPU is a single device or a pod.
-            # For TPU-v4, the pricing is uniform, and thus the pricing API
-            # only provides the price of TPU-v4 pods.
-            is_pod = num_cores > 8 or tpu_version == 'v4'
 
             if f'Tpu-{tpu_version}' not in description:
                 continue
@@ -459,16 +495,28 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
             tpu_device_price = unit_price
             tpu_core_price = tpu_device_price / 8
             tpu_price = num_cores * tpu_core_price
-            assert row['AcceleratorCount'] == 1, row
             break
 
-        assert tpu_price is not None, row
+        if tpu_price is None:
+            # Find the line with the same accelerator name, region, zone in
+            # the hidden TPU dataframe for the row.
+            hidden_tpu = HIDDEN_TPU_DF[
+                (HIDDEN_TPU_DF['AcceleratorName'] == row['AcceleratorName']) &
+                (HIDDEN_TPU_DF['Region'] == row['Region']) &
+                (HIDDEN_TPU_DF['AvailabilityZone'] == row['AvailabilityZone'])]
+            if not hidden_tpu.empty:
+                price_str = 'SpotPrice' if spot else 'Price'
+                tpu_price = hidden_tpu[price_str].values[0]
+        if tpu_price is None:
+            spot_str = 'spot ' if spot else ''
+            print(f'The {spot_str}price of {tpu_name} in {tpu_region} is '
+                  'not found in SKUs or hidden TPU price DF.')
+        assert spot or tpu_price is not None, (row, hidden_tpu, HIDDEN_TPU_DF)
         return tpu_price
 
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)
     df['SpotPrice'] = df.apply(lambda row: get_tpu_price(row, spot=True),
                                axis=1)
-    df = pd.concat([df, HIDDEN_TPU_DF], ignore_index=True)
     df = df.reset_index(drop=True)
     df['version_and_size'] = df['AcceleratorName'].apply(
         lambda name: (name.split('-')[1], int(name.split('-')[2])))

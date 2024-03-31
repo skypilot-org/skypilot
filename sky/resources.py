@@ -5,9 +5,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 
+from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
-from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
@@ -62,6 +62,7 @@ class Resources:
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         # Internal use only.
+        # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
     ):
@@ -130,6 +131,10 @@ class Resources:
           _docker_login_config: the docker configuration to use. This include
             the docker username, password, and registry server. If None, skip
             docker login.
+
+        Raises:
+            ValueError: if some attributes are invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
         """
         self._version = self._VERSION
         self._cloud = cloud
@@ -199,7 +204,6 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
-        self._try_validate_local()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_spot()
@@ -251,9 +255,6 @@ class Resources:
         memory = ''
         if self.memory is not None:
             memory = f', mem={self.memory}'
-
-        if isinstance(self.cloud, clouds.Local):
-            return f'{self.cloud}({self.accelerators})'
 
         use_spot = ''
         if self.use_spot:
@@ -451,7 +452,10 @@ class Resources:
 
         self._memory = str(memory)
         if isinstance(memory, str):
-            if memory.endswith('+'):
+            if memory.endswith(('+', 'x')):
+                # 'x' is used internally for make sure our resources used by
+                # spot controller (memory: 3x) to have enough memory based on
+                # the vCPUs.
                 num_memory_gb = memory[:-1]
             else:
                 num_memory_gb = memory
@@ -502,12 +506,6 @@ class Resources:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
 
-            # Ignore check for the local cloud case.
-            # It is possible the accelerators dict can contain multiple
-            # types of accelerators for some on-prem clusters.
-            if not isinstance(self._cloud, clouds.Local):
-                assert len(accelerators) == 1, accelerators
-
             # Canonicalize the accelerator names.
             accelerators = {
                 accelerator_registry.canonicalize_accelerator_name(
@@ -552,6 +550,12 @@ class Resources:
 
     def _validate_and_set_region_zone(self, region: Optional[str],
                                       zone: Optional[str]) -> None:
+        """Try to validate and set the region and zone attribute.
+
+        Raises:
+            ValueError: if the attributes are invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
+        """
         if region is None and zone is None:
             return
 
@@ -559,7 +563,8 @@ class Resources:
             # Try to infer the cloud from region/zone, if unique. If 0 or >1
             # cloud corresponds to region/zone, errors out.
             valid_clouds = []
-            enabled_clouds = global_user_state.get_enabled_clouds()
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+                raise_if_no_cloud_access=True)
             cloud_to_errors = {}
             for cloud in enabled_clouds:
                 try:
@@ -656,6 +661,12 @@ class Resources:
         return filtered_regions
 
     def _try_validate_instance_type(self) -> None:
+        """Try to validate the instance type attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
+        """
         if self.instance_type is None:
             return
 
@@ -670,7 +681,8 @@ class Resources:
         else:
             # If cloud not specified
             valid_clouds = []
-            enabled_clouds = global_user_state.get_enabled_clouds()
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+                raise_if_no_cloud_access=True)
             for cloud in enabled_clouds:
                 if cloud.instance_type_exists(self._instance_type):
                     valid_clouds.append(cloud)
@@ -695,6 +707,11 @@ class Resources:
             self._cloud = valid_clouds[0]
 
     def _try_validate_cpus_mem(self) -> None:
+        """Try to validate the cpus and memory attributes.
+
+        Raises:
+            ValueError: if the attributes are invalid.
+        """
         if self.cpus is None and self.memory is None:
             return
         if self.instance_type is not None:
@@ -720,7 +737,7 @@ class Resources:
                             f'number of vCPUs. {self.instance_type} has {cpus} '
                             f'vCPUs, but {self.cpus} is requested.')
             if self.memory is not None:
-                if self.memory.endswith('+'):
+                if self.memory.endswith(('+', 'x')):
                     if mem < float(self.memory[:-1]):
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
@@ -735,6 +752,11 @@ class Resources:
                             f'memory, but {self.memory} is requested.')
 
     def _try_validate_spot(self) -> None:
+        """Try to validate the spot related attributes.
+
+        Raises:
+            ValueError: if the attributes are invalid.
+        """
         if self._spot_recovery is None:
             return
         if not self._use_spot:
@@ -749,25 +771,6 @@ class Resources:
                     'is not supported. The strategy should be among '
                     f'{list(spot.SPOT_STRATEGIES.keys())}')
 
-    def _try_validate_local(self) -> None:
-        if isinstance(self._cloud, clouds.Local):
-            if self._use_spot:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Local/On-prem mode does not support spot '
-                                     'instances.')
-            local_instance = clouds.Local.get_default_instance_type()
-            if (self._instance_type is not None and
-                    self._instance_type != local_instance):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Local/On-prem mode does not support instance type:'
-                        f' {self._instance_type}.')
-            if self._image_id is not None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Local/On-prem mode does not support custom '
-                        'images.')
-
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
             return None
@@ -778,6 +781,11 @@ class Resources:
         return None
 
     def _try_validate_image_id(self) -> None:
+        """Try to validate the image_id attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
         if self._image_id is None:
             return
 
@@ -808,8 +816,8 @@ class Resources:
         except exceptions.NotSupportedError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS/GCP/IBM/OCI/Kubernetes,'
-                    ' please explicitly specify the cloud.') from e
+                    'image_id is only supported for AWS/GCP/Azure/IBM/OCI/'
+                    'Kubernetes, please explicitly specify the cloud.') from e
 
         if self._region is not None:
             if self._region not in self._image_id:
@@ -851,13 +859,30 @@ class Resources:
                         'image.')
 
     def _try_validate_disk_tier(self) -> None:
+        """Try to validate the disk_tier attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
         if self.disk_tier is None:
             return
         if self.cloud is not None:
-            self.cloud.check_disk_tier_enabled(self.instance_type,
-                                               self.disk_tier)
+            try:
+                self.cloud.check_disk_tier_enabled(self.instance_type,
+                                                   self.disk_tier)
+            except exceptions.NotSupportedError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Disk tier {self.disk_tier.value} is not supported '
+                        f'for instance type {self.instance_type}.') from None
 
     def _try_validate_ports(self) -> None:
+        """Try to validate the ports attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+            exceptions.NoCloudAccessError: if no public cloud is enabled.
+        """
         if self.ports is None:
             return
         if skypilot_config.get_nested(('aws', 'security_group_name'),
@@ -869,6 +894,22 @@ class Resources:
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
                 self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
+        else:
+            at_least_one_cloud_supports_ports = False
+            for cloud in sky_check.get_cached_enabled_clouds_or_refresh(
+                    raise_if_no_cloud_access=True):
+                try:
+                    cloud.check_features_are_supported(
+                        self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
+                    at_least_one_cloud_supports_ports = True
+                except exceptions.NotSupportedError:
+                    pass
+            if not at_least_one_cloud_supports_ports:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'No enabled clouds support opening ports. To fix: '
+                        'do not specify resources.ports, or enable a cloud '
+                        'that does support this feature.')
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
 
@@ -896,9 +937,10 @@ class Resources:
     def get_spot_str(self) -> str:
         return '[Spot]' if self.use_spot else ''
 
-    def make_deploy_variables(
-            self, cluster_name_on_cloud: str, region: clouds.Region,
-            zones: Optional[List[clouds.Zone]]) -> Dict[str, Optional[str]]:
+    def make_deploy_variables(self, cluster_name_on_cloud: str,
+                              region: clouds.Region,
+                              zones: Optional[List[clouds.Zone]],
+                              dryrun: bool) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to resource variables.
 
         These variables are divided into two categories: cloud-specific and
@@ -907,7 +949,7 @@ class Resources:
         variables are generated by this method.
         """
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
-            self, cluster_name_on_cloud, region, zones)
+            self, cluster_name_on_cloud, region, zones, dryrun)
         docker_image = self.extract_docker_image()
         return dict(
             cloud_specific_variables,
@@ -925,14 +967,16 @@ class Resources:
                 'docker_login_config': self._docker_login_config
             })
 
-    def get_reservations_available_resources(
-            self, specific_reservations: Set[str]) -> Dict[str, int]:
+    def get_reservations_available_resources(self) -> Dict[str, int]:
         """Returns the number of available reservation resources."""
         if self.use_spot:
             # GCP's & AWS's reservations do not support spot instances. We
             # assume other clouds behave the same. We can move this check down
             # to each cloud if any cloud supports reservations for spot.
             return {}
+        specific_reservations = set(
+            skypilot_config.get_nested(
+                (str(self.cloud).lower(), 'specific_reservations'), set()))
         return self.cloud.get_reservations_available_resources(
             self._instance_type, self._region, self._zone,
             specific_reservations)

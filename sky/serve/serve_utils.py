@@ -1,5 +1,6 @@
 """User interface with the SkyServe."""
 import base64
+import collections
 import enum
 import os
 import pathlib
@@ -10,8 +11,8 @@ import shutil
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
-                    TextIO, Type, TypeVar)
+from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
+                    Optional, TextIO, Type, TypeVar)
 import uuid
 
 import colorama
@@ -25,6 +26,7 @@ from sky import global_user_state
 from sky import status_lib
 from sky.serve import constants
 from sky.serve import serve_state
+from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -34,10 +36,13 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import fastapi
 
+    from sky.serve import replica_managers
+
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
-NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
+NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
+                         constants.CONTROLLER_MEMORY_USAGE_GB)
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
@@ -74,10 +79,19 @@ class UserSignal(enum.Enum):
         return _SIGNAL_TO_ERROR[self]
 
 
+class UpdateMode(enum.Enum):
+    """Update mode for updating a service."""
+    ROLLING = 'rolling'
+    BLUE_GREEN = 'blue_green'
+
+
+DEFAULT_UPDATE_MODE = UpdateMode.ROLLING
+
 _SIGNAL_TO_ERROR = {
     UserSignal.TERMINATE: exceptions.ServeUserTerminatedError,
 }
 
+# pylint: disable=invalid-name
 KeyType = TypeVar('KeyType')
 ValueType = TypeVar('ValueType')
 
@@ -226,9 +240,9 @@ def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
 
-def set_service_status_from_replica_statuses(
-        service_name: str,
-        replica_statuses: List[serve_state.ReplicaStatus]) -> None:
+def set_service_status_and_active_versions_from_replica(
+        service_name: str, replica_infos: List['replica_managers.ReplicaInfo'],
+        update_mode: UpdateMode) -> None:
     record = serve_state.get_service_from_name(service_name)
     if record is None:
         raise ValueError('The service is up-ed in an old version and does not '
@@ -240,9 +254,20 @@ def set_service_status_from_replica_statuses(
         # terminated, the service status will still be READY, but we don't want
         # change service status to READY.
         return
-    serve_state.set_service_status(
+
+    ready_replicas = list(filter(lambda info: info.is_ready, replica_infos))
+    if update_mode == UpdateMode.ROLLING:
+        active_versions = sorted(
+            list(set(info.version for info in ready_replicas)))
+    else:
+        chosen_version = get_latest_version_with_min_replicas(
+            service_name, replica_infos)
+        active_versions = [chosen_version] if chosen_version is not None else []
+    serve_state.set_service_status_and_active_versions(
         service_name,
-        serve_state.ServiceStatus.from_replica_statuses(replica_statuses))
+        serve_state.ServiceStatus.from_replica_statuses(
+            [info.status for info in ready_replicas]),
+        active_versions=active_versions)
 
 
 def update_service_status() -> None:
@@ -256,11 +281,11 @@ def update_service_status() -> None:
         controller_status = job_lib.get_status(controller_job_id)
         if controller_status is None or controller_status.is_terminal():
             # If controller job is not running, set it as controller failed.
-            serve_state.set_service_status(
+            serve_state.set_service_status_and_active_versions(
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-def update_service_encoded(service_name: str, version: int) -> str:
+def update_service_encoded(service_name: str, version: int, mode: str) -> str:
     service_status = _get_service_status(service_name)
     if service_status is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
@@ -270,6 +295,7 @@ def update_service_encoded(service_name: str, version: int) -> str:
         '/controller/update_service',
         json={
             'version': version,
+            'mode': mode,
         })
     if resp.status_code == 404:
         raise ValueError('The service is up-ed in an old version and does not '
@@ -416,7 +442,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
             # Filelock is needed to prevent race condition between signal
             # check/removal and signal writing.
             with filelock.FileLock(str(signal_file) + '.lock'):
-                with signal_file.open(mode='w') as f:
+                with signal_file.open(mode='w', encoding='utf-8') as f:
                     f.write(UserSignal.TERMINATE.value)
                     f.flush()
         terminated_service_names.append(f'{service_name!r}')
@@ -431,7 +457,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     return '\n'.join(messages)
 
 
-def wait_service_initialization(service_name: str, job_id: int) -> str:
+def wait_service_registration(service_name: str, job_id: int) -> str:
     """Util function to call at the end of `sky.serve.up()`.
 
     This function will:
@@ -464,10 +490,19 @@ def wait_service_initialization(service_name: str, job_id: int) -> str:
                 raise RuntimeError('Max number of services reached. '
                                    'To spin up more services, please '
                                    'tear down some existing services.')
-        if time.time() - start_time > constants.INITIALIZATION_TIMEOUT_SECONDS:
+        elapsed = time.time() - start_time
+        if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
+            # Print the controller log to help user debug.
+            controller_log_path = (
+                generate_remote_controller_log_file_name(service_name))
+            with open(os.path.expanduser(controller_log_path),
+                      'r',
+                      encoding='utf-8') as f:
+                log_content = f.read()
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Initialization of service {service_name!r} timeout.')
+                raise ValueError(f'Failed to register service {service_name!r} '
+                                 'on the SkyServe controller. '
+                                 f'Reason:\n{log_content}')
         time.sleep(1)
 
 
@@ -483,6 +518,24 @@ def check_service_status_healthy(service_name: str) -> Optional[str]:
         return (f'Service {service_name!r} is still initializing its '
                 'controller. Please try again later.')
     return None
+
+
+def get_latest_version_with_min_replicas(
+        service_name: str,
+        replica_infos: List['replica_managers.ReplicaInfo']) -> Optional[int]:
+    # Find the latest version with at least min_replicas replicas.
+    version2count: DefaultDict[int, int] = collections.defaultdict(int)
+    for info in replica_infos:
+        if info.is_ready:
+            version2count[info.version] += 1
+
+    active_versions = sorted(version2count.keys(), reverse=True)
+    for version in active_versions:
+        spec = serve_state.get_spec(service_name, version)
+        if (spec is not None and version2count[version] >= spec.min_replicas):
+            return version
+    # Use the oldest version if no version has enough replicas.
+    return active_versions[-1] if active_versions else None
 
 
 def _follow_replica_logs(
@@ -525,7 +578,8 @@ def _follow_replica_logs(
                     # starting. For our launching logs, it's always:
                     # Launching on <cloud> <region> (<zone>)
                     if log_file is not None:
-                        with open(log_file, 'r', newline='') as f:
+                        with open(log_file, 'r', newline='',
+                                  encoding='utf-8') as f:
                             # We still exit if more than 10 seconds without new
                             # content to avoid any internal bug that causes
                             # the launch failed and cluster status remains INIT.
@@ -558,7 +612,7 @@ def stream_replica_logs(service_name: str, replica_id: int,
 
     log_file_name = generate_replica_log_file_name(service_name, replica_id)
     if os.path.exists(log_file_name):
-        with open(log_file_name, 'r') as f:
+        with open(log_file_name, 'r', encoding='utf-8') as f:
             print(f.read(), flush=True)
         return ''
 
@@ -581,7 +635,7 @@ def stream_replica_logs(service_name: str, replica_id: int,
 
     finish_stream = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
-    with open(launch_log_file_name, 'r', newline='') as f:
+    with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
         for line in _follow_replica_logs(f,
                                          replica_cluster_name,
                                          finish_stream=finish_stream,
@@ -643,7 +697,8 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
             return True
         return record['status'] in serve_state.ServiceStatus.failed_statuses()
 
-    with open(os.path.expanduser(log_file), 'r', newline='') as f:
+    with open(os.path.expanduser(log_file), 'r', newline='',
+              encoding='utf-8') as f:
         for line in _follow_logs(f,
                                  finish_stream=_service_is_terminal,
                                  exit_if_stream_end=not follow):
@@ -697,7 +752,9 @@ def format_service_table(service_records: List[Dict[str, Any]],
             replica_infos.append(replica)
 
         service_name = record['name']
-        version = record['version'] if 'version' in record else '-'
+        version = ','.join(
+            str(v) for v in record['active_versions']
+        ) if 'active_versions' in record and record['active_versions'] else '-'
         uptime = log_utils.readable_time_duration(record['uptime'],
                                                   absolute=True)
         service_status = record['status']
@@ -802,9 +859,13 @@ class ServeCodeGen:
     Usage:
       >> code = ServeCodeGen.get_service_status(service_name)
     """
+
+    # TODO(zhwu): When any API is changed, we should update the
+    # constants.SERVE_VERSION.
     _PREFIX = [
         'from sky.serve import serve_state',
         'from sky.serve import serve_utils',
+        'from sky.serve import constants',
     ]
 
     @classmethod
@@ -833,9 +894,9 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def wait_service_initialization(cls, service_name: str, job_id: int) -> str:
+    def wait_service_registration(cls, service_name: str, job_id: int) -> str:
         code = [
-            'msg = serve_utils.wait_service_initialization('
+            'msg = serve_utils.wait_service_registration('
             f'{service_name!r}, {job_id})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
@@ -863,12 +924,21 @@ class ServeCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
-        return f'python3 -u -c {shlex.quote(generated_code)}'
+        return (f'{skylet_constants.SKY_PYTHON_CMD} '
+                f'-u -c {shlex.quote(generated_code)}')
 
     @classmethod
-    def update_service(cls, service_name: str, version: int) -> str:
+    def update_service(cls, service_name: str, version: int, mode: str) -> str:
         code = [
+            # Backward compatibility for old serve version on the remote
+            # machine. The `mode` argument was added in #3249, and if the remote
+            # machine has an old SkyPilot version before that, we need to avoid
+            # passing the `mode` argument to the job_lib functions.
+            # TODO(zhwu): Remove this in 0.7.0 release.
+            f'mode_kwargs = {{"mode": {mode!r}}} '
+            'if getattr(constants, "SERVE_VERSION", 0) >= 1 else {}',
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
-            f'{version})', 'print(msg, end="", flush=True)'
+            f'{version}, **mode_kwargs)',
+            'print(msg, end="", flush=True)',
         ]
         return cls._build(code)

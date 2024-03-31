@@ -147,7 +147,7 @@ Your image must satisfy the following requirements:
 
 Using Images from Private Repositories
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config` to specify the secret like so:
+To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config.yaml` to specify the secret like so:
 
 .. code-block:: yaml
 
@@ -161,6 +161,47 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
 
     If you use Amazon ECR, your secret credentials may expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
 
+
+Opening Ports
+-------------
+
+Opening ports on SkyPilot clusters running on Kubernetes is supported through two modes:
+
+1. `LoadBalancer services <https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer>`_ (default)
+2. `Nginx IngressController <https://kubernetes.github.io/ingress-nginx/>`_
+
+One of these modes must be supported and configured on your cluster. Refer to the :ref:`setting up ports on Kubernetes guide <kubernetes-ports>` on how to do this.
+
+.. tip::
+
+  On Google GKE, Amazon EKS or other cloud-hosted Kubernetes services, the default LoadBalancer services mode is supported out of the box and no additional configuration is needed.
+
+Once your cluster is  configured, launch a task which exposes services on a port by adding :code:`ports` to the :code:`resources` section of your task YAML.
+
+.. code-block:: yaml
+
+    # task.yaml
+    resources:
+      ports: 8888
+
+    run: |
+      python -m http.server 8888
+
+After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can get the URL to access the port using :code:`sky status --endpoints myclus`.
+
+.. code-block:: bash
+
+    # List all ports exposed by the cluster
+    $ sky status --endpoints myclus
+    8888: 34.173.13.241:8888
+
+    # curl a specific port's endpoint
+    $ curl $(sky status --endpoint 8888 myclus)
+    ...
+
+.. tip::
+
+    To learn more about opening ports in SkyPilot tasks, see :ref:`Opening Ports <ports>`.
 
 FAQs
 ----
@@ -177,6 +218,33 @@ FAQs
 
   For isolation, you can create separate Kubernetes namespaces and set them in the kubeconfig distributed to users. SkyPilot will use the namespace set in the kubeconfig for running all tasks.
 
+* **How can I specify custom configuration for the pods created by SkyPilot?**
+
+  You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
+  The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#pod-v1-core>`_.
+
+  For example, to set custom environment variables and attach a volume on your pods, you can add the following to your :code:`~/.sky/config.yaml` file:
+
+  .. code-block:: yaml
+
+      kubernetes:
+        pod_config:
+          spec:
+            containers:
+              - env:
+                - name: MY_ENV_VAR
+                  value: MY_ENV_VALUE
+                volumeMounts:       # Custom volume mounts for the pod
+                  - mountPath: /foo
+                    name: example-volume
+            volumes:
+              - name: example-volume
+                hostPath:
+                  path: /tmp
+                  type: Directory
+
+  For more details refer to :ref:`config-yaml`.
+
 Features and Roadmap
 --------------------
 
@@ -187,7 +255,7 @@ Kubernetes support is under active development. Some features are in progress an
 * Storage mounting - ✅ Available on x86_64 clusters
 * Multi-node tasks - ✅ Available
 * Custom images - ✅ Available
-* Opening ports and exposing services - 🚧 In progress
+* Opening ports and exposing services - ✅ Available
 * Multiple Kubernetes Clusters - 🚧 In progress
 
 
@@ -195,3 +263,4 @@ Kubernetes support is under active development. Some features are in progress an
    :hidden:
 
    kubernetes-setup
+   kubernetes-troubleshooting

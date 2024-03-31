@@ -18,8 +18,6 @@ import uuid
 
 from sky import clouds
 from sky import status_lib
-from sky.adaptors import cloudflare
-from sky.data import storage as storage_lib
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -328,8 +326,8 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         handle = get_handle_from_cluster_name(cluster_name)
         if handle is None:
             return
-        # Must invalidate IP list: otherwise 'sky cpunode'
-        # on a stopped cpunode will directly try to ssh, which leads to timeout.
+        # Must invalidate IP list to avoid directly trying to ssh into a
+        # stopped VM, which leads to timeout.
         if hasattr(handle, 'stable_internal_external_ips'):
             handle.stable_internal_external_ips = None
         _DB.cursor.execute(
@@ -681,7 +679,7 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def get_enabled_clouds() -> List[clouds.Cloud]:
+def get_cached_enabled_clouds() -> List[clouds.Cloud]:
     rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
                               (_ENABLED_CLOUDS_KEY,))
     ret = []
@@ -690,26 +688,17 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
         break
     enabled_clouds: List[clouds.Cloud] = []
     for c in ret:
-        cloud = clouds.CLOUD_REGISTRY.from_str(c)
+        try:
+            cloud = clouds.CLOUD_REGISTRY.from_str(c)
+        except ValueError:
+            # Handle the case for the clouds whose support has been removed from
+            # SkyPilot, e.g., 'local' was a cloud in the past and may be stored
+            # in the database for users before #3037. We should ignore removed
+            # clouds and continue.
+            continue
         if cloud is not None:
             enabled_clouds.append(cloud)
     return enabled_clouds
-
-
-def get_enabled_storage_clouds() -> List[str]:
-    # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
-    # is resolved by implementing separate 'enabled_storage_clouds'
-    enabled_clouds = get_enabled_clouds()
-    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
-
-    enabled_storage_clouds = [
-        cloud for cloud in enabled_clouds
-        if cloud in storage_lib.STORE_ENABLED_CLOUDS
-    ]
-    r2_is_enabled, _ = cloudflare.check_credentials()
-    if r2_is_enabled:
-        enabled_storage_clouds.append(cloudflare.NAME)
-    return enabled_storage_clouds
 
 
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:

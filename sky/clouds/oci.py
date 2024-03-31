@@ -27,7 +27,7 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_tenancy_prefix = None
+_tenancy_prefix: Optional[str] = None
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -189,10 +189,13 @@ class OCI(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud  # Unused.
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud, dryrun  # Unused.
         assert region is not None, resources
 
         acc_dict = self.get_accelerators_from_instance_type(
@@ -265,7 +268,7 @@ class OCI(clouds.Cloud):
                     ['tenancy']).data
 
                 first_ad = ad_list[0]
-                _tenancy_prefix = str(first_ad.name).split(':')[0]
+                _tenancy_prefix = str(first_ad.name).split(':', maxsplit=1)[0]
             except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
                     oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
                 # This should only happen in testing where oci config is
@@ -449,14 +452,6 @@ class OCI(clouds.Cloud):
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         return service_catalog.validate_region_zone(region, zone, clouds='oci')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'oci')
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:

@@ -242,24 +242,49 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
         # roles, so only call setIamPolicy if needed.
         return True, policy
 
-    for binding in original_policy['bindings']:
-        if member_id in binding['members']:
-            role = binding['role']
-            try:
-                role_definition = iam.projects().roles().get(
-                    name=role).execute()
-            except TypeError as e:
-                if 'does not match the pattern' in str(e):
-                    logger.info('_configure_iam_role: fail to check permission '
-                                f'for built-in role {role}. skipped.')
-                    permissions = []
+    # TODO(zhwu): It is possible that the permission is only granted at the
+    # service-account level, not at the project level. We should check the
+    # permission at both levels.
+    # For example, `roles/iam.serviceAccountUser` can be granted at the
+    # skypilot-v1 service account level, which can be checked with
+    # service_account_policy = iam.projects().serviceAccounts().getIamPolicy(
+    #    resource=f'projects/{project_id}/serviceAcccounts/{email}').execute()
+    # We now skip the check for `iam.serviceAccounts.actAs` permission for
+    # simplicity as it can be granted at the service account level.
+    def check_permissions(policy, required_permissions):
+        for binding in policy['bindings']:
+            if member_id in binding['members']:
+                role = binding['role']
+                logger.info(f'_configure_iam_role: role {role} is attached to '
+                            f'{member_id}...')
+                try:
+                    role_definition = iam.projects().roles().get(
+                        name=role).execute()
+                except TypeError as e:
+                    if 'does not match the pattern' in str(e):
+                        logger.info(
+                            '_configure_iam_role: fail to check permission '
+                            f'for built-in role {role}. Fallback to predefined '
+                            'permission list.')
+                        # Built-in roles cannot be checked for permissions with
+                        # the current API, so we fallback to predefined list
+                        # to find the implied permissions.
+                        permissions = constants.BUILTIN_ROLE_TO_PERMISSIONS.get(
+                            role, [])
+                    else:
+                        raise
                 else:
-                    raise
-            else:
-                permissions = role_definition['includedPermissions']
-            required_permissions -= set(permissions)
-        if not required_permissions:
-            break
+                    permissions = role_definition['includedPermissions']
+                    logger.info(f'_configure_iam_role: role {role} has '
+                                f'permissions {permissions}.')
+                required_permissions -= set(permissions)
+            if not required_permissions:
+                break
+        return required_permissions
+
+    # Check the permissions
+    required_permissions = check_permissions(original_policy,
+                                             required_permissions)
     if not required_permissions:
         # All required permissions are already granted.
         return True, policy

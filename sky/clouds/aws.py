@@ -16,6 +16,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -101,6 +102,8 @@ class AWS(clouds.Cloud):
     # maximum length of DescribeInstances API filter value.
     # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 248
+
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _regions: List[clouds.Region] = []
 
@@ -255,9 +258,17 @@ class AWS(clouds.Cloud):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
         client = aws.client('ec2', region_name=region)
+        image_not_found_message = (
+            f'Image {image_id!r} not found in AWS region {region}.\n'
+            f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            'Example: ami-0729d913a335efca7')
         try:
             image_info = client.describe_images(ImageIds=[image_id])
-            image_info = image_info['Images'][0]
+            image_info = image_info.get('Images', [])
+            if not image_info:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(image_not_found_message)
+            image_info = image_info[0]
             image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
         except aws.botocore_exceptions().NoCredentialsError:
@@ -267,10 +278,7 @@ class AWS(clouds.Cloud):
             return DEFAULT_AMI_GB
         except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Image {image_id!r} not found in AWS region {region}.\n'
-                    f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-                    'Example: ami-0729d913a335efca7') from None
+                raise ValueError(image_not_found_message) from None
         return image_size
 
     @classmethod
@@ -279,7 +287,7 @@ class AWS(clouds.Cloud):
         # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
         command_str = (
             'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document'  # pylint: disable=line-too-long
-            ' | python3 -u -c "import sys, json; '
+            f' | {constants.SKY_PYTHON_CMD} -u -c "import sys, json; '
             'print(json.load(sys.stdin)[\'availabilityZone\'])"')
         return command_str
 
@@ -363,10 +371,13 @@ class AWS(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='aws')
 
-    def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Any]:
+    def make_deploy_resources_variables(self,
+                                        resources: 'resources_lib.Resources',
+                                        cluster_name_on_cloud: str,
+                                        region: 'clouds.Region',
+                                        zones: Optional[List['clouds.Zone']],
+                                        dryrun: bool = False) -> Dict[str, Any]:
+        del dryrun  # unused
         assert zones is not None, (region, zones)
 
         region_name = region.name
@@ -735,14 +746,6 @@ class AWS(clouds.Cloud):
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'aws')
 
     @classmethod
     def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:

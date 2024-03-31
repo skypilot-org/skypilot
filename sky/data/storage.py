@@ -11,7 +11,7 @@ import urllib.parse
 
 import colorama
 
-from sky import check
+from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -68,14 +68,34 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'It may have been deleted externally.')
 
 
+def get_cached_enabled_storage_clouds_or_refresh(
+        raise_if_no_cloud_access: bool = False) -> List[str]:
+    # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
+    # is resolved by implementing separate 'enabled_storage_clouds'
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
+
+    enabled_storage_clouds = [
+        cloud for cloud in enabled_clouds if cloud in STORE_ENABLED_CLOUDS
+    ]
+    r2_is_enabled, _ = cloudflare.check_credentials()
+    if r2_is_enabled:
+        enabled_storage_clouds.append(cloudflare.NAME)
+    if raise_if_no_cloud_access and not enabled_storage_clouds:
+        raise exceptions.NoCloudAccessError(
+            'No cloud access available for storage. '
+            'Please check your cloud credentials.')
+    return enabled_storage_clouds
+
+
 def _is_storage_cloud_enabled(cloud_name: str,
                               try_fix_with_sky_check: bool = True) -> bool:
-    enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+    enabled_storage_clouds = get_cached_enabled_storage_clouds_or_refresh()
     if cloud_name in enabled_storage_clouds:
         return True
     if try_fix_with_sky_check:
         # TODO(zhwu): Only check the specified cloud to speed up.
-        check.check(quiet=True)
+        sky_check.check(quiet=True)
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)
     return False
@@ -316,6 +336,35 @@ class AbstractStore:
         # S3 Client and GCS Client cannot be deep copied, hence the
         # original Store object is returned
         return self
+
+    def _validate_existing_bucket(self):
+        """Validates the storage fields for existing buckets."""
+        # Check if 'source' is None, this is only allowed when Storage is in
+        # either MOUNT mode or COPY mode with sky-managed storage.
+        # Note: In COPY mode, a 'source' being None with non-sky-managed
+        # storage is already handled as an error in _validate_storage_spec.
+        if self.source is None:
+            # Retrieve a handle associated with the storage name.
+            # This handle links to sky managed storage if it exists.
+            handle = global_user_state.get_handle_from_storage_name(self.name)
+            # If handle is None, it implies the bucket is created
+            # externally and not managed by Skypilot. For mounting such
+            # externally created buckets, users must provide the
+            # bucket's URL as 'source'.
+            if handle is None:
+                with ux_utils.print_exception_no_traceback():
+                    store_prefix = get_store_prefix(StoreType.from_store(self))
+                    raise exceptions.StorageSpecError(
+                        'Attempted to mount a non-sky managed bucket '
+                        f'{self.name!r} without specifying the storage source.'
+                        f' Bucket {self.name!r} already exists. \n'
+                        '    • To create a new bucket, specify a unique name.\n'
+                        '    • To mount an externally created bucket (e.g., '
+                        'created through cloud console or cloud cli), '
+                        'specify the bucket URL in the source field '
+                        'instead of its name. I.e., replace '
+                        f'`name: {self.name}` with '
+                        f'`source: {store_prefix}{self.name}`.')
 
 
 class Storage(object):
@@ -762,7 +811,9 @@ class Storage(object):
 
         return storage_obj
 
-    def add_store(self, store_type: Union[str, StoreType]) -> AbstractStore:
+    def add_store(self,
+                  store_type: Union[str, StoreType],
+                  region: Optional[str] = None) -> AbstractStore:
         """Initializes and adds a new store to the storage.
 
         Invoked by the optimizer after it has selected a store to
@@ -770,6 +821,8 @@ class Storage(object):
 
         Args:
           store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
+          region: str; Region to place the bucket in. Caller must ensure that
+            the region is valid for the chosen store_type.
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -797,6 +850,7 @@ class Storage(object):
             store = store_cls(
                 name=self.name,
                 source=self.source,
+                region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
@@ -814,6 +868,10 @@ class Storage(object):
         except exceptions.StorageInitError:
             logger.error(f'Could not initialize {store_type} store with '
                          f'name {self.name}. General initialization error.')
+            raise
+        except exceptions.StorageSpecError:
+            logger.error(f'Could not mount externally created {store_type}'
+                         f'store with name {self.name!r}.')
             raise
 
         # Add store to storage
@@ -1235,6 +1293,8 @@ class S3Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -1250,6 +1310,7 @@ class S3Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
+            self._validate_existing_bucket()
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -1274,7 +1335,7 @@ class S3Store(AbstractStore):
         # Store object is being reconstructed for deletion or re-mount with
         # sky start, and error is raised instead.
         if self.sync_on_reconstruction:
-            bucket = self._create_s3_bucket(self.name)
+            bucket = self._create_s3_bucket(self.name, self.region)
             return bucket, True
         else:
             # Raised when Storage object is reconstructed for sky storage
@@ -1324,9 +1385,15 @@ class S3Store(AbstractStore):
             if region is None:
                 s3_client.create_bucket(Bucket=bucket_name)
             else:
-                location = {'LocationConstraint': region}
-                s3_client.create_bucket(Bucket=bucket_name,
-                                        CreateBucketConfiguration=location)
+                if region == 'us-east-1':
+                    # If default us-east-1 region is used, the
+                    # LocationConstraint must not be specified.
+                    # https://stackoverflow.com/a/51912090
+                    s3_client.create_bucket(Bucket=bucket_name)
+                else:
+                    location = {'LocationConstraint': region}
+                    s3_client.create_bucket(Bucket=bucket_name,
+                                            CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
@@ -1676,6 +1743,8 @@ class GcsStore(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -1684,6 +1753,7 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(self.name)
+            self._validate_existing_bucket()
             return bucket, False
         except gcp.not_found_exception() as e:
             if isinstance(self.source, str) and self.source.startswith('gs://'):
@@ -1697,7 +1767,7 @@ class GcsStore(AbstractStore):
                 # is being reconstructed for deletion or re-mount with
                 # sky start, and error is raised instead.
                 if self.sync_on_reconstruction:
-                    bucket = self._create_gcs_bucket(self.name)
+                    bucket = self._create_gcs_bucket(self.name, self.region)
                     return bucket, True
                 else:
                     # This is raised when Storage object is reconstructed for
@@ -2025,6 +2095,8 @@ class R2Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -2040,6 +2112,7 @@ class R2Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
+            self._validate_existing_bucket()
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -2441,6 +2514,8 @@ class IBMCosStore(AbstractStore):
           bool: indicates whether a new bucket was created.
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If bucket creation fails.
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -2500,7 +2575,9 @@ class IBMCosStore(AbstractStore):
                 f'{self.name}')
         else:
             # bucket exists
-            return self.s3_resource.Bucket(self.name), False
+            bucket = self.s3_resource.Bucket(self.name)
+            self._validate_existing_bucket()
+            return bucket, False
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
