@@ -164,9 +164,7 @@ class CommandRunner:
             command += [
                 # Need this `-i` option to make sure `source ~/.bashrc` work.
                 '-i',
-                shlex.quote(
-                    f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                    f'PYTHONWARNINGS=ignore && ({cmd})'),
+                shlex.quote(cmd),
             ]
         else:
             # Optimization: this reduces the time for connecting to the remote
@@ -665,7 +663,6 @@ class KubernetesCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
-        print(' '.join(command))
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
