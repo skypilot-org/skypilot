@@ -79,5 +79,8 @@ Your docker image can have all skypilot dependencies pre-installed to further re
     RUN conda create -n vllm python=3.10 -y
     SHELL ["conda", "run", "-n", "vllm", "/bin/bash", "-c"]
     RUN pip install vllm==0.3.0 transformers==4.37.2
+    # Optional: login to HugoingFace Hub for private model download
+    # RUN python -c 'import huggingface_hub; huggingface_hub.login("$HF_TOKEN")'
+    RUN python -c 'from huggingface_hub import snapshot_download; snapshot_download("$MODEL_NAME", allow_patterns=["*.safetensors", "*.bin"])'
 
 This is easier to configure than machine images, but it may have a longer startup time than machine images since it needs to pull the docker image from the registry in addition to the usual VM setup.
