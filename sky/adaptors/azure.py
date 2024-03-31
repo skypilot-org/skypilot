@@ -40,17 +40,10 @@ def get_current_account_user() -> str:
 
 
 @import_package
-def http_error_exception():
-    """HttpError exception."""
-    from azure.core import exceptions
-    return exceptions.HttpResponseError
-
-
-@import_package
-def resources_not_found_exception():
-    """ResourceNotFoundError exception."""
-    from azure.core import exceptions
-    return exceptions.ResourceNotFoundError
+def exceptions():
+    """Azure exceptions."""
+    from azure.core import exceptions as azure_exceptions
+    return azure_exceptions
 
 
 @functools.lru_cache()

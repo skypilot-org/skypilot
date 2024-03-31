@@ -164,7 +164,7 @@ class Azure(clouds.Cloud):
         try:
             image = compute_client.virtual_machine_images.get(
                 region, publisher, offer, sku, version)
-        except azure.resources_not_found_exception() as e:
+        except azure.exceptions().ResourceNotFoundError() as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Image not found: {image_id}') from e
         if image.os_disk_image is None:
