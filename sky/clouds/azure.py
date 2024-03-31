@@ -158,7 +158,6 @@ class Azure(clouds.Cloud):
             if offer == 'ubuntu-hpc':
                 return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
             else:
-                assert offer == 'ubuntu-2004', offer
                 return _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB
         compute_client = azure.get_client('compute', cls.get_project_id())
         try:
