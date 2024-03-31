@@ -590,4 +590,13 @@ You can also :ref:`use docker containers as runtime environment <docker-containe
 
     # Here goes the setup and run commands...
 
+Your docker image can have all skypilot dependencies pre-installed to further reduce the setup time. You could try building your docker image based from our base image. The `Dockerfile` could look like the following:
+
+.. code-block:: Dockerfile
+  FROM docker:berkeleyskypilot/skypilot-k8s-gpu:latest
+
+  # Your dependencies installation and model download code goes here.
+  # An example to install dependencies for vLLM:
+
+
 This is easier to configure than machine images, but it may have a longer startup time than machine images since it needs to pull the docker image from the registry.
