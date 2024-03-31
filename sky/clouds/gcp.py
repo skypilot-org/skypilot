@@ -436,7 +436,7 @@ class GCP(clouds.Cloud):
                                                              clouds='gcp')
 
         # Skydentity Hack - set image to ubuntu since debian doesn't support cloudinit
-        image_id = 'projects/deeplearning-platform-release/global/images/common-cpu-v20211105-ubuntu-1804'
+        image_id = 'projects/deeplearning-platform-release/global/images/common-cpu-v20240319-ubuntu-2004'
 
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
