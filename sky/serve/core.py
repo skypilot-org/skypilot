@@ -1,7 +1,8 @@
 """SkyServe core APIs."""
 import re
 import tempfile
-from typing import Any, Dict, List, Optional, Union
+import typing
+from typing import Any, Dict, List, Optional, Set, Union
 
 import colorama
 
@@ -12,6 +13,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds.service_catalog import common as service_catalog_common
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -23,6 +25,9 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import clouds
 
 logger = sky_logging.init_logger(__name__)
 
@@ -122,6 +127,14 @@ def up(
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
 
+    # If the controller and replicas are from the same cloud, it should
+    # provide better connectivity. We will let the controller choose from
+    # the clouds of the resources if the controller does not exist.
+    requested_clouds: Set['clouds.Cloud'] = set()
+    for resources in task.resources:
+        if resources.cloud is not None:
+            requested_clouds.add(resources.cloud)
+
     with tempfile.NamedTemporaryFile(
             prefix=f'service-task-{service_name}-',
             mode='w',
@@ -138,9 +151,11 @@ def up(
             serve_utils.generate_remote_config_yaml_file_name(service_name))
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
-        controller_resources = (controller_utils.get_controller_resources(
-            controller_type='serve',
-            controller_resources_config=serve_constants.CONTROLLER_RESOURCES))
+        controller_resources_in_config = (
+            controller_utils.get_controller_resources(
+                controller_type='serve',
+                controller_resources_config=serve_constants.CONTROLLER_RESOURCES
+            ))
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
@@ -148,6 +163,8 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
+            'modified_catalogs':
+                service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
                 'serve',
                 remote_user_config_path=remote_config_yaml_path,
@@ -160,17 +177,21 @@ def up(
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
             is not None)
-        requested_cloud = list(task.resources)[0].cloud
-        controller_cloud = (requested_cloud if not controller_exist and
-                            controller_resources.cloud is None else
-                            controller_resources.cloud)
+        if (not controller_exist and
+                controller_resources_in_config.cloud is None):
+            controller_clouds = requested_clouds
+        else:
+            controller_clouds = {controller_resources_in_config.cloud}
         # TODO(tian): Probably run another sky.launch after we get the load
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
         # any connection to the unregistered ports.
-        controller_resources = controller_resources.copy(
-            cloud=controller_cloud,
-            ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+        controller_resources = {
+            controller_resources_in_config.copy(
+                cloud=controller_cloud,
+                ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+            for controller_cloud in controller_clouds
+        }
         controller_task.set_resources(controller_resources)
 
         # # Set service_name so the backend will know to modify default ray

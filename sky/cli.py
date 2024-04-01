@@ -560,7 +560,8 @@ def _launch_with_confirm(
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
         try:
-            backend_utils.check_public_cloud_enabled()
+            sky_check.get_cached_enabled_clouds_or_refresh(
+                raise_if_no_cloud_access=True)
         except exceptions.NoCloudAccessError as e:
             # Catch the exception where the public cloud is not enabled, and
             # only print the error message without the error type.

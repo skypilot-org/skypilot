@@ -20,6 +20,7 @@ from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds.service_catalog import common as service_catalog_common
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -233,8 +234,8 @@ def _execute(
     # Requested features that some clouds support and others don't.
     requested_features = set()
 
-    if task.num_nodes > 1:
-        requested_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
+    # Add requested features from the task
+    requested_features |= task.get_required_cloud_features()
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):
@@ -679,6 +680,8 @@ def spot_launch(
             'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
             'sky_python_cmd': constants.SKY_PYTHON_CMD,
+            'modified_catalogs':
+                service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
                 'spot',
                 remote_user_config_path=remote_user_config_path,
