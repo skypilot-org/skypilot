@@ -755,9 +755,11 @@ def cleanup_ports(
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
-    if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
-        # Using default AWS SG. We only want to delete the SG that is dedicated
-        # to this cluster (i.e., this cluster have opened some ports).
+    managed_by_skypilot = provider_config['security_group'].get('ManagedBySkyPilot', True)
+    if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or not managed_by_skypilot:
+        # 1) Using default AWS SG or 2) the SG is specified by the user.
+        # We only want to delete the SG that is dedicated to this cluster (i.e.,
+        # this cluster have opened some ports).
         return
     sg = _get_sg_from_name(ec2, sg_name)
     if sg is None:
