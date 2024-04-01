@@ -10,6 +10,6 @@ resources:
   cpus: 2+
   use_spot: True
 
-workdir: tests/skyserve/spot
+workdir: tests/skyserve/restart
 
 run: python3 user_bug.py
