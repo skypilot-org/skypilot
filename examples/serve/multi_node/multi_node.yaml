@@ -16,7 +16,7 @@ num_nodes: 2
 resources:
   cloud: gcp
   ports: 8000
-  accelerators: A100:4
+  accelerators: A100:2
   use_spot: true
   memory: 64+
 
@@ -34,12 +34,14 @@ setup: |
 run: |
   conda activate vllm
   head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  num_gpus=$(($SKYPILOT_NUM_GPUS_PER_NODE*$num_nodes))
   if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
       ray start --head --port=6379  --disable-usage-stats
       sleep 60
       python -u -m vllm.entrypoints.openai.api_server \
         --model $MODEL_NAME \
-        --tensor-parallel-size 8 \
+        --tensor-parallel-size $num_gpus \
         --max-model-len 512
   else
       sleep 20
