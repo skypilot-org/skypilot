@@ -1366,8 +1366,7 @@ class S3Store(AbstractStore):
         install_cmd = mounting_utils.get_s3_mount_install_cmd()
         mount_cmd = mounting_utils.get_s3_mount_cmd(self.bucket.name,
                                                     mount_path)
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd)
+        return mounting_utils.get_mounting_script(mount_path, mount_cmd, install_cmd)
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -1806,8 +1805,9 @@ class GcsStore(AbstractStore):
                                                      mount_path)
         version_check_cmd = (
             f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd, version_check_cmd)
+        
+        return mounting_utils.get_mounting_script(mount_path, mount_cmd,
+                                                   install_cmd, version_check_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -2183,8 +2183,8 @@ class R2Store(AbstractStore):
                                                     endpoint_url,
                                                     self.bucket.name,
                                                     mount_path)
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd)
+        
+        return mounting_utils.get_mounting_script(mount_path, mount_cmd, install_cmd)                    
 
     def _create_r2_bucket(self,
                           bucket_name: str,
@@ -2610,8 +2610,8 @@ class IBMCosStore(AbstractStore):
                                                      self.bucket_rclone_profile,
                                                      self.bucket.name,
                                                      mount_path)
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd)
+        
+        return mounting_utils.get_mounting_script(mount_path, mount_cmd, install_cmd)
 
     def _create_cos_bucket(self,
                            bucket_name: str,
