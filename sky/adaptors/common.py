@@ -27,10 +27,13 @@ class LazyImport:
         # Attempt to access the attribute, if it fails, assume it's a submodule
         # and lazily import it
         try:
+            if name in self.__dict__:
+                return self.__dict__[name]
             return getattr(self.load_module(), name)
         except AttributeError:
             # Dynamically create a new LazyImport instance for the submodule
             submodule_name = f'{self._module_name}.{name}'
-            setattr(self, name,
-                    LazyImport(submodule_name, self._import_error_message))
-            return getattr(self, name)
+            lazy_submodule = LazyImport(submodule_name,
+                                        self._import_error_message)
+            setattr(self, name, lazy_submodule)
+            return lazy_submodule
