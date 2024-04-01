@@ -24,12 +24,13 @@ def get_port_mode(
     curr_kube_config = kubernetes_utils.get_current_kube_config_context_name()
     running_kind = curr_kube_config == kubernetes_utils.KIND_CONTEXT_NAME
 
+    if running_kind:
+        # If running in kind (`sky local up`), use ingress mode
+        return kubernetes_enums.KubernetesPortMode.INGRESS
+
     mode_str = mode_str or skypilot_config.get_nested(
         ('kubernetes', 'ports'),
         kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
-    mode_str = (running_kind and
-                kubernetes_enums.KubernetesPortMode.INGRESS.value) or mode_str
-
     try:
         port_mode = kubernetes_enums.KubernetesPortMode(mode_str)
     except ValueError as e:

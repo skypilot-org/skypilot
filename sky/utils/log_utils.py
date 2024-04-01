@@ -123,15 +123,6 @@ class SkyLocalUpLineProcessor(LineProcessor):
             logger.info(
                 f'{colorama.Fore.GREEN}Nginx Ingress Controller installed.'
                 f'{colorama.Style.RESET_ALL}')
-        if ('Starting patch of Nginx Ingress Controller host port...'
-                in log_line):
-            self.status_display.update(
-                '[bold cyan]Patching Nginx Ingress Controller '
-                'host port')
-        if 'Nginx Ingress Controller host port patched' in log_line:
-            logger.info(f'{colorama.Fore.GREEN}'
-                        'Nginx Ingress Controller host port patched.'
-                        f'{colorama.Style.RESET_ALL}')
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
