@@ -13,20 +13,20 @@ def launch(name: str, data_center_id: str, ssh_key: str, machine_type: str,
            tags: Dict[str, str], disk_size: int):
     """Launches an instance with the given parameters."""
     disk = cudo.cudo.Disk(storage_class='STORAGE_CLASS_NETWORK',
-                       size_gib=disk_size)
+                          size_gib=disk_size)
 
     request = cudo.cudo.CreateVMBody(ssh_key_source='SSH_KEY_SOURCE_NONE',
-                                  custom_ssh_keys=[ssh_key],
-                                  vm_id=name,
-                                  machine_type=machine_type,
-                                  data_center_id=data_center_id,
-                                  boot_disk_image_id='ubuntu-nvidia-docker',
-                                  memory_gib=memory_gib,
-                                  vcpus=vcpu_count,
-                                  gpus=gpu_count,
-                                  gpu_model=gpu_model,
-                                  boot_disk=disk,
-                                  metadata=tags)
+                                     custom_ssh_keys=[ssh_key],
+                                     vm_id=name,
+                                     machine_type=machine_type,
+                                     data_center_id=data_center_id,
+                                     boot_disk_image_id='ubuntu-nvidia-docker',
+                                     memory_gib=memory_gib,
+                                     vcpus=vcpu_count,
+                                     gpus=gpu_count,
+                                     gpu_model=gpu_model,
+                                     boot_disk=disk,
+                                     metadata=tags)
 
     try:
         api = cudo.cudo.cudo_api.virtual_machines()
