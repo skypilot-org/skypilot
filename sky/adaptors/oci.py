@@ -9,7 +9,7 @@ ENV_VAR_OCI_CONFIG = 'OCI_CONFIG'
 
 oci = common.LazyImport(
     'oci',
-    import_error_message='Fail to import dependencies for OCI. '
+    import_error_message='Failed to import dependencies for OCI. '
     'Try running: pip install "skypilot[oci]"')
 
 

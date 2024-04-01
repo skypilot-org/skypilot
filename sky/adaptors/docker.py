@@ -6,7 +6,7 @@ from sky.adaptors import common
 
 docker = common.LazyImport(
     'docker',
-    import_error_message='Fail to import dependencies for Docker. '
+    import_error_message='Failed to import dependencies for Docker. '
     'See README for how to install it.')
 
 

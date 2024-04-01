@@ -8,7 +8,7 @@ from sky.adaptors import common
 from sky.utils import env_options
 from sky.utils import ux_utils
 
-_IMPORT_ERROR_MESSAGE = ('Fail to import dependencies for Kubernetes. '
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '
                          'Try running: pip install "skypilot[kubernetes]"')
 kubernetes = common.LazyImport('kubernetes',
                                import_error_message=_IMPORT_ERROR_MESSAGE)

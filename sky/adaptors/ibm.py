@@ -15,7 +15,7 @@ from sky.adaptors import common
 CREDENTIAL_FILE = '~/.ibm/credentials.yaml'
 logger = sky_logging.init_logger(__name__)
 
-_IMPORT_ERROR_MESSAGE = ('Fail to import dependencies for IBM. '
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for IBM. '
                          'Try running: pip install "skypilot[ibm]".\n')
 ibm_vpc = common.LazyImport('ibm_vpc',
                             import_error_message=_IMPORT_ERROR_MESSAGE)

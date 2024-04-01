@@ -2,7 +2,7 @@
 
 from sky.adaptors import common
 
-_IMPORT_ERROR_MESSAGE = ('Fail to import dependencies for vSphere. '
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for vSphere. '
                          'Try running: pip install "skypilot[vsphere]"')
 vmware_vapi = common.LazyImport('vmware.vapi',
                                 import_error_message=_IMPORT_ERROR_MESSAGE)

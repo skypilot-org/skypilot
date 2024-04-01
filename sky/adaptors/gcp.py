@@ -5,7 +5,7 @@ import json
 
 from sky.adaptors import common
 
-_IMPORT_ERROR_MESSAGE = ('Fail to import dependencies for GCP. '
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '
                          'Try pip install "skypilot[gcp]"')
 googleapiclient = common.LazyImport('googleapiclient',
                                     import_error_message=_IMPORT_ERROR_MESSAGE)
