@@ -6,7 +6,9 @@ from typing import Optional
 class LazyImport:
     """Lazy importer for heavy modules or cloud modules only when enabled."""
 
-    def __init__(self, module_name: str, import_error_message: Optional[str] = None):
+    def __init__(self,
+                 module_name: str,
+                 import_error_message: Optional[str] = None):
         self._module_name = module_name
         self._module = None
         self._import_error_message = import_error_message
