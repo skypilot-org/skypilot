@@ -1,0 +1,40 @@
+resources:
+  cpus: 8+ #  No GPUs necessary for Ollama!
+  memory: 32+
+  ports: 8888
+
+envs:
+  MODEL_NAME: llama2 # mistral, phi, other ollama supported models
+  OLLAMA_HOST: 0.0.0.0:8888
+
+setup: |
+  # Install Ollama
+  sudo curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/bin/ollama
+  sudo chmod +x /usr/bin/ollama
+  
+  # Start `ollama serve` and capture PID to kill it after pull is done
+  ollama serve &
+  OLLAMA_PID=$!
+  
+  # Wait for ollama to be ready
+  IS_READY=false
+  for i in {1..20};
+    do ollama list && IS_READY=true && break;
+    sleep 5;
+  done
+  if [ "$IS_READY" = false ]; then
+      echo "Ollama was not ready after 100 seconds. Exiting."
+      exit 1
+  fi
+  
+  # Pull the model
+  ollama pull $MODEL_NAME
+  echo "Model $MODEL_NAME pulled successfully."
+  
+  # Kill `ollama serve` after pull is done
+  kill $OLLAMA_PID
+
+run: |
+  # Run `ollama serve` in the foreground
+  echo "Serve model $MODEL_NAME"
+  ollama serve
