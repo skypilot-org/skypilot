@@ -12,3 +12,8 @@ pip install "skypilot-nightly[all]"
 For detailed installation instructions, please refer to the [installation guide](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
 
 Once installed, run `sky check` to verify you have cloud access.
+
+💡Tip: if you do not have any cloud access, you can run this recipe on your local machine
+by creating a local Kubernetes cluster with `sky local up`. 
+
+### Running Ollama with SkyPilot

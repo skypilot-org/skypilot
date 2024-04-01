@@ -1,6 +1,6 @@
 resources:
-  cpus: 8+ #  No GPUs necessary for Ollama!
-  memory: 32+
+  cpus: 4+ #  No GPUs necessary for Ollama!
+  memory: 8+
   ports: 8888
 
 envs:
@@ -9,7 +9,12 @@ envs:
 
 setup: |
   # Install Ollama
-  sudo curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/bin/ollama
+  if [ "$(uname -m)" == "aarch64" ]; then
+    # For apple silicon support
+    sudo curl -L https://ollama.com/download/ollama-linux-arm64 -o /usr/bin/ollama
+  else
+    sudo curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/bin/ollama
+  fi
   sudo chmod +x /usr/bin/ollama
   
   # Start `ollama serve` and capture PID to kill it after pull is done
