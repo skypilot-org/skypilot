@@ -191,7 +191,7 @@ def _should_use_spot(task_yaml: str,
     ]
     # Either resources all use spot or none use spot.
     assert len(spot_use_resources) in [0, len(task.resources)]
-    return spot_use_resources == len(task.resources)
+    return len(spot_use_resources) == len(task.resources)
 
 
 def with_lock(func):
