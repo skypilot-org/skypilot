@@ -126,7 +126,7 @@ class LazyDataFrame:
 
     def __init__(self, filename: str):
         self._filename = filename
-        self._df = None
+        self._df: Optional['pd.DataFrame'] = None
 
     def _load_df(self) -> 'pd.DataFrame':
         if self._df is None:
