@@ -715,7 +715,7 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
         if info['status'] == serve_state.ReplicaStatus.READY:
             ready_replica_num += 1
         # TODO(MaoZiming): add a column showing failed replicas number.
-        if info['status'] != serve_state.ReplicaStatus.FAILED:
+        if info['status'] not in serve_state.ReplicaStatus.failed_statuses():
             total_replica_num += 1
     return f'{ready_replica_num}/{total_replica_num}'
 

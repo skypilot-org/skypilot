@@ -101,6 +101,15 @@ class ReplicaStatus(enum.Enum):
     # The replica VM is once failed and has been deleted.
     FAILED = 'FAILED'
 
+    # The replica fails due to healthiness check.
+    FAILED_PROBE = 'FAILED_PROBE'
+
+    # The replica fails during launching
+    FAILED_PROVISION = 'FAILED_PROVISION'
+
+    # The replica fails due to the failure of user app.
+    FAILED_USER_APP = 'FAILED_USER_APP'
+
     # `sky.down` failed during service teardown.
     # This could mean resource leakage.
     # TODO(tian): This status should be removed in the future, at which point
@@ -145,6 +154,9 @@ _REPLICA_STATUS_TO_COLOR = {
     ReplicaStatus.NOT_READY: colorama.Fore.YELLOW,
     ReplicaStatus.SHUTTING_DOWN: colorama.Fore.MAGENTA,
     ReplicaStatus.FAILED: colorama.Fore.RED,
+    ReplicaStatus.FAILED_PROBE: colorama.Fore.RED,
+    ReplicaStatus.FAILED_USER_APP: colorama.Fore.RED,
+    ReplicaStatus.FAILED_PROVISION: colorama.Fore.RED,
     ReplicaStatus.FAILED_CLEANUP: colorama.Fore.RED,
     ReplicaStatus.PREEMPTED: colorama.Fore.MAGENTA,
     ReplicaStatus.UNKNOWN: colorama.Fore.RED,
@@ -171,7 +183,10 @@ class ServiceStatus(enum.Enum):
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
     # At least one replica is failed and no replica is ready
+    # Deprecated: Failed state will be renamed to CrashLoop
     FAILED = 'FAILED'
+
+    CRASH_LOOP = 'CRASH_LOOP'
 
     # Clean up failed
     FAILED_CLEANUP = 'FAILED_CLEANUP'
@@ -200,7 +215,7 @@ class ServiceStatus(enum.Enum):
             return cls.READY
         if sum(status2num[status]
                for status in ReplicaStatus.failed_statuses()) > 0:
-            return cls.FAILED
+            return cls.CRASH_LOOP
         # When min_replicas = 0, there is no (provisioning) replica.
         if len(replica_statuses) == 0:
             return cls.NO_REPLICA
@@ -213,6 +228,7 @@ _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.CONTROLLER_FAILED: colorama.Fore.RED,
     ServiceStatus.READY: colorama.Fore.GREEN,
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
+    ServiceStatus.CRASH_LOOP: colorama.Fore.RED,
     ServiceStatus.FAILED: colorama.Fore.RED,
     ServiceStatus.FAILED_CLEANUP: colorama.Fore.RED,
     ServiceStatus.NO_REPLICA: colorama.Fore.MAGENTA,

@@ -3276,11 +3276,11 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
                 name, [(1, True, 'SHUTTING_DOWN'),
                        (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
             f's=$(sky serve status {name}); echo "$s";'
-            'until echo "$s" | grep -A2 "Service Replicas" | grep "FAILED"; '
+            'until echo "$s" | grep -A2 "Service Replicas" | grep "FAILED_USER_APP"; '
             'do echo "Waiting for first service to be FAILED..."; '
             f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
             + _check_replica_in_status(
-                name, [(1, True, 'FAILED'),
+                name, [(1, True, 'FAILED_USER_APP'),
                        (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
         ],
         _TEARDOWN_SERVICE.format(name=name),

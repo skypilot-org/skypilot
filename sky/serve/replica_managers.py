@@ -330,20 +330,20 @@ class ReplicaStatusProperty:
                 return serve_state.ReplicaStatus.FAILED_CLEANUP
             if self.user_app_failed:
                 # Failed on user setup/run
-                return serve_state.ReplicaStatus.FAILED
+                return serve_state.ReplicaStatus.FAILED_USER_APP
             if self.sky_launch_status == ProcessStatus.FAILED:
                 # sky.launch failed
-                return serve_state.ReplicaStatus.FAILED
+                return serve_state.ReplicaStatus.FAILED_PROVISION
             if self.first_ready_time is None:
                 # readiness probe is not executed yet, but a scale down is
                 # triggered.
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
             if self.first_ready_time == -1:
                 # initial delay seconds exceeded
-                return serve_state.ReplicaStatus.FAILED
+                return serve_state.ReplicaStatus.FAILED_PROBE
             if not self.service_ready_now:
                 # Max continuous failure exceeded
-                return serve_state.ReplicaStatus.FAILED
+                return serve_state.ReplicaStatus.FAILED_PROBE
             # This indicate it is a scale_down with correct teardown.
             # Should have been cleaned from the replica table.
             return serve_state.ReplicaStatus.UNKNOWN
