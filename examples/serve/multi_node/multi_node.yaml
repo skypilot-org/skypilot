@@ -1,15 +1,18 @@
 # SkyServe YAML to launch a service where each replica contains multiple nodes.
 # Preemption of one node will cause the replica to be preempted and new replica to be launched.
 
-service:
-  readiness_probe: 
-    path: /v1/models
-    initial_delay_seconds: 6000
-  replicas: 1
-
 envs:
   MODEL_NAME: meta-llama/Llama-2-70b-hf
   HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
+
+service:
+  readiness_probe: 
+    path: /v1/completions
+    post_data:
+      model: $MODEL_NAME
+      prompt: "Hello world,"
+      max_tokens: 7
+  replicas: 1
 
 num_nodes: 2
 
