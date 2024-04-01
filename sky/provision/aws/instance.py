@@ -612,8 +612,9 @@ def terminate_instances(
     instances.terminate()
     if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
             not managed_by_skypilot):
-        # Using default AWS SG. We don't need to wait for the
-        # termination of the instances.
+        # Using default AWS SG or user specified security group. We don't need
+        # to wait for the termination of the instances, as we do not need to
+        # delete the SG.
         return
     # If ports are specified, we need to delete the newly created Security
     # Group. Here we wait for all instances to be terminated, since the
