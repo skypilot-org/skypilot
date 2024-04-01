@@ -8,14 +8,15 @@ service:
   replicas: 1
 
 envs:
-  MODEL_NAME: facebook/opt-13b
+  MODEL_NAME: meta-llama/Llama-2-70b-hf
+  HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
 
 num_nodes: 2
 
 resources:
   cloud: gcp
   ports: 8000
-  accelerators: V100:2
+  accelerators: A100:4
   use_spot: true
   memory: 64+
 
@@ -23,22 +24,22 @@ setup: |
   conda create -n vllm python=3.11 -y
   conda activate vllm
   pip install -U "ray[default]"
+  pip install transformers
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
   # Need to install vllm from source.
-  git clone https://github.com/vllm-project/vllm.git
-  cd vllm
-  pip install -v -e .
+  pip install git+https://github.com/vllm-project/vllm.git@563c1d7ec56aa0f9fdc28720f3517bf9297f5476
+
 
 run: |
   conda activate vllm
   head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
-  cd vllm
   if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
       ray start --head --port=6379  --disable-usage-stats
       sleep 60
       python -u -m vllm.entrypoints.openai.api_server \
         --model $MODEL_NAME \
-        --tensor-parallel-size 4 \
+        --tensor-parallel-size 8 \
         --max-model-len 512
   else
       sleep 20
