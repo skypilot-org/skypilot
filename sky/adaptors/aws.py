@@ -32,6 +32,7 @@ import functools
 import logging
 import threading
 import time
+import os
 from typing import Any, Callable
 
 from sky.utils import common_utils
@@ -120,7 +121,14 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
             # and we are not sure if the code inside 'session()' or
             # 'session().xx()' is thread-safe.
             with _session_creation_lock:
-                return creation_fn_or_cls()
+                if object_name == 'session':
+                    aws_access_key_id = os.environ.get('TENSORFUSE_AWS_ACCESS_KEY_ID')
+                    aws_secret_access_key = os.environ.get('TENSORFUSE_AWS_SECRET_ACCESS_KEY')
+                    print(f'SESSION CREATED, ID = {aws_access_key_id}, SECRET = {aws_secret_access_key}')
+                    return creation_fn_or_cls(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
+                else:
+                    print("CREATING OTHER OBJECT TYPE")
+                    return creation_fn_or_cls()
         except (botocore_exceptions().CredentialRetrievalError,
                 botocore_exceptions().NoCredentialsError) as e:
             attempt += 1
