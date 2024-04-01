@@ -3268,7 +3268,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             f's=$(sky serve status {name}); echo "$s";'
             'until echo "$s" | grep -A2 "Service Replicas" | grep "SHUTTING_DOWN"; '
             'do echo "Waiting for first service to be SHUTTING DOWN..."; '
-            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; sleep 20; '
+            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; sleep 10; '
             + _SERVE_STATUS_WAIT.format(name=name) +
             # When the first replica is detected failed, the controller will
             # start to provision a new replica, and shut down the first one.
