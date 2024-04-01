@@ -8,7 +8,7 @@ from sky.adaptors import common
 
 azure = common.LazyImport(
     'azure',
-    import_error_message=('Fail to import dependencies for Azure.'
+    import_error_message=('Failed to import dependencies for Azure.'
                           'Try pip install "skypilot[azure]"'))
 _session_creation_lock = threading.RLock()
 

@@ -2,13 +2,13 @@
 import typing
 from typing import List
 
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.clouds.service_catalog import common
 
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 
 def resource_diff(original_df: 'pd.DataFrame', new_df: 'pd.DataFrame',

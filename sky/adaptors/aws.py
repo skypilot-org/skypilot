@@ -39,7 +39,7 @@ from sky.utils import common_utils
 
 logger = logging.getLogger(__name__)
 
-_IMPORT_ERROR_MESSAGE = ('Fail to import dependencies for AWS. '
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for AWS. '
                          'Try pip install "skypilot[aws]"')
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
 botocore = common.LazyImport('botocore',

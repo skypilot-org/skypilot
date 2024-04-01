@@ -11,7 +11,7 @@ import filelock
 import requests
 
 from sky import sky_logging
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.clouds import cloud_registry
 from sky.clouds.service_catalog import constants
@@ -21,7 +21,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 logger = sky_logging.init_logger(__name__)
 

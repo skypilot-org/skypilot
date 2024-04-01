@@ -14,12 +14,12 @@ import urllib
 import numpy as np
 import requests
 
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 US_REGIONS = {
     'centralus',

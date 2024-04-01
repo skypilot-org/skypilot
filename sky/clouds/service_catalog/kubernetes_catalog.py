@@ -7,7 +7,7 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
@@ -16,7 +16,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 _PULL_FREQUENCY_HOURS = 7
 

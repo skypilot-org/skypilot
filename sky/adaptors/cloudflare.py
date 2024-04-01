@@ -10,7 +10,7 @@ from typing import Dict, Optional, Tuple
 from sky.adaptors import common
 from sky.utils import ux_utils
 
-_IMPORT_ERROR_MESSAGE = ('Fail to import dependencies for Cloudflare.'
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Cloudflare.'
                          'Try pip install "skypilot[cloudflare]"')
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
 botocore = common.LazyImport('botocore',
