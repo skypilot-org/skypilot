@@ -588,6 +588,8 @@ def terminate_instances(
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     sg_name = provider_config['security_group']['GroupName']
+    managed_by_skypilot = provider_config['security_group'].get(
+        'ManagedBySkyPilot', True)
     ec2 = _default_ec2_resource(region)
     filters = [
         {
@@ -608,7 +610,8 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances.terminate()
-    if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
+    if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
+            not managed_by_skypilot):
         # Using default AWS SG. We don't need to wait for the
         # termination of the instances.
         return
