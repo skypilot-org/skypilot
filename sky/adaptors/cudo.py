@@ -10,4 +10,4 @@ cudo_sdk = common.LazyImport(
 
 def cudo():
     """Return the Cudo Compute package."""
-    return cudo_sdk.load_module()
+    return cudo_sdk

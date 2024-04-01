@@ -173,11 +173,9 @@ def client(service_name: str, **kwargs):
 
 def botocore_exceptions():
     """AWS botocore exception."""
-    from botocore import exceptions
-    return exceptions
+    return botocore.exceptions
 
 
 def botocore_config():
     """AWS botocore exception."""
-    from botocore import config
-    return config
+    return botocore.config

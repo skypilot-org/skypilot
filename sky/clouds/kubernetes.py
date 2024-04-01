@@ -378,7 +378,7 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
-        k8s = kubernetes.get_kubernetes()
+        k8s = kubernetes.kubernetes
         try:
             _, current_context = k8s.config.list_kube_config_contexts()
             if 'namespace' in current_context['context']:
