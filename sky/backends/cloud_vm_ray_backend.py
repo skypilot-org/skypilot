@@ -1,4 +1,5 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
+import base64
 import copy
 import enum
 import getpass
@@ -8,7 +9,6 @@ import math
 import os
 import pathlib
 import re
-import shlex
 import signal
 import subprocess
 import sys
@@ -3112,7 +3112,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
-        create_script_code = (f'{{ echo {shlex.quote(codegen)} > '
+        encoded_script = base64.b64encode(
+            codegen.encode('utf-8')).decode('utf-8')
+        create_script_code = (f'{{ echo "{encoded_script}" | base64 --decode > '
                               f'{script_path}; }}')
         job_submit_cmd = (
             f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
