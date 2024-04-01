@@ -6,6 +6,7 @@ service:
     min_replicas: 2
     max_replicas: 3
     dynamic_ondemand_fallback: true
+    target_qps_per_replica: 1
 
 resources:
   ports: 8080
