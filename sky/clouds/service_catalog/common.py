@@ -118,7 +118,10 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
 
 
 class LazyDataFrame:
-    """A lazy data frame that reads the catalog on demand."""
+    """A lazy data frame that reads the catalog on demand.
+    We don't need to load the catalog for every SkyPilot call, and this class
+    allows us to load the catalog only when needed.
+    """
 
     def __init__(self, filename: str):
         self._filename = filename

@@ -5,7 +5,7 @@ from typing import Optional
 
 class LazyImport:
     """Lazy importer for heavy modules or cloud modules only when enabled.
-    
+
     We use this for pandas and networkx in SkyPilot module, as they can be time-
     consuming to import (0.1-0.2 seconds). With this module, we can avoid the
     unnecessary import time when the module is not used.
