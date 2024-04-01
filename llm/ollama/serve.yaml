@@ -1,10 +1,41 @@
+# Run LLMs on CPUs with Ollama
+#
+# Usage:
+#
+#  sky launch ollama.yaml -c dbrx --env MODEL_NAME=
+#
+# curl /v1/chat/completions:
+#
+#   IP=$(sky status --endpoints ollama)
+#   curl $IP:8081/v1/models
+#   curl http://$IP:8081/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -d '{
+#       "model": "databricks/dbrx-instruct",
+#       "messages": [
+#         {
+#           "role": "system",
+#           "content": "You are a helpful assistant."
+#         },
+#         {
+#           "role": "user",
+#           "content": "Who are you?"
+#         }
+#       ]
+#     }'
+#
+# Chat with model with Gradio UI:
+#
+#   Running on local URL:  http://127.0.0.1:8811
+#   Running on public URL: https://<hash>.gradio.live
+
 resources:
-  cpus: 4+ #  No GPUs necessary for Ollama!
-  memory: 8+
+  cpus: 4+  # No GPUs necessary for Ollama!
+  memory: 8+  # 8 GB+ for 7B models, 16 GB+ for 13B models, 32 GB+ for 33B models
   ports: 8888
 
 envs:
-  MODEL_NAME: llama2 # mistral, phi, other ollama supported models
+  MODEL_NAME: llama2  # mistral, phi, other ollama supported models
   OLLAMA_HOST: 0.0.0.0:8888
 
 setup: |
