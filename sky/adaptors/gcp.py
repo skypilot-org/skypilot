@@ -24,16 +24,12 @@ def build(service_name: str, version: str, *args, **kwargs):
 
 
 def storage_client():
-    """Helper method that connects to GCS Storage Client for
-    GCS Bucket
-    """
+    """Connects to GCS Storage Client for GCS Bucket"""
     return google.cloud.storage.Client()
 
 
 def anonymous_storage_client():
-    """Helper method that connects to GCS Storage Client for
-    Public GCS Buckets
-    """
+    """Connects to GCS Storage Client for Public GCS Buckets"""
     return google.cloud.storage.Client.create_anonymous_client()
 
 
