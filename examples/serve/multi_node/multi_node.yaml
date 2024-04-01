@@ -18,7 +18,6 @@ service:
 num_nodes: 2
 
 resources:
-  cloud: gcp
   ports: 8000
   accelerators: A100:2
   use_spot: true
@@ -27,8 +26,8 @@ resources:
 setup: |
   conda create -n vllm python=3.11 -y
   conda activate vllm
-  pip install -U "ray[default]"
-  pip install transformers
+  pip install "ray[default]==2.10.0"
+  pip install "transformers==4.39.2"
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
   # Need to install vllm from source.
