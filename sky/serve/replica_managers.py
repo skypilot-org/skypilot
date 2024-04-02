@@ -259,7 +259,7 @@ class ReplicaStatusProperty:
             # sky_launch_status == RUNNING: a scale down happened before
             # the sky.launch finished.
             return self.sky_launch_status != ProcessStatus.FAILED
-        if self.first_ready_time is not None:
+        if self.first_ready_time is not None and self.first_ready_time >= 0.0:
             # If the service is ever up, we assume there is no bug in the user
             # code and the scale down is successful, thus enabling the
             # controller to remove the replica from the replica table and auto
@@ -271,6 +271,8 @@ class ReplicaStatusProperty:
             return True
         if self.user_app_failed:
             return False
+        if self.first_ready_time is None:
+            return True
         if not self.service_ready_now:
             return False
         return self.first_ready_time >= 0.0

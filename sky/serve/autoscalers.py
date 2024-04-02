@@ -117,20 +117,21 @@ class Autoscaler:
     def _dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
         raise NotImplementedError
-    
+
     def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
         states = {'latset_version_ever_ready': self.latest_version_ever_ready}
         states.update(self._dump_dynamic_states())
         return states
 
-    def _load_dynamic_states(dynamic_states: Dict[str, Any]) -> None:
+    def _load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         """Load dynamic states to autoscaler."""
         raise NotImplementedError
 
     def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         """Load dynamic states to autoscaler."""
-        self.latest_version_ever_ready = dynamic_states.pop('latest_version_ever_ready', constants.INITIAL_VERSION)
+        self.latest_version_ever_ready = dynamic_states.pop(
+            'latest_version_ever_ready', constants.INITIAL_VERSION)
         self._load_dynamic_states(dynamic_states)
 
 
@@ -396,7 +397,8 @@ class RequestRateAutoscaler(Autoscaler):
                     latest_nonterminal_replicas.append(info)
                     if info.is_ready:
                         self.latest_version_ever_ready = self.latest_version
-                elif (info.status_property.unrecoverable_failure() and self.latest_version_ever_ready < self.latest_version):
+                elif (info.status_property.unrecoverable_failure() and
+                      self.latest_version_ever_ready < self.latest_version):
                     # Stop scaling if one of replica of the latest version
                     # failed, it is likely that a fatal error happens to the
                     # user application and may lead to a infinte termination

@@ -3089,9 +3089,7 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
     for check_tuple in check_tuples:
         count, is_spot, status = check_tuple
         resource_str = ''
-        if status not in [
-                'PENDING', 'SHUTTING_DOWN', 'FAILED', 'FAILED_USER_APP'
-        ]:
+        if status not in ['PENDING', 'SHUTTING_DOWN', 'FAILED']:
             spot_str = ''
             if is_spot:
                 spot_str = '\[Spot\]'
@@ -3272,11 +3270,11 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             'do echo "Waiting for first service to be SHUTTING DOWN..."; '
             f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; ',
             f's=$(sky serve status {name}); echo "$s";'
-            'until echo "$s" | grep -A2 "Service Replicas" | grep "FAILED_USER_APP"; '
+            'until echo "$s" | grep -A2 "Service Replicas" | grep "FAILED"; '
             'do echo "Waiting for first service to be FAILED..."; '
             f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
             + _check_replica_in_status(
-                name, [(1, True, 'FAILED_USER_APP'),
+                name, [(1, True, 'FAILED'),
                        (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
         ],
         _TEARDOWN_SERVICE.format(name=name),

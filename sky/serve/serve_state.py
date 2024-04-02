@@ -110,7 +110,6 @@ class ReplicaStatus(enum.Enum):
     # The replica fails during launching
     FAILED_PROVISION = 'FAILED_PROVISION'
 
-
     # `sky.down` failed during service teardown.
     # This could mean resource leakage.
     # TODO(tian): This status should be removed in the future, at which point
@@ -126,14 +125,14 @@ class ReplicaStatus(enum.Enum):
     @classmethod
     def failed_statuses(cls) -> List['ReplicaStatus']:
         return [
-            cls.FAILED, cls.FAILED_CLEANUP, cls.FAILED_INITIAL_DELAY, cls.FAILED_PROBING,
-            cls.FAILED_PROVISION, cls.UNKNOWN
+            cls.FAILED, cls.FAILED_CLEANUP, cls.FAILED_INITIAL_DELAY,
+            cls.FAILED_PROBING, cls.FAILED_PROVISION, cls.UNKNOWN
         ]
 
     @classmethod
     def terminal_statuses(cls) -> List['ReplicaStatus']:
-        return [
-            cls.SHUTTING_DOWN, cls.PREEMPTED, cls.UNKNOWN] + cls.failed_statuses()
+        return [cls.SHUTTING_DOWN, cls.PREEMPTED, cls.UNKNOWN
+               ] + cls.failed_statuses()
 
     @classmethod
     def scale_down_decision_order(cls) -> List['ReplicaStatus']:
