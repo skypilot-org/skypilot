@@ -11,27 +11,10 @@ _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '
 googleapiclient = common.LazyImport('googleapiclient',
                                     import_error_message=_IMPORT_ERROR_MESSAGE)
 google = common.LazyImport('google', import_error_message=_IMPORT_ERROR_MESSAGE)
+_LAZY_MODULES = (google, googleapiclient)
 
 
-def import_package(func):
-    # import_package decorator is to check the dependencies and output user-
-    # friendly error messages if the dependencies are not installed before any
-    # function is called.
-
-    # We cannot use LazyImport for the underlying google.cloud.storage, because
-    # google.cloud can be imported but google.cloud.storage cannot be retrieved
-    # with getattr(google.cloud, 'storage').
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        google.load_module()
-        googleapiclient.load_module()
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def build(service_name: str, version: str, *args, **kwargs):
     """Build a GCP service.
 
@@ -43,7 +26,7 @@ def build(service_name: str, version: str, *args, **kwargs):
     return discovery.build(service_name, version, *args, **kwargs)
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def storage_client():
     """Helper method that connects to GCS Storage Client for
     GCS Bucket
@@ -52,7 +35,7 @@ def storage_client():
     return storage.Client()
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def anonymous_storage_client():
     """Helper method that connects to GCS Storage Client for
     Public GCS Buckets
@@ -61,35 +44,35 @@ def anonymous_storage_client():
     return storage.Client.create_anonymous_client()
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def not_found_exception():
     """NotFound exception."""
     from google.api_core import exceptions as gcs_exceptions
     return gcs_exceptions.NotFound
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def forbidden_exception():
     """Forbidden exception."""
     from google.api_core import exceptions as gcs_exceptions
     return gcs_exceptions.Forbidden
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def http_error_exception():
     """HttpError exception."""
     from googleapiclient import errors
     return errors.HttpError
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def credential_error_exception():
     """CredentialError exception."""
     from google.auth import exceptions
     return exceptions.DefaultCredentialsError
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def get_credentials(cred_type: str, credentials_field: str):
     """Get GCP credentials."""
     from google.oauth2 import service_account

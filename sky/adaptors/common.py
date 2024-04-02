@@ -1,14 +1,15 @@
 """Lazy import for modules to avoid import error when not used."""
+import functools
 import importlib
-from typing import Optional
+from typing import Tuple, Optional
 
 
 class LazyImport:
     """Lazy importer for heavy modules or cloud modules only when enabled.
 
-    We use this for pandas and networkx in SkyPilot module, as they can be time-
-    consuming to import (0.1-0.2 seconds). With this module, we can avoid the
-    unnecessary import time when the module is not used.
+    We use this for pandas and networkx, as they can be time-consuming to import
+    (0.1-0.2 seconds). With this class, we can avoid the unnecessary import time
+    when the module is not used.
 
     We also use this for cloud adaptors, because we do not want to import the
     cloud dependencies when it is not enabled.
@@ -45,3 +46,19 @@ class LazyImport:
                                         self._import_error_message)
             setattr(self, name, lazy_submodule)
             return lazy_submodule
+
+
+def load_lazy_modules(modules: Tuple[LazyImport, ...]):
+    """Load lazy modules to before entering a function to error out quickly."""
+
+    def decorator(func):
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for m in modules:
+                m.load_module()
+            return func(*args, **kwargs)
+
+        return wrapper
+    
+    return decorator

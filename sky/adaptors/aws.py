@@ -37,13 +37,14 @@ from typing import Any, Callable
 from sky.adaptors import common
 from sky.utils import common_utils
 
-logger = logging.getLogger(__name__)
-
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for AWS. '
                          'Try pip install "skypilot[aws]"')
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
 botocore = common.LazyImport('botocore',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
+_LAZY_MODULES = (boto3, botocore)
+
+logger = logging.getLogger(__name__)
 _session_creation_lock = threading.RLock()
 
 version = 1
@@ -171,11 +172,15 @@ def client(service_name: str, **kwargs):
                               'client')
 
 
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
-    return botocore.exceptions
+    from botocore import exceptions
+    return exceptions
 
 
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def botocore_config():
     """AWS botocore exception."""
-    return botocore.config
+    from botocore import config
+    return config

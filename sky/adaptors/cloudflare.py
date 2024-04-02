@@ -15,6 +15,8 @@ _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Cloudflare.'
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
 botocore = common.LazyImport('botocore',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
+_LAZY_MODULES = (boto3, botocore)
+
 _session_creation_lock = threading.RLock()
 ACCOUNT_ID_PATH = '~/.cloudflare/accountid'
 R2_CREDENTIALS_PATH = '~/.cloudflare/r2.credentials'
@@ -124,6 +126,7 @@ def client(service_name: str, region):
         region_name=region)
 
 
+@common.load_lazy_modules(_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
     from botocore import exceptions
