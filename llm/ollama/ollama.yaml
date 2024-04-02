@@ -2,16 +2,15 @@
 #
 # Usage:
 #
-#  sky launch ollama.yaml -c dbrx --env MODEL_NAME=
+#  sky launch ollama.yaml -c ollama --env MODEL_NAME=llama2
 #
 # curl /v1/chat/completions:
 #
-#   IP=$(sky status --endpoints ollama)
-#   curl $IP:8081/v1/models
-#   curl http://$IP:8081/v1/chat/completions \
+#   ENDPOINT=$(sky status --endpoint 8888 ollama)
+#   curl $ENDPOINT/v1/chat/completions \
 #     -H "Content-Type: application/json" \
 #     -d '{
-#       "model": "databricks/dbrx-instruct",
+#       "model": "llama2",
 #       "messages": [
 #         {
 #           "role": "system",
@@ -23,20 +22,27 @@
 #         }
 #       ]
 #     }'
-#
-# Chat with model with Gradio UI:
-#
-#   Running on local URL:  http://127.0.0.1:8811
-#   Running on public URL: https://<hash>.gradio.live
-
-resources:
-  cpus: 4+  # No GPUs necessary for Ollama!
-  memory: 8+  # 8 GB+ for 7B models, 16 GB+ for 13B models, 32 GB+ for 33B models
-  ports: 8888
 
 envs:
   MODEL_NAME: llama2  # mistral, phi, other ollama supported models
-  OLLAMA_HOST: 0.0.0.0:8888
+  OLLAMA_HOST: 0.0.0.0:8888  # Host and port for Ollama to listen on
+
+resources:
+  cpus: 4+  # No GPUs necessary for Ollama
+  memory: 8+  # 8 GB+ for 7B models, 16 GB+ for 13B models, 32 GB+ for 33B models
+  ports: 8888
+
+service:
+  replicas: 2
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
 
 setup: |
   # Install Ollama
@@ -72,5 +78,5 @@ setup: |
 
 run: |
   # Run `ollama serve` in the foreground
-  echo "Serve model $MODEL_NAME"
+  echo "Serving model $MODEL_NAME"
   ollama serve
