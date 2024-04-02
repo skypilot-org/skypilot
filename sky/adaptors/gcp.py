@@ -27,18 +27,14 @@ def build(service_name: str, version: str, *args, **kwargs):
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def storage_client():
-    """Helper method that connects to GCS Storage Client for
-    GCS Bucket
-    """
+    """Helper that connects to GCS Storage Client for GCS Bucket"""
     from google.cloud import storage
     return storage.Client()
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
 def anonymous_storage_client():
-    """Helper method that connects to GCS Storage Client for
-    Public GCS Buckets
-    """
+    """Helper that connects to GCS Storage Client for Public GCS Buckets"""
     from google.cloud import storage
     return storage.Client.create_anonymous_client()
 
