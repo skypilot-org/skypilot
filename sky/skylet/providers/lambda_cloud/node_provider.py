@@ -172,7 +172,10 @@ class LambdaNodeProvider(NodeProvider):
         self.metadata.refresh([node['id'] for node in vms])
         self._guess_and_add_missing_tags(vms)
         nodes = [_extract_metadata(vm) for vm in filter(_match_tags, vms)]
-        nodes = [node for node in nodes if node['status'] not in ['terminating', 'terminated']]
+        nodes = [
+            node for node in nodes
+            if node['status'] not in ['terminating', 'terminated']
+        ]
         subprocess_utils.run_in_parallel(_get_internal_ip, nodes)
         self.cached_nodes = {node['id']: node for node in nodes}
         return self.cached_nodes
