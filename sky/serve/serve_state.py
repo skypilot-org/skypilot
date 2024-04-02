@@ -104,7 +104,6 @@ class ReplicaStatus(enum.Enum):
     # The replica fails due to initial delay.
     FAILED_INITIAL_DELAY = 'FAILED_INITIAL_DELAY'
 
-
     # The replica fails due to healthiness check.
     FAILED_PROBING = 'FAILED_PROBING'
 
@@ -129,16 +128,17 @@ class ReplicaStatus(enum.Enum):
     @classmethod
     def failed_statuses(cls) -> List['ReplicaStatus']:
         return [
-            cls.FAILED, cls.FAILED_CLEANUP, cls.FAILED_INITIAL_DELAY, cls.FAILED_PROBING,
-            cls.FAILED_PROVISION, cls.FAILED_USER_APP, cls.UNKNOWN
+            cls.FAILED, cls.FAILED_CLEANUP, cls.FAILED_INITIAL_DELAY,
+            cls.FAILED_PROBING, cls.FAILED_PROVISION, cls.FAILED_USER_APP,
+            cls.UNKNOWN
         ]
 
     @classmethod
     def terminal_statuses(cls) -> List['ReplicaStatus']:
         return [
             cls.SHUTTING_DOWN, cls.FAILED, cls.FAILED_CLEANUP,
-            cls.FAILED_INITIAL_DELAY, cls.FAILED_PROBING, cls.FAILED_PROVISION, cls.FAILED_USER_APP,
-            cls.PREEMPTED, cls.UNKNOWN
+            cls.FAILED_INITIAL_DELAY, cls.FAILED_PROBING, cls.FAILED_PROVISION,
+            cls.FAILED_USER_APP, cls.PREEMPTED, cls.UNKNOWN
         ]
 
     @classmethod
