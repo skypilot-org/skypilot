@@ -19,6 +19,6 @@ def get_provider_name(config: dict) -> str:
     assert provider_search is not None, config
     provider_name = provider_search.group(1).lower()
     # Special handling for lambda_cloud as Lambda cloud is registered as lambda.
-    if provider_name.endswith('_cloud'):
-        provider_name = provider_name.replace('_cloud', '')
+    if provider_name == 'lambda_cloud':
+        provider_name = 'lambda'
     return provider_name
