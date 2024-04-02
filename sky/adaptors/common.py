@@ -50,7 +50,7 @@ class LazyImport:
 
 
 def load_lazy_modules(modules: Tuple[LazyImport, ...]):
-    """Load lazy modules to before entering a function to error out quickly."""
+    """Load lazy modules before entering a function to error out quickly."""
 
     def decorator(func):
 
