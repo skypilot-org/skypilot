@@ -2,7 +2,7 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch vllm.yaml -c dbrx --env HF_TOKEN
+#  HF_TOKEN=xxx sky launch dbrx.yaml -c dbrx --env HF_TOKEN
 #
 # curl /v1/chat/completions:
 #
