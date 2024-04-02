@@ -132,9 +132,9 @@ class ReplicaStatus(enum.Enum):
     @classmethod
     def terminal_statuses(cls) -> List['ReplicaStatus']:
         return [
-            cls.SHUTTING_DOWN, cls.FAILED, cls.FAILED_CLEANUP, cls.FAILED_PROBING,
-            cls.FAILED_PROVISION, cls.FAILED_USER_APP, cls.PREEMPTED,
-            cls.UNKNOWN
+            cls.SHUTTING_DOWN, cls.FAILED, cls.FAILED_CLEANUP,
+            cls.FAILED_PROBING, cls.FAILED_PROVISION, cls.FAILED_USER_APP,
+            cls.PREEMPTED, cls.UNKNOWN
         ]
 
     @classmethod

@@ -340,10 +340,10 @@ class ReplicaStatusProperty:
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
             if self.first_ready_time == -1:
                 # initial delay seconds exceeded
-                return serve_state.ReplicaStatus.FAILED_PROBE
+                return serve_state.ReplicaStatus.FAILED_PROBING
             if not self.service_ready_now:
                 # Max continuous failure exceeded
-                return serve_state.ReplicaStatus.FAILED_PROBE
+                return serve_state.ReplicaStatus.FAILED_PROBING
             # This indicate it is a scale_down with correct teardown.
             # Should have been cleaned from the replica table.
             return serve_state.ReplicaStatus.UNKNOWN
