@@ -280,6 +280,7 @@ class Lambda(clouds.Cloud):
             'booting': status_lib.ClusterStatus.INIT,
             'active': status_lib.ClusterStatus.UP,
             'unhealthy': status_lib.ClusterStatus.INIT,
+            'terminating': None,
             'terminated': None,
         }
         # TODO(ewzeng): filter by hash_filter_string to be safe
