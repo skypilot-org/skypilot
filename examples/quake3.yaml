@@ -1,3 +1,7 @@
+# Run quake3js server in the sky!
+# Usage
+#   sky launch -c quake3 examples/quake3.yaml
+
 resources:
   cpus: 8+
   ports:
