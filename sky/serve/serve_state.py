@@ -183,10 +183,7 @@ class ServiceStatus(enum.Enum):
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
     # At least one replica is failed and no replica is ready
-    # Deprecated: Failed state will be renamed to CrashLoop
     FAILED = 'FAILED'
-
-    CRASH_LOOP = 'CRASH_LOOP'
 
     # Clean up failed
     FAILED_CLEANUP = 'FAILED_CLEANUP'
@@ -215,7 +212,7 @@ class ServiceStatus(enum.Enum):
             return cls.READY
         if sum(status2num[status]
                for status in ReplicaStatus.failed_statuses()) > 0:
-            return cls.CRASH_LOOP
+            return cls.FAILED
         # When min_replicas = 0, there is no (provisioning) replica.
         if len(replica_statuses) == 0:
             return cls.NO_REPLICA
@@ -228,7 +225,6 @@ _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.CONTROLLER_FAILED: colorama.Fore.RED,
     ServiceStatus.READY: colorama.Fore.GREEN,
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
-    ServiceStatus.CRASH_LOOP: colorama.Fore.RED,
     ServiceStatus.FAILED: colorama.Fore.RED,
     ServiceStatus.FAILED_CLEANUP: colorama.Fore.RED,
     ServiceStatus.NO_REPLICA: colorama.Fore.MAGENTA,
