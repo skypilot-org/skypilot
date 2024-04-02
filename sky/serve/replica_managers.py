@@ -352,7 +352,7 @@ class ReplicaStatusProperty:
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
             if self.first_ready_time == -1:
                 # initial delay seconds exceeded
-                return serve_state.ReplicaStatus.FAILED_PROBING
+                return serve_state.ReplicaStatus.FAILED_INITIAL_DELAY
             if not self.service_ready_now:
                 # Max continuous failure exceeded
                 return serve_state.ReplicaStatus.FAILED_PROBING
