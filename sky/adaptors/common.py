@@ -1,7 +1,7 @@
 """Lazy import for modules to avoid import error when not used."""
 import functools
 import importlib
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 
 class LazyImport:
@@ -33,7 +33,7 @@ class LazyImport:
                 raise
         return self._module
 
-    def __getattr__(self, name):
+    def __getattr__(self, name) -> Any:
         # Attempt to access the attribute, if it fails, assume it's a submodule
         # and lazily import it
         try:

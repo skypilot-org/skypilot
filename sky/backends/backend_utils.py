@@ -745,7 +745,7 @@ def write_cluster_config(
         cluster_name: str,
         local_wheel_path: pathlib.Path,
         wheel_hash: str,
-        region: Optional[clouds.Region] = None,
+        region: clouds.Region,
         zones: Optional[List[clouds.Zone]] = None,
         dryrun: bool = False,
         keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:

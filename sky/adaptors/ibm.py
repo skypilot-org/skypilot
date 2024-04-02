@@ -35,7 +35,7 @@ def read_credential_file():
                   encoding='utf-8') as f:
             return yaml.safe_load(f)
     except FileNotFoundError:
-        return False
+        return {}
 
 
 def get_api_key():

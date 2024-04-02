@@ -38,6 +38,7 @@ from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
+from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -751,7 +752,7 @@ class FailoverCloudErrorHandlerV1:
         # Sometimes, LambdaCloudError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in clouds.Lambda.regions():
+                for r in service_catalog.regions('lambda'):
                     if e.find(r.name) == -1:
                         _add_to_blocked_resources(
                             blocked_resources,
@@ -823,7 +824,7 @@ class FailoverCloudErrorHandlerV1:
         # Sometimes, SCPError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in clouds.SCP.regions():
+                for r in service_catalog.regions('scp'):
                     if e.find(r.name) == -1:
                         _add_to_blocked_resources(
                             blocked_resources,
@@ -1076,7 +1077,8 @@ class FailoverCloudErrorHandlerV2:
                     blocked_resources,
                     launchable_resources.copy(region=None, zone=None))
             elif code == 'SUBNET_NOT_FOUND_FOR_VPC':
-                if (any(acc.lower().startswith('tpu-v4')
+                if (launchable_resources.accelerators is not None and any(
+                        acc.lower().startswith('tpu-v4')
                         for acc in launchable_resources.accelerators.keys()) and
                         region.name == 'us-central2'):
                     # us-central2 is a TPU v4 only region. The subnet for
