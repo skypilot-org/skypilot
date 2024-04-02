@@ -75,6 +75,7 @@ class Autoscaler:
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
+        self.latest_version_ever_ready: int = self.latest_version
         self.update_mode = serve_utils.DEFAULT_UPDATE_MODE
 
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
@@ -113,13 +114,24 @@ class Autoscaler:
         else:
             return RequestRateAutoscaler(service_name, spec)
 
+    def _dump_dynamic_states(self) -> Dict[str, Any]:
+        """Dump dynamic states from autoscaler."""
+        raise NotImplementedError
+    
     def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
+        states = {'latset_version_ever_ready': self.latest_version_ever_ready}
+        states.update(self._dump_dynamic_states())
+        return states
+
+    def _load_dynamic_states(dynamic_states: Dict[str, Any]) -> None:
+        """Load dynamic states to autoscaler."""
         raise NotImplementedError
 
     def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         """Load dynamic states to autoscaler."""
-        raise NotImplementedError
+        self.latest_version_ever_ready = dynamic_states.pop('latest_version_ever_ready', constants.INITIAL_VERSION)
+        self._load_dynamic_states(dynamic_states)
 
 
 class RequestRateAutoscaler(Autoscaler):
@@ -382,6 +394,14 @@ class RequestRateAutoscaler(Autoscaler):
             if info.version == self.latest_version:
                 if not info.is_terminal:
                     latest_nonterminal_replicas.append(info)
+                    if info.is_ready:
+                        self.latest_version_ever_ready = self.latest_version
+                elif (info.status_property.unrecoverable_failure() and self.latest_version_ever_ready < self.latest_version):
+                    # Stop scaling if one of replica of the latest version
+                    # failed, it is likely that a fatal error happens to the
+                    # user application and may lead to a infinte termination
+                    # and restart.
+                    return []
 
         self._set_target_num_replica_with_hysteresis()
 
@@ -433,12 +453,12 @@ class RequestRateAutoscaler(Autoscaler):
             logger.info('No scaling needed.')
         return scaling_options
 
-    def dump_dynamic_states(self) -> Dict[str, Any]:
+    def _dump_dynamic_states(self) -> Dict[str, Any]:
         return {
             'request_timestamps': self.request_timestamps,
         }
 
-    def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
+    def _load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         if 'request_timestamps' in dynamic_states:
             self.request_timestamps = dynamic_states.pop('request_timestamps')
         if dynamic_states:

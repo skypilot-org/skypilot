@@ -235,7 +235,7 @@ class ReplicaStatusProperty:
     sky_launch_status: Optional[ProcessStatus] = None
     user_app_failed: bool = False
     service_ready_now: bool = False
-    # None means readiness probe is not executed yet;
+    # None means readiness probe is not succeeded yet;
     # -1 means the initial delay seconds is exceeded.
     first_ready_time: Optional[float] = None
     # None means sky.down is not called yet.
@@ -243,7 +243,7 @@ class ReplicaStatusProperty:
     # The replica's spot instance was preempted.
     preempted: bool = False
 
-    def is_scale_down_succeeded(self, initial_delay_seconds: int) -> bool:
+    def remove_terminated_replica(self) -> bool:
         """Whether to remove the replica record from the replica table.
 
         If not, the replica will stay in the replica table permanently to
@@ -251,24 +251,19 @@ class ReplicaStatusProperty:
         """
         if self.sky_launch_status == ProcessStatus.INTERRUPTED:
             return True
-        if self.sky_launch_status != ProcessStatus.SUCCEEDED:
-            # sky_launch_status == RUNNING: a scale down happened before
-            # the sky.launch finished.
-            return self.sky_launch_status != ProcessStatus.FAILED
         if self.sky_down_status != ProcessStatus.SUCCEEDED:
             return False
         if self.preempted:
             return True
-        if (self.first_ready_time is not None and
-                time.time() - self.first_ready_time > initial_delay_seconds):
-            # If the service is up for more than `initial_delay_seconds`,
-            # we assume there is no bug in the user code and the scale down
-            # is successful, thus enabling the controller to remove the
-            # replica from the replica table and auto restart the replica.
-            # Here we assume that initial_delay_seconds is larger than
-            # consecutive_failure_threshold_seconds, so if a replica is not
-            # teardown for initial_delay_seconds, it is safe to assume that
-            # it is UP for initial_delay_seconds.
+        if self.sky_launch_status != ProcessStatus.SUCCEEDED:
+            # sky_launch_status == RUNNING: a scale down happened before
+            # the sky.launch finished.
+            return self.sky_launch_status != ProcessStatus.FAILED
+        if self.first_ready_time is not None:
+            # If the service is ever up, we assume there is no bug in the user
+            # code and the scale down is successful, thus enabling the
+            # controller to remove the replica from the replica table and auto
+            # restart the replica.
             # For replica with a failed sky.launch, it is likely due to some
             # misconfigured resources, so we don't want to auto restart it.
             # For replica with a failed sky.down, we cannot restart it since
@@ -276,11 +271,28 @@ class ReplicaStatusProperty:
             return True
         if self.user_app_failed:
             return False
-        if self.first_ready_time is None:
-            return True
         if not self.service_ready_now:
             return False
         return self.first_ready_time >= 0.0
+
+    def unrecoverable_failure(self) -> bool:
+        """Whether the replica fails and cannot be recovered."""
+        if self.first_ready_time is not None:
+            # If the service is ever up, we assume there is no bug in the user
+            # code and the scale down is successful, thus enabling the
+            # controller to remove the replica from the replica table and auto
+            # restart the replica.
+            # For replica with a failed sky.launch, it is likely due to some
+            # misconfigured resources, so we don't want to auto restart it.
+            # For replica with a failed sky.down, we cannot restart it since
+            # otherwise we will have a resource leak.
+            return False
+        if self.user_app_failed:
+            return True
+        # TODO(zhwu): launch failures not related to resource unavailability
+        # should be considered as unrecoverable failure. (refer to
+        # `spot.recovery_strategy.StrategyExecutor::_launch`)
+        return False
 
     def should_track_service_status(self) -> bool:
         """Should we track the status of the replica.
@@ -330,7 +342,7 @@ class ReplicaStatusProperty:
                 return serve_state.ReplicaStatus.FAILED_CLEANUP
             if self.user_app_failed:
                 # Failed on user setup/run
-                return serve_state.ReplicaStatus.FAILED_USER_APP
+                return serve_state.ReplicaStatus.FAILED
             if self.sky_launch_status == ProcessStatus.FAILED:
                 # sky.launch failed
                 return serve_state.ReplicaStatus.FAILED_PROVISION
@@ -340,10 +352,10 @@ class ReplicaStatusProperty:
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
             if self.first_ready_time == -1:
                 # initial delay seconds exceeded
-                return serve_state.ReplicaStatus.FAILED_PROBE
+                return serve_state.ReplicaStatus.FAILED_PROBING
             if not self.service_ready_now:
                 # Max continuous failure exceeded
-                return serve_state.ReplicaStatus.FAILED_PROBE
+                return serve_state.ReplicaStatus.FAILED_PROBING
             # This indicate it is a scale_down with correct teardown.
             # Should have been cleaned from the replica table.
             return serve_state.ReplicaStatus.UNKNOWN
@@ -859,8 +871,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # initial_delay_seconds is not supported. We should add it
                 # later when we support `sky serve update`.
                 removal_reason = None
-                if info.status_property.is_scale_down_succeeded(
-                        self._get_initial_delay_seconds(info.version)):
+                if info.status_property.remove_terminated_replica():
                     # This means the cluster is deleted due to
                     # a scale down or the cluster is recovering
                     # from preemption. Delete the replica info
