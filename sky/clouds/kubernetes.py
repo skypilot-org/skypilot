@@ -64,6 +64,9 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: 'Kubernetes can'
+                                                             'not host '
+                                                             'controllers.',
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
