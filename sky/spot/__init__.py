@@ -7,6 +7,7 @@ from sky.spot.constants import SPOT_CONTROLLER_YAML_PREFIX
 from sky.spot.constants import SPOT_TASK_YAML_PREFIX
 from sky.spot.recovery_strategy import SPOT_DEFAULT_STRATEGY
 from sky.spot.recovery_strategy import SPOT_STRATEGIES
+from sky.spot.spot_state import SpotStatus
 from sky.spot.spot_utils import dump_job_table_cache
 from sky.spot.spot_utils import dump_spot_job_queue
 from sky.spot.spot_utils import format_job_table
@@ -25,6 +26,8 @@ __all__ = [
     'SPOT_CONTROLLER_TEMPLATE',
     'SPOT_CONTROLLER_YAML_PREFIX',
     'SPOT_TASK_YAML_PREFIX',
+    # Enums
+    'SpotStatus',
     # utils
     'SpotCodeGen',
     'dump_job_table_cache',
