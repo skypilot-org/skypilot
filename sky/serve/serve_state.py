@@ -101,6 +101,10 @@ class ReplicaStatus(enum.Enum):
     # The replica VM is once failed and has been deleted.
     FAILED = 'FAILED'
 
+    # The replica fails due to initial delay.
+    FAILED_INITIAL_DELAY = 'FAILED_INITIAL_DELAY'
+
+
     # The replica fails due to healthiness check.
     FAILED_PROBING = 'FAILED_PROBING'
 
@@ -125,7 +129,7 @@ class ReplicaStatus(enum.Enum):
     @classmethod
     def failed_statuses(cls) -> List['ReplicaStatus']:
         return [
-            cls.FAILED, cls.FAILED_CLEANUP, cls.FAILED_PROBING,
+            cls.FAILED, cls.FAILED_CLEANUP, cls.FAILED_INITIAL_DELAY, cls.FAILED_PROBING,
             cls.FAILED_PROVISION, cls.FAILED_USER_APP, cls.UNKNOWN
         ]
 
@@ -133,7 +137,7 @@ class ReplicaStatus(enum.Enum):
     def terminal_statuses(cls) -> List['ReplicaStatus']:
         return [
             cls.SHUTTING_DOWN, cls.FAILED, cls.FAILED_CLEANUP,
-            cls.FAILED_PROBING, cls.FAILED_PROVISION, cls.FAILED_USER_APP,
+            cls.FAILED_INITIAL_DELAY, cls.FAILED_PROBING, cls.FAILED_PROVISION, cls.FAILED_USER_APP,
             cls.PREEMPTED, cls.UNKNOWN
         ]
 
@@ -158,6 +162,7 @@ _REPLICA_STATUS_TO_COLOR = {
     ReplicaStatus.NOT_READY: colorama.Fore.YELLOW,
     ReplicaStatus.SHUTTING_DOWN: colorama.Fore.MAGENTA,
     ReplicaStatus.FAILED: colorama.Fore.RED,
+    ReplicaStatus.FAILED_INITIAL_DELAY: colorama.Fore.RED,
     ReplicaStatus.FAILED_PROBING: colorama.Fore.RED,
     ReplicaStatus.FAILED_USER_APP: colorama.Fore.RED,
     ReplicaStatus.FAILED_PROVISION: colorama.Fore.RED,
