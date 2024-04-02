@@ -33,7 +33,7 @@ class LazyImport:
                 raise
         return self._module
 
-    def __getattr__(self, name) -> Any:
+    def __getattr__(self, name: str) -> Any:
         # Attempt to access the attribute, if it fails, assume it's a submodule
         # and lazily import it
         try:
