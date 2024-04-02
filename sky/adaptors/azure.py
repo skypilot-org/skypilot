@@ -31,8 +31,8 @@ def get_current_account_user() -> str:
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def exceptions():
     """Azure exceptions."""
-    from azure.common import credentials
-    return credentials.get_cli_profile().get_current_account_user()
+    from azure.core import exceptions as azure_exceptions
+    return azure_exceptions
 
 
 @functools.lru_cache()
