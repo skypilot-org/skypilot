@@ -3089,7 +3089,9 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
     for check_tuple in check_tuples:
         count, is_spot, status = check_tuple
         resource_str = ''
-        if status not in ['PENDING', 'SHUTTING_DOWN', 'FAILED', 'FAILED_USER_APP']:
+        if status not in [
+                'PENDING', 'SHUTTING_DOWN', 'FAILED', 'FAILED_USER_APP'
+        ]:
             spot_str = ''
             if is_spot:
                 spot_str = '\[Spot\]'
@@ -3424,7 +3426,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             # should be able to get observe the period that the traffic is mixed
             # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; sleep 2'
+            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; sleep 2; '
             # The latest version should have one READY and the one of the older versions should be shutting down
             f'{single_new_replica} {_check_service_version(name, "1,2")} '
             # Check the output from the old version, immediately after the
