@@ -64,7 +64,7 @@ def get_az_mount_install_cmd() -> str:
     Returns:
         str: installation command of the mounting utility blobdfuse2
     """
-    install_cmd = ('sudo apt-get update --allow-releaseinfo-change && '
+    install_cmd = ('sudo apt-get update; '
                    'sudo apt-get install -y '
                    '-o Dpkg::Options::="--force-confdef" '
                    'fuse3 libfuse3-dev && '
@@ -95,9 +95,9 @@ def get_az_mount_cmd(container_name: str,
     Returns:
         str: command used to mount AZ container with blobfuse2
     """
-    # storage_account_key is set to None when mounting public container
-    # mounting public clouds are not officially supported by blobfuse2 yet,
-    # and the following SAS token value is a suggested workaround.
+    # storage_account_key is set to None when mounting public container, and
+    # mounting public containers are not officially supported by blobfuse2 yet.
+    # Setting an empty SAS token value is a suggested workaround.
     # https://github.com/Azure/azure-storage-fuse/issues/1338
     if storage_account_key is None:
         key_env_var = f'AZURE_STORAGE_SAS_TOKEN={shlex.quote(" ")}'

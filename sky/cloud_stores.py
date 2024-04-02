@@ -157,10 +157,24 @@ class GcsCloudStorage(CloudStorage):
 class AzureCloudStorage(CloudStorage):
     """Azure Blob Storage."""
 
-    # List of commands to install AWS CLI
+    # Installing latest available version for consistent behavior
+    # Installation reference: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux?pivots=apt#option-2-step-by-step-installation-instructions
     _GET_AZCLI = [
         'az --version >/dev/null 2>&1 || '
-        '(sudo apt-get update --allow-releaseinfo-change; '
+        '(sudo apt-get update; '
+        'sudo apt-get install ca-certificates curl apt-transport-https '
+        'lsb-release gnupg -y; '
+        'sudo mkdir -p /etc/apt/keyrings; '
+        'curl -sLS https://packages.microsoft.com/keys/microsoft.asc | '
+        'gpg --dearmor | '
+        'sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null; '
+        'sudo chmod go+r /etc/apt/keyrings/microsoft.gpg; '
+        'AZ_DIST=$(lsb_release -cs); '
+        'echo "deb [arch=`dpkg --print-architecture` '
+        'signed-by=/etc/apt/keyrings/microsoft.gpg] '
+        'https://packages.microsoft.com/repos/azure-cli/ $AZ_DIST main" | '
+        'sudo tee /etc/apt/sources.list.d/azure-cli.list; '
+        'sudo apt-get update; '
         'sudo apt-get install azure-cli -y)'
     ]
 
@@ -204,10 +218,11 @@ class AzureCloudStorage(CloudStorage):
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
         if storage_account_key is None:
-            storage_account_key = ' '
+            storage_account_key = ''
+        storage_account_key = f'--account-key {shlex.quote(storage_account_key)} '
         download_command = ('az storage blob download-batch '
                             f'--account-name {storage_account_name} '
-                            f'--account-key {shlex.quote(storage_account_key)} '
+                            f'{storage_account_key}'
                             f'--source {container_name} '
                             f'--destination {destination}')
 
@@ -226,10 +241,11 @@ class AzureCloudStorage(CloudStorage):
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
         if storage_account_key is None:
-            storage_account_key = ' '
+            storage_account_key = ''
+        storage_account_key = f'--account-key {shlex.quote(storage_account_key)} '
         download_command = ('az storage blob download '
                             f'--account-name {storage_account_name} '
-                            f'--account-key {shlex.quote(storage_account_key)} '
+                            f'{storage_account_key}'
                             f'--name {path} --file {destination} '
                             f'--container-name {container_name}')
 
