@@ -1,0 +1,9 @@
+resources:
+  cpus: 8+
+  ports:
+    - 8888    # To serve content files
+    - 27960   # Server port
+
+run: |
+  # Thanks to the amazing work by the QuakeJS team and the Dockerfile by treyyoder!
+  docker run --name quakejs -e HTTP_PORT=8888 -p 8888:80 -p 27960:27960 treyyoder/quakejs:latest
