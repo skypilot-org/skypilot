@@ -14,6 +14,7 @@ _LAZY_MODULES = (azure,)
 
 _session_creation_lock = threading.RLock()
 
+
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_subscription_id() -> str:
     """Get the default subscription id."""
@@ -47,12 +48,10 @@ def get_client(name: str, subscription_id: str):
         credential = AzureCliCredential(process_timeout=30)
         if name == 'compute':
             from azure.mgmt.compute import ComputeManagementClient
-            return ComputeManagementClient(
-                credential, subscription_id)
+            return ComputeManagementClient(credential, subscription_id)
         elif name == 'network':
             from azure.mgmt.network import NetworkManagementClient
-            return NetworkManagementClient(
-                credential, subscription_id)
+            return NetworkManagementClient(credential, subscription_id)
         elif name == 'resource':
             from azure.mgmt.resource import ResourceManagementClient
             return ResourceManagementClient(credential, subscription_id)

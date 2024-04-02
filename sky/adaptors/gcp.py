@@ -1,7 +1,6 @@
 """GCP cloud adaptors"""
 
 # pylint: disable=import-outside-toplevel
-import functools
 import json
 
 from sky.adaptors import common

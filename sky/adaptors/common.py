@@ -1,7 +1,7 @@
 """Lazy import for modules to avoid import error when not used."""
 import functools
 import importlib
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 
 class LazyImport:
@@ -9,7 +9,7 @@ class LazyImport:
 
     We use this for pandas and networkx, as they can be time-consuming to import
     (0.1-0.2 seconds). With this class, we can avoid the unnecessary import time
-    when the module is not used (e.g., `networkx` should not be imported for 
+    when the module is not used (e.g., `networkx` should not be imported for
     `sky status and `pandas` should not be imported for `sky exec`).
 
     We also use this for cloud adaptors, because we do not want to import the
@@ -61,5 +61,5 @@ def load_lazy_modules(modules: Tuple[LazyImport, ...]):
             return func(*args, **kwargs)
 
         return wrapper
-    
+
     return decorator
