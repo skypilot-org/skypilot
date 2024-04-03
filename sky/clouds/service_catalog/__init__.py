@@ -5,9 +5,10 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 from sky.clouds.service_catalog.config import fallback_to_default_catalog
+from sky.clouds.service_catalog.constants import ALL_CLOUDS
+from sky.clouds.service_catalog.constants import CATALOG_DIR
 from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
 from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
-from sky.clouds.service_catalog.constants import LOCAL_CATALOG_DIR
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -15,8 +16,6 @@ if typing.TYPE_CHECKING:
     from sky.clouds.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
-ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
-              'kubernetes', 'runpod', 'vsphere', 'cudo', 'fluidstack')
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
@@ -336,7 +335,8 @@ __all__ = [
     # Configuration
     'fallback_to_default_catalog',
     # Constants
+    'ALL_CLOUDS',
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',
-    'LOCAL_CATALOG_DIR',
+    'CATALOG_DIR',
 ]

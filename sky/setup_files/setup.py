@@ -169,7 +169,7 @@ local_ray = [
     # click/grpcio/protobuf.
     # Excluded 2.6.0 as it has a bug in the cluster launcher:
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
-    'ray[default] >= 2.2.0, <= 2.6.3, != 2.6.0',
+    'ray[default] >= 2.2.0, <= 2.9.3, != 2.6.0',
 ]
 
 remote = [
@@ -183,13 +183,11 @@ remote = [
     "grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < '3.10' and sys_platform != 'darwin'",  # noqa:E501
     "grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= '3.10' and sys_platform != 'darwin'",  # noqa:E501
     # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/86fab1764e618215d8131e8e5068f0d493c77023/python/setup.py#L326
+    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
     'protobuf >= 3.15.3, != 3.19.5',
-    # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
-    # https://github.com/ray-project/ray/issues/36990
-    # >=1.10.8 is needed for ray>=2.6. See
-    # https://github.com/ray-project/ray/issues/35661
-    'pydantic <2.0, >=1.10.8',
+    # Some pydantic versions are not compatible with ray. Adopted from ray's
+    # setup.py: https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
+    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3',
 ]
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
@@ -238,6 +236,7 @@ extras_require: Dict[str, List[str]] = {
     'runpod': ['runpod>=1.5.1'],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.8'],
+    'paperspace': [],  # No dependencies needed for paperspace
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have
@@ -288,6 +287,7 @@ setuptools.setup(
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: OS Independent',
         'Topic :: Software Development :: Libraries :: Python Modules',

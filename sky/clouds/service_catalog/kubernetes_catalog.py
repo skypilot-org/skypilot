@@ -3,15 +3,20 @@
 Kubernetes does not require a catalog of instances, but we need an image catalog
 mapping SkyPilot image tags to corresponding container image tags.
 """
+import typing
 from typing import Dict, List, Optional, Set, Tuple
 
-import pandas as pd
-
-from sky import global_user_state
+from sky import check as sky_check
+from sky.adaptors import common as adaptors_common
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.provision.kubernetes import utils as kubernetes_utils
+
+if typing.TYPE_CHECKING:
+    import pandas as pd
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
 _PULL_FREQUENCY_HOURS = 7
 
@@ -44,7 +49,8 @@ def list_accelerators(
     del all_regions, require_price  # Unused.
     k8s_cloud = Kubernetes()
     if not any(
-            map(k8s_cloud.is_same_cloud, global_user_state.get_enabled_clouds())
+            map(k8s_cloud.is_same_cloud,
+                sky_check.get_cached_enabled_clouds_or_refresh())
     ) or not kubernetes_utils.check_credentials()[0]:
         return {}
 

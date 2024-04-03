@@ -1,6 +1,9 @@
-# Serving Mixtral from Mistral.ai
+<!-- $REMOVE -->
+# Serving Mixtral from Mistral AI
+<!-- $END_REMOVE -->
+<!-- $UNCOMMENT# Mixtral: MOE LLM from Mistral AI -->
 
-Mistral AI released Mixtral 8x7B, a high-quality sparse mixture of experts model (SMoE) with open weights. Mixtral outperforms Llama 2 70B on most benchmarks with 6x faster inference. Mistral.ai uses SkyPilot as [the default way](https://docs.mistral.ai/self-deployment/skypilot) to distribute their new model. This folder contains the code to serve Mixtral on any cloud with SkyPilot. 
+Mistral AI released Mixtral 8x7B, a high-quality sparse mixture of experts model (SMoE) with open weights. Mixtral outperforms Llama 2 70B on most benchmarks with 6x faster inference. Mistral AI uses SkyPilot as [the default way](https://docs.mistral.ai/self-deployment/skypilot) to distribute their new model. This folder contains the code to serve Mixtral on any cloud with SkyPilot. 
 
 There are three ways to serve the model:
 
@@ -145,6 +148,6 @@ curl -L http://$ENDPOINT/v1/chat/completions \
 
 ## 3. Official guide from Mistral AI
 
-Mistral.ai also includes a guide for launching the Mixtral 8x7B model with SkyPilot in their official doc. Please refer to [this link](https://docs.mistral.ai/self-deployment/skypilot) for more details.
+Mistral AI also includes a guide for launching the Mixtral 8x7B model with SkyPilot in their official doc. Please refer to [this link](https://docs.mistral.ai/self-deployment/skypilot) for more details.
 
-> Note: the docker image of the official doc may not be updated yet, which can cause a failure where vLLM is complaining about the missing support for the model. Please feel free to create a new docker image with the setup commands in our [serve.yaml](./serve.yaml) file instead.
+> Note: the docker image of the official doc may not be updated yet, which can cause a failure where vLLM is complaining about the missing support for the model. Please feel free to create a new docker image with the setup commands in our [serve.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral/serve.yaml) file instead.

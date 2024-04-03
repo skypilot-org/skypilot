@@ -9,6 +9,7 @@ import sky
 from sky import exceptions
 from sky import skypilot_config
 from sky.adaptors import kubernetes
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 
@@ -19,6 +20,14 @@ _LOADBALANCER_TEMPLATE_NAME = 'kubernetes-loadbalancer.yml.j2'
 def get_port_mode(
         mode_str: Optional[str] = None) -> kubernetes_enums.KubernetesPortMode:
     """Get the port mode from the provider config."""
+
+    curr_kube_config = kubernetes_utils.get_current_kube_config_context_name()
+    running_kind = curr_kube_config == kubernetes_utils.KIND_CONTEXT_NAME
+
+    if running_kind:
+        # If running in kind (`sky local up`), use ingress mode
+        return kubernetes_enums.KubernetesPortMode.INGRESS
+
     mode_str = mode_str or skypilot_config.get_nested(
         ('kubernetes', 'ports'),
         kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
@@ -57,9 +66,10 @@ def fill_loadbalancer_template(namespace: str, service_name: str,
     return content
 
 
-def fill_ingress_template(namespace: str, path_prefix: str, service_name: str,
-                          service_port: int, ingress_name: str,
-                          selector_key: str, selector_value: str) -> Dict:
+def fill_ingress_template(namespace: str, service_details: List[Tuple[str, int,
+                                                                      str]],
+                          ingress_name: str, selector_key: str,
+                          selector_value: str) -> Dict:
     template_path = os.path.join(sky.__root_dir__, 'templates',
                                  _INGRESS_TEMPLATE_NAME)
     if not os.path.exists(template_path):
@@ -70,15 +80,22 @@ def fill_ingress_template(namespace: str, path_prefix: str, service_name: str,
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,
-        path_prefix=path_prefix.rstrip('/').lstrip('/'),
-        service_name=service_name,
-        service_port=service_port,
+        service_names_and_ports=[{
+            'service_name': name,
+            'service_port': port,
+            'path_prefix': path_prefix
+        } for name, port, path_prefix in service_details],
         ingress_name=ingress_name,
         selector_key=selector_key,
         selector_value=selector_value,
     )
     content = yaml.safe_load(cont)
-    return content
+
+    # Return a dictionary containing both specs
+    return {
+        'ingress_spec': content['ingress_spec'],
+        'services_spec': content['services_spec']
+    }
 
 
 def create_or_replace_namespaced_ingress(
@@ -90,7 +107,7 @@ def create_or_replace_namespaced_ingress(
     try:
         networking_api.read_namespaced_ingress(
             ingress_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             networking_api.create_namespaced_ingress(
                 namespace,
@@ -112,7 +129,7 @@ def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
     try:
         networking_api.delete_namespaced_ingress(
             ingress_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             raise exceptions.PortDoesNotExistError(
                 f'Port {ingress_name.split("--")[-1]} does not exist.')
@@ -128,7 +145,7 @@ def create_or_replace_namespaced_service(
     try:
         core_api.read_namespaced_service(
             service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             core_api.create_namespaced_service(
                 namespace,
@@ -150,7 +167,7 @@ def delete_namespaced_service(namespace: str, service_name: str) -> None:
     try:
         core_api.delete_namespaced_service(
             service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             raise exceptions.PortDoesNotExistError(
                 f'Port {service_name.split("--")[-1]} does not exist.')

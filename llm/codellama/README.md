@@ -1,17 +1,29 @@
-# Serving Your Private Code Llama-70B with API, Chat, and VSCode Access
+<!-- $REMOVE -->
+# Code Llama: Serve Your Private Code Model with API, Chat, and VSCode Access
+<!-- $END_REMOVE -->
+<!-- $UNCOMMENT# Code Llama: Serve Your Private Code Model -->
 
 [Code Llama](https://github.com/facebookresearch/codellama) is a code-specialized version of Llama 2 that was created by further training Llama 2 on its code-specific datasets, sampling more data from that same dataset for longer. On Jan 29th, 2024, Meta released the Code Llama 70B, the largest and best-performing model in the Code Llama family.
 
 The followings are the demos of Code Llama 70B hosted by SkyPilot Serve (aka SkyServe) (see more details about the setup in later sections):
 
-##### Connect to hosted Code Llama with Tabby as a coding assistant in VScode
-<img src="https://imgur.com/fguAmP0.gif" width="60%" />
+## Demos
+<figure>
+<center>
+<img src="https://imgur.com/fguAmP0.gif" width="60%" title="Coding Assistant: Connect to hosted Code Llama with Tabby in VScode" />
 
-##### Connect to hosted Code Llama with FastChat for chatting
-<img src="https://imgur.com/Dor1MoE.gif" width="60%" /> 
+<figcaption>Coding Assistant: Connect to hosted Code Llama with Tabby in VScode</figcaption>
+</figure>
+
+<figure>
+<center>
+<img src="https://imgur.com/Dor1MoE.gif" width="60%" title="Chat: Connect to hosted Code Llama with FastChat" />
+
+<figcaption>Chat: Connect to hosted Code Llama with FastChat</figcaption>
+</figure>
 
 ## References
-* [Llama-2 Example](../../llm/llama-2/)
+* [Llama-2 Example](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2/)
 * [Code Llama release](https://ai.meta.com/blog/code-llama-large-language-model-coding/)
 * [Code Llama paper](https://arxiv.org/abs/2308.12950)
 
@@ -28,7 +40,7 @@ The followings are the demos of Code Llama 70B hosted by SkyPilot Serve (aka Sky
 
 After [installing SkyPilot](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html), run your own Code Llama on vLLM with SkyPilot in 1-click:
 
-1. Start serving Code Llama 70B on a single instance with any available GPU in the list specified in [endpoint.yaml](endpoint.yaml) with a vLLM powered OpenAI-compatible endpoint:
+1. Start serving Code Llama 70B on a single instance with any available GPU in the list specified in [endpoint.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/codellama/endpoint.yaml) with a vLLM powered OpenAI-compatible endpoint:
 ```console
 sky launch -c code-llama -s endpoint.yaml
 
@@ -173,14 +185,14 @@ print(sorted_numbers)
 This code defines a function `quicksort` that takes a list of integers as input. It divides the list into three parts based on the pivot element, which is the middle element of the list. It then recursively sorts the left and right partitions and combines them with the middle partition.
 ````````
 
-Alternatively, we could access the model through python with OpenAI's API (see [complete.py](complete.py)):
+Alternatively, we could access the model through python with OpenAI's API (see [complete.py](https://github.com/skypilot-org/skypilot/tree/master/llm/codellama/complete.py)):
 ```bash
 python complete.py
 ```
 
 ## **Optional:** Accessing Code Llama with Chat GUI
 
-It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat). Please check the [demo](#connect-to-hosted-code-llama-with-fastchat-for-chatting).
+It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat). Please check the [demo](#demos).
 
 1. Start the chat web UI:
 ```bash
@@ -198,7 +210,7 @@ Note that you may get better results to use a higher temperature and top_p value
 ## **Optional:** Using Code Llama as Coding Assistant in VScode
 
 [Tabby](https://tabby.tabbyml.com/) is an open-source, self-hosted AI coding assistant. It allows you to connect
-to your own AI models and use them as a coding assistant in VScode. Please check the [demo](#connect-to-hosted-code-llama-with-tabby-as-a-coding-assistant-in-vscode) at the top.
+to your own AI models and use them as a coding assistant in VScode. Please check the [demo](#demos) at the top.
 
 To start a Tabby server that connects to the Code Llama service, run:
 ```bash
@@ -215,7 +227,7 @@ Then, you can connect to the Tabby server from VScode by installing the [Tabby e
 
 > Note that Code Llama 70B does not have the full infiling functionality [[1](https://huggingface.co/codellama/CodeLlama-70b-Instruct-hf)], so the performance of Tabby with Code Llama may be limited.
 > 
-> To get infiling functionality, you can use the smaller Code Llama models, e.g., Code Llama [7B](https://huggingface.co/codellama/CodeLlama-13B-Instruct-hf) and [13B](https://huggingface.co/codellama/CodeLlama-13B-Instruct-hf), and replace `prompt_template` with `"<｜fim▁begin｜>{prefix}<｜fim▁hole｜>{suffix}<｜fim▁end｜>"` in the [yaml](./tabby.yaml) or the command above.
+> To get infiling functionality, you can use the smaller Code Llama models, e.g., Code Llama [7B](https://huggingface.co/codellama/CodeLlama-13B-Instruct-hf) and [13B](https://huggingface.co/codellama/CodeLlama-13B-Instruct-hf), and replace `prompt_template` with `"<｜fim▁begin｜>{prefix}<｜fim▁hole｜>{suffix}<｜fim▁end｜>"` in the [yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/codellama/tabby.yaml) or the command above.
 > 
-> For better performance, we recommend using Tabby with the recommended models in the [Tabby documentation](https://tabby.tabbyml.com/docs/models/) and our [Tabby example](../tabby).
+> For better performance, we recommend using Tabby with the recommended models in the [Tabby documentation](https://tabby.tabbyml.com/docs/models/) and our [Tabby example](https://github.com/skypilot-org/skypilot/tree/master/llm/tabby).
 

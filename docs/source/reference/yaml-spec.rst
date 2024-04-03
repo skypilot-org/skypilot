@@ -19,6 +19,9 @@ Available fields:
     #
     # Commands in "setup" and "run" will be executed under it.
     #
+    # If a relative path is used, it's evaluated relative to the location from 
+    # which `sky` is called.
+    #
     # If a .gitignore file (or a .git/info/exclude file) exists in the working
     # directory, files and directories listed in it will be excluded from syncing.
     workdir: ~/my-task-code
@@ -191,6 +194,10 @@ Available fields:
       # Or machine image: https://cloud.google.com/compute/docs/machine-images
       # image_id: projects/my-project/global/machineImages/my-machine-image
       #
+      # Azure
+      # To find Azure images: https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
+      # image_id: microsoft-dsvm:ubuntu-2004:2004:21.11.04
+      #
       # IBM
       # Create a private VPC image and paste its ID in the following format:
       # image_id: <unique_image_id>
@@ -251,6 +258,9 @@ Available fields:
 
     file_mounts:
       # Uses rsync to sync local files/directories to all nodes of the cluster.
+      #
+      # If a relative path is used, it's evaluated relative to the location from
+      # which `sky` is called.
       #
       # If symlinks are present, they are copied as symlinks, and their targets
       # must also be synced using file_mounts to ensure correctness.

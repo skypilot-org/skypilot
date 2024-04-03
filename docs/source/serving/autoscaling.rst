@@ -119,3 +119,7 @@ If your service might experience long periods of time with no traffic, consider 
     # ...
 
 The service will scale down all replicas when there is no traffic to the system and will save costs on idle replicas. When upscaling from zero, the upscale delay will be ignored in order to bring up the service faster.
+
+.. tip::
+
+    If the scale-to-zero is set, the clients that access the endpoint should make sure to have a retry mechanism to be able to wait until the replicas are provisioned and ready, i.e., starting a new replica when there is zero replica available.

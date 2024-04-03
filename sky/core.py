@@ -1,6 +1,5 @@
 """SDK functions for cluster/job management."""
 import getpass
-import sys
 import typing
 from typing import Any, Dict, List, Optional, Union
 
@@ -310,7 +309,12 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 
     Args:
         cluster_name: name of the cluster to stop.
-        purge: whether to ignore cloud provider errors (if any).
+        purge: (Advanced) Forcefully mark the cluster as stopped in SkyPilot's
+            cluster table, even if the actual cluster stop operation failed on
+            the cloud. WARNING: This flag should only be set sparingly in
+            certain manual troubleshooting scenarios; with it set, it is the
+            user's responsibility to ensure there are no leaked instances and
+            related resources.
 
     Raises:
         ValueError: the specified cluster does not exist.
@@ -360,7 +364,12 @@ def down(cluster_name: str, purge: bool = False) -> None:
 
     Args:
         cluster_name: name of the cluster to down.
-        purge: whether to ignore cloud provider errors (if any).
+        purge: (Advanced) Forcefully remove the cluster from SkyPilot's cluster
+            table, even if the actual cluster termination failed on the cloud.
+            WARNING: This flag should only be set sparingly in certain manual
+            troubleshooting scenarios; with it set, it is the user's
+            responsibility to ensure there are no leaked instances and related
+            resources.
 
     Raises:
         ValueError: the specified cluster does not exist.
@@ -759,16 +768,6 @@ def job_status(cluster_name: str,
 
 
 @usage_lib.entrypoint
-def spot_status(refresh: bool) -> List[Dict[str, Any]]:
-    """[Deprecated] (alias of spot_queue) Get statuses of managed spot jobs."""
-    sky_logging.print(
-        f'{colorama.Fore.YELLOW}WARNING: `spot_status()` is deprecated. '
-        f'Instead, use: spot_queue(){colorama.Style.RESET_ALL}',
-        file=sys.stderr)
-    return spot_queue(refresh=refresh)
-
-
-@usage_lib.entrypoint
 def spot_queue(refresh: bool,
                skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -785,8 +784,8 @@ def spot_queue(refresh: bool,
                 'submitted_at': (float) timestamp of submission,
                 'end_at': (float) timestamp of end,
                 'duration': (float) duration in seconds,
-                'retry_count': int Number of retries,
-                'status': sky.JobStatus status of the job,
+                'recovery_count': (int) Number of retries,
+                'status': (sky.spot.SpotStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
             }
@@ -796,17 +795,20 @@ def spot_queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the spot jobs with ssh.
     """
-
-    stop_msg = ''
+    stopped_message = ''
     if not refresh:
-        stop_msg = 'To view the latest job table: sky spot queue --refresh'
-    controller_status, handle = backend_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
-        stopped_message=stop_msg)
+        stopped_message = ('No in-progress spot jobs.')
+    try:
+        handle = backend_utils.is_controller_accessible(
+            controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+            stopped_message=stopped_message)
+    except exceptions.ClusterNotUpError as e:
+        if not refresh:
+            raise
+        handle = None
+        controller_status = e.cluster_status
 
-    if (refresh and controller_status in [
-            status_lib.ClusterStatus.STOPPED, status_lib.ClusterStatus.INIT
-    ]):
+    if refresh and handle is None:
         sky_logging.print(f'{colorama.Fore.YELLOW}'
                           'Restarting controller for latest status...'
                           f'{colorama.Style.RESET_ALL}')
@@ -817,15 +819,7 @@ def spot_queue(refresh: bool,
         controller_status = status_lib.ClusterStatus.UP
         rich_utils.force_update_status('[cyan] Checking spot jobs[/]')
 
-    if handle is None or handle.head_ip is None:
-        # When the controller is STOPPED, the head_ip will be None, as
-        # it will be set in global_user_state.remove_cluster().
-        # We do not directly check for UP because the controller may be
-        # in INIT state during another spot launch, but still have
-        # head_ip available. In this case, we can still try to ssh
-        # into the controller and fetch the job table.
-        raise exceptions.ClusterNotUpError('Spot controller is not up.',
-                                           cluster_status=controller_status)
+    assert handle is not None, (controller_status, refresh)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -837,14 +831,15 @@ def spot_queue(refresh: bool,
         require_outputs=True,
         stream_logs=False,
         separate_stderr=True)
+
     try:
         subprocess_utils.handle_returncode(returncode,
                                            code,
                                            'Failed to fetch managed spot jobs',
-                                           stderr,
+                                           job_table_payload + stderr,
                                            stream_logs=False)
     except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+        raise RuntimeError(str(e)) from e
 
     jobs = spot.load_spot_job_queue(job_table_payload)
     if skip_finished:
@@ -873,16 +868,9 @@ def spot_cancel(name: Optional[str] = None,
         RuntimeError: failed to cancel the job.
     """
     job_ids = [] if job_ids is None else job_ids
-    cluster_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
         stopped_message='All managed spot jobs should have finished.')
-    if handle is None or handle.head_ip is None:
-        # The error message is already printed in
-        # backend_utils.is_controller_up
-        # TODO(zhwu): Move the error message into the exception.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(message='',
-                                               cluster_status=cluster_status)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
@@ -933,17 +921,10 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
     """
     # TODO(zhwu): Automatically restart the spot controller
-    controller_status, handle = backend_utils.is_controller_up(
+    handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
         stopped_message=('Please restart the spot controller with '
                          f'`sky start {spot.SPOT_CONTROLLER_NAME}`.'))
-    if handle is None or handle.head_ip is None:
-        msg = 'All jobs finished.'
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg = ''
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(msg,
-                                               cluster_status=controller_status)
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')

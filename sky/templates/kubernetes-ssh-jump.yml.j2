@@ -65,12 +65,15 @@ service_account:
     kind: ServiceAccount
     metadata:
         name: sky-ssh-jump-sa
-        parent: skypilot
+        labels:
+          parent: skypilot
 role:
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
         name: sky-ssh-jump-role
+        labels:
+          parent: skypilot
     rules:
       - apiGroups: [""]
         resources: ["pods", "pods/status", "pods/exec", "services"]
@@ -80,7 +83,8 @@ role_binding:
     kind: RoleBinding
     metadata:
         name: sky-ssh-jump-rb
-        parent: skypilot
+        labels:
+          parent: skypilot
     subjects:
     - kind: ServiceAccount
       name: sky-ssh-jump-sa

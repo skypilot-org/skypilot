@@ -38,7 +38,11 @@ class RunPod(clouds.Cloud):
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             (f'Docker image is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-            ('Customizing disk tier is not supported yet on RunPod.')
+            ('Customizing disk tier is not supported yet on RunPod.'),
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
+            ('Mounting object stores is not supported on RunPod. To read data '
+             'from object stores on RunPod, use `mode: COPY` to copy the data '
+             'to local disk.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
