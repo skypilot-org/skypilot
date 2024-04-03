@@ -3283,7 +3283,8 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'until curl -L http://$endpoint | grep "Hi, SkyPilot here!"; do sleep 2; done; sleep 2; '
-            + _check_replica_in_status(name, [(1, False, 'READY'), (1, False, 'FAILED')]),
+            + _check_replica_in_status(name, [(1, False, 'READY'),
+                                              (1, False, 'FAILED')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
