@@ -3602,7 +3602,12 @@ def test_skyserve_failures(generic_cloud: str):
             # Make sure no new replicas are started for early failure.
             f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 2;',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/failures/probing.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f's=$(sky serve status {name}); '
+            # Wait for replica to be ready.
+            f'until echo "$s" | grep "READY"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done;',
+            # Wait for replica to change to FAILED_PROBING
             f's=$(sky serve status {name}); '
             f'until echo "$s" | grep "FAILED_PROBING"; do '
             'echo "Waiting for replica to be failed..."; sleep 5; '
