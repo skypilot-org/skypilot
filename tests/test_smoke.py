@@ -966,7 +966,7 @@ def test_azure_storage_mounts_with_stop():
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name, resource_group_name)
     template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+        'tests/test_yamls/test_azure_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
