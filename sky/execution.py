@@ -234,6 +234,10 @@ def _execute(
     # Requested features that some clouds support and others don't.
     requested_features = set()
 
+    if controller_utils.Controllers.from_name(cluster_name) is not None:
+        requested_features.add(
+            clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
+
     # Add requested features from the task
     requested_features |= task.get_required_cloud_features()
 

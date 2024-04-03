@@ -419,6 +419,8 @@ class AWS(clouds.Cloud):
             'zones': ','.join(zone_names),
             'image_id': image_id,
             'security_group': security_group,
+            'security_group_managed_by_skypilot':
+                str(security_group != user_security_group).lower(),
             **AWS._get_disk_specs(r.disk_tier)
         }
 

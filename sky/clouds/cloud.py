@@ -42,6 +42,7 @@ class CloudImplementationFeatures(enum.Enum):
     CUSTOM_DISK_TIER = 'custom_disk_tier'
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
+    HOST_CONTROLLERS = 'host_controllers'  # Can run spot/serve controllers
 
 
 class Region(collections.namedtuple('Region', ['name'])):

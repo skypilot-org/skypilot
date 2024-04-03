@@ -64,6 +64,13 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
+        # Kubernetes may be using exec-based auth, which may not work by
+        # directly copying the kubeconfig file to the controller.
+        # Support for service accounts for auth will be added in #3377, which
+        # will allow us to support hosting controllers.
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: 'Kubernetes can '
+                                                             'not host '
+                                                             'controllers.',
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
@@ -77,16 +84,6 @@ class Kubernetes(clouds.Cloud):
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
-        curr_context = kubernetes_utils.get_current_kube_config_context_name()
-        if curr_context == kubernetes_utils.KIND_CONTEXT_NAME:
-            # If we are using KIND, the loadbalancer service will never be
-            # assigned an external IP. Users may use ingress, but that requires
-            # blocking HTTP port 80.
-            # For now, we disable port opening feature on kind clusters.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.OPEN_PORTS] = (
-                    'Opening ports is not supported in Kubernetes when '
-                    'using local kind cluster.')
         return unsupported_features
 
     @classmethod
@@ -378,7 +375,7 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
-        k8s = kubernetes.get_kubernetes()
+        k8s = kubernetes.kubernetes
         try:
             _, current_context = k8s.config.list_kube_config_contexts()
             if 'namespace' in current_context['context']:
