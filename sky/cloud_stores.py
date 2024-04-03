@@ -7,8 +7,8 @@ TODO:
 * Better interface.
 * Better implementation (e.g., fsspec, smart_open, using each cloud's SDK).
 """
-import subprocess
 import shlex
+import subprocess
 import urllib.parse
 
 from sky.adaptors import aws
@@ -158,7 +158,7 @@ class AzureCloudStorage(CloudStorage):
     """Azure Blob Storage."""
 
     # Installing latest available version for consistent behavior
-    # Installation reference: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux?pivots=apt#option-2-step-by-step-installation-instructions
+    # Installation reference: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux?pivots=apt#option-2-step-by-step-installation-instructions # pylint: disable=line-too-long
     _GET_AZCLI = [
         'az --version >/dev/null 2>&1 || '
         '(sudo apt-get update; '
@@ -213,13 +213,12 @@ class AzureCloudStorage(CloudStorage):
             source)
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
-        # resource_group_name is None when using a public container or
-        # a private containers not belonging to the user.
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
         if storage_account_key is None:
             storage_account_key = ''
-        storage_account_key = f'--account-key {shlex.quote(storage_account_key)} '
+        storage_account_key = ('--account-key '
+                               f'{shlex.quote(storage_account_key)} ')
         download_command = ('az storage blob download-batch '
                             f'--account-name {storage_account_name} '
                             f'{storage_account_key}'
@@ -236,13 +235,12 @@ class AzureCloudStorage(CloudStorage):
             source)
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
-        # resource_group_name is None when using a public container or
-        # a private containers not belonging to the user.
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
         if storage_account_key is None:
             storage_account_key = ''
-        storage_account_key = f'--account-key {shlex.quote(storage_account_key)} '
+        storage_account_key = ('--account-key '
+                               f'{shlex.quote(storage_account_key)} ')
         download_command = ('az storage blob download '
                             f'--account-name {storage_account_name} '
                             f'{storage_account_key}'

@@ -2,14 +2,12 @@
 
 # pylint: disable=import-outside-toplevel
 import functools
-import logging
 import threading
 from typing import Optional
 
-from sky import exceptions
-from sky.utils import ux_utils
-
+from sky import exceptions as sky_exceptions
 from sky.adaptors import common
+from sky.utils import ux_utils
 
 azure = common.LazyImport(
     'azure',
@@ -70,8 +68,7 @@ def get_client(name: str,
             from azure.storage.blob import ContainerClient
             container_url = (f'https://{storage_account_name}.'
                              f'blob.core.windows.net/{container_name}')
-            container_client = ContainerClient.from_container_url(
-                container_url)
+            container_client = ContainerClient.from_container_url(container_url)
             try:
                 container_client.exists()
             except exceptions().ClientAuthenticationError as e:
@@ -84,12 +81,12 @@ def get_client(name: str,
                         container_url, credential)
                     try:
                         container_client.exists()
-                    except exceptions().ClientAuthenticationError as e:
+                    except exceptions().ClientAuthenticationError as error:
                         # Caught when user attempted to use incorrect public
                         # container name.
-                        if 'ERROR: AADSTS50020' in e.message:
+                        if 'ERROR: AADSTS50020' in error.message:
                             with ux_utils.print_exception_no_traceback():
-                                raise exceptions.StorageBucketGetError(
+                                raise sky_exceptions.StorageBucketGetError(
                                     'Attempted to fetch a non-existant public '
                                     'container name: '
                                     f'{container_client.container_name}. '

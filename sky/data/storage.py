@@ -2253,8 +2253,9 @@ class AzureBlobStore(AbstractStore):
             container = data_utils.create_az_client('container',
                                                     self.storage_account_name,
                                                     self.name)
-            if container.exists(timeout=5):
-                is_private = True if container.get_container_properties()['public_access'] is None else False
+            if container.exists():
+                is_private = True if container.get_container_properties(
+                )['public_access'] is None else False
                 # when user attempts to use private container without
                 # access rights
                 if self.resource_group_name is None and is_private:
@@ -2272,7 +2273,8 @@ class AzureBlobStore(AbstractStore):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageBucketGetError(
                             'Attempted to use a non-existent bucket as a '
-                            f'source: {self.source}.')
+                            f'source: {self.source}. Please check if the '
+                            'container name is correct.')
         except azure.exceptions().ServiceRequestError as e:
             # raised when storage account name to be used does not exist.
             error_message = e.message
@@ -2281,7 +2283,8 @@ class AzureBlobStore(AbstractStore):
                     raise exceptions.StorageBucketGetError(
                         'Attempted to fetch a bucket from non-existant '
                         'storage account '
-                        f'name: {self.storage_account_name}.')
+                        f'name: {self.storage_account_name}. Please check '
+                        'if the name is correct.')
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if
@@ -2366,7 +2369,7 @@ class AzureBlobStore(AbstractStore):
             container_name: str; Name of container
 
         Returns:
-            bool: True if bucket was deleted, False if it was deleted externally.
+            bool: True if bucket was deleted, False if it's deleted externally.
         """
         with rich_utils.safe_status(
                 f'[bold cyan]Deleting Azure bucket {container_name}[/]'):

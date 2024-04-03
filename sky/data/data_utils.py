@@ -175,8 +175,7 @@ def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
     Returns:
       boolean; shows either or not the container exists.
     """
-    container_client = create_az_client('container',
-                                        storage_account_name,
+    container_client = create_az_client('container', storage_account_name,
                                         container_name)
     return container_client.exists()
 
