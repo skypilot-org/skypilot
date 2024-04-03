@@ -1,13 +1,20 @@
 file_mounts:
-  # Mounting public buckets
+  {% if cloud == 'aws' %}
+  # Mounting public buckets for AWS
   /mount_public_s3:
     source: s3://digitalcorpora
     mode: MOUNT
-
-  # Mounting public buckets
+  {% elif cloud == 'gcp' %}
+  # Mounting public buckets for GCP
   /mount_public_gcp:
     source: gs://gcp-public-data-sentinel-2
     mode: MOUNT
+  {% elif cloud == 'azure' %}
+  # Mounting public buckets for Azure
+  /mount_public_azure:
+    source: az://azuremlexampledata/data
+    mode: MOUNT
+  {% endif %}
 
   # Mounting private buckets in COPY mode with a source dir
   /mount_private_copy:
@@ -31,8 +38,13 @@ run: |
   set -ex
   
   # Check public bucket contents
+  {% if cloud == 'aws' %}
   ls -ltr /mount_public_s3/corpora
+  {% elif cloud == 'gcp' %}
   ls -ltr /mount_public_gcp/tiles
+  {% elif cloud == 'azure' %}
+  ls -ltr /mount_public_azure/imagenet
+  {% endif %}
   
   # Check private bucket contents
   ls -ltr /mount_private_copy/foo

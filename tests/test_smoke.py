@@ -896,18 +896,19 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 @pytest.mark.aws
 def test_aws_storage_mounts_with_stop():
     name = _get_cluster_name()
+    cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    content = template.render(storage_name=storage_name, cloud=cloud)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
         file_path = f.name
         test_commands = [
             *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud aws {file_path}',
+            f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
             f'sky stop -y {name}',
@@ -928,18 +929,19 @@ def test_aws_storage_mounts_with_stop():
 @pytest.mark.gcp
 def test_gcp_storage_mounts_with_stop():
     name = _get_cluster_name()
+    cloud = 'gcp'
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    content = template.render(storage_name=storage_name, cloud=cloud)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
         file_path = f.name
         test_commands = [
             *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud gcp {file_path}',
+            f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'gsutil ls gs://{storage_name}/hello.txt',
             f'sky stop -y {name}',
@@ -960,22 +962,23 @@ def test_gcp_storage_mounts_with_stop():
 @pytest.mark.azure
 def test_azure_storage_mounts_with_stop():
     name = _get_cluster_name()
+    cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
     storage_account_name = f'sky{common_utils.get_user_hash()}'
     resource_group_name = data_utils.get_az_resource_group(storage_account_name)
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name, resource_group_name)
     template_str = pathlib.Path(
-        'tests/test_yamls/test_azure_storage_mounting.yaml').read_text()
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    content = template.render(storage_name=storage_name, cloud=cloud)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
         file_path = f.name
         test_commands = [
             *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud azure {file_path}',
+            f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'output=$(az storage blob list -c {storage_name} --account-name {storage_account_name} --account-key {storage_account_key} --prefix hello.txt)'
             # if the file does not exist, az storage blob list returns '[]'
