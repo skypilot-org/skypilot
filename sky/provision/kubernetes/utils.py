@@ -531,7 +531,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
     Returns:
         str | None: The current kubernetes context if it exists, None otherwise
     """
-    k8s = kubernetes.get_kubernetes()
+    k8s = kubernetes.kubernetes
     try:
         _, current_context = k8s.config.list_kube_config_contexts()
         return current_context['name']
@@ -546,7 +546,7 @@ def get_current_kube_config_context_namespace() -> str:
         str | None: The current kubernetes context namespace if it exists, else
             the default namespace.
     """
-    k8s = kubernetes.get_kubernetes()
+    k8s = kubernetes.kubernetes
     try:
         _, current_context = k8s.config.list_kube_config_contexts()
         if 'namespace' in current_context['context']:

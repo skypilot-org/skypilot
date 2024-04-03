@@ -30,6 +30,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[lambda]"
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
+          pip install "skypilot-nightly[paperspace]"
           pip install "skypilot-nightly[cudo]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
@@ -56,6 +57,7 @@ Install SkyPilot using pip:
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
           pip install "skypilot[fluidstack]"
+          pip install "skypilot[paperspace]"
           pip install "skypilot[cudo]"
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
@@ -85,6 +87,7 @@ Install SkyPilot using pip:
           pip install -e ".[lambda]"
           pip install -e ".[runpod]"
           pip install -e ".[fluidstack]"
+          pip install -e ".[paperspace]"
           pip install -e ".[cudo]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
@@ -141,6 +144,7 @@ This will produce a summary like:
     OCI: enabled
     Lambda: enabled
     RunPod: enabled
+    Paperspace: enabled
     Fluidstack: enabled
     Cudo: enabled
     IBM: enabled
@@ -165,7 +169,7 @@ section :ref:`below <cloud-account-setup>`.
 Cloud account setup
 -------------------
 
-SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidstack, Cudo,
+SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidstack, Paperspace, Cudo,
 IBM, SCP, VMware vSphere and Cloudflare (for R2 object store).
 
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
@@ -267,6 +271,15 @@ Lambda Cloud
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
+Paperspace
+~~~~~~~~~~~~~~~~~~
+
+`Paperspace <https://www.paperspace.com/>`_ is a cloud provider that provides access to GPU accelerated VMs. To configure Paperspace access, go to follow `these instructions to generate an API key <https://docs.digitalocean.com/reference/paperspace/api-keys/>`_. Add the API key with:
+
+.. code-block:: shell
+
+  mkdir -p ~/.paperspace
+  echo "{'api_key' : <your_api_key_here>}" > ~/.paperspace/config.json
 
 RunPod
 ~~~~~~~~~~

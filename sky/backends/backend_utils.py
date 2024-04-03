@@ -745,7 +745,7 @@ def write_cluster_config(
         cluster_name: str,
         local_wheel_path: pathlib.Path,
         wheel_hash: str,
-        region: Optional[clouds.Region] = None,
+        region: clouds.Region,
         zones: Optional[List[clouds.Zone]] = None,
         dryrun: bool = False,
         keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
@@ -976,9 +976,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
-    if isinstance(
-            cloud,
-        (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere, clouds.Cudo)):
+    if isinstance(cloud, (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere,
+                          clouds.Cudo, clouds.Paperspace)):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)

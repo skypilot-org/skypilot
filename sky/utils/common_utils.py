@@ -323,7 +323,8 @@ def dump_yaml_str(config):
                      default_flow_style=False)
 
 
-def make_decorator(cls, name_or_fn: Union[str, Callable], **ctx_kwargs):
+def make_decorator(cls, name_or_fn: Union[str, Callable],
+                   **ctx_kwargs) -> Callable:
     """Make the cls a decorator.
 
     class cls:
