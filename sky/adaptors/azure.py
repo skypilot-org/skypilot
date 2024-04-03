@@ -6,6 +6,9 @@ import logging
 import threading
 from typing import Optional
 
+from sky import exceptions
+from sky.utils import ux_utils
+
 azure = None
 _session_creation_lock = threading.RLock()
 
@@ -91,16 +94,29 @@ def get_client(name: str,
             container_url = (f'https://{storage_account_name}.'
                              f'blob.core.windows.net/{container_name}')
             container_client = ContainerClient.from_container_url(
-                container_url,
-                credential)
+                container_url)
             try:
                 container_client.exists()
             except core_exception().ClientAuthenticationError as e:
-                # Raised when credential is provided to the public
-                # container url. We reattempt without credentials.
-                if 'ERROR: AADSTS50020' in e.message:
+                # Caught when credential is not provided to the private
+                # container url or wrong container name is provided as the
+                # public container url. We reattempt with credentials assuming
+                # user is using private container with access rights.
+                if 'ErrorCode:NoAuthenticationInformation' in e.message:
                     container_client = ContainerClient.from_container_url(
-                        container_url)
+                        container_url, credential)
+                    try:
+                        container_client.exists()
+                    except core_exception().ClientAuthenticationError as e:
+                        # Caught when user attempted to use incorrect public
+                        # container name.
+                        if 'ERROR: AADSTS50020' in e.message:
+                            with ux_utils.print_exception_no_traceback():
+                                raise exceptions.StorageBucketGetError(
+                                    'Attempted to fetch a non-existant public '
+                                    'container name: '
+                                    f'{container_client.container_name}. '
+                                    'Please check if the name is correct.')
             return container_client
         else:
             raise ValueError(f'Client not supported: "{name}"')
