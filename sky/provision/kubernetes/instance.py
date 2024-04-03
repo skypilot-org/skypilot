@@ -523,7 +523,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     wait_pods.append(jump_pod)
     provision_timeout = provider_config['timeout']
 
-    wait_str = 'indefinitely' if provision_timeout == 0 else f'for {provision_timeout}s'
+    wait_str = ('indefinitely' if provision_timeout == 0
+                else f'for {provision_timeout}s')
     logger.debug(f'run_instances: waiting {wait_str} for pods to schedule and '
                  f'run: {list(wait_pods_dict.keys())}')
 
