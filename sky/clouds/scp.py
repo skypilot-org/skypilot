@@ -181,12 +181,14 @@ class SCP(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        dryrun: bool = False,
+        tailscale_authkey: Optional[str] = None,
+    ) -> Dict[str, Optional[str]]:
         del cluster_name_on_cloud, dryrun  # Unused.
         assert zones is None, 'SCP does not support zones.'
 

@@ -179,6 +179,7 @@ class Vsphere(clouds.Cloud):
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
         dryrun: bool = False,
+        tailscale_authkey: Optional[str] = None,
     ) -> Dict[str, Optional[str]]:
         # TODO get image id here.
         del cluster_name_on_cloud, dryrun  # unused

@@ -175,6 +175,7 @@ class IBM(clouds.Cloud):
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
         dryrun: bool = False,
+        tailscale_authkey: Optional[str] = None,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 

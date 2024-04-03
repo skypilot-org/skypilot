@@ -254,6 +254,7 @@ class Cloud:
         region: 'Region',
         zones: Optional[List['Zone']],
         dryrun: bool = False,
+        tailscale_authkey: Optional[str] = None,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 

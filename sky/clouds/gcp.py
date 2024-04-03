@@ -391,12 +391,14 @@ class GCP(clouds.Cloud):
                                                          clouds='gcp')
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources.Resources',
-            cluster_name_on_cloud: str,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        self,
+        resources: 'resources.Resources',
+        cluster_name_on_cloud: str,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        dryrun: bool = False,
+        tailscale_authkey: Optional[str] = None,
+    ) -> Dict[str, Optional[str]]:
         assert zones is not None, (region, zones)
 
         region_name = region.name

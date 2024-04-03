@@ -189,6 +189,7 @@ class Cudo(clouds.Cloud):
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
         dryrun: bool = False,
+        tailscale_authkey: Optional[str] = None,
     ) -> Dict[str, Optional[str]]:
         del zones
         r = resources

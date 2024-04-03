@@ -1359,6 +1359,7 @@ class RetryingVmProvisioner(object):
         prev_cluster_status: Optional[status_lib.ClusterStatus],
         prev_handle: Optional['CloudVmRayResourceHandle'],
         prev_cluster_ever_up: bool,
+        tailscale_authkey: Optional[str],
     ) -> Dict[str, Any]:
         """The provision retry loop."""
         style = colorama.Style
@@ -1454,7 +1455,9 @@ class RetryingVmProvisioner(object):
                     region=region,
                     zones=zones,
                     dryrun=dryrun,
-                    keep_launch_fields_in_existing_config=cluster_exists)
+                    keep_launch_fields_in_existing_config=cluster_exists,
+                    tailscale_authkey=tailscale_authkey,
+                )
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found, or
                 # GPUs are requested in a Kubernetes cluster but the cluster
@@ -1541,7 +1544,7 @@ class RetryingVmProvisioner(object):
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
                             to_provision, handle.cluster_name_on_cloud, region,
-                            zones))
+                            zones, False, tailscale_authkey))
                     config_dict['provision_record'] = provision_record
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
@@ -1979,7 +1982,7 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up = to_provision_config.prev_cluster_ever_up
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
-
+        tailscale_authkey = task.envs.get('TAILSCALE_KEY')
         failover_history: List[Exception] = list()
 
         style = colorama.Style
@@ -2007,7 +2010,9 @@ class RetryingVmProvisioner(object):
                     cloud_user_identity=cloud_user,
                     prev_cluster_status=prev_cluster_status,
                     prev_handle=prev_handle,
-                    prev_cluster_ever_up=prev_cluster_ever_up)
+                    prev_cluster_ever_up=prev_cluster_ever_up,
+                    tailscale_authkey=tailscale_authkey,
+                )
                 if dryrun:
                     return config_dict
             except (exceptions.InvalidClusterNameError,

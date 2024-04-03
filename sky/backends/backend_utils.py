@@ -738,16 +738,18 @@ def _replace_yaml_dicts(
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
-        to_provision: 'resources.Resources',
-        num_nodes: int,
-        cluster_config_template: str,
-        cluster_name: str,
-        local_wheel_path: pathlib.Path,
-        wheel_hash: str,
-        region: Optional[clouds.Region] = None,
-        zones: Optional[List[clouds.Zone]] = None,
-        dryrun: bool = False,
-        keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
+    to_provision: 'resources.Resources',
+    num_nodes: int,
+    cluster_config_template: str,
+    cluster_name: str,
+    local_wheel_path: pathlib.Path,
+    wheel_hash: str,
+    region: Optional[clouds.Region] = None,
+    zones: Optional[List[clouds.Zone]] = None,
+    dryrun: bool = False,
+    keep_launch_fields_in_existing_config: bool = True,
+    tailscale_authkey: Optional[str] = None,
+) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -786,7 +788,8 @@ def write_cluster_config(
     # for the validation.
     # TODO(tian): Move more cloud agnostic vars to resources.py.
     resources_vars = to_provision.make_deploy_variables(cluster_name_on_cloud,
-                                                        region, zones, dryrun)
+                                                        region, zones, dryrun,
+                                                        tailscale_authkey)
     config_dict = {}
 
     specific_reservations = set(

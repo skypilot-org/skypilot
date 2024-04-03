@@ -182,6 +182,7 @@ class Fluidstack(clouds.Cloud):
         region: clouds.Region,
         zones: Optional[List[clouds.Zone]],
         dryrun: bool = False,
+        tailscale_authkey: Optional[str] = None,
     ) -> Dict[str, Optional[str]]:
 
         assert zones is None, 'FluidStack does not support zones.'

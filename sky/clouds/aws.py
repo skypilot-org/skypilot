@@ -370,12 +370,15 @@ class AWS(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='aws')
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources_lib.Resources',
-                                        cluster_name_on_cloud: str,
-                                        region: 'clouds.Region',
-                                        zones: Optional[List['clouds.Zone']],
-                                        dryrun: bool = False) -> Dict[str, Any]:
+    def make_deploy_resources_variables(
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
+        region: 'clouds.Region',
+        zones: Optional[List['clouds.Zone']],
+        dryrun: bool = False,
+        tailscale_authkey: Optional[str] = None,
+    ) -> Dict[str, Any]:
         del dryrun  # unused
         assert zones is not None, (region, zones)
 
@@ -409,9 +412,7 @@ class AWS(clouds.Cloud):
             security_group = user_security_group
         else:
             security_group = DEFAULT_SECURITY_GROUP_NAME
-        tailscale_key = os.environ['TAILSCALE_KEY']
-        authkey_option = f"'--authkey={tailscale_key}'"  # pylint: disable=invalid-string-quote
-        return {
+        deploy_resource_variables = {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
@@ -419,9 +420,15 @@ class AWS(clouds.Cloud):
             'zones': ','.join(zone_names),
             'image_id': image_id,
             'security_group': security_group,
-            'authkey_option': authkey_option,
             **AWS._get_disk_specs(r.disk_tier)
         }
+        if tailscale_authkey is not None:
+            logger.info(
+                'Tailscale authkey is defined. Adding to deploy resource variables.'
+            )
+            authkey_option = f"'--authkey={tailscale_authkey}'"  # pylint: disable=invalid-string-quote
+            deploy_resource_variables['authkey_option'] = authkey_option
+        return deploy_resource_variables
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
