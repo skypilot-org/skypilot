@@ -3594,7 +3594,7 @@ def test_skyserve_failures(generic_cloud: str):
         'test-skyserve-failures',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/failures/initial_delay.yaml',
-            f's=$(sky serve status {name})'
+            f's=$(sky serve status {name}); '
             f'until ! echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
             'echo "Waiting for replica to be failed..."; sleep 5; '
             's=$(sky serve status); echo "$s"; done;',
@@ -3602,7 +3602,7 @@ def test_skyserve_failures(generic_cloud: str):
             f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 2',
             f'sky ser ve update {name} --cloud {generic_cloud} -y tests/skyserve/failures/probing.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            f's=$(sky serve status {name})'
+            f's=$(sky serve status {name}); '
             f'until ! echo "$s" | grep "FAILED_PROBING"; do '
             'echo "Waiting for replica to be failed..."; sleep 5; '
             's=$(sky serve status); echo "$s"; done;' +
