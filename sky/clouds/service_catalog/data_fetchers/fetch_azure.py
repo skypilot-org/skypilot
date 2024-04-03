@@ -7,12 +7,19 @@ import json
 from multiprocessing import pool as mp_pool
 import os
 import subprocess
+import typing
 from typing import List, Optional, Set
 import urllib
 
 import numpy as np
-import pandas as pd
 import requests
+
+from sky.adaptors import common as adaptors_common
+
+if typing.TYPE_CHECKING:
+    import pandas as pd
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
 US_REGIONS = {
     'centralus',
@@ -103,7 +110,7 @@ def get_pricing_url(region: Optional[str] = None) -> str:
     return f'https://prices.azure.com/api/retail/prices?$filter={filters_str}'
 
 
-def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
+def get_pricing_df(region: Optional[str] = None) -> 'pd.DataFrame':
     all_items = []
     url = get_pricing_url(region)
     print(f'Getting pricing for {region}, url: {url}')
@@ -128,7 +135,7 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
               (df['unitPrice'] > 0)]
 
 
-def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
+def get_sku_df(region_set: Set[str]) -> 'pd.DataFrame':
     print('Fetching SKU list')
     # To get a complete list, --all option is necessary.
     proc = subprocess.run(

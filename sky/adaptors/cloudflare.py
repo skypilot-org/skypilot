@@ -7,35 +7,22 @@ import os
 import threading
 from typing import Dict, Optional, Tuple
 
+from sky.adaptors import common
 from sky.utils import ux_utils
 
-boto3 = None
-botocore = None
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Cloudflare.'
+                         'Try pip install "skypilot[cloudflare]"')
+boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
+botocore = common.LazyImport('botocore',
+                             import_error_message=_IMPORT_ERROR_MESSAGE)
+_LAZY_MODULES = (boto3, botocore)
+
 _session_creation_lock = threading.RLock()
 ACCOUNT_ID_PATH = '~/.cloudflare/accountid'
 R2_CREDENTIALS_PATH = '~/.cloudflare/r2.credentials'
 R2_PROFILE_NAME = 'r2'
 _INDENT_PREFIX = '    '
 NAME = 'Cloudflare'
-
-
-def import_package(func):
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        global boto3, botocore
-        if boto3 is None or botocore is None:
-            try:
-                import boto3 as _boto3
-                import botocore as _botocore
-                boto3 = _boto3
-                botocore = _botocore
-            except ImportError:
-                raise ImportError('Fail to import dependencies for Cloudflare.'
-                                  'Try pip install "skypilot[aws]"') from None
-        return func(*args, **kwargs)
-
-    return wrapper
 
 
 @contextlib.contextmanager
@@ -75,7 +62,6 @@ def get_r2_credentials(boto3_session):
 # for different threads.
 # Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # pylint: disable=line-too-long
 @functools.lru_cache()
-@import_package
 def session():
     """Create an AWS session."""
     # Creating the session object is not thread-safe for boto3,
@@ -90,7 +76,6 @@ def session():
 
 
 @functools.lru_cache()
-@import_package
 def resource(resource_name: str, **kwargs):
     """Create a Cloudflare resource.
 
@@ -141,7 +126,7 @@ def client(service_name: str, region):
         region_name=region)
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
     from botocore import exceptions
@@ -152,7 +137,7 @@ def create_endpoint():
     """Reads accountid necessary to interact with R2"""
 
     accountid_path = os.path.expanduser(ACCOUNT_ID_PATH)
-    with open(accountid_path, 'r') as f:
+    with open(accountid_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
         accountid = lines[0]
 
@@ -202,7 +187,7 @@ def r2_profile_in_aws_cred() -> bool:
     profile_path = os.path.expanduser(R2_CREDENTIALS_PATH)
     r2_profile_exists = False
     if os.path.isfile(profile_path):
-        with open(profile_path, 'r') as file:
+        with open(profile_path, 'r', encoding='utf-8') as file:
             for line in file:
                 if f'[{R2_PROFILE_NAME}]' in line:
                     r2_profile_exists = True

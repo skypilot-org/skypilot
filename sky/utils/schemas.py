@@ -327,12 +327,22 @@ def get_service_schema():
                 'properties': {
                     'min_replicas': {
                         'type': 'integer',
+                        'minimum': 0,
                     },
                     'max_replicas': {
                         'type': 'integer',
+                        'minimum': 0,
                     },
                     'target_qps_per_replica': {
                         'type': 'number',
+                        'minimum': 0,
+                    },
+                    'dynamic_ondemand_fallback': {
+                        'type': 'boolean',
+                    },
+                    'base_ondemand_fallback_replicas': {
+                        'type': 'integer',
+                        'minimum': 0,
                     },
                     'upscale_delay_seconds': {
                         'type': 'number',
@@ -507,6 +517,23 @@ _NETWORK_CONFIG_SCHEMA = {
     },
 }
 
+_INSTANCE_TAGS_SCHEMA = {
+    'instance_tags': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': {
+            'type': 'string',
+        },
+    },
+}
+
+_REMOTE_IDENTITY_SCHEMA = {
+    'remote_identity': {
+        'type': 'string',
+        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'],
+    }
+}
+
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
@@ -534,7 +561,120 @@ def get_config_schema():
             },
         }
     }
+    cloud_configs = {
+        'aws': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'security_group_name': {
+                    'type': 'string',
+                },
+                **_INSTANCE_TAGS_SCHEMA,
+                **_NETWORK_CONFIG_SCHEMA,
+            }
+        },
+        'gcp': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'prioritize_reservations': {
+                    'type': 'boolean',
+                },
+                'specific_reservations': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
+                **_INSTANCE_TAGS_SCHEMA,
+                **_NETWORK_CONFIG_SCHEMA,
+            }
+        },
+        'azure': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'storage_account': {
+                    'type': 'string'
+                },
+                'resource_group': {
+                    'type': 'string'
+                },
+            }
+        },
+        'kubernetes': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'networking': {
+                    'type': 'string',
+                    'case_insensitive_enum': [
+                        type.value
+                        for type in kubernetes_enums.KubernetesNetworkingMode
+                    ]
+                },
+                'ports': {
+                    'type': 'string',
+                    'case_insensitive_enum': [
+                        type.value
+                        for type in kubernetes_enums.KubernetesPortMode
+                    ]
+                },
+                'pod_config': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating pod spec is hard
+                    'additionalProperties': True,
+                },
+                'custom_metadata': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating metadata is hard
+                    'additionalProperties': True,
+                    # Disallow 'name' and 'namespace' keys in this dict
+                    'not': {
+                        'anyOf': [{
+                            'required': ['name']
+                        }, {
+                            'required': ['namespace']
+                        }]
+                    }
+                }
+            }
+        },
+        'oci': {
+            'type': 'object',
+            'required': [],
+            'properties': {},
+            # Properties are either 'default' or a region name.
+            'additionalProperties': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'compartment_ocid': {
+                        'type': 'string',
+                    },
+                    'image_tag_general': {
+                        'type': 'string',
+                    },
+                    'image_tag_gpu': {
+                        'type': 'string',
+                    },
+                    'vcn_subnet': {
+                        'type': 'string',
+                    },
+                }
+            },
+        },
+    }
 
+    for config in cloud_configs.values():
+        config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -543,92 +683,6 @@ def get_config_schema():
         'properties': {
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
-            'aws': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'instance_tags': {
-                        'type': 'object',
-                        'required': [],
-                        'additionalProperties': {
-                            'type': 'string',
-                        },
-                    },
-                    **_NETWORK_CONFIG_SCHEMA,
-                }
-            },
-            'gcp': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'specific_reservations': {
-                        'type': 'array',
-                        'items': {
-                            'type': 'string',
-                        },
-                    },
-                    **_NETWORK_CONFIG_SCHEMA,
-                }
-            },
-            'azure': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'storage_account': {
-                        'type': 'string'
-                    },
-                    'resource_group': {
-                        'type': 'string'
-                    },
-                }
-            },
-            'kubernetes': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'networking': {
-                        'type': 'string',
-                        'case_insensitive_enum': [
-                            type.value for type in
-                            kubernetes_enums.KubernetesNetworkingMode
-                        ]
-                    },
-                    'ports': {
-                        'type': 'string',
-                        'case_insensitive_enum': [
-                            type.value
-                            for type in kubernetes_enums.KubernetesPortMode
-                        ]
-                    },
-                }
-            },
-            'oci': {
-                'type': 'object',
-                'required': [],
-                # Properties are either 'default' or a region name.
-                'additionalProperties': {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'compartment_ocid': {
-                            'type': 'string',
-                        },
-                        'image_tag_general': {
-                            'type': 'string',
-                        },
-                        'image_tag_gpu': {
-                            'type': 'string',
-                        },
-                        'vcn_subnet': {
-                            'type': 'string',
-                        },
-                    }
-                },
-            },
+            **cloud_configs,
         }
     }

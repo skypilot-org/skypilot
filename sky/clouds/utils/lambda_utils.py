@@ -34,14 +34,14 @@ class Metadata:
     def get(self, instance_id: str) -> Optional[Dict[str, Any]]:
         if not os.path.exists(self.path):
             return None
-        with open(self.path, 'r') as f:
+        with open(self.path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
         return metadata.get(instance_id)
 
     def set(self, instance_id: str, value: Optional[Dict[str, Any]]) -> None:
         # Read from metadata file
         if os.path.exists(self.path):
-            with open(self.path, 'r') as f:
+            with open(self.path, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
         else:
             metadata = {}
@@ -56,14 +56,14 @@ class Metadata:
         else:
             metadata[instance_id] = value
         # Write to metadata file
-        with open(self.path, 'w') as f:
+        with open(self.path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f)
 
     def refresh(self, instance_ids: List[str]) -> None:
         """Remove all tags for instances not in instance_ids."""
         if not os.path.exists(self.path):
             return
-        with open(self.path, 'r') as f:
+        with open(self.path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
         for instance_id in list(metadata.keys()):
             if instance_id not in instance_ids:
@@ -71,7 +71,7 @@ class Metadata:
         if len(metadata) == 0:
             os.remove(self.path)
             return
-        with open(self.path, 'w') as f:
+        with open(self.path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f)
 
 
@@ -123,7 +123,7 @@ class LambdaCloudClient:
     def __init__(self) -> None:
         self.credentials = os.path.expanduser(CREDENTIALS_PATH)
         assert os.path.exists(self.credentials), 'Credentials not found'
-        with open(self.credentials, 'r') as f:
+        with open(self.credentials, 'r', encoding='utf-8') as f:
             lines = [line.strip() for line in f.readlines() if ' = ' in line]
             self._credentials = {
                 line.split(' = ')[0]: line.split(' = ')[1] for line in lines

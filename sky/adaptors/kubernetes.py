@@ -2,54 +2,30 @@
 
 # pylint: disable=import-outside-toplevel
 
-import functools
 import os
 
+from sky.adaptors import common
 from sky.utils import env_options
 from sky.utils import ux_utils
 
-kubernetes = None
-urllib3 = None
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '
+                         'Try running: pip install "skypilot[kubernetes]"')
+kubernetes = common.LazyImport('kubernetes',
+                               import_error_message=_IMPORT_ERROR_MESSAGE)
+urllib3 = common.LazyImport('urllib3',
+                            import_error_message=_IMPORT_ERROR_MESSAGE)
 
 _configured = False
 _core_api = None
 _auth_api = None
 _networking_api = None
 _custom_objects_api = None
+_node_api = None
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
 
 
-def import_package(func):
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        global kubernetes
-        global urllib3
-        if kubernetes is None:
-            try:
-                import kubernetes as _kubernetes
-                import urllib3 as _urllib3
-            except ImportError:
-                # TODO(romilb): Update this message to point to installation
-                #  docs when they are ready.
-                raise ImportError('Fail to import dependencies for Kubernetes. '
-                                  'Run `pip install kubernetes` to '
-                                  'install them.') from None
-            kubernetes = _kubernetes
-            urllib3 = _urllib3
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-@import_package
-def get_kubernetes():
-    return kubernetes
-
-
-@import_package
 def _load_config():
     global _configured
     if _configured:
@@ -81,12 +57,12 @@ def _load_config():
                 err_str = (
                     'Failed to load Kubernetes configuration. '
                     f'Please check if your kubeconfig file is valid.{suffix}')
+            err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
     _configured = True
 
 
-@import_package
 def core_api():
     global _core_api
     if _core_api is None:
@@ -96,7 +72,6 @@ def core_api():
     return _core_api
 
 
-@import_package
 def auth_api():
     global _auth_api
     if _auth_api is None:
@@ -106,7 +81,6 @@ def auth_api():
     return _auth_api
 
 
-@import_package
 def networking_api():
     global _networking_api
     if _networking_api is None:
@@ -116,7 +90,6 @@ def networking_api():
     return _networking_api
 
 
-@import_package
 def custom_objects_api():
     global _custom_objects_api
     if _custom_objects_api is None:
@@ -126,21 +99,26 @@ def custom_objects_api():
     return _custom_objects_api
 
 
-@import_package
+def node_api():
+    global _node_api
+    if _node_api is None:
+        _load_config()
+        _node_api = kubernetes.client.NodeV1Api()
+
+    return _node_api
+
+
 def api_exception():
     return kubernetes.client.rest.ApiException
 
 
-@import_package
 def config_exception():
     return kubernetes.config.config_exception.ConfigException
 
 
-@import_package
 def max_retry_error():
     return urllib3.exceptions.MaxRetryError
 
 
-@import_package
 def stream():
     return kubernetes.stream.stream

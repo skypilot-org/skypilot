@@ -15,9 +15,12 @@ from sky import status_lib
 from sky.provision import aws
 from sky.provision import azure
 from sky.provision import common
+from sky.provision import cudo
+from sky.provision import fluidstack
 from sky.provision import gcp
 from sky.provision import kubernetes
 from sky.provision import runpod
+from sky.provision import vsphere
 
 logger = sky_logging.init_logger(__name__)
 
@@ -92,7 +95,7 @@ def run_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
 def stop_instances(
     provider_name: str,
     cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
+    provider_config: Dict[str, Any],
     worker_only: bool = False,
 ) -> None:
     """Stop running instances."""
@@ -103,7 +106,7 @@ def stop_instances(
 def terminate_instances(
     provider_name: str,
     cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
+    provider_config: Dict[str, Any],
     worker_only: bool = False,
 ) -> None:
     """Terminate running or stopped instances."""

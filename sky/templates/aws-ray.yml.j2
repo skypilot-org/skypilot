@@ -36,19 +36,11 @@ provider:
   security_group:
     # AWS config file must include security group name
     GroupName: {{security_group}}
+    ManagedBySkyPilot: {{security_group_managed_by_skypilot}}
 {% if vpc_name is not none %}
   # NOTE: This is a new field added by SkyPilot to force use a specific VPC.
   vpc_name: {{vpc_name}}
 {% endif %}
-{%- if docker_login_config is not none %}
-  # We put docker login config in provider section because ray's schema disabled
-  # additionalProperties for docker config.
-  # See: https://github.com/ray-project/ray/blob/d2fc4823126927b2c54f89ec72fa3d24b442e6a3/python/ray/autoscaler/ray-schema.json#L227
-  docker_login_config:
-    username: {{docker_login_config.username}}
-    password: {{docker_login_config.password}}
-    server: {{docker_login_config.server}}
-{%- endif %}
   use_internal_ips: {{use_internal_ips}}
   # Disable launch config check for worker nodes as it can cause resource
   # leakage.
@@ -150,24 +142,21 @@ setup_commands:
   # Create ~/.ssh/config file in case the file does not exist in the custom image.
   # We set auto_activate_base to be false for pre-installed conda.
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
+  # Line "conda config --remove channels": remove the default channel set in the default AWS image as it cannot be accessed.
+  #    UnavailableInvalidChannel: HTTP 404 NOT FOUND for channel  <https://aws-ml-conda-ec2.s3.us-west-2.amazonaws.com>
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
-    (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
-    (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
-    source ~/.bashrc;
-    mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
-    (pip3 list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null || pip3 install --exists-action w -U ray[default]=={{ray_version}});
-    (pip3 list | grep "skypilot " && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[aws, remote]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
+    conda config --remove channels "https://aws-ml-conda-ec2.s3.us-west-2.amazonaws.com" || true;
+    {{ ray_skypilot_installation_commands }}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     {%- endif %}
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
-    python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.

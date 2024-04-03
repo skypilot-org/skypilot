@@ -3,19 +3,22 @@
 For now this service catalog is manually coded. In the future it should be
 queried from GCP API.
 """
-from collections import defaultdict
 import typing
 from typing import Dict, List, Optional, Tuple
 
-import pandas as pd
-
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.clouds.service_catalog import common
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import pandas as pd
+
     from sky.clouds import cloud
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -92,6 +95,9 @@ _ACC_INSTANCE_TYPE_DICTS = {
         4: ['g2-standard-48'],
         8: ['g2-standard-96'],
     },
+    'H100': {
+        8: ['a3-highgpu-8g'],
+    }
 }
 
 # Number of CPU cores per GPU based on the AWS setting.
@@ -233,9 +239,10 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
@@ -312,14 +319,6 @@ def validate_region_zone(
     return common.validate_region_zone_impl('gcp', _df, region, zone)
 
 
-def accelerator_in_region_or_zone(acc_name: str,
-                                  acc_count: int,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
-                                                     region, zone)
-
-
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
@@ -327,12 +326,12 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 
 def _get_accelerator(
-    df: pd.DataFrame,
+    df: 'pd.DataFrame',
     accelerator: str,
     count: int,
     region: Optional[str],
     zone: Optional[str] = None,
-) -> pd.DataFrame:
+) -> 'pd.DataFrame':
     idx = (df['AcceleratorName'].str.fullmatch(
         accelerator, case=False)) & (df['AcceleratorCount'] == count)
     if region is not None:
@@ -370,68 +369,126 @@ def list_accelerators(
     quantity_filter: Optional[int] = None,
     case_sensitive: bool = True,
     all_regions: bool = False,
+    require_price: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
-    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
-                                            region_filter, quantity_filter,
-                                            case_sensitive, all_regions)
 
-    # Remove GPUs that are unsupported by SkyPilot.
-    new_results = {}
-    for acc_name, acc_info in results.items():
-        if (acc_name.startswith('tpu') or
-                acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY or
-                acc_name in _ACC_INSTANCE_TYPE_DICTS):
-            new_results[acc_name] = acc_info
-    results = new_results
+    # This is a simplified version of get_instance_type_for_accelerator, as it
+    # has to be applied to all the entries in acc_host_df, and the input is more
+    # restricted.
+    def _get_host_instance_type(acc_name: str, acc_count: int, region: str,
+                                zone: str) -> Optional[str]:
+        df = _df[(_df['Region'].str.lower() == region.lower()) &
+                 (_df['AvailabilityZone'].str.lower() == zone.lower()) &
+                 (_df['InstanceType'].notna())]
+        if acc_name in _ACC_INSTANCE_TYPE_DICTS:
+            instance_types = _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+            df = df[df['InstanceType'].isin(instance_types)]
+        else:
+            if acc_name not in _NUM_ACC_TO_NUM_CPU:
+                acc_name = 'DEFAULT'
 
-    # Figure out which instance type to use.
-    infos_with_instance_type: List[common.InstanceTypeInfo] = sum(
-        results.values(), [])
+            cpus = _NUM_ACC_TO_NUM_CPU[acc_name][acc_count]
+            # The memory size should be at least 4x the requested number of
+            # vCPUs to be consistent with all other clouds.
+            memory = cpus * _DEFAULT_GPU_MEMORY_CPU_RATIO
+            df = df[df['InstanceType'].str.startswith(_DEFAULT_HOST_VM_FAMILY)]
+            df = df[(df['vCPUs'] >= cpus) & (df['MemoryGiB'] >= memory)]
+        df = df.dropna(subset=['Price'])
+        # Some regions may not have the host VM available, although the GPU is
+        # offered, e.g., a2-megagpu-16g in asia-northeast1.
+        if df.empty:
+            return None
+        row = df.loc[df['Price'].idxmin()]
+        return row['InstanceType']
 
-    new_infos = defaultdict(list)
-    for info in infos_with_instance_type:
-        assert pd.isna(info.instance_type) and pd.isna(info.memory), info
-        # We show TPU-VM prices here, so no instance type is needed.
-        # Set it as `TPU-VM` to be shown in the table.
-        if info.accelerator_name.startswith('tpu'):
-            new_infos[info.accelerator_name].append(
-                info._replace(instance_type='TPU-VM'))
-            continue
-        vm_types, _ = get_instance_type_for_accelerator(info.accelerator_name,
-                                                        info.accelerator_count,
-                                                        region=region_filter)
-        # The acc name & count in `info` are retrieved from the table so we
-        # could definitely find a column in the original table
-        # Additionally the way get_instance_type_for_accelerator works
-        # we will always get either a specialized instance type
-        # or a default instance type. So we can safely assume that
-        # vm_types is not None.
-        assert vm_types is not None
-        for vm_type in vm_types:
-            df = _df[_df['InstanceType'] == vm_type]
-            cpu_count = df['vCPUs'].iloc[0]
-            memory = df['MemoryGiB'].iloc[0]
-            vm_price = common.get_hourly_cost_impl(_df,
-                                                   vm_type,
-                                                   use_spot=False,
-                                                   region=region_filter,
-                                                   zone=None)
-            vm_spot_price = common.get_hourly_cost_impl(_df,
-                                                        vm_type,
-                                                        use_spot=True,
-                                                        region=region_filter,
-                                                        zone=None)
-            new_infos[info.accelerator_name].append(
-                info._replace(
-                    instance_type=vm_type,
-                    cpu_count=cpu_count,
-                    memory=memory,
-                    # total cost = VM instance + GPU.
-                    price=info.price + vm_price,
-                    spot_price=info.spot_price + vm_spot_price,
-                ))
-    return new_infos
+    acc_host_df = _df
+    tpu_df = None
+    # If price information is not required, we do not need to fetch the host VM
+    # information.
+    if require_price:
+        acc_host_df = _df[_df['AcceleratorName'].notna()]
+        # Filter the acc_host_df first before fetching the host VM information.
+        # This is to reduce the rows to be processed for optimization.
+        # TODO: keep it sync with `list_accelerators_impl`
+        if gpus_only:
+            acc_host_df = acc_host_df[~acc_host_df['GpuInfo'].isna()]
+        if name_filter is not None:
+            acc_host_df = acc_host_df[
+                acc_host_df['AcceleratorName'].str.contains(name_filter,
+                                                            case=case_sensitive,
+                                                            regex=True)]
+        if region_filter is not None:
+            acc_host_df = acc_host_df[acc_host_df['Region'].str.contains(
+                region_filter, case=case_sensitive, regex=True)]
+        acc_host_df['AcceleratorCount'] = acc_host_df[
+            'AcceleratorCount'].astype(int)
+        if quantity_filter is not None:
+            acc_host_df = acc_host_df[acc_host_df['AcceleratorCount'] ==
+                                      quantity_filter]
+        # Split the TPU and GPU information, as we should not combine the price
+        # of the TPU and the host VM.
+        # TODO: Fix the price for TPU VMs.
+        is_tpu = acc_host_df['AcceleratorName'].str.startswith('tpu-')
+        tpu_df = acc_host_df[is_tpu]
+        acc_host_df = acc_host_df[~is_tpu]
+        if not acc_host_df.empty:
+            assert acc_host_df['InstanceType'].isna().all(), acc_host_df
+            acc_host_df = acc_host_df.drop(
+                columns=['InstanceType', 'vCPUs', 'MemoryGiB'])
+            # Fetch the host VM information for each accelerator in its region
+            # and zone.
+            acc_host_df['InstanceType'] = acc_host_df.apply(
+                lambda x: _get_host_instance_type(x['AcceleratorName'],
+                                                  x['AcceleratorCount'],
+                                                  region=x['Region'],
+                                                  zone=x['AvailabilityZone']),
+                axis=1)
+            acc_host_df.dropna(subset=['InstanceType', 'Price'], inplace=True)
+            # Combine the price of the host VM and the GPU.
+            acc_host_df = pd.merge(
+                acc_host_df,
+                _df[[
+                    'InstanceType', 'vCPUs', 'MemoryGiB', 'Region',
+                    'AvailabilityZone', 'Price', 'SpotPrice'
+                ]],
+                on=['InstanceType', 'Region', 'AvailabilityZone'],
+                how='inner',
+                suffixes=('', '_host'))
+            # Combine the price of the host instance type and the GPU.
+            acc_host_df['Price'] = (acc_host_df['Price'] +
+                                    acc_host_df['Price_host'])
+            acc_host_df['SpotPrice'] = (acc_host_df['SpotPrice'] +
+                                        acc_host_df['SpotPrice_host'])
+            acc_host_df.rename(columns={
+                'vCPUs_host': 'vCPUs',
+                'MemoryGiB_host': 'MemoryGiB'
+            },
+                               inplace=True)
+        acc_host_df = pd.concat([acc_host_df, tpu_df])
+    results = common.list_accelerators_impl('GCP', acc_host_df, gpus_only,
+                                            name_filter, region_filter,
+                                            quantity_filter, case_sensitive,
+                                            all_regions)
+    if tpu_df is not None and not tpu_df.empty:
+        # Combine the entries for TPUs with the same version.
+        # TODO: The current TPU prices are the price of the TPU itself, not the
+        # TPU VM. We should fix this in the future.
+        for acc_name in list(results.keys()):
+            if acc_name.startswith('tpu-'):
+                version = acc_name.split('-')[1]
+                acc_info = results.pop(acc_name)
+                tpu_group = f'tpu-{version}'
+                if tpu_group not in results:
+                    results[tpu_group] = []
+                results[tpu_group].extend(acc_info)
+        for acc_group in list(results.keys()):
+            if acc_group.startswith('tpu-'):
+                results[acc_group] = sorted(
+                    results[acc_group],
+                    key=lambda x: (x.price, x.spot_price, x.region),
+                )
+    return results
 
 
 def get_region_zones_for_accelerators(

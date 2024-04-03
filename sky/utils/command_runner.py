@@ -1,6 +1,5 @@
 """Runner for commands to be executed on the cluster."""
 import enum
-import getpass
 import hashlib
 import os
 import pathlib
@@ -36,8 +35,8 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     """Returns a temporary path to be used as the ssh control path."""
     if ssh_control_filename is None:
         return None
-    username = getpass.getuser()
-    path = (f'/tmp/skypilot_ssh_{username}/{ssh_control_filename}')
+    user_hash = common_utils.get_user_hash()
+    path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -48,11 +47,13 @@ def ssh_options_list(
     *,
     ssh_proxy_command: Optional[str] = None,
     docker_ssh_proxy_command: Optional[str] = None,
-    timeout: int = 30,
+    connect_timeout: Optional[int] = None,
     port: int = 22,
     disable_control_master: Optional[bool] = False,
 ) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
+    if connect_timeout is None:
+        connect_timeout = 30
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
     arg_dict = {
@@ -76,7 +77,7 @@ def ssh_options_list(
         'ServerAliveInterval': 5,
         'ServerAliveCountMax': 3,
         # ConnectTimeout.
-        'ConnectTimeout': f'{timeout}s',
+        'ConnectTimeout': f'{connect_timeout}s',
         # Agent forwarding for git.
         'ForwardAgent': 'yes',
     }
@@ -219,7 +220,8 @@ class SSHCommandRunner:
         ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,
-                          port_forward: Optional[List[int]]) -> List[str]:
+                          port_forward: Optional[List[int]],
+                          connect_timeout: Optional[int]) -> List[str]:
         ssh = ['ssh']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
@@ -244,6 +246,7 @@ class SSHCommandRunner:
             ssh_proxy_command=self._ssh_proxy_command,
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
+            connect_timeout=connect_timeout,
             disable_control_master=self.disable_control_master) + [
                 f'{self.ssh_user}@{self.ip}'
             ]
@@ -261,6 +264,7 @@ class SSHCommandRunner:
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
+            connect_timeout: Optional[int] = None,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -286,8 +290,10 @@ class SSHCommandRunner:
             or
             A tuple of (returncode, stdout, stderr).
         """
-        base_ssh_command = self._ssh_base_command(ssh_mode=ssh_mode,
-                                                  port_forward=port_forward)
+        base_ssh_command = self._ssh_base_command(
+            ssh_mode=ssh_mode,
+            port_forward=port_forward,
+            connect_timeout=connect_timeout)
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             command = base_ssh_command + cmd
@@ -339,7 +345,6 @@ class SSHCommandRunner:
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
-
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
@@ -451,3 +456,10 @@ class SSHCommandRunner:
                                            error_msg,
                                            stderr=stderr,
                                            stream_logs=stream_logs)
+
+    def check_connection(self) -> bool:
+        """Check if the connection to the remote machine is successful."""
+        returncode = self.run('true', connect_timeout=5, stream_logs=False)
+        if returncode:
+            return False
+        return True

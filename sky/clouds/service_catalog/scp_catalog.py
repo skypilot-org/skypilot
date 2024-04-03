@@ -8,6 +8,7 @@ import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky.clouds.service_catalog import common
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -32,17 +33,6 @@ def validate_region_zone(
     return common.validate_region_zone_impl('scp', _df, region, zone)
 
 
-def accelerator_in_region_or_zone(acc_name: str,
-                                  acc_count: int,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> bool:
-    if zone is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('SCP Cloud does not support zones.')
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
-                                                     region, zone)
-
-
 def get_hourly_cost(instance_type: str,
                     use_spot: bool = False,
                     region: Optional[str] = None,
@@ -61,9 +51,10 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = str(_DEFAULT_NUM_VCPUS)
@@ -122,14 +113,15 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 
 def list_accelerators(
-    gpus_only: bool,
-    name_filter: Optional[str],
-    region_filter: Optional[str],
-    quantity_filter: Optional[int],
-    case_sensitive: bool = True,
-    all_regions: bool = False,
-) -> Dict[str, List[common.InstanceTypeInfo]]:
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        quantity_filter: Optional[int],
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in SCP offering GPUs."""
+    del require_price  # Unused.
     return common.list_accelerators_impl('scp', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
                                          case_sensitive, all_regions)

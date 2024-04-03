@@ -17,7 +17,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -29,8 +29,12 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[oci]"
           pip install "skypilot-nightly[lambda]"
           pip install "skypilot-nightly[runpod]"
+          pip install "skypilot-nightly[fluidstack]"
+          pip install "skypilot-nightly[paperspace]"
+          pip install "skypilot-nightly[cudo]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
+          pip install "skypilot-nightly[vsphere]"
           pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[all]"
 
@@ -40,7 +44,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -52,8 +56,12 @@ Install SkyPilot using pip:
           pip install "skypilot[oci]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
+          pip install "skypilot[fluidstack]"
+          pip install "skypilot[paperspace]"
+          pip install "skypilot[cudo]"
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
+          pip install "skypilot[vsphere]"
           pip install "skypilot[kubernetes]"
           pip install "skypilot[all]"
 
@@ -63,7 +71,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -78,8 +86,12 @@ Install SkyPilot using pip:
           pip install -e ".[oci]"
           pip install -e ".[lambda]"
           pip install -e ".[runpod]"
+          pip install -e ".[fluidstack]"
+          pip install -e ".[paperspace]"
+          pip install -e ".[cudo]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
+          pip install -e ".[vsphere]"
           pip install -e ".[kubernetes]"
           pip install -e ".[all]"
 
@@ -132,8 +144,12 @@ This will produce a summary like:
     OCI: enabled
     Lambda: enabled
     RunPod: enabled
+    Paperspace: enabled
+    Fluidstack: enabled
+    Cudo: enabled
     IBM: enabled
     SCP: enabled
+    vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
 
@@ -153,8 +169,8 @@ section :ref:`below <cloud-account-setup>`.
 Cloud account setup
 -------------------
 
-SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod,
-IBM, SCP, and Cloudflare (for R2 object store).
+SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidstack, Paperspace, Cudo,
+IBM, SCP, VMware vSphere and Cloudflare (for R2 object store).
 
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
 
@@ -255,6 +271,15 @@ Lambda Cloud
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
+Paperspace
+~~~~~~~~~~~~~~~~~~
+
+`Paperspace <https://www.paperspace.com/>`_ is a cloud provider that provides access to GPU accelerated VMs. To configure Paperspace access, go to follow `these instructions to generate an API key <https://docs.digitalocean.com/reference/paperspace/api-keys/>`_. Add the API key with:
+
+.. code-block:: shell
+
+  mkdir -p ~/.paperspace
+  echo "{'api_key' : <your_api_key_here>}" > ~/.paperspace/config.json
 
 RunPod
 ~~~~~~~~~~
@@ -265,6 +290,43 @@ RunPod
   
   pip install "runpod>=1.5.1"
   runpod config
+
+
+Fluidstack
+~~~~~~~~~~~~~~~~~~
+
+`Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access, go to the `Home <https://console.fluidstack.io/>`__ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` and the :code:`API token` to :code:`~/.fluidstack/api_token`:
+
+.. code-block:: shell
+
+  mkdir -p ~/.fluidstack
+  echo "your_api_key_here" > ~/.fluidstack/api_key
+  echo "your_api_token_here" > ~/.fluidstack/api_token
+
+
+Cudo Compute
+~~~~~~~~~~~~~~~~~~
+
+`Cudo Compute <https://www.cudocompute.com/>`__ GPU cloud provides low cost GPUs powered with green energy.
+
+1. Create an API Key by following `this guide <https://www.cudocompute.com/docs/guide/api-keys/>`__.
+2. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
+3. Run :code:`cudoctl init`:
+
+.. code-block:: shell
+
+  cudoctl init
+    ✔ api key: my-api-key
+    ✔ project: my-project
+    ✔ billing account: my-billing-account
+    ✔ context: default
+    config file saved ~/.config/cudo/cudo.yml
+
+  pip install "cudocompute>=0.1.8"
+
+If you want to want to use skypilot with a different Cudo Compute account or project, just run :code:`cudoctl init`: again.
+
+
 
 
 IBM
@@ -324,6 +386,42 @@ To configure SCP access, you need access keys and the ID of the project your tas
 
   Multi-node clusters are currently not supported on SCP.
 
+
+
+VMware vSphere
+~~~~~~~~~~~~~~
+
+To configure VMware vSphere access, store the vSphere credentials in :code:`~/.vsphere/credential.yaml`:
+
+.. code-block:: shell
+
+    mkdir -p ~/.vsphere
+    touch ~/.vsphere/credential.yaml
+
+Here is an example of configuration within the credential file:
+
+.. code-block:: yaml
+
+    vcenters:
+      - name: <your_vsphere_server_ip_01>
+        username: <your_vsphere_user_name>
+        password: <your_vsphere_user_passwd>
+        skip_verification: true # If your vcenter have valid certificate then change to 'false' here
+        # Clusters that can be used by SkyPilot:
+        #   [] means all the clusters in the vSphere can be used by Skypilot
+        # Instead, you can specify the clusters in a list:
+        # clusters:
+        #   - name: <your_vsphere_cluster_name1>
+        #   - name: <your_vsphere_cluster_name2>
+        clusters: []
+      # If you are configuring only one vSphere instance, omit the following line.
+      - name: <your_vsphere_server_ip_02>
+        username: <your_vsphere_user_name>
+        password: <your_vsphere_user_passwd>
+        skip_verification: true
+        clusters: []
+
+After configuring the vSphere credentials, ensure that the necessary preparations for vSphere are completed. Please refer to this guide for more information: :ref:`Cloud Preparation for vSphere <cloud-prepare-vsphere>`
 
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~

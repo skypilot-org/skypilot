@@ -9,57 +9,40 @@ from typing import Optional
 from sky import exceptions
 from sky.utils import ux_utils
 
-azure = None
+from sky.adaptors import common
+
+azure = common.LazyImport(
+    'azure',
+    import_error_message=('Failed to import dependencies for Azure.'
+                          'Try pip install "skypilot[azure]"'))
+_LAZY_MODULES = (azure,)
+
 _session_creation_lock = threading.RLock()
 
 
-def import_package(func):
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        global azure
-        if azure is None:
-            try:
-                import azure as _azure  # type: ignore
-                azure = _azure
-            except ImportError:
-                raise ImportError('Fail to import dependencies for Azure.'
-                                  'Try pip install "skypilot[azure]"') from None
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-@import_package
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_subscription_id() -> str:
     """Get the default subscription id."""
     from azure.common import credentials
     return credentials.get_cli_profile().get_subscription_id()
 
 
-@import_package
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_current_account_user() -> str:
     """Get the default account user."""
     from azure.common import credentials
     return credentials.get_cli_profile().get_current_account_user()
 
 
-@import_package
-def core_exception():
-    """HttpError exception."""
-    from azure.core import exceptions
-    return exceptions
-
-
-@import_package
-def http_error_exception():
-    """HttpError exception."""
-    from azure.core import exceptions
-    return exceptions.HttpResponseError
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def exceptions():
+    """Azure exceptions."""
+    from azure.core import exceptions as azure_exceptions
+    return azure_exceptions
 
 
 @functools.lru_cache()
-@import_package
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_client(name: str,
                subscription_id: str,
                storage_account_name: Optional[str] = None,
@@ -69,22 +52,22 @@ def get_client(name: str,
     # Tracked in
     # https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
     from azure.identity import AzureCliCredential
-    from azure.mgmt.network import NetworkManagementClient
-    from azure.mgmt.resource import ResourceManagementClient
-    from azure.mgmt.storage import StorageManagementClient
-    from azure.storage.blob import ContainerClient
     with _session_creation_lock:
         credential = AzureCliCredential(process_timeout=30)
         if name == 'compute':
             from azure.mgmt.compute import ComputeManagementClient
             return ComputeManagementClient(credential, subscription_id)
         elif name == 'network':
+            from azure.mgmt.network import NetworkManagementClient
             return NetworkManagementClient(credential, subscription_id)
         elif name == 'resource':
+            from azure.mgmt.resource import ResourceManagementClient
             return ResourceManagementClient(credential, subscription_id)
         elif name == 'storage':
+            from azure.mgmt.storage import StorageManagementClient
             return StorageManagementClient(credential, subscription_id)
         elif name == 'container':
+            from azure.storage.blob import ContainerClient
             # Suppress noisy logs from Azure SDK when attempting to run 
             # exists() on public container with credentials. Reference:
             # https://github.com/Azure/azure-sdk-for-python/issues/9422
@@ -97,7 +80,7 @@ def get_client(name: str,
                 container_url)
             try:
                 container_client.exists()
-            except core_exception().ClientAuthenticationError as e:
+            except exceptions().ClientAuthenticationError as e:
                 # Caught when credential is not provided to the private
                 # container url or wrong container name is provided as the
                 # public container url. We reattempt with credentials assuming
@@ -107,7 +90,7 @@ def get_client(name: str,
                         container_url, credential)
                     try:
                         container_client.exists()
-                    except core_exception().ClientAuthenticationError as e:
+                    except exceptions().ClientAuthenticationError as e:
                         # Caught when user attempted to use incorrect public
                         # container name.
                         if 'ERROR: AADSTS50020' in e.message:
@@ -122,7 +105,7 @@ def get_client(name: str,
             raise ValueError(f'Client not supported: "{name}"')
 
 
-@import_package
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def create_security_rule(**kwargs):
     from azure.mgmt.network.models import SecurityRule
     return SecurityRule(**kwargs)
