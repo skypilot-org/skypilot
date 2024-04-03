@@ -260,11 +260,13 @@ class ReplicaStatusProperty:
         failure, e.g., the user app fails before the service endpoint being
         ready for the current version.
         """
+        replica_status = self.to_replica_status()
         logger.info(
-            f'Check replica unrecorverable: {self.first_ready_time}, {self.user_app_failed}'
+            'Check replica unrecorverable: first_ready_time '
+            f'{self.first_ready_time}, user_app_failed {self.user_app_failed}, '
+            f'status {replica_status}'
         )
-        if (self.to_replica_status()
-                not in serve_state.ReplicaStatus.failed_statuses()):
+        if replica_status not in serve_state.ReplicaStatus.terminal_statuses():
             return False
         if self.first_ready_time is not None:
             if self.first_ready_time >= 0:
