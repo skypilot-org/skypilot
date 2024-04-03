@@ -1973,16 +1973,16 @@ class AzureBlobStore(AbstractStore):
         # If creating a new container, it's necessary to obtain resource group name and storage account
         # from this function either using default value or user provided value from config.yaml.
         # We can tell if already existing bucket is used or not
+        # Using externally created storage
         if isinstance(self.source, str) and self.source.startswith('az://'):
             bucket_name, _, storage_account_name = data_utils.split_az_path(
                 self.source)
-            # Using externally created storage
             assert self.name == bucket_name
             self.storage_account_name = storage_account_name
             self.resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
+        # Creating new container
         else:
-            # creating new container
             # If resource group or storage account names are not provided from
             # config, then use default names.
             self.storage_account_name = skypilot_config.get_nested(
@@ -1991,8 +1991,9 @@ class AzureBlobStore(AbstractStore):
             self.resource_group_name = skypilot_config.get_nested(
                 ('azure', 'resource_group'),
                 f'sky{common_utils.get_user_hash()}')
-            # If the resource group or storage account already exist with name
-            # used to create below, both create functions will silently move on.
+            # If the resource group or storage account used to run both create
+            # functions below already exist under user's subscription id, both
+            # will silently move on.
             self.resource_client.resource_groups.create_or_update(
                 self.resource_group_name, {'location': self.region})
             try:
@@ -2023,7 +2024,7 @@ class AzureBlobStore(AbstractStore):
                             'Please try with another name.')
 
         # resource_group_name is set to None when using non-sky-managed
-        # public container.
+        # public container or private container without access.
         if self.resource_group_name is not None:
             self.storage_account_key = data_utils.get_az_storage_account_key(
                 self.storage_account_name, self.resource_group_name,
@@ -2192,6 +2193,12 @@ class AzureBlobStore(AbstractStore):
             # if the public container doesn't exist, it raises an error
             # instead of returning False.
             if container.exists(timeout=5):
+                is_private = True if container.get_container_properties()['public_access'] is None else False
+                if self.resource_group_name is None and is_private:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketGetError(
+                            _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                                name=self.name))
                 return container.container_name, False
             # when the container name does not exist under the provided
             # storage account name and credentials, and user has the rights to
@@ -2203,16 +2210,8 @@ class AzureBlobStore(AbstractStore):
                         raise exceptions.StorageBucketGetError(
                             'Attempted to use a non-existent bucket as a '
                             f'source: {self.source}.')
-        except azure.core_exception().ClientAuthenticationError as e:
-            error_message = e.message
-            # raised when attempted to access a storage account without rights.
-            if 'ErrorCode:NoAuthenticationInformation' in error_message:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageBucketGetError(
-                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                            name=self.name)) from e
         except azure.core_exception().ServiceRequestError as e:
-            # raised when storage account name to be does not exist.
+            # raised when storage account name to be used does not exist.
             error_message = e.message
             if 'Name or service not known' in error_message:
                 with ux_utils.print_exception_no_traceback():
