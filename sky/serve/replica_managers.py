@@ -278,7 +278,12 @@ class ReplicaStatusProperty:
         return self.first_ready_time >= 0.0
 
     def unrecoverable_failure(self) -> bool:
-        """Whether the replica fails and cannot be recovered."""
+        """Whether the replica fails and cannot be recovered.
+
+        Autoscaler should stop scaling if any of the replica has unrecoverable
+        failure, e.g., the user app fails before the service endpoint being
+        ready for the current version.
+        """
         if self.first_ready_time is not None:
             # If the service is ever up, we assume there is no bug in the user
             # code and the scale down is successful, thus enabling the

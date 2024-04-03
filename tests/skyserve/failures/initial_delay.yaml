@@ -1,0 +1,12 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 10
+  replicas: 2
+
+resources:
+  cpus: 2
+  ports: 8081
+
+run: |
+  sleep 1000

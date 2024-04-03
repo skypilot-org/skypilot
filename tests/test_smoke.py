@@ -3031,8 +3031,10 @@ _SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
 # The teardown command has a 10-mins timeout, so we don't need to do
 # the timeout here. See implementation of run_one_test() for details.
 _TEARDOWN_SERVICE = (
-    '(while true; do'
+    '(for i in `seq 1 20`; do'
     '     s=$(sky serve down -y {name});'
+    '     echo "Trying to terminate {name}";'
+    '     echo "$s";'
     '     echo "$s" | grep -q "scheduled to be terminated" && break;'
     '     sleep 10;'
     'done)')
@@ -3089,7 +3091,8 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
     for check_tuple in check_tuples:
         count, is_spot, status = check_tuple
         resource_str = ''
-        if status not in ['PENDING', 'SHUTTING_DOWN', 'FAILED']:
+        if status not in ['PENDING', 'SHUTTING_DOWN'
+                         ] and not status.startswith('FAILED'):
             spot_str = ''
             if is_spot:
                 spot_str = '\[Spot\]'
@@ -3273,9 +3276,16 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             'until echo "$s" | grep -A2 "Service Replicas" | grep "FAILED"; '
             'do echo "Waiting for first service to be FAILED..."; '
             f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
-            + _check_replica_in_status(
-                name, [(1, True, 'FAILED'),
-                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            + _check_replica_in_status(name, [(1, True, 'FAILED')]) +
+            # User bug failure will cause no further scaling.
+            f'echo "$s" | grep -A4 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
+            f'echo "$s" | grep -B100 "NO_REPLICA" | grep "0/1"',
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'until curl -L http://$endpoint | grep "Hi, SkyPilot here!"; do sleep 2; done; sleep 2; '
+            + _check_replica_in_status(name, [(1, True, 'READY')]),
+            _SERVE_STATUS_WAIT.format(name=name) +
+            f'echo "$s" | grep -A4 "Service Replicas" | grep "{name}" | wc -l | grep 1'
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3548,7 +3558,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             _check_service_version(name, "1"),
         ]
     test = Test(
-        f'test-skyserve-new-autoscaler-update',
+        'test-skyserve-new-autoscaler-update',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
@@ -3568,6 +3578,38 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             _check_replica_in_status(name, [(4, True, 'READY'),
                                             (1, False, 'READY')]),
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_failures(generic_cloud: str):
+    """Test replica failure statuses"""
+    name = _get_service_name()
+
+    test = Test(
+        'test-skyserve-failures',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/failures/initial_delay.yaml',
+            f's=$(sky serve status {name})'
+            f'until ! echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            's=$(sky serve status); echo "$s"; done;',
+            'sleep 60',
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 2',
+            f'sky ser ve update {name} --cloud {generic_cloud} -y tests/skyserve/failures/probing.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f's=$(sky serve status {name})'
+            f'until ! echo "$s" | grep "FAILED_PROBING"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            's=$(sky serve status); echo "$s"; done;' +
+            _check_replica_in_status(
+                name, [(1, True, 'FAILED_PROBING'),
+                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            # TODO(zhwu): add test for FAILED_PROVISION
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
