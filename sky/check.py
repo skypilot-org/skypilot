@@ -12,7 +12,6 @@ from sky.adaptors import cloudflare
 from sky.utils import ux_utils
 
 
-# TODO(zhwu): add check for a single cloud to improve performance
 def check(
     quiet: bool = False,
     verbose: bool = False,
