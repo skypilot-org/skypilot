@@ -4152,18 +4152,18 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_az_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using gsutil
-
         storage_account_name = f'sky{common_utils.get_user_hash()}'
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
+        bucket_uri = f'az://{storage_account_name}/{tmp_bucket_name}'
         subprocess.check_call([
             'az', 'storage', 'container', 'create', '--name',
             f'{tmp_bucket_name}', '--account-name', f'{storage_account_name}',
             '--account-key', f'{storage_account_key}'
         ])
-        yield tmp_bucket_name
+        yield tmp_bucket_name, bucket_uri
         subprocess.check_call([
             'az', 'storage', 'container', 'delete', '--name',
             f'{tmp_bucket_name}', '--account-name', f'{storage_account_name}',

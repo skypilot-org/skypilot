@@ -1929,6 +1929,8 @@ class AzureBlobStore(AbstractStore):
         self.storage_account_name: str
         self.storage_account_key: Optional[str] = None
         self.resource_group_name: Optional[str] = None
+        if region is None:
+            region = 'eastus'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
 
@@ -2073,7 +2075,7 @@ class AzureBlobStore(AbstractStore):
                             'name': 'Standard_GRS'
                         },
                         'kind': 'StorageV2',
-                        'location': 'westus',
+                        'location': self.region,
                         'encryption': {
                             'services': {
                                 'blob': {
