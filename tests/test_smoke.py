@@ -3269,17 +3269,17 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/restart/user_bug.yaml',
             f's=$(sky serve status {name}); echo "$s";'
-            'until echo "$s" | grep -A 100"Service Replicas" | grep "SHUTTING_DOWN"; '
+            'until echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN"; '
             'do echo "Waiting for first service to be SHUTTING DOWN..."; '
             f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; ',
             f's=$(sky serve status {name}); echo "$s";'
-            'until echo "$s" | grep -A 100"Service Replicas" | grep "FAILED"; '
+            'until echo "$s" | grep -A 100 "Service Replicas" | grep "FAILED"; '
             'do echo "Waiting for first service to be FAILED..."; '
             f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
             + _check_replica_in_status(name, [(1, True, 'FAILED')]) +
             # User bug failure will cause no further scaling.
-            f'echo "$s" | grep -A 100"Service Replicas" | grep "{name}" | wc -l | grep 1; '
-            f'echo "$s" | grep -B100 "NO_REPLICA" | grep "0/1"',
+            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
+            f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/1"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'until curl -L http://$endpoint | grep "Hi, SkyPilot here!"; do sleep 2; done; sleep 2; '
