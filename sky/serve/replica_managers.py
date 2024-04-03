@@ -284,7 +284,7 @@ class ReplicaStatusProperty:
         failure, e.g., the user app fails before the service endpoint being
         ready for the current version.
         """
-        if self.first_ready_time is not None:
+        if self.first_ready_time is not None and self.first_ready_time >= 0:
             # If the service is ever up, we assume there is no bug in the user
             # code and the scale down is successful, thus enabling the
             # controller to remove the replica from the replica table and auto
