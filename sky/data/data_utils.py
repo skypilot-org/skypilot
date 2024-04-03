@@ -51,7 +51,7 @@ def split_gcs_path(gcs_path: str) -> Tuple[str, str]:
 
 
 def split_az_path(az_path: str) -> Tuple[str, str, str]:
-    """Splits Azure Container Path into Bucket name and Relative Path to Bucket
+    """Splits Path into Storage account and Container names and Relative Path
 
     Args:
         az_path: str; Container Path, e.g. az://storage_account/container/
@@ -175,17 +175,10 @@ def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
     Returns:
       boolean; shows either or not the container exists.
     """
-    storage_client = create_az_client('storage')
-    resource_group_name = get_az_resource_group(storage_account_name,
-                                                storage_client)
-    try:
-        # TODO(Doyoung): This may need an additional handling for public
-        # container. Test it, and if it doesn't work, update.
-        storage_client.blob_containers.get(resource_group_name,
-                                           storage_account_name, container_name)
-        return True
-    except azure.exceptions().ResourceNotFoundError:
-        return False
+    container_client = create_az_client('container',
+                                        storage_account_name,
+                                        container_name)
+    return container_client.exists()
 
 
 def get_az_resource_group(
@@ -231,6 +224,8 @@ def get_az_storage_account_key(
     Returns:
         One of the few access keys to the given storage account
     """
+    # resource_group_name is None when using a public container or
+    # a private containers not belonging to the user.
     if resource_group_name is None:
         return None
     if resource_client is None:
