@@ -2369,15 +2369,33 @@ class AzureBlobStore(AbstractStore):
             container_name: str; Name of container
 
         Returns:
-            bool: True if bucket was deleted, False if it's deleted externally.
+            bool: True if container was deleted, False if it's
+                deleted externally.
         """
-        with rich_utils.safe_status(
-                f'[bold cyan]Deleting Azure bucket {container_name}[/]'):
-            self.storage_client.blob_containers.delete(
-                self.resource_group_name,
-                self.storage_account_name,
-                container_name,
-            )
+        try:
+            with rich_utils.safe_status(
+                    f'[bold cyan]Deleting Azure cotainer {container_name}[/]'):
+                self.storage_client.blob_containers.get(
+                    self.resource_group_name,
+                    self.storage_account_name,
+                    container_name,
+                )
+                self.storage_client.blob_containers.delete(
+                    self.resource_group_name,
+                    self.storage_account_name,
+                    container_name,
+                )
+        except azure.exceptions().ResourceNotFoundError as e:
+            if 'Code: ContainerNotFound' in e.message:
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name=container_name))
+                return False
+            else:
+                logger.error(e.output)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'Failed to delete Azure container {container_name}.')
         return True
 
 
