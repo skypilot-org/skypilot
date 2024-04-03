@@ -107,7 +107,7 @@ def create_or_replace_namespaced_ingress(
     try:
         networking_api.read_namespaced_ingress(
             ingress_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             networking_api.create_namespaced_ingress(
                 namespace,
@@ -129,7 +129,7 @@ def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
     try:
         networking_api.delete_namespaced_ingress(
             ingress_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             raise exceptions.PortDoesNotExistError(
                 f'Port {ingress_name.split("--")[-1]} does not exist.')
@@ -145,7 +145,7 @@ def create_or_replace_namespaced_service(
     try:
         core_api.read_namespaced_service(
             service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             core_api.create_namespaced_service(
                 namespace,
@@ -167,7 +167,7 @@ def delete_namespaced_service(namespace: str, service_name: str) -> None:
     try:
         core_api.delete_namespaced_service(
             service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             raise exceptions.PortDoesNotExistError(
                 f'Port {service_name.split("--")[-1]} does not exist.')

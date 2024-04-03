@@ -453,7 +453,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     nvidia_runtime_exists = False
     try:
         nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class()
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         logger.warning('run_instances: Error occurred while checking for '
                        f'nvidia RuntimeClass - '
                        f'{common_utils.format_exception(e)}'

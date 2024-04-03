@@ -412,7 +412,7 @@ class GCPComputeInstance(GCPInstance):
             f'Waiting GCP operation {operation["name"]} to be ready ...')
 
         @_retry_on_http_exception(
-            f'Fail to wait for operation {operation["name"]}')
+            f'Failed to wait for operation {operation["name"]}')
         def call_operation(fn, timeout: int):
             request = fn(
                 project=project_id,
@@ -965,7 +965,7 @@ class GCPTPUVMInstance(GCPInstance):
         del project_id, zone  # unused
 
         @_retry_on_http_exception(
-            f'Fail to wait for operation {operation["name"]}')
+            f'Failed to wait for operation {operation["name"]}')
         def call_operation(fn, timeout: int):
             request = fn(name=operation['name'])
             request.http.timeout = timeout

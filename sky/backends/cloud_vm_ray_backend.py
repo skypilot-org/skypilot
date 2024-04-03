@@ -1,4 +1,5 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
+import base64
 import copy
 import enum
 import getpass
@@ -37,6 +38,7 @@ from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
+from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -750,7 +752,7 @@ class FailoverCloudErrorHandlerV1:
         # Sometimes, LambdaCloudError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in clouds.Lambda.regions():
+                for r in service_catalog.regions('lambda'):
                     if e.find(r.name) == -1:
                         _add_to_blocked_resources(
                             blocked_resources,
@@ -822,7 +824,7 @@ class FailoverCloudErrorHandlerV1:
         # Sometimes, SCPError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in clouds.SCP.regions():
+                for r in service_catalog.regions('scp'):
                     if e.find(r.name) == -1:
                         _add_to_blocked_resources(
                             blocked_resources,
@@ -1075,7 +1077,8 @@ class FailoverCloudErrorHandlerV2:
                     blocked_resources,
                     launchable_resources.copy(region=None, zone=None))
             elif code == 'SUBNET_NOT_FOUND_FOR_VPC':
-                if (any(acc.lower().startswith('tpu-v4')
+                if (launchable_resources.accelerators is not None and any(
+                        acc.lower().startswith('tpu-v4')
                         for acc in launchable_resources.accelerators.keys()) and
                         region.name == 'us-central2'):
                     # us-central2 is a TPU v4 only region. The subnet for
@@ -3102,28 +3105,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Executes generated code on the head node."""
         style = colorama.Style
         fore = colorama.Fore
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
-        head_ssh_port = handle.head_ssh_port
-        runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                 port=head_ssh_port,
-                                                 **ssh_credentials)
-        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-            fp.write(codegen)
-            fp.flush()
-            script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
-            # We choose to sync code + exec, because the alternative of 'ray
-            # submit' may not work as it may use system python (python2) to
-            # execute the script.  Happens for AWS.
-            runner.rsync(source=fp.name,
-                         target=script_path,
-                         up=True,
-                         stream_logs=False)
+
+        script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
+        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
+                      f'touch {remote_log_path}')
+        encoded_script = base64.b64encode(
+            codegen.encode('utf-8')).decode('utf-8')
+        create_script_code = (f'{{ echo "{encoded_script}" | base64 --decode > '
+                              f'{script_path}; }}')
         job_submit_cmd = (
             f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
@@ -3133,10 +3127,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} 2> /dev/null"'
         )
 
-        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
-                      f'touch {remote_log_path}')
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-        job_submit_cmd = mkdir_code + ' && ' + code
+        job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
         if spot_dag is not None:
             # Add the spot job to spot queue table.
