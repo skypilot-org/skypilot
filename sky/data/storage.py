@@ -2084,7 +2084,7 @@ class AzureBlobStore(AbstractStore):
                             'key_source': 'Microsoft.Storage'
                         },
                     }).result()
-            except azure.core_exception().ResourceExistsError as e:
+            except azure.exceptions().ResourceExistsError as e:
                 error_message = e.message
                 if 'StorageAccountAlreadyTaken' in error_message:
                     with ux_utils.print_exception_no_traceback():
@@ -2280,7 +2280,7 @@ class AzureBlobStore(AbstractStore):
                         raise exceptions.StorageBucketGetError(
                             'Attempted to use a non-existent bucket as a '
                             f'source: {self.source}.')
-        except azure.core_exception().ServiceRequestError as e:
+        except azure.exceptions().ServiceRequestError as e:
             # raised when storage account name to be used does not exist.
             error_message = e.message
             if 'Name or service not known' in error_message:
@@ -2354,7 +2354,7 @@ class AzureBlobStore(AbstractStore):
                 container_name, {})
             logger.info('Created AZ Container '
                         f'{container_name} in {region}.')
-        except azure.core_exception().ResourceExistsError as e:
+        except azure.exceptions().ResourceExistsError as e:
             error_msg, error_code = e.error.message, e.error.code
             if error_code == 'ContainerOperationFailure':
                 if 'container is being deleted' in error_msg:

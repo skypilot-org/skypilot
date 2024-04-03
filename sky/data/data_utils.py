@@ -184,7 +184,7 @@ def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
         storage_client.blob_containers.get(resource_group_name,
                                            storage_account_name, container_name)
         return True
-    except azure.core_exception().ResourceNotFoundError:
+    except azure.exceptions().ResourceNotFoundError:
         return False
 
 
