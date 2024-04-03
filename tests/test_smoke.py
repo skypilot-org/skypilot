@@ -3035,7 +3035,7 @@ _TEARDOWN_SERVICE = (
     '     s=$(sky serve down -y {name});'
     '     echo "Trying to terminate {name}";'
     '     echo "$s";'
-    '     echo "$s" | grep -q "scheduled to be terminated" && break;'
+    '     echo "$s" | grep -q "scheduled to be terminated\|No service to terminate" && break;'
     '     sleep 10;'
     'done)')
 
