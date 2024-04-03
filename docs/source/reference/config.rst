@@ -288,6 +288,21 @@ Available fields and semantics:
       annotations:
         myannotation: myvalue
 
+    # Timeout for provisioning a pod (in seconds, optional)
+    #
+    # This timeout determines how long SkyPilot will wait for a pod in PENDING
+    # status before giving up and failing over to the next cloud. Larger
+    # timeouts may be required for autoscaling clusters, since the autoscaler
+    # may take some time to provision new nodes. Note that this timeout
+    # includes time taken by the Kubernetes scheduler itself, which can be
+    # upto 2-3 seconds.
+    #
+    # Can be set to zero to wait indefinitely for pod provisioning (e.g., in
+    # autoscaling clusters or clusters with queuing/admission control).
+    #
+    # Default: 10 seconds
+    provision_timeout: 10
+
     # Additional fields to override the pod fields used by SkyPilot (optional)
     #
     # Any key:value pairs added here would get added to the pod spec used to

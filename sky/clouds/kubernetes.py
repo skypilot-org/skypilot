@@ -6,6 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
@@ -42,8 +43,7 @@ class Kubernetes(clouds.Cloud):
     # Note that this timeout includes time taken by the Kubernetes scheduler
     # itself, which can be upto 2-3 seconds.
     # For non-autoscaling clusters, we conservatively set this to 10s.
-    # TODO(romilb): Make the timeout configurable.
-    TIMEOUT = 10
+    TIMEOUT = skypilot_config.get_nested(['kubernetes', 'provision_timeout'], 10)
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
@@ -273,7 +273,6 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_value': k8s_acc_label_value,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
-            # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
         }
 
