@@ -257,6 +257,17 @@ class Azure(clouds.Cloud):
         gen_version = azure_catalog.get_gen_version_from_instance_type(
             r.instance_type)
         image_config = self._get_image_config(gen_version, r.instance_type)
+
+        # skydentity - read ssh key from ~/.ssh/sky-key.pub
+        ssh_key = ''
+        try:
+            with open(os.path.expanduser('~/.ssh/sky-key.pub')) as f:
+                ssh_key = f.read().strip()
+        except FileNotFoundError:
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    'Could not find ~/.ssh/sky-key.pub.') from None
+
         # Setup commands to eliminate the banner and restart sshd.
         # This script will modify /etc/ssh/sshd_config and add a bash script
         # into .bashrc. The bash script will restart sshd if it has not been
@@ -266,6 +277,13 @@ class Azure(clouds.Cloud):
         cloud_init_setup_commands = base64.b64encode(
             textwrap.dedent("""\
             #cloud-config
+            users:
+              - name: azureuser
+                sudo: ['ALL=(ALL) NOPASSWD:ALL']
+                groups: sudo
+                shell: /bin/bash
+                ssh_authorized_keys:
+                  - {0}
             runcmd:
               - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
               - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/skypilot:ssh_user/.bashrc
@@ -280,7 +298,7 @@ class Azure(clouds.Cloud):
               - path: /etc/apt/apt.conf.d/10cloudinit-disable
                 content: |
                   APT::Periodic::Enable "0";
-            """).encode('utf-8')).decode('utf-8')
+            """).format(ssh_key).encode('utf-8')).decode('utf-8')
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,

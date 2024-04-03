@@ -268,9 +268,6 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 # for more information. Here we decode it and replace the ssh user
 # and public key content, then encode it back.
 def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read().strip()
     for node_type in config['available_node_types']:
         node_config = config['available_node_types'][node_type]['node_config']
         cloud_init = (
@@ -278,8 +275,7 @@ def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         cloud_init = base64.b64decode(cloud_init).decode('utf-8')
         cloud_init = cloud_init.replace('skypilot:ssh_user',
                                         config['auth']['ssh_user'])
-        cloud_init = cloud_init.replace('skypilot:ssh_public_key_content',
-                                        public_key)
+        logger.info(f'Azure using cloud init: {str(cloud_init)}')
         cloud_init = base64.b64encode(
             cloud_init.encode('utf-8')).decode('utf-8')
         node_config['azure_arm_parameters']['cloudInitSetupCommands'] = (
@@ -287,6 +283,8 @@ def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config_str = common_utils.dump_yaml_str(config)
     config_str = config_str.replace('skypilot:ssh_user',
                                     config['auth']['ssh_user'])
+    # Skydentity hack - generate a random ssh key and use it in Azure ARM since publicKey is required in the template
+    public_key, _ = _generate_rsa_key_pair()    # Private key is discarded
     config_str = config_str.replace('skypilot:ssh_public_key_content',
                                     public_key)
     config = yaml.safe_load(config_str)
