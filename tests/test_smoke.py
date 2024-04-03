@@ -3854,7 +3854,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize('private_bucket', [
         f's3://imagenet', f'gs://imagenet',
-        pytest.param('az://privatesmoketest/test', marks=pytest.mark.azure),
+        pytest.param('az://smoketestprivate/test', marks=pytest.mark.azure),
         pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
     ])
     def test_private_bucket(self, private_bucket):
