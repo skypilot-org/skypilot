@@ -2042,9 +2042,6 @@ class AzureBlobStore(AbstractStore):
         """
         self.storage_client = data_utils.create_az_client('storage')
         self.resource_client = data_utils.create_az_client('resource')
-        # If creating a new container, it's necessary to obtain resource group name and storage account
-        # from this function either using default value or user provided value from config.yaml.
-        # We can tell if already existing bucket is used or not
         # Using externally created storage
         if isinstance(self.source, str) and self.source.startswith('az://'):
             bucket_name, _, storage_account_name = data_utils.split_az_path(
@@ -2063,9 +2060,9 @@ class AzureBlobStore(AbstractStore):
             self.resource_group_name = skypilot_config.get_nested(
                 ('azure', 'resource_group'),
                 f'sky{common_utils.get_user_hash()}')
-            # If the resource group or storage account used to run both create
-            # functions below already exist under user's subscription id, both
-            # will silently move on.
+            # If the resource group name and storage account name used to run
+            # create functions below already exist under user's
+            # subscription id, both will silently move on.
             self.resource_client.resource_groups.create_or_update(
                 self.resource_group_name, {'location': self.region})
             try:
@@ -2096,13 +2093,12 @@ class AzureBlobStore(AbstractStore):
                             'Please try with another name.')
 
         # resource_group_name is set to None when using non-sky-managed
-        # public container or private container without access.
+        # public container or private container without authorization.
         if self.resource_group_name is not None:
             self.storage_account_key = data_utils.get_az_storage_account_key(
                 self.storage_account_name, self.resource_group_name,
                 self.storage_client, self.resource_client)
-        # TODO(Doyoung): Add naming convention check from storage account name
-        # and resource group name
+
         self.bucket_name, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
@@ -2177,9 +2173,9 @@ class AzureBlobStore(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            # shlex.quote is not used as az storage blob sync already
-            # deals with file names with empty spaces when used
-            # with --include-pattern.
+            # shlex.quote is not used for file_names as 'az storage blob sync'
+            # already handles file names with empty spaces when used with
+            # '--include-pattern' option.
             includes_list = ';'.join(file_names)
             includes = f'--include-pattern "{includes_list}"'
             base_dir_path = shlex.quote(base_dir_path)
@@ -2254,18 +2250,13 @@ class AzureBlobStore(AbstractStore):
                 'sky storage delete' or 'sky start'
         """
         try:
-            # When using non-sky-managed public container
             container = data_utils.create_az_client('container',
                                                     self.storage_account_name,
                                                     self.name)
-            # Here, exists() is used to check if the public container
-            # exists. exists() will return False only when the credentials
-            # are provided for from_container_url() and there is no
-            # credentials to provide for public container. In this case,
-            # if the public container doesn't exist, it raises an error
-            # instead of returning False.
             if container.exists(timeout=5):
                 is_private = True if container.get_container_properties()['public_access'] is None else False
+                # when user attempts to use private container without
+                # access rights
                 if self.resource_group_name is None and is_private:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageBucketGetError(
