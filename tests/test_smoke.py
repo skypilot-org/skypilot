@@ -3279,13 +3279,11 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             + _check_replica_in_status(name, [(1, True, 'FAILED')]) +
             # User bug failure will cause no further scaling.
             f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
-            f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/1"',
+            f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'until curl -L http://$endpoint | grep "Hi, SkyPilot here!"; do sleep 2; done; sleep 2; '
-            + _check_replica_in_status(name, [(1, True, 'READY')]),
-            _SERVE_STATUS_WAIT.format(name=name) +
-            f'echo "$s" | grep -A4 "Service Replicas" | grep "{name}" | wc -l | grep 1'
+            + _check_replica_in_status(name, [(1, False, 'READY'), (1, False, 'FAILED')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3599,8 +3597,10 @@ def test_skyserve_failures(generic_cloud: str):
             'echo "Waiting for replica to be failed..."; sleep 5; '
             f's=$(sky serve status {name}); echo "$s"; done;',
             'sleep 60',
-            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 2',
-            f'sky ser ve update {name} --cloud {generic_cloud} -y tests/skyserve/failures/probing.yaml',
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 2; '
+            # Make sure no new replicas are started for early failure.
+            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 2;',
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/failures/probing.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f's=$(sky serve status {name}); '
             f'until echo "$s" | grep "FAILED_PROBING"; do '

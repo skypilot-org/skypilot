@@ -284,16 +284,22 @@ class ReplicaStatusProperty:
         failure, e.g., the user app fails before the service endpoint being
         ready for the current version.
         """
-        if self.first_ready_time is not None and self.first_ready_time >= 0:
-            # If the service is ever up, we assume there is no bug in the user
-            # code and the scale down is successful, thus enabling the
-            # controller to remove the replica from the replica table and auto
-            # restart the replica.
-            # For replica with a failed sky.launch, it is likely due to some
-            # misconfigured resources, so we don't want to auto restart it.
-            # For replica with a failed sky.down, we cannot restart it since
-            # otherwise we will have a resource leak.
-            return False
+        logger.info(f'Check replica unrecorverable: {self.first_ready_time}, {self.user_app_failed}')
+        if self.first_ready_time is not None:
+            if self.first_ready_time >= 0:
+                # If the service is ever up, we assume there is no bug in the
+                # user code and the scale down is successful, thus enabling the
+                # controller to remove the replica from the replica table and
+                # auto restart the replica.
+                # For replica with a failed sky.launch, it is likely due to some
+                # misconfigured resources, so we don't want to auto restart it.
+                # For replica with a failed sky.down, we cannot restart it since
+                # otherwise we will have a resource leak.
+                return False
+            elif self.first_ready_time < 0:
+                # If the service timeout, it is likely the service is not
+                # recoverable.
+                return True
         if self.user_app_failed:
             return True
         # TODO(zhwu): launch failures not related to resource unavailability
