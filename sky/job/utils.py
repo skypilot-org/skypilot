@@ -18,11 +18,11 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.job import constants as spot_constants
+from sky.job import state
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet.log_lib import run_bash_command_with_log
-from sky.job import constants as spot_constants
-from sky.job import state
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
@@ -164,14 +164,14 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
 def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
     """Run event callback for the task."""
 
-    def callback_func(state: str):
+    def callback_func(status: str):
         event_callback = task.event_callback if task else None
         if event_callback is None or task is None:
             return
         event_callback = event_callback.strip()
         cluster_name = generate_spot_cluster_name(task.name,
                                                   job_id) if task.name else None
-        logger.info(f'=== START: event callback for {state!r} ===')
+        logger.info(f'=== START: event callback for {status!r} ===')
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'spot_event',
                                 f'spot-callback-{job_id}-{task_id}.log')
         result = run_bash_command_with_log(
@@ -184,14 +184,14 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
                     task.envs.get(constants.TASK_ID_LIST_ENV_VAR, 'N.A.')),
                 TASK_ID=str(task_id),
                 JOB_ID=str(job_id),
-                JOB_STATUS=state,
+                JOB_STATUS=status,
                 CLUSTER_NAME=cluster_name or '',
                 TASK_NAME=task.name or '',
                 # TODO(MaoZiming): Future event type Job or Spot.
                 EVENT_TYPE='Spot'))
         logger.info(
             f'Bash:{event_callback},log_path:{log_path},result:{result}')
-        logger.info(f'=== END: event callback for {state!r} ===')
+        logger.info(f'=== END: event callback for {status!r} ===')
 
     return callback_func
 

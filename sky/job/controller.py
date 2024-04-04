@@ -15,11 +15,11 @@ from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
-from sky.skylet import constants
-from sky.skylet import job_lib
 from sky.job import recovery_strategy
 from sky.job import state
 from sky.job import utils
+from sky.skylet import constants
+from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils

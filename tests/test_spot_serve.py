@@ -14,8 +14,8 @@ from sky import backends
 from sky import cli
 from sky import exceptions
 from sky import global_user_state
-from sky import serve
 from sky import job
+from sky import serve
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import db_utils
@@ -253,8 +253,7 @@ class TestSpotOperations:
     def test_cancel_on_spot_controller(self, _mock_cluster_state,
                                        _mock_spot_controller):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.cancel,
-                                   [job.SPOT_CONTROLLER_NAME, '-a'])
+        result = cli_runner.invoke(cli.cancel, [job.SPOT_CONTROLLER_NAME, '-a'])
         assert result.exit_code == 1
         assert 'Cancelling the spot controller\'s jobs is not allowed.' in str(
             result.output)

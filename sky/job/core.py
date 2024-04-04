@@ -14,9 +14,9 @@ from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
-from sky.skylet import constants as skylet_constants
 from sky.job import constants
 from sky.job import utils
+from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -299,15 +299,15 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
 
 
 spot_launch = common_utils.deprecated_function(launch,
-                                               name='sky.spot.launch',
+                                               name='sky.job.launch',
                                                deprecated_name='spot_launch',
                                                removing_version='0.7.0')
 spot_queue = common_utils.deprecated_function(queue,
-                                              name='sky.spot.queue',
+                                              name='sky.job.queue',
                                               deprecated_name='spot_queue',
                                               removing_version='0.7.0')
 spot_cancel = common_utils.deprecated_function(cancel,
-                                               name='sky.spot.cancel',
+                                               name='sky.job.cancel',
                                                deprecated_name='spot_cancel',
                                                removing_version='0.7.0')
 spot_tail_logs = common_utils.deprecated_function(

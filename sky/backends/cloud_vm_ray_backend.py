@@ -28,12 +28,12 @@ from sky import cloud_stores
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import job as spot_lib
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import job as spot_lib
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils

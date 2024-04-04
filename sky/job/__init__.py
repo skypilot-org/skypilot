@@ -10,7 +10,7 @@ from sky.job.core import launch
 from sky.job.core import queue
 from sky.job.core import tail_logs
 from sky.job.recovery_strategy import SPOT_DEFAULT_STRATEGY
-from sky.job.recovery_strategy import SPOT_STRATEGIES
+from sky.job.recovery_strategy import RECOVERY_STRATEGIES
 from sky.job.state import SpotStatus
 from sky.job.utils import dump_job_table_cache
 from sky.job.utils import dump_spot_job_queue
@@ -23,7 +23,7 @@ from sky.job.utils import SpotCodeGen
 pathlib.Path(SPOT_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
                                                               exist_ok=True)
 __all__ = [
-    'SPOT_STRATEGIES',
+    'RECOVERY_STRATEGIES',
     'SPOT_DEFAULT_STRATEGY',
     'SPOT_CONTROLLER_NAME',
     # Constants

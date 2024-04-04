@@ -3,8 +3,8 @@ import copy
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag as dag_lib
-from sky import sky_logging
 from sky import job
+from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
@@ -142,15 +142,14 @@ def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
                 task.name = f'{dag.name}-{task_id}'
 
 
-def fill_default_spot_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
+def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
 
         new_resources_list = []
         for resources in list(task_.resources):
             change_default_value: Dict[str, Any] = {}
             if resources.job_recovery is None:
-                change_default_value[
-                    'job_recovery'] = job.SPOT_DEFAULT_STRATEGY
+                change_default_value['job_recovery'] = job.SPOT_DEFAULT_STRATEGY
 
             new_resources = resources.copy(**change_default_value)
             new_resources_list.append(new_resources)

@@ -51,10 +51,10 @@ from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
+from sky import job as managed_job
 from sky import provision as provision_lib
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import job as spot_lib
 from sky import status_lib
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
@@ -778,7 +778,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.workdir = workdir
 
     # Spot launch specific.
-    if job_recoveryis not None:
+    if job_recovery is not None:
         override_params['job_recovery'] = job_recovery
 
     task.set_resources_override(override_params)
@@ -1219,7 +1219,7 @@ def exec(
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _get_spot_jobs(
+def _get_managed_jobs(
         refresh: bool,
         skip_finished: bool,
         show_all: bool,
@@ -1250,9 +1250,9 @@ def _get_spot_jobs(
             usage_lib.messages.usage.set_internal()
         with sky_logging.silent():
             # Make the call silent
-            spot_jobs = spot_lib.queue(refresh=refresh,
-                                       skip_finished=skip_finished)
-        num_in_progress_jobs = len(spot_jobs)
+            jobs = managed_job.queue(refresh=refresh,
+                                     skip_finished=skip_finished)
+        num_in_progress_jobs = len(jobs)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         msg = str(e)
@@ -1273,9 +1273,9 @@ def _get_spot_jobs(
     else:
         max_jobs_to_show = (_NUM_SPOT_JOBS_TO_SHOW_IN_STATUS
                             if limit_num_jobs_to_show else None)
-        msg = spot_lib.format_job_table(spot_jobs,
-                                        show_all=show_all,
-                                        max_jobs=max_jobs_to_show)
+        msg = managed_job.format_job_table(jobs,
+                                           show_all=show_all,
+                                           max_jobs=max_jobs_to_show)
     return num_in_progress_jobs, msg
 
 
@@ -1398,8 +1398,8 @@ def _get_services(service_names: Optional[List[str]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
-           endpoint: Optional[int], show_spot_jobs: bool, show_services: bool,
-           clusters: List[str]):
+           endpoint: Optional[int], show_managed_jobs: bool,
+           show_services: bool, clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1464,13 +1464,14 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
     with multiprocessing.Pool(2) as pool:
         # Do not show spot queue if user specifies clusters, and if user
         # specifies --ip or --endpoint(s).
-        show_spot_jobs = show_spot_jobs and not any([clusters, ip, endpoints])
+        show_managed_jobs = show_managed_jobs and not any(
+            [clusters, ip, endpoints])
         show_endpoints = endpoints or endpoint is not None
         show_single_endpoint = endpoint is not None
-        if show_spot_jobs:
+        if show_managed_jobs:
             # Run the spot job query in parallel to speed up the status query.
-            spot_jobs_future = pool.apply_async(
-                _get_spot_jobs,
+            managed_jobs_future = pool.apply_async(
+                _get_managed_jobs,
                 kwds=dict(refresh=False,
                           skip_finished=True,
                           show_all=False,
@@ -1655,14 +1656,14 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 interrupted = True
             return interrupted, result
 
-        spot_jobs_query_interrupted = False
-        if show_spot_jobs:
+        managed_jobs_query_interrupted = False
+        if show_managed_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed jobs{colorama.Style.RESET_ALL}')
             with rich_utils.safe_status('[cyan]Checking spot jobs[/]'):
-                spot_jobs_query_interrupted, result = _try_get_future_result(
-                    spot_jobs_future)
-                if spot_jobs_query_interrupted:
+                managed_jobs_query_interrupted, result = _try_get_future_result(
+                    managed_jobs_future)
+                if managed_jobs_query_interrupted:
                     # Set to -1, so that the controller is not considered
                     # down, and the hint for showing sky spot queue
                     # will still be shown.
@@ -1695,7 +1696,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Services{colorama.Style.RESET_ALL}')
             num_services = None
-            if spot_jobs_query_interrupted:
+            if managed_jobs_query_interrupted:
                 # The pool is terminated, so we cannot run the service query.
                 msg = 'KeyboardInterrupt'
             else:
@@ -1712,7 +1713,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
                              value.in_progress_hint)
 
-        if show_spot_jobs or show_services:
+        if show_managed_jobs or show_services:
             try:
                 pool.close()
                 pool.join()
@@ -2501,14 +2502,14 @@ def down(
                            purge=purge)
 
 
-def _hint_or_raise_for_down_spot_controller(controller_name: str):
+def _hint_or_raise_for_down_job_controller(controller_name: str):
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
     with rich_utils.safe_status(
             '[bold cyan]Checking for in-progress spot jobs[/]'):
         try:
-            spot_jobs = spot_lib.queue(refresh=False, skip_finished=True)
+            managed_jobs = managed_job.queue(refresh=False, skip_finished=True)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -2516,13 +2517,12 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                         controller.value.
                         decline_down_when_failed_to_fetch_status_hint)
             if e.cluster_status is None:
-                click.echo(
-                    'Managed job controller has already been torn down.')
+                click.echo('Managed job controller has already been torn down.')
                 sys.exit(0)
             # At this point, the spot jobs are failed to be fetched due to the
             # controller being STOPPED or being firstly launched, i.e., there is
             # no in-prgress spot jobs.
-            spot_jobs = []
+            managed_jobs = []
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'spot controller. Please be aware of the following:'
@@ -2530,8 +2530,8 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
            '\n * All logs and status information of the spot '
            'jobs (output of `sky spot queue`) will be lost.')
     click.echo(msg)
-    if spot_jobs:
-        job_table = spot_lib.format_job_table(spot_jobs, show_all=False)
+    if managed_jobs:
+        job_table = managed_job.format_job_table(managed_jobs, show_all=False)
         msg = controller.value.decline_down_for_dirty_controller_hint
         # Add prefix to each line to align with the bullet point.
         msg += '\n'.join(
@@ -2576,7 +2576,7 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
 
 _CONTROLLER_TO_HINT_OR_RAISE = {
     controller_utils.Controllers.SPOT_CONTROLLER:
-        (_hint_or_raise_for_down_spot_controller),
+        (_hint_or_raise_for_down_job_controller),
     controller_utils.Controllers.SKY_SERVE_CONTROLLER:
         (_hint_or_raise_for_down_sky_serve_controller),
 }
@@ -3147,12 +3147,12 @@ def bench():
 
 
 @cli.group(cls=_NaturalOrderGroup)
-def spot():
-    """Managed Spot CLI (spot instances with auto-recovery)."""
+def job():
+    """Managed Job CLI (spot instances with auto-recovery)."""
     pass
 
 
-@spot.command('launch', cls=_DocumentedCodeCommand)
+@job.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
@@ -3191,7 +3191,7 @@ def spot():
               help='Skip confirmation prompt.')
 @timeline.event
 @usage_lib.entrypoint
-def spot_launch(
+def job_launch(
     entrypoint: List[str],
     name: Optional[str],
     workdir: Optional[str],
@@ -3275,11 +3275,10 @@ def spot_launch(
         dag.name = name
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
-    dag_utils.fill_default_spot_config_in_dag_for_job_launch(dag)
+    dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
-    click.secho(
-        f'Managed job {dag.name!r} will be launched on (estimated):',
-        fg='yellow')
+    click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
+                fg='yellow')
     dag = sky.optimize(dag)
 
     if not yes:
@@ -3289,13 +3288,13 @@ def spot_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
-    spot_lib.launch(dag,
-                    name,
-                    detach_run=detach_run,
-                    retry_until_up=retry_until_up)
+    sky.job.launch(dag,
+                   name,
+                   detach_run=detach_run,
+                   retry_until_up=retry_until_up)
 
 
-@spot.command('queue', cls=_DocumentedCodeCommand)
+@job.command('queue', cls=_DocumentedCodeCommand)
 @click.option('--all',
               '-a',
               default=False,
@@ -3318,7 +3317,7 @@ def spot_launch(
               help='Show only pending/running jobs\' information.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_queue(all: bool, refresh: bool, skip_finished: bool):
+def job_queue(all: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed jobs.
 
     Each spot job can have one of the following statuses:
@@ -3374,10 +3373,10 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     """
     click.secho('Fetching managed job statuses...', fg='yellow')
     with rich_utils.safe_status('[cyan]Checking spot jobs[/]'):
-        _, msg = _get_spot_jobs(refresh=refresh,
-                                skip_finished=skip_finished,
-                                show_all=all,
-                                is_called_by_user=True)
+        _, msg = _get_managed_jobs(refresh=refresh,
+                                   skip_finished=skip_finished,
+                                   show_all=all,
+                                   is_called_by_user=True)
     if not skip_finished:
         in_progress_only_hint = ''
     else:
@@ -3387,7 +3386,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
                f'{in_progress_only_hint}\n{msg}')
 
 
-@spot.command('cancel', cls=_DocumentedCodeCommand)
+@job.command('cancel', cls=_DocumentedCodeCommand)
 @click.option('--name',
               '-n',
               required=False,
@@ -3408,7 +3407,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
+def job_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     """Cancel managed jobs.
 
     You can provide either a job name or a list of job IDs to be cancelled.
@@ -3448,10 +3447,10 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
                       abort=True,
                       show_default=True)
 
-    spot_lib.cancel(job_ids=job_ids, name=name, all=all)
+    job.cancel(job_ids=job_ids, name=name, all=all)
 
 
-@spot.command('logs', cls=_DocumentedCodeCommand)
+@job.command('logs', cls=_DocumentedCodeCommand)
 @click.option('--name',
               '-n',
               required=False,
@@ -3471,22 +3470,22 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
           'launching/recoveries, etc.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool):
+def job_logs(name: Optional[str], job_id: Optional[int], follow: bool,
+             controller: bool):
     """Tail the log of a managed job."""
     try:
         if controller:
-            core.tail_logs(spot_lib.SPOT_CONTROLLER_NAME,
+            core.tail_logs(job.SPOT_CONTROLLER_NAME,
                            job_id=job_id,
                            follow=follow)
         else:
-            spot_lib.tail_logs(name=name, job_id=job_id, follow=follow)
+            job.tail_logs(name=name, job_id=job_id, follow=follow)
     except exceptions.ClusterNotUpError as e:
         click.echo(e)
         sys.exit(1)
 
 
-@spot.command('dashboard', cls=_DocumentedCodeCommand)
+@job.command('dashboard', cls=_DocumentedCodeCommand)
 @click.option(
     '--port',
     '-p',
@@ -3496,7 +3495,7 @@ def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     help=('Local port to use for the dashboard. If None, a free port is '
           'automatically chosen.'))
 @usage_lib.entrypoint
-def spot_dashboard(port: Optional[int]):
+def job_dashboard(port: Optional[int]):
     """Opens a dashboard for spot jobs (needs controller to be UP)."""
     # TODO(zongheng): ideally, the controller/dashboard server should expose the
     # API perhaps via REST. Then here we would (1) not have to use SSH to try to
@@ -3520,7 +3519,7 @@ def spot_dashboard(port: Optional[int]):
     else:
         free_port = port
     ssh_command = (f'ssh -qNL {free_port}:localhost:{remote_port} '
-                   f'{spot_lib.SPOT_CONTROLLER_NAME}')
+                   f'{job.SPOT_CONTROLLER_NAME}')
     click.echo('Forwarding port: ', nl=False)
     click.secho(f'{ssh_command}', dim=True)
 

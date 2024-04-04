@@ -45,8 +45,8 @@ import pytest
 
 import sky
 from sky import global_user_state
-from sky import serve
 from sky import job
+from sky import serve
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import AWS
