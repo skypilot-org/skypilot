@@ -11,7 +11,7 @@ class Options(enum.Enum):
     MINIMIZE_LOGGING = 'SKYPILOT_MINIMIZE_LOGGING'
     # Internal: this is used to skip the cloud user identity check,
     # which is used to protect cluster operations in a multi-identity
-    # scenario. Currently, this is only used in the spot controller,
+    # scenario. Currently, this is only used in the job controller,
     # as there will not be multiple identities, and skipping the check
     # can increase robustness.
     SKIP_CLOUD_IDENTITY_CHECK = 'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK'

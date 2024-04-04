@@ -69,15 +69,15 @@ class Controllers(enum.Enum):
             '* {job_info}To see all managed jobs: '
             f'{colorama.Style.BRIGHT}sky spot queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
-            'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
+            'Cancelling the job controller\'s jobs is not allowed.\nTo cancel '
             f'managed jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
             f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
         decline_down_when_failed_to_fetch_status_hint=(
-            f'{colorama.Fore.RED}Tearing down the spot controller while '
+            f'{colorama.Fore.RED}Tearing down the job controller while '
             'it is in INIT state is not supported (this means a job launch '
             'is in progress or the previous launch failed), as we cannot '
             'guarantee that all the managed jobs are finished. Please wait '
-            'until the spot controller is UP or fix it with '
+            'until the job controller is UP or fix it with '
             f'{colorama.Style.BRIGHT}sky start '
             f'{utils.JOB_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.'),
         decline_down_for_dirty_controller_hint=(
@@ -89,7 +89,7 @@ class Controllers(enum.Enum):
             'managed job controller.'),
         default_hint_if_non_existent='No in-progress managed jobs.',
         connection_error_hint=(
-            'Failed to connect to spot controller, please try again later.'))
+            'Failed to connect to job controller, please try again later.'))
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         name='serve controller',
         cluster_name=serve_utils.SKY_SERVE_CONTROLLER_NAME,
@@ -204,7 +204,7 @@ def download_and_stream_latest_job_log(
         local_dir: str) -> Optional[str]:
     """Downloads and streams the latest job log.
 
-    This function is only used by spot controller and sky serve controller.
+    This function is only used by job controller and sky serve controller.
     """
     os.makedirs(local_dir, exist_ok=True)
     log_file = None
@@ -519,7 +519,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Step 4: Upload storage from sources
     # Upload the local source to a bucket. The task will not be executed
     # locally, so we need to upload the files/folders to the bucket manually
-    # here before sending the task to the remote spot controller.
+    # here before sending the task to the remote job controller.
     if task.storage_mounts:
         # There may be existing (non-translated) storage mounts, so log this
         # whenever task.storage_mounts is non-empty.

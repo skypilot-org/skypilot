@@ -1228,7 +1228,7 @@ def _get_managed_jobs(
     """Get the in-progress managed jobs.
 
     Args:
-        refresh: Query the latest statuses, restarting the spot controller if
+        refresh: Query the latest statuses, restarting the job controller if
             stopped.
         skip_finished: Show only in-progress jobs.
         show_all: Show all information of each spot job (e.g., region, price).
@@ -1674,7 +1674,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
             click.echo(msg)
             if num_in_progress_jobs is not None:
-                # spot controller is UP.
+                # job controller is UP.
                 job_info = ''
                 if num_in_progress_jobs > 0:
                     plural_and_verb = ' is'
@@ -2384,7 +2384,7 @@ def start(
     if not to_start:
         return
 
-    # Checks for controller clusters (spot controller / sky serve controller).
+    # Checks for controller clusters (job controller / sky serve controller).
     controllers, normal_clusters = [], []
     for name in to_start:
         if controller_utils.Controllers.from_name(name) is not None:
@@ -2526,7 +2526,7 @@ def _hint_or_raise_for_down_job_controller(controller_name: str):
             managed_jobs = []
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
-           'spot controller. Please be aware of the following:'
+           'job controller. Please be aware of the following:'
            f'{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
            'jobs (output of `sky spot queue`) will be lost.')
@@ -2592,7 +2592,7 @@ def _down_or_stop_clusters(
         idle_minutes_to_autostop: Optional[int] = None) -> None:
     """Tears down or (auto-)stops a cluster (or all clusters).
 
-    Controllers (spot controller and sky serve controller) can only be
+    Controllers (job controller and sky serve controller) can only be
     terminated if the cluster name is explicitly and uniquely specified (not
     via glob) and purge is set to True.
     """
@@ -3183,7 +3183,7 @@ def job():
         'future release.) Whether to retry provisioning infinitely until the '
         'cluster is up, if unavailability errors are encountered. This '  # pylint: disable=bad-docstring-quotes
         'applies to launching the spot clusters (both the initial and any '
-        'recovery attempts), not the spot controller.'))
+        'recovery attempts), not the job controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3308,7 +3308,7 @@ def job_launch(
     default=False,
     is_flag=True,
     required=False,
-    help='Query the latest statuses, restarting the spot controller if stopped.'
+    help='Query the latest statuses, restarting the job controller if stopped.'
 )
 @click.option('--skip-finished',
               '-s',
@@ -3323,10 +3323,10 @@ def job_queue(all: bool, refresh: bool, skip_finished: bool):
 
     Each spot job can have one of the following statuses:
 
-    - ``PENDING``: Job is waiting for a free slot on the spot controller to be
+    - ``PENDING``: Job is waiting for a free slot on the job controller to be
       accepted.
 
-    - ``SUBMITTED``: Job is submitted to and accepted by the spot controller.
+    - ``SUBMITTED``: Job is submitted to and accepted by the job controller.
 
     - ``STARTING``: Job is starting (provisioning a spot cluster).
 
@@ -3503,9 +3503,9 @@ def job_dashboard(port: Optional[int]):
     # see if the controller is UP first, which is slow; (2) not have to run SSH
     # port forwarding first (we'd just launch a local dashboard which would make
     # REST API calls to the controller dashboard server).
-    click.secho('Checking if spot controller is up...', fg='yellow')
+    click.secho('Checking if job controller is up...', fg='yellow')
     hint = (
-        'Dashboard is not available if spot controller is not up. Run a spot '
+        'Dashboard is not available if job controller is not up. Run a spot '
         'job first.')
     backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.JOB_CONTROLLER,
@@ -3539,7 +3539,7 @@ def job_dashboard(port: Optional[int]):
             try:
                 os.killpg(os.getpgid(ssh_process.pid), signal.SIGTERM)
             except ProcessLookupError:
-                # This happens if spot controller is auto-stopped.
+                # This happens if job controller is auto-stopped.
                 pass
         finally:
             click.echo('Exiting.')

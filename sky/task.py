@@ -271,7 +271,7 @@ class Task:
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
 
-        # Only set when 'self' is a spot controller task: 'self.managed_job_dag'
+        # Only set when 'self' is a job controller task: 'self.managed_job_dag'
         # is the underlying managed job dag (sky.Dag object).
         self.managed_job_dag: Optional['sky.Dag'] = None
 

@@ -370,7 +370,7 @@ def down(cluster_name: str, purge: bool = False) -> None:
         ValueError: the specified cluster does not exist.
         RuntimeError: failed to tear down the cluster.
         sky.exceptions.NotSupportedError: the specified cluster is the managed
-          spot controller.
+          job controller.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
@@ -557,7 +557,7 @@ def cancel(
     Additional arguments:
         _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.
-            This is used by the spot controller to cancel the job when the
+            This is used by the job controller to cancel the job when the
             worker node is preempted in the spot cluster.
 
     Raises:

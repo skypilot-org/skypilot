@@ -136,7 +136,7 @@ class ManagedJobStatus(enum.Enum):
     That means during the lifetime of a spot job, its JobsStatus could be
     reset to INIT or SETTING_UP multiple times (depending on the preemptions).
 
-    However, a spot job only has one ManagedJobStatus on the spot controller.
+    However, a spot job only has one ManagedJobStatus on the job controller.
         ManagedJobStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
     Mapping from JobStatus to ManagedJobStatus:
         INIT            ->  STARTING/RECOVERING
@@ -151,13 +151,13 @@ class ManagedJobStatus(enum.Enum):
     resource to run the job and the job will be immediately transitioned to
     RUNNING.
     """
-    # PENDING: Waiting for the spot controller to have a slot to run the
+    # PENDING: Waiting for the job controller to have a slot to run the
     # controller process.
     # The submitted_at timestamp of the spot job in the 'spot' table will be
     # set to the time when the job is firstly submitted by the user (set to
     # PENDING).
     PENDING = 'PENDING'
-    # SUBMITTED: The spot controller starts the controller process.
+    # SUBMITTED: The job controller starts the controller process.
     SUBMITTED = 'SUBMITTED'
     # STARTING: The controller process is launching the spot cluster for
     # the spot job.

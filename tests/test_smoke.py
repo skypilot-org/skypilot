@@ -81,9 +81,9 @@ storage_setup_commands = [
     'touch ~/.ssh/id_rsa.pub'
 ]
 
-# Wait until the spot controller is not in INIT state.
+# Wait until the job controller is not in INIT state.
 # This is a workaround for the issue that when multiple spot tests
-# are running in parallel, the spot controller may be in INIT and
+# are running in parallel, the job controller may be in INIT and
 # the spot queue/cancel command will return staled table.
 _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
                     'until ! echo "$s" | grep "jobs will not be shown until"; '
@@ -93,10 +93,10 @@ _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
 _SPOT_CANCEL_WAIT = (
     's=$(sky spot cancel -y -n {job_name}); '
     'until ! echo "$s" | grep "Please wait for the controller to be ready."; '
-    'do echo "Waiting for the spot controller '
+    'do echo "Waiting for the job controller '
     'to be ready"; sleep 5; s=$(sky spot cancel -y -n {job_name}); '
     'done; echo "$s"; echo; echo; echo "$s"')
-# TODO(zhwu): make the spot controller on GCP.
+# TODO(zhwu): make the job controller on GCP.
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
