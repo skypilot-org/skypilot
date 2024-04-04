@@ -165,12 +165,12 @@ def _wait_for_pods_to_schedule(namespace, new_nodes, timeout: int):
     is ContainerCreating, then we can assume that resources have been
     allocated and we can exit.
 
-    If timeout is set to zero, this method will wait indefinitely.
+    If timeout is set to a negative value, this method will wait indefinitely.
     """
     start_time = time.time()
 
     def _evaluate_timeout() -> bool:
-        # If timeout is set to zero, retry indefinitely.
+        # If timeout is negative, retry indefinitely.
         if timeout < 0:
             return True
         return time.time() - start_time < timeout
