@@ -272,7 +272,7 @@ class Task:
         self.file_mounts: Optional[Dict[str, str]] = None
 
         # Only set when 'self' is a spot controller task: 'self.spot_dag' is
-        # the underlying managed spot dag (sky.Dag object).
+        # the underlying managed job dag (sky.Dag object).
         self.spot_dag: Optional['sky.Dag'] = None
 
         # Only set when 'self' is a sky serve controller task.
@@ -551,7 +551,7 @@ class Task:
 
     @property
     def need_spot_recovery(self) -> bool:
-        return any(r.spot_recovery is not None for r in self.resources)
+        return any(r.job_recovery is not None for r in self.resources)
 
     @property
     def use_spot(self) -> bool:

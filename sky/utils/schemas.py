@@ -57,7 +57,7 @@ def get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
-            'spot_recovery': {
+            'job_recovery': {
                 'type': 'string',
             },
             'disk_size': {
@@ -172,7 +172,7 @@ def get_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
-            'spot_recovery': {
+            'job_recovery': {
                 'type': 'string',
             },
             'disk_size': {

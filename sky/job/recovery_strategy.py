@@ -3,7 +3,7 @@
 In the YAML file, the user can specify the strategy to use for spot jobs.
 
 resources:
-    spot_recovery: EAGER_NEXT_REGION
+    job_recovery: EAGER_NEXT_REGION
 """
 import time
 import traceback
@@ -96,19 +96,19 @@ class StrategyExecutor:
         """Create a strategy from a task."""
 
         resource_list = list(task.resources)
-        spot_recovery = resource_list[0].spot_recovery
+        job_recovery = resource_list[0].job_recovery
         for resource in resource_list:
-            if resource.spot_recovery != spot_recovery:
+            if resource.job_recovery != job_recovery:
                 raise ValueError(
                     'The spot recovery strategy should be the same for all '
                     'resources.')
-        # Remove the spot_recovery field from the resources, as the strategy
+        # Remove the job_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
-        new_resources_list = [r.copy(spot_recovery=None) for r in resource_list]
+        new_resources_list = [r.copy(job_recovery=None) for r in resource_list]
         # set the new_task_resources to be the same type (list or set) as the
         # original task.resources
         task.set_resources(type(task.resources)(new_resources_list))
-        return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
+        return SPOT_STRATEGIES[job_recovery](cluster_name, backend, task,
                                               retry_until_up)
 
     def launch(self) -> float:

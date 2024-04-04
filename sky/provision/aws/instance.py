@@ -63,11 +63,11 @@ def _default_ec2_resource(region: str) -> Any:
         # For backward compatibility, reload the module if the aws module was
         # imported before and stale. Used for, e.g., a live spot controller
         # running an older version and a new version gets installed by
-        # `sky spot launch`.
+        # `sky job launch`.
         #
         # Detailed explanation follows. Assume we're in this situation: an old
         # spot controller running a spot job and then the code gets updated on
-        # the controller due to a new `sky spot launch` or `sky start`.
+        # the controller due to a new `sky job launch or `sky start`.
         #
         # First, controller consists of an outer process (sky.spot.controller's
         # main) and an inner process running the controller logic (started as a

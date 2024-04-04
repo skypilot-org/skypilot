@@ -62,9 +62,9 @@ def _validate_service_task(task: 'sky.Task') -> None:
     policy_description = ('on-demand'
                           if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
-        if resource.spot_recovery is not None:
+        if resource.job_recovery is not None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('spot_recovery is disabled for SkyServe. '
+                raise ValueError('job_recovery is disabled for SkyServe. '
                                  'SkyServe will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
