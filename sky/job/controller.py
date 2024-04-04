@@ -159,13 +159,13 @@ class JobController:
         if task_id == 0:
             submitted_at = backend_utils.get_timestamp_from_run_timestamp(
                 self._backend.run_timestamp)
-        state.set_submitted(
-            self._job_id,
-            task_id,
-            self._backend.run_timestamp,
-            submitted_at,
-            resources_str=backend_utils.get_task_resources_str(task),
-            callback_func=callback_func)
+        state.set_submitted(self._job_id,
+                            task_id,
+                            self._backend.run_timestamp,
+                            submitted_at,
+                            resources_str=backend_utils.get_task_resources_str(
+                                task, is_managed_job=True),
+                            callback_func=callback_func)
         logger.info(
             f'Submitted spot job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
@@ -269,7 +269,7 @@ class JobController:
                         managed_job_status = state.ManagedJobStatus.FAILED_SETUP
                     failure_reason = (
                         'To see the details, run: '
-                        f'sky spot logs --controller {self._job_id}')
+                        f'sky job logs --controller {self._job_id}')
 
                     state.set_failed(self._job_id,
                                      task_id,
@@ -509,7 +509,7 @@ def start(job_id, dag_yaml, retry_until_up):
                 task_id=None,
                 failure_type=state.ManagedJobStatus.FAILED_CONTROLLER,
                 failure_reason=('Unexpected error occurred. For details, '
-                                f'run: sky spot logs --controller {job_id}'))
+                                f'run: sky job logs --controller {job_id}'))
 
 
 if __name__ == '__main__':

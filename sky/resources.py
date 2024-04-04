@@ -334,6 +334,7 @@ class Resources:
         return self._instance_type
 
     @property
+    @functools.lru_cache(maxsize=1)
     def cpus(self) -> Optional[str]:
         """Returns the number of vCPUs that each instance must have.
 
@@ -344,7 +345,12 @@ class Resources:
         at launch time. Thus, Resources in the backend's ResourceHandle will
         always have the cpus field set to None.)
         """
-        return self._cpus
+        if self._cpus is not None:
+            return self._cpus
+        if self.cloud is not None and self._instance_type is not None:
+            vcpus, _ = self.cloud.get_vcpus_mem_from_instance_type(
+                self._instance_type)
+            return str(vcpus)
 
     @property
     def memory(self) -> Optional[str]:

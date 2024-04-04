@@ -3132,7 +3132,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             managed_job_code = managed_job_codegen.set_pending(
                 job_id, managed_job_dag)
             # Set the spot job to PENDING state to make sure that this spot
-            # job appears in the `sky spot queue`, when there are already 16
+            # job appears in the `sky job queue`, when there are already 16
             # controller process jobs running on the controller VM with 8
             # CPU cores.
             # The spot job should be set to PENDING state *after* the
@@ -3177,19 +3177,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{fore.CYAN}Spot Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                     '\nTo cancel the job:\t\t'
-                    f'{backend_utils.BOLD}sky spot cancel {job_id}'
+                    f'{backend_utils.BOLD}sky job cancel {job_id}'
                     f'{backend_utils.RESET_BOLD}'
                     '\nTo stream job logs:\t\t'
-                    f'{backend_utils.BOLD}sky spot logs {job_id}'
+                    f'{backend_utils.BOLD}sky job logs {job_id}'
                     f'{backend_utils.RESET_BOLD}'
                     f'\nTo stream controller logs:\t'
-                    f'{backend_utils.BOLD}sky spot logs --controller {job_id}'
+                    f'{backend_utils.BOLD}sky job logs --controller {job_id}'
                     f'{backend_utils.RESET_BOLD}'
-                    '\nTo view all managed jobs:\t\t'
-                    f'{backend_utils.BOLD}sky spot queue'
+                    '\nTo view all managed jobs:\t'
+                    f'{backend_utils.BOLD}sky job queue'
                     f'{backend_utils.RESET_BOLD}'
                     '\nTo view the spot job dashboard:\t'
-                    f'{backend_utils.BOLD}sky spot dashboard'
+                    f'{backend_utils.BOLD}sky job dashboard'
                     f'{backend_utils.RESET_BOLD}')
             elif controller is None:
                 logger.info(f'{fore.CYAN}Job ID: '

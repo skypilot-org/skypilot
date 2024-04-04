@@ -67,10 +67,10 @@ class Controllers(enum.Enum):
         cluster_name=utils.JOB_CONTROLLER_NAME,
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
-            f'{colorama.Style.BRIGHT}sky spot queue{colorama.Style.RESET_ALL}'),
+            f'{colorama.Style.BRIGHT}sky job queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the job controller\'s jobs is not allowed.\nTo cancel '
-            f'managed jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
+            f'managed jobs, use: {colorama.Style.BRIGHT}sky job cancel <spot '
             f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
         decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the job controller while '
@@ -83,7 +83,7 @@ class Controllers(enum.Enum):
         decline_down_for_dirty_controller_hint=(
             f'{colorama.Fore.RED}In-progress managed jobs found. To avoid '
             f'resource leakage, cancel all jobs first: {colorama.Style.BRIGHT}'
-            f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
+            f'sky job cancel -a{colorama.Style.RESET_ALL}\n'),
         check_cluster_name_hint=(
             f'Cluster {utils.JOB_CONTROLLER_NAME} is reserved for '
             'managed job controller.'),
