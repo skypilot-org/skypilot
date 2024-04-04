@@ -297,4 +297,5 @@ def launch(
             idle_minutes_to_autostop=skylet_constants.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
+            _disable_controller_check=True
         )
