@@ -124,10 +124,10 @@ columns = [
 ]
 
 
-class SpotStatus(enum.Enum):
+class ManagedJobStatus(enum.Enum):
     """Spot job status, designed to be in serverless style.
 
-    The SpotStatus is a higher level status than the JobStatus.
+    The ManagedJobStatus is a higher level status than the JobStatus.
     Each spot job submitted to the spot cluster, will have a JobStatus
     on that spot cluster:
         JobStatus = [INIT, SETTING_UP, PENDING, RUNNING, ...]
@@ -136,9 +136,9 @@ class SpotStatus(enum.Enum):
     That means during the lifetime of a spot job, its JobsStatus could be
     reset to INIT or SETTING_UP multiple times (depending on the preemptions).
 
-    However, a spot job only has one SpotStatus on the spot controller.
-        SpotStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
-    Mapping from JobStatus to SpotStatus:
+    However, a spot job only has one ManagedJobStatus on the spot controller.
+        ManagedJobStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
+    Mapping from JobStatus to ManagedJobStatus:
         INIT            ->  STARTING/RECOVERING
         SETTING_UP      ->  RUNNING
         PENDING         ->  RUNNING
@@ -209,10 +209,10 @@ class SpotStatus(enum.Enum):
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
     def __lt__(self, other):
-        return list(SpotStatus).index(self) < list(SpotStatus).index(other)
+        return (list(ManagedJobStatus).index(self) < list(ManagedJobStatus).index(other))
 
     @classmethod
-    def terminal_statuses(cls) -> List['SpotStatus']:
+    def terminal_statuses(cls) -> List['ManagedJobStatus']:
         return [
             cls.SUCCEEDED,
             cls.FAILED,
@@ -225,7 +225,7 @@ class SpotStatus(enum.Enum):
         ]
 
     @classmethod
-    def failure_statuses(cls) -> List['SpotStatus']:
+    def failure_statuses(cls) -> List['ManagedJobStatus']:
         return [
             cls.FAILED, cls.FAILED_SETUP, cls.FAILED_PRECHECKS,
             cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER
@@ -233,19 +233,19 @@ class SpotStatus(enum.Enum):
 
 
 _SPOT_STATUS_TO_COLOR = {
-    SpotStatus.PENDING: colorama.Fore.BLUE,
-    SpotStatus.SUBMITTED: colorama.Fore.BLUE,
-    SpotStatus.STARTING: colorama.Fore.BLUE,
-    SpotStatus.RUNNING: colorama.Fore.GREEN,
-    SpotStatus.RECOVERING: colorama.Fore.CYAN,
-    SpotStatus.SUCCEEDED: colorama.Fore.GREEN,
-    SpotStatus.FAILED: colorama.Fore.RED,
-    SpotStatus.FAILED_PRECHECKS: colorama.Fore.RED,
-    SpotStatus.FAILED_SETUP: colorama.Fore.RED,
-    SpotStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
-    SpotStatus.FAILED_CONTROLLER: colorama.Fore.RED,
-    SpotStatus.CANCELLING: colorama.Fore.YELLOW,
-    SpotStatus.CANCELLED: colorama.Fore.YELLOW,
+    ManagedJobStatus.PENDING: colorama.Fore.BLUE,
+    ManagedJobStatus.SUBMITTED: colorama.Fore.BLUE,
+    ManagedJobStatus.STARTING: colorama.Fore.BLUE,
+    ManagedJobStatus.RUNNING: colorama.Fore.GREEN,
+    ManagedJobStatus.RECOVERING: colorama.Fore.CYAN,
+    ManagedJobStatus.SUCCEEDED: colorama.Fore.GREEN,
+    ManagedJobStatus.FAILED: colorama.Fore.RED,
+    ManagedJobStatus.FAILED_PRECHECKS: colorama.Fore.RED,
+    ManagedJobStatus.FAILED_SETUP: colorama.Fore.RED,
+    ManagedJobStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
+    ManagedJobStatus.FAILED_CONTROLLER: colorama.Fore.RED,
+    ManagedJobStatus.CANCELLING: colorama.Fore.YELLOW,
+    ManagedJobStatus.CANCELLED: colorama.Fore.YELLOW,
 }
 
 
@@ -268,7 +268,7 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
             (spot_job_id, task_id, task_name, resources, status)
             VALUES (?, ?, ?, ?, ?)""",
             (job_id, task_id, task_name, resources_str,
-             SpotStatus.PENDING.value))
+             ManagedJobStatus.PENDING.value))
 
 
 def set_submitted(job_id: int, task_id: int, run_timestamp: str,
@@ -299,7 +299,7 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             run_timestamp=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
-            (resources_str, submit_time, SpotStatus.SUBMITTED.value,
+            (resources_str, submit_time, ManagedJobStatus.SUBMITTED.value,
              run_timestamp, job_id, task_id))
     callback_func('SUBMITTED')
 
@@ -312,7 +312,7 @@ def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
             """\
             UPDATE spot SET status=(?)
             WHERE spot_job_id=(?) AND
-            task_id=(?)""", (SpotStatus.STARTING.value, job_id, task_id))
+            task_id=(?)""", (ManagedJobStatus.STARTING.value, job_id, task_id))
     callback_func('STARTING')
 
 
@@ -326,7 +326,7 @@ def set_started(job_id: int, task_id: int, start_time: float,
             UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
-            (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
+            (ManagedJobStatus.RUNNING.value, start_time, start_time, job_id, task_id))
     callback_func('STARTED')
 
 
@@ -340,7 +340,7 @@ def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
                 status=(?), job_duration=job_duration+(?)-last_recovered_at
                 WHERE spot_job_id=(?) AND
                 task_id=(?)""",
-            (SpotStatus.RECOVERING.value, time.time(), job_id, task_id))
+            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id))
     callback_func('RECOVERING')
 
 
@@ -354,7 +354,7 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float,
             status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
-            (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
+            (ManagedJobStatus.RUNNING.value, recovered_time, job_id, task_id))
     logger.info('==== Recovered. ====')
     callback_func('RECOVERED')
 
@@ -369,7 +369,7 @@ def set_succeeded(job_id: int, task_id: int, end_time: float,
             status=(?), end_at=(?)
             WHERE spot_job_id=(?) AND task_id=(?)
             AND end_at IS null""",
-            (SpotStatus.SUCCEEDED.value, end_time, job_id, task_id))
+            (ManagedJobStatus.SUCCEEDED.value, end_time, job_id, task_id))
 
     callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
@@ -378,7 +378,7 @@ def set_succeeded(job_id: int, task_id: int, end_time: float,
 def set_failed(
     job_id: int,
     task_id: Optional[int],
-    failure_type: SpotStatus,
+    failure_type: ManagedJobStatus,
     failure_reason: str,
     callback_func: Optional[CallbackType] = None,
     end_time: Optional[float] = None,
@@ -389,7 +389,7 @@ def set_failed(
         job_id: The job id.
         task_id: The task id. If None, all non-finished tasks of the job will
             be set to failed.
-        failure_type: The failure type. One of SpotStatus.FAILED_*.
+        failure_type: The failure type. One of ManagedJobStatus.FAILED_*.
         failure_reason: The failure reason.
         end_time: The end time. If None, the current time will be used.
     """
@@ -405,8 +405,8 @@ def set_failed(
         previous_status = cursor.execute(
             'SELECT status FROM spot WHERE spot_job_id=(?)',
             (job_id,)).fetchone()
-        previous_status = SpotStatus(previous_status[0])
-        if previous_status in [SpotStatus.RECOVERING]:
+        previous_status = ManagedJobStatus(previous_status[0])
+        if previous_status in [ManagedJobStatus.RECOVERING]:
             # If the job is recovering, we should set the
             # last_recovered_at to the end_time, so that the
             # end_at - last_recovered_at will not be affect the job duration
@@ -438,7 +438,7 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
             UPDATE spot SET
             status=(?), end_at=(?)
             WHERE spot_job_id=(?) AND end_at IS null""",
-            (SpotStatus.CANCELLING.value, time.time(), job_id))
+            (ManagedJobStatus.CANCELLING.value, time.time(), job_id))
         if rows.rowcount > 0:
             logger.info('Cancelling the job...')
             callback_func('CANCELLING')
@@ -455,8 +455,8 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
             UPDATE spot SET
             status=(?), end_at=(?)
             WHERE spot_job_id=(?) AND status=(?)""",
-            (SpotStatus.CANCELLED.value, time.time(), job_id,
-             SpotStatus.CANCELLING.value))
+            (ManagedJobStatus.CANCELLED.value, time.time(), job_id,
+             ManagedJobStatus.CANCELLING.value))
         if rows.rowcount > 0:
             logger.info('Job cancelled.')
             callback_func('CANCELLED')
@@ -465,8 +465,9 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
 # ======== utility functions ========
 def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get non-terminal job ids by name."""
-    statuses = ', '.join(['?'] * len(SpotStatus.terminal_statuses()))
-    field_values = [status.value for status in SpotStatus.terminal_statuses()]
+    statuses = ', '.join(['?'] * len(ManagedJobStatus.terminal_statuses()))
+    field_values = [status.value 
+                    for status in ManagedJobStatus.terminal_statuses()]
 
     name_filter = ''
     if name is not None:
@@ -494,14 +495,14 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
         return job_ids
 
 
-def _get_all_task_ids_statuses(job_id: int) -> List[Tuple[int, SpotStatus]]:
+def _get_all_task_ids_statuses(job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         id_statuses = cursor.execute(
             """\
             SELECT task_id, status FROM spot
             WHERE spot_job_id=(?)
             ORDER BY task_id ASC""", (job_id,)).fetchall()
-        return [(row[0], SpotStatus(row[1])) for row in id_statuses]
+        return [(row[0], ManagedJobStatus(row[1])) for row in id_statuses]
 
 
 def get_num_tasks(job_id: int) -> int:
@@ -509,13 +510,13 @@ def get_num_tasks(job_id: int) -> int:
 
 
 def get_latest_task_id_status(
-        job_id: int) -> Union[Tuple[int, SpotStatus], Tuple[None, None]]:
+        job_id: int) -> Union[Tuple[int, ManagedJobStatus], Tuple[None, None]]:
     """Returns the (task id, status) of the latest task of a job.
 
     The latest means the task that is currently being executed or to be
     started by the controller process. For example, in a spot job with
     3 tasks, the first task is succeeded, and the second task is being
-    executed. This will return (1, SpotStatus.RUNNING).
+    executed. This will return (1, ManagedJobStatus.RUNNING).
 
     If the job_id does not exist, (None, None) will be returned.
     """
@@ -529,7 +530,7 @@ def get_latest_task_id_status(
     return task_id, status
 
 
-def get_status(job_id: int) -> Optional[SpotStatus]:
+def get_status(job_id: int) -> Optional[ManagedJobStatus]:
     _, status = get_latest_task_id_status(job_id)
     return status
 
@@ -571,7 +572,7 @@ def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
         jobs = []
         for row in rows:
             job_dict = dict(zip(columns, row))
-            job_dict['status'] = SpotStatus(job_dict['status'])
+            job_dict['status'] = ManagedJobStatus(job_dict['status'])
             if job_dict['job_name'] is None:
                 job_dict['job_name'] = job_dict['task_name']
             jobs.append(job_dict)

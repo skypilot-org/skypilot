@@ -138,7 +138,7 @@ def update_spot_job_status(job_id: Optional[int] = None):
             state.set_failed(
                 job_id_,
                 task_id=None,
-                failure_type=state.SpotStatus.FAILED_CONTROLLER,
+                failure_type=state.ManagedJobStatus.FAILED_CONTROLLER,
                 failure_reason=
                 'Controller process has exited abnormally. For more details,'
                 f' run: sky spot logs --controller {job_id_}')
@@ -331,10 +331,10 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # the table before the spot state is updated by the controller. In
             # this case, we should skip the logging, and wait for the next
             # round of status check.
-            if handle is None or spot_status != state.SpotStatus.RUNNING:
+            if handle is None or spot_status != state.ManagedJobStatus.RUNNING:
                 status_str = ''
                 if (spot_status is not None and
-                        spot_status != state.SpotStatus.RUNNING):
+                        spot_status != state.ManagedJobStatus.RUNNING):
                     status_str = f' (status: {spot_status.value})'
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
@@ -453,7 +453,7 @@ def dump_spot_job_queue() -> str:
             end_at = time.time()
 
         job_submitted_at = job['last_recovered_at'] - job['job_duration']
-        if job['status'] == state.SpotStatus.RECOVERING:
+        if job['status'] == state.ManagedJobStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = job['job_duration']
         elif job_submitted_at > 0:
@@ -485,7 +485,7 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     """Load job queue from json string."""
     jobs = common_utils.decode_payload(payload)
     for job in jobs:
-        job['status'] = state.SpotStatus(job['status'])
+        job['status'] = state.ManagedJobStatus(job['status'])
     return jobs
 
 
@@ -552,7 +552,7 @@ def format_job_table(
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
-            spot_status = state.SpotStatus.SUCCEEDED
+            spot_status = state.ManagedJobStatus.SUCCEEDED
             failure_reason = None
             current_task_id = len(job_tasks) - 1
             for task in job_tasks:
@@ -567,7 +567,7 @@ def format_job_table(
                 else:
                     end_at = None
                 recovery_cnt += task['recovery_count']
-                if spot_status == state.SpotStatus.SUCCEEDED:
+                if spot_status == state.ManagedJobStatus.SUCCEEDED:
                     # Use the first non-succeeded status.
                     # TODO(zhwu): we should not blindly use the first non-
                     # succeeded as the status could be changed to SUBMITTED
@@ -577,7 +577,7 @@ def format_job_table(
                     current_task_id = task['task_id']
 
                 if (failure_reason is None and
-                        task['status'] > state.SpotStatus.SUCCEEDED):
+                        task['status'] > state.ManagedJobStatus.SUCCEEDED):
                     failure_reason = task['failure_reason']
 
             job_duration = log_utils.readable_time_duration(0,
@@ -589,7 +589,7 @@ def format_job_table(
                                                               absolute=True)
 
             status_str = spot_status.colored_str()
-            if (spot_status < state.SpotStatus.RUNNING and
+            if (spot_status < state.ManagedJobStatus.RUNNING and
                     current_task_id > 0):
                 status_str += f' (task: {current_task_id})'
 
@@ -671,8 +671,8 @@ class SpotCodeGen:
       >> codegen = SpotCodegen.show_jobs(...)
     """
     _PREFIX = [
-        'from sky.spot import spot_state',
-        'from sky.spot import spot_utils',
+        'from sky.job import state',
+        'from sky.job import utils',
     ]
 
     @classmethod
