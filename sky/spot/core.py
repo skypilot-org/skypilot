@@ -289,13 +289,11 @@ def launch(
               f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
-        sky.launch(
-            task=controller_task,
-            stream_logs=stream_logs,
-            cluster_name=controller_name,
-            detach_run=detach_run,
-            idle_minutes_to_autostop=skylet_constants.
-            CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-            retry_until_up=True,
-            _disable_controller_check=True
-        )
+        sky.launch(task=controller_task,
+                   stream_logs=stream_logs,
+                   cluster_name=controller_name,
+                   detach_run=detach_run,
+                   idle_minutes_to_autostop=skylet_constants.
+                   CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                   retry_until_up=True,
+                   _disable_controller_check=True)
