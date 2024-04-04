@@ -19,7 +19,7 @@ import pytest
 # --aws, --gcp, --azure, or --lambda.
 #
 # To only run tests for managed job (without generic tests), use
-# --managed-spot.
+# --managed-job.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace'
@@ -57,7 +57,7 @@ def pytest_addoption(parser):
                          action='store_true',
                          default=False,
                          help=f'Only run {cloud.upper()} tests.')
-    parser.addoption('--managed-spot',
+    parser.addoption('--managed-job',
                      action='store_true',
                      default=False,
                      help='Only run tests for managed job.')
@@ -116,7 +116,7 @@ def pytest_collection_modifyitems(config, items):
     skip_marks = {}
     skip_marks['slow'] = pytest.mark.skip(reason='need --runslow option to run')
     skip_marks['managed_job'] = pytest.mark.skip(
-        reason='skipped, because --managed-spot option is set')
+        reason='skipped, because --managed-job option is set')
     skip_marks['serve'] = pytest.mark.skip(
         reason='skipped, because --serve option is set')
     skip_marks['tpu'] = pytest.mark.skip(
@@ -145,7 +145,7 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(skip_marks[cloud])
 
         if (not 'managed_job'
-                in item.keywords) and config.getoption('--managed-spot'):
+                in item.keywords) and config.getoption('--managed-job'):
             item.add_marker(skip_marks['managed_job'])
         if (not 'tpu' in item.keywords) and config.getoption('--tpu'):
             item.add_marker(skip_marks['tpu'])
