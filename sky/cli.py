@@ -3289,7 +3289,7 @@ def spot_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
-    sky.spot_launch(dag,
+    spot_lib.launch(dag,
                     name,
                     detach_run=detach_run,
                     retry_until_up=retry_until_up)
