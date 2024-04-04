@@ -28,7 +28,7 @@ from sky import cloud_stores
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
-from sky import job as spot_lib
+from sky import job as managed_job
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
@@ -3100,7 +3100,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen: str,
         job_id: int,
         detach_run: bool = False,
-        spot_dag: Optional['dag.Dag'] = None,
+        managed_job_dag: Optional['dag.Dag'] = None,
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
@@ -3130,10 +3130,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
-        if spot_dag is not None:
+        if managed_job_dag is not None:
             # Add the spot job to spot queue table.
-            spot_codegen = spot_lib.SpotCodeGen()
-            spot_code = spot_codegen.set_pending(job_id, spot_dag)
+            managed_job_codegen = managed_job.SpotCodeGen()
+            managed_job_code = managed_job_codegen.set_pending(
+                job_id, managed_job_dag)
             # Set the spot job to PENDING state to make sure that this spot
             # job appears in the `sky spot queue`, when there are already 16
             # controller process jobs running on the controller VM with 8
@@ -3145,7 +3146,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # We cannot set the spot job to PENDING state in the codegen for
             # the controller process job, as it will stay in the job pending
             # table and not be executed until there is an empty slot.
-            job_submit_cmd = job_submit_cmd + ' && ' + spot_code
+            job_submit_cmd = job_submit_cmd + ' && ' + managed_job_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3166,8 +3167,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         try:
             if not detach_run:
-                if handle.cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
-                    self.tail_spot_logs(handle, job_id)
+                if handle.cluster_name == managed_job.JOB_CONTROLLER_NAME:
+                    self.tail_managed_job_logs(handle, job_id)
                 else:
                     # Sky logs. Not using subprocess.run since it will make the
                     # ssh keep connected after ctrl-c.
@@ -3175,7 +3176,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         finally:
             name = handle.cluster_name
             controller = controller_utils.Controllers.from_name(name)
-            if controller == controller_utils.Controllers.SPOT_CONTROLLER:
+            if controller == controller_utils.Controllers.JOB_CONTROLLER:
                 logger.info(
                     f'{fore.CYAN}Spot Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
@@ -3188,7 +3189,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'\nTo stream controller logs:\t'
                     f'{backend_utils.BOLD}sky spot logs --controller {job_id}'
                     f'{backend_utils.RESET_BOLD}'
-                    '\nTo view all spot jobs:\t\t'
+                    '\nTo view all managed jobs:\t\t'
                     f'{backend_utils.BOLD}sky spot queue'
                     f'{backend_utils.RESET_BOLD}'
                     '\nTo view the spot job dashboard:\t'
@@ -3522,12 +3523,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def tail_logs(self,
                   handle: CloudVmRayResourceHandle,
                   job_id: Optional[int],
-                  spot_job_id: Optional[int] = None,
+                  managed_job_id: Optional[int] = None,
                   follow: bool = True) -> int:
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
-                                               spot_job_id=spot_job_id,
+                                               managed_job_id=managed_job_id,
                                                follow=follow)
-        if job_id is None and spot_job_id is None:
+        if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
 
@@ -3554,17 +3555,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode = e.code
         return returncode
 
-    def tail_spot_logs(self,
-                       handle: CloudVmRayResourceHandle,
-                       job_id: Optional[int] = None,
-                       job_name: Optional[str] = None,
-                       follow: bool = True) -> None:
+    def tail_managed_job_logs(self,
+                              handle: CloudVmRayResourceHandle,
+                              job_id: Optional[int] = None,
+                              job_name: Optional[str] = None,
+                              follow: bool = True) -> None:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         if job_name is not None:
-            code = spot_lib.SpotCodeGen.stream_logs_by_name(job_name, follow)
+            code = managed_job.SpotCodeGen.stream_logs_by_name(job_name, follow)
         else:
-            code = spot_lib.SpotCodeGen.stream_logs_by_id(job_id, follow)
+            code = managed_job.SpotCodeGen.stream_logs_by_id(job_id, follow)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -4576,7 +4577,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                spot_dag=task.spot_dag)
+                                managed_job_dag=task.managed_job_dag)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
@@ -4639,4 +4640,4 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                spot_dag=task.spot_dag)
+                                managed_job_dag=task.managed_job_dag)

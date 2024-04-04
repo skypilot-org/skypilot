@@ -2252,7 +2252,7 @@ def test_spot_recovery_aws(aws_config_region):
     """Test managed job recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, job.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, job.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
         'spot_recovery_aws',
@@ -2285,7 +2285,7 @@ def test_spot_recovery_gcp():
     """Test managed job recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, job.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, job.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-east4-b'
     query_cmd = (
         f'gcloud compute instances list --filter='
@@ -2434,7 +2434,7 @@ def test_spot_recovery_multi_node_aws(aws_config_region):
     """Test managed job recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, job.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, job.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
         'spot_recovery_multi_node_aws',
@@ -2468,7 +2468,7 @@ def test_spot_recovery_multi_node_gcp():
     """Test managed job recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, job.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, job.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-west2-a'
     # Use ':' to match as the cluster name will contain the suffix with job id
     query_cmd = (
@@ -2503,11 +2503,11 @@ def test_spot_recovery_multi_node_gcp():
 def test_spot_cancellation_aws(aws_config_region):
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, job.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name, job.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     name_2_on_cloud = common_utils.make_cluster_name_on_cloud(
-        f'{name}-2', job.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        f'{name}-2', job.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
-        f'{name}-3', job.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        f'{name}-3', job.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
         'spot_cancellation_aws',
@@ -2574,7 +2574,7 @@ def test_spot_cancellation_gcp():
     name = _get_cluster_name()
     name_3 = f'{name}-3'
     name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name_3, job.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+        name_3, job.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-west3-b'
     query_state_cmd = (
         'gcloud compute instances list '
@@ -2644,7 +2644,7 @@ def test_spot_storage(generic_cloud: str):
     storage_name = f'sky-test-{int(time.time())}'
 
     # Also perform region testing for bucket creation to validate if buckets are
-    # created in the correct region and correctly mounted in spot jobs.
+    # created in the correct region and correctly mounted in managed jobs.
     # However, we inject this testing only for AWS and GCP since they are the
     # supported object storage providers in SkyPilot.
     region_flag = ''

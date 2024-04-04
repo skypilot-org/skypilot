@@ -196,8 +196,6 @@ def _start(
         idle_minutes_to_autostop = (
             constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
 
-    # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
-    # would have a cluster name (the controller) filled in.
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
     with dag.Dag():

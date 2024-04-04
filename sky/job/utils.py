@@ -18,7 +18,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
-from sky.job import constants as spot_constants
+from sky.job import constants as job_constants
 from sky.job import state
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -36,7 +36,7 @@ logger = sky_logging.init_logger(__name__)
 
 # Add user hash so that two users don't have the same controller VM on
 # shared-account clouds such as GCP.
-SPOT_CONTROLLER_NAME: str = (
+JOB_CONTROLLER_NAME: str = (
     f'sky-spot-controller-{common_utils.get_user_hash()}')
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
@@ -115,7 +115,7 @@ def update_spot_job_status(job_id: Optional[int] = None):
             for task in tasks:
                 task_name = task['job_name']
                 # Tear down the abnormal spot cluster to avoid resource leakage.
-                cluster_name = generate_spot_cluster_name(task_name, job_id_)
+                cluster_name = generate_job_cluster_name(task_name, job_id_)
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
                 if handle is not None:
@@ -169,7 +169,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         if event_callback is None or task is None:
             return
         event_callback = event_callback.strip()
-        cluster_name = generate_spot_cluster_name(task.name,
+        cluster_name = generate_job_cluster_name(task.name,
                                                   job_id) if task.name else None
         logger.info(f'=== START: event callback for {status!r} ===')
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'spot_event',
@@ -199,14 +199,14 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
 # ======== user functions ========
 
 
-def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
+def generate_job_cluster_name(task_name: str, job_id: int) -> str:
     """Generate spot cluster name."""
     # Truncate the task name to 30 chars to avoid the cluster name being too
     # long after appending the job id, which will cause another truncation in
     # the underlying sky.launch, hiding the `job_id` in the cluster name.
     cluster_name = common_utils.make_cluster_name_on_cloud(
         task_name,
-        spot_constants.SPOT_CLUSTER_NAME_PREFIX_LENGTH,
+        job_constants.JOB_CLUSTER_NAME_PREFIX_LENGTH,
         add_user_hash=False)
     return f'{cluster_name}-{job_id}'
 
@@ -323,7 +323,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             handle = None
             if task_id is not None:
                 task_name = state.get_task_name(job_id, task_id)
-                cluster_name = generate_spot_cluster_name(task_name, job_id)
+                cluster_name = generate_job_cluster_name(task_name, job_id)
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
 
@@ -352,13 +352,13 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             status_display.stop()
             returncode = backend.tail_logs(handle,
                                            job_id=None,
-                                           spot_job_id=job_id,
+                                           managed_job_id=job_id,
                                            follow=follow)
             if returncode == 0:
                 # If the log tailing exit successfully (the real job can be
                 # SUCCEEDED or FAILED), we can safely break the loop. We use the
-                # status in job queue to show the information, as the spot_state
-                # is not updated yet.
+                # status in job queue to show the information, as the
+                # ManagedJobStatus is not updated yet.
                 job_statuses = backend.get_job_status(handle, stream_logs=False)
                 job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
@@ -465,7 +465,7 @@ def dump_spot_job_queue() -> str:
         job['job_duration'] = job_duration
         job['status'] = job['status'].value
 
-        cluster_name = generate_spot_cluster_name(job['task_name'],
+        cluster_name = generate_job_cluster_name(job['task_name'],
                                                   job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
@@ -481,7 +481,7 @@ def dump_spot_job_queue() -> str:
     return common_utils.encode_payload(jobs)
 
 
-def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
+def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     """Load job queue from json string."""
     jobs = common_utils.decode_payload(payload)
     for job in jobs:
@@ -510,16 +510,16 @@ def format_job_table(
         show_all: bool,
         return_rows: bool = False,
         max_jobs: Optional[int] = None) -> Union[str, List[List[str]]]:
-    """Returns spot jobs as a formatted string.
+    """Returns managed jobs as a formatted string.
 
     Args:
-        jobs: A list of spot jobs.
+        jobs: A list of managed jobs.
         show_all: Whether to show all columns.
         max_jobs: The maximum number of jobs to show in the table.
         return_rows: If True, return the rows as a list of strings instead of
           all rows concatenated into a single string.
 
-    Returns: A formatted string of spot jobs, if not `return_rows`; otherwise a
+    Returns: A formatted string of managed jobs, if not `return_rows`; otherwise a
       list of "rows" (each of which is a list of str).
     """
     columns = [
@@ -654,7 +654,7 @@ def format_job_table(
     if status_str:
         status_str = f'In progress tasks: {status_str}'
     else:
-        status_str = 'No in-progress spot jobs.'
+        status_str = 'No in-progress managed jobs.'
     output = status_str
     if str(job_table):
         output += f'\n{job_table}'
@@ -678,7 +678,7 @@ class SpotCodeGen:
     @classmethod
     def get_job_table(cls) -> str:
         code = [
-            'job_table = spot_utils.dump_spot_job_queue()',
+            'job_table = utils.dump_spot_job_queue()',
             'print(job_table, flush=True)',
         ]
         return cls._build(code)
@@ -686,7 +686,7 @@ class SpotCodeGen:
     @classmethod
     def cancel_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
         code = [
-            f'msg = spot_utils.cancel_jobs_by_id({job_ids})',
+            f'msg = utils.cancel_jobs_by_id({job_ids})',
             'print(msg, end="", flush=True)',
         ]
         return cls._build(code)
@@ -694,7 +694,7 @@ class SpotCodeGen:
     @classmethod
     def cancel_job_by_name(cls, job_name: str) -> str:
         code = [
-            f'msg = spot_utils.cancel_job_by_name({job_name!r})',
+            f'msg = utils.cancel_job_by_name({job_name!r})',
             'print(msg, end="", flush=True)',
         ]
         return cls._build(code)
@@ -702,7 +702,7 @@ class SpotCodeGen:
     @classmethod
     def stream_logs_by_name(cls, job_name: str, follow: bool = True) -> str:
         code = [
-            f'msg = spot_utils.stream_logs_by_name({job_name!r}, '
+            f'msg = utils.stream_logs_by_name({job_name!r}, '
             f'follow={follow})',
             'print(msg, flush=True)',
         ]
@@ -714,8 +714,8 @@ class SpotCodeGen:
                           follow: bool = True) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
-            'else spot_state.get_latest_job_id()',
-            f'msg = spot_utils.stream_logs_by_id(job_id, follow={follow})',
+            'else state.get_latest_job_id()',
+            f'msg = utils.stream_logs_by_id(job_id, follow={follow})',
             'print(msg, flush=True)',
         ]
         return cls._build(code)
@@ -725,13 +725,13 @@ class SpotCodeGen:
         dag_name = spot_dag.name
         # Add the spot job to spot queue table.
         code = [
-            f'spot_state.set_job_name('
+            f'state.set_job_name('
             f'{job_id}, {dag_name!r})',
         ]
         for task_id, task in enumerate(spot_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(task)
             code += [
-                f'spot_state.set_pending('
+                f'state.set_pending('
                 f'{job_id}, {task_id}, {task.name!r}, '
                 f'{resources_str!r})',
             ]

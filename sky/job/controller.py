@@ -43,7 +43,7 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
     return dag, dag_name
 
 
-class SpotController:
+class JobController:
     """Each spot controller manages the life cycle of one spot job."""
 
     def __init__(self, job_id: int, dag_yaml: str,
@@ -58,7 +58,7 @@ class SpotController:
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
-        #   Example value: sky-2022-10-04-22-46-52-467694_spot_id-17-1
+        #   Example value: sky-2022-10-04-22-46-52-467694_job_id-17-1
         job_id_env_vars = []
         for i in range(len(self._dag.tasks)):
             job_id_env_var = common_utils.get_global_job_id(
@@ -84,10 +84,10 @@ class SpotController:
         donwload and stream should be faster, and more robust against
         preemptions or ssh disconnection during the streaming.
         """
-        spot_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                         'spot_jobs')
+        managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                         'managed_jobs')
         controller_utils.download_and_stream_latest_job_log(
-            self._backend, handle, spot_job_logs_dir)
+            self._backend, handle, managed_job_logs_dir)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
@@ -160,7 +160,7 @@ class SpotController:
             f'Submitted spot job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
         assert task.name is not None, task
-        cluster_name = utils.generate_spot_cluster_name(
+        cluster_name = utils.generate_job_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._retry_until_up)
@@ -256,16 +256,16 @@ class SpotController:
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
                     self._download_log_and_stream(handle)
-                    spot_status_to_set = state.ManagedJobStatus.FAILED
+                    managed_job_status = state.ManagedJobStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
-                        spot_status_to_set = state.ManagedJobStatus.FAILED_SETUP
+                        managed_job_status = state.ManagedJobStatus.FAILED_SETUP
                     failure_reason = (
                         'To see the details, run: '
                         f'sky spot logs --controller {self._job_id}')
 
                     state.set_failed(self._job_id,
                                           task_id,
-                                          failure_type=spot_status_to_set,
+                                          failure_type=managed_job_status,
                                           failure_reason=failure_reason,
                                           end_time=end_time,
                                           callback_func=callback_func)
@@ -288,7 +288,7 @@ class SpotController:
                     logger.info('Cleaning up the preempted spot cluster...')
                     recovery_strategy.terminate_cluster(cluster_name)
 
-            # Try to recover the spot jobs, when the cluster is preempted
+            # Try to recover the managed jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
             state.set_recovering(job_id=self._job_id,
                                       task_id=task_id,
@@ -374,8 +374,8 @@ def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    spot_controller = SpotController(job_id, dag_yaml, retry_until_up)
-    spot_controller.run()
+    job_controller = JobController(job_id, dag_yaml, retry_until_up)
+    job_controller.run()
 
 
 def _handle_signal(job_id):
@@ -420,7 +420,7 @@ def _cleanup(job_id: int, dag_yaml: str):
     # controller, we should keep it in sync with SpotController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
-        cluster_name = utils.generate_spot_cluster_name(task.name, job_id)
+        cluster_name = utils.generate_job_cluster_name(task.name, job_id)
         recovery_strategy.terminate_cluster(cluster_name)
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.

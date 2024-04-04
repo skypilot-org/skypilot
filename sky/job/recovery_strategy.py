@@ -1,6 +1,6 @@
 """The strategy to handle launching/recovery/termination of spot clusters.
 
-In the YAML file, the user can specify the strategy to use for spot jobs.
+In the YAML file, the user can specify the strategy to use for managed jobs.
 
 resources:
     job_recovery: EAGER_NEXT_REGION
@@ -29,7 +29,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 RECOVERY_STRATEGIES = {}
-SPOT_DEFAULT_STRATEGY = None
+DEFAULT_RECOVERY_STRATEGY = None
 
 # Waiting time for job from INIT/PENDING to RUNNING
 # 10 * JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 10 * 5 = 50 seconds
@@ -85,10 +85,10 @@ class StrategyExecutor:
     def __init_subclass__(cls, name: str, default: bool = False):
         RECOVERY_STRATEGIES[name] = cls
         if default:
-            global SPOT_DEFAULT_STRATEGY
-            assert SPOT_DEFAULT_STRATEGY is None, (
+            global DEFAULT_RECOVERY_STRATEGY
+            assert DEFAULT_RECOVERY_STRATEGY is None, (
                 'Only one strategy can be default.')
-            SPOT_DEFAULT_STRATEGY = name
+            DEFAULT_RECOVERY_STRATEGY = name
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
@@ -293,7 +293,7 @@ class StrategyExecutor:
                            cluster_name=self.cluster_name,
                            detach_setup=True,
                            detach_run=True,
-                           _is_launched_by_spot_controller=True)
+                           _is_launched_by_job_controller=True)
                 logger.info('Spot cluster launched.')
             except (exceptions.InvalidClusterNameError,
                     exceptions.NoCloudAccessError,

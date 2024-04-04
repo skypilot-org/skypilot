@@ -1,4 +1,4 @@
-"""The database for spot jobs status."""
+"""The database for managed jobs status."""
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
 import enum
@@ -326,7 +326,7 @@ def set_started(job_id: int, task_id: int, start_time: float,
             UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
-            (ManagedJobStatus.RUNNING.value, start_time, start_time, job_id, task_id))
+            (ManagedJobStatus.RUNNING.value, start_time, start_time, job_id, task_id,))
     callback_func('STARTED')
 
 
@@ -466,7 +466,7 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
 def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get non-terminal job ids by name."""
     statuses = ', '.join(['?'] * len(ManagedJobStatus.terminal_statuses()))
-    field_values = [status.value 
+    field_values = [status.value
                     for status in ManagedJobStatus.terminal_statuses()]
 
     name_filter = ''
@@ -479,7 +479,7 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
         field_values.extend([name, name])
 
     # Left outer join is used here instead of join, because the job_info does
-    # not contain the spot jobs submitted before #1982.
+    # not contain the managed jobs submitted before #1982.
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             f"""\
@@ -559,7 +559,7 @@ def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     # Join the spot and job_info tables to get the job name for each task.
     # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
     # existing controller before #1982, the job_info table may not exist,
-    # and all the spot jobs created before will not present in the
+    # and all the managed jobs created before will not present in the
     # job_info.
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(f"""\
