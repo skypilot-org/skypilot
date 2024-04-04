@@ -291,15 +291,16 @@ Available fields and semantics:
     # Timeout for provisioning a pod (in seconds, optional)
     #
     # This timeout determines how long SkyPilot will wait for a pod in PENDING
-    # status before giving up and failing over to the next cloud. Larger
-    # timeouts may be required for autoscaling clusters, since the autoscaler
-    # may take some time to provision new nodes. For example, an autoscaling
-    # CPU node pool on GKE may take upto 4-5 minutes to provision a new node.
+    # status before giving up, deleting the pending pod and failing over to the
+    # next cloud. Larger timeouts may be required for autoscaling clusters,
+    # since the autoscaler may take some time to provision new nodes.
+    # For example, an autoscaling CPU node pool on GKE may take upto 5 minutes
+    # (300 seconds) to provision a new node.
     #
     # Note that this timeout includes time taken by the Kubernetes scheduler
     # itself, which can be upto 2-3 seconds.
     #
-    # Can be set to zero to wait indefinitely for pod provisioning (e.g., in
+    # Can be set to -1 to wait indefinitely for pod provisioning (e.g., in
     # autoscaling clusters or clusters with queuing/admission control).
     #
     # Default: 10 seconds

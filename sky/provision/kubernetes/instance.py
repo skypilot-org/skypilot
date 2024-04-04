@@ -171,7 +171,7 @@ def _wait_for_pods_to_schedule(namespace, new_nodes, timeout: int):
 
     def _evaluate_timeout() -> bool:
         # If timeout is set to zero, retry indefinitely.
-        if timeout == 0:
+        if timeout < 0:
             return True
         return time.time() - start_time < timeout
 
@@ -524,7 +524,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     provision_timeout = provider_config['timeout']
 
     wait_str = ('indefinitely'
-                if provision_timeout == 0 else f'for {provision_timeout}s')
+                if provision_timeout < 0 else f'for {provision_timeout}s')
     logger.debug(f'run_instances: waiting {wait_str} for pods to schedule and '
                  f'run: {list(wait_pods_dict.keys())}')
 
