@@ -21,7 +21,7 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.serve import serve_utils
 from sky.skylet import constants
-from sky.spot import spot_utils
+from sky.job import spot_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils

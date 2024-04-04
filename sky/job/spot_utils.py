@@ -1,4 +1,4 @@
-"""User interfaces with managed spot jobs."""
+"""User interfaces with managed jobs."""
 import collections
 import enum
 import json
@@ -21,8 +21,8 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet.log_lib import run_bash_command_with_log
-from sky.spot import constants as spot_constants
-from sky.spot import spot_state
+from sky.job import constants as spot_constants
+from sky.job import spot_state
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
@@ -225,7 +225,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     logger.info(f'Cancelling jobs {job_id_str}.')
     cancelled_job_ids = []
     for job_id in job_ids:
-        # Check the status of the managed spot job status. If it is in
+        # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
         job_status = spot_state.get_status(job_id)
         if job_status is None:
@@ -664,7 +664,7 @@ def format_job_table(
 
 
 class SpotCodeGen:
-    """Code generator for managed spot job utility functions.
+    """Code generator for managed job utility functions.
 
     Usage:
 

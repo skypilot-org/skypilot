@@ -17,7 +17,7 @@ from sky.clouds import cloud_registry
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
-from sky.spot import spot_utils
+from sky.job import spot_utils
 from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils

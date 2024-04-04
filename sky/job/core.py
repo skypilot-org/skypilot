@@ -1,4 +1,4 @@
-"""SDK functions for managed spot job."""
+"""SDK functions for managed job."""
 import os
 import tempfile
 from typing import Any, Dict, List, Optional, Union
@@ -15,8 +15,8 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
 from sky.skylet import constants as skylet_constants
-from sky.spot import constants
-from sky.spot import spot_utils
+from sky.job import constants
+from sky.job import spot_utils
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -134,7 +134,7 @@ def launch(
 @usage_lib.entrypoint
 def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Get statuses of managed spot jobs.
+    """Get statuses of managed jobs.
 
     Please refer to the sky.cli.spot_queue for the documentation.
 
@@ -198,7 +198,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     try:
         subprocess_utils.handle_returncode(returncode,
                                            code,
-                                           'Failed to fetch managed spot jobs',
+                                           'Failed to fetch managed jobs',
                                            job_table_payload + stderr,
                                            stream_logs=False)
     except exceptions.CommandError as e:
@@ -222,7 +222,7 @@ def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
            all: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Cancel managed spot jobs.
+    """Cancel managed jobs.
 
     Please refer to the sky.cli.spot_cancel for the document.
 
@@ -233,7 +233,7 @@ def cancel(name: Optional[str] = None,
     job_ids = [] if job_ids is None else job_ids
     handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
-        stopped_message='All managed spot jobs should have finished.')
+        stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
@@ -260,7 +260,7 @@ def cancel(name: Optional[str] = None,
                                                 stream_logs=False)
     try:
         subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to cancel managed spot job',
+                                           'Failed to cancel managed job',
                                            stdout)
     except exceptions.CommandError as e:
         with ux_utils.print_exception_no_traceback():
@@ -276,7 +276,7 @@ def cancel(name: Optional[str] = None,
 @usage_lib.entrypoint
 def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Tail logs of managed spot jobs.
+    """Tail logs of managed jobs.
 
     Please refer to the sky.cli.spot_logs for the document.
 

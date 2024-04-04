@@ -13,7 +13,7 @@ import flask
 import yaml
 
 import sky
-from sky import spot
+from sky import job
 from sky.utils import common_utils
 
 app = flask.Flask(__name__)
@@ -37,11 +37,11 @@ def home():
         # Experimental: run on laptop (refresh is very slow).
         all_spot_jobs = sky.spot_queue(refresh=True, skip_finished=False)
     else:
-        job_table = spot.dump_spot_job_queue()
-        all_spot_jobs = spot.load_spot_job_queue(job_table)
+        job_table = job.dump_spot_job_queue()
+        all_spot_jobs = job.load_spot_job_queue(job_table)
 
     timestamp = datetime.datetime.utcnow()
-    rows = spot.format_job_table(all_spot_jobs, show_all=True, return_rows=True)
+    rows = job.format_job_table(all_spot_jobs, show_all=True, return_rows=True)
 
     # FIXME(zongheng): make the job table/queue funcs return structured info so
     # that we don't have to do things like row[-5] below.

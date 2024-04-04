@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag as dag_lib
 from sky import sky_logging
-from sky import spot
+from sky import job
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
@@ -150,13 +150,13 @@ def fill_default_spot_config_in_dag_for_spot_launch(dag: dag_lib.Dag) -> None:
             change_default_value: Dict[str, Any] = {}
             if resources.use_spot_specified and not resources.use_spot:
                 logger.info(
-                    'Field `use_spot` is set to false but a managed spot job is '  # pylint: disable=line-too-long
+                    'Field `use_spot` is set to false but a managed job is '  # pylint: disable=line-too-long
                     'being launched. Ignoring the field and proceeding to use spot '  # pylint: disable=line-too-long
                     'instance(s).')
             change_default_value['use_spot'] = True
             if resources.spot_recovery is None:
                 change_default_value[
-                    'spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+                    'spot_recovery'] = job.SPOT_DEFAULT_STRATEGY
 
             new_resources = resources.copy(**change_default_value)
             new_resources_list.append(new_resources)

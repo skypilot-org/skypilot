@@ -10,7 +10,7 @@ from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky import spot
+from sky import job
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
 from sky.skylet import constants
@@ -764,12 +764,12 @@ class Resources:
                 raise ValueError(
                     'Cannot specify spot_recovery without use_spot set to True.'
                 )
-        if self._spot_recovery not in spot.SPOT_STRATEGIES:
+        if self._spot_recovery not in job.SPOT_STRATEGIES:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Spot recovery strategy {self._spot_recovery} '
                     'is not supported. The strategy should be among '
-                    f'{list(spot.SPOT_STRATEGIES.keys())}')
+                    f'{list(job.SPOT_STRATEGIES.keys())}')
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:

@@ -108,10 +108,10 @@ from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
 # TODO (zhwu): These imports are for backward compatibility, and spot APIs
 # should be called with `sky.spot.xxx` instead. Remove in release 0.7.0
-from sky.spot.core import spot_cancel
-from sky.spot.core import spot_launch
-from sky.spot.core import spot_queue
-from sky.spot.core import spot_tail_logs
+from sky.job.core import spot_cancel
+from sky.job.core import spot_launch
+from sky.job.core import spot_queue
+from sky.job.core import spot_tail_logs
 from sky.status_lib import ClusterStatus
 from sky.task import Task
 

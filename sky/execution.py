@@ -164,7 +164,7 @@ def _execute(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 'Spot recovery is specified in the task. To launch the '
-                'managed spot job, please use: sky spot launch')
+                'managed job, please use: sky spot launch')
 
     cluster_exists = False
     if cluster_name is not None:

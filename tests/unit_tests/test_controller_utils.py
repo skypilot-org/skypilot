@@ -2,7 +2,7 @@
 import pytest
 
 from sky.serve import constants as serve_constants
-from sky.spot import constants as spot_constants
+from sky.job import constants as spot_constants
 from sky.utils import controller_utils
 
 
