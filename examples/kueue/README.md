@@ -2,6 +2,9 @@
 
 SkyPilot can be used with [Kueue](https://kueue.sigs.k8s.io/) to manage queues and priorities in multi-tenant Kubernetes clusters. 
 
+## Prerequisites
+Make sure you're on commit `c2a30082586787d9cef83c21f1da3fdeb4c7b346` or later. Nightly builds on or after `skypilot-nightly==1.0.0.dev20240404` will also work.
+
 ## 🛠️ Setting up Kueue
 
 1. Setup [Kueue](https://kueue.sigs.k8s.io/docs/installation/) and [enable integration for v1/pod](https://kueue.sigs.k8s.io/docs/tasks/run/plain_pods/#before-you-begin). The following is an example enabling pod integration in `controller_manager_config.yaml` in the Kueue installation manifest:
