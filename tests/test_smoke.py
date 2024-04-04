@@ -3037,6 +3037,7 @@ _TEARDOWN_SERVICE = (
     '     echo "$s";'
     '     echo "$s" | grep -q "scheduled to be terminated\|No service to terminate" && break;'
     '     sleep 10;'
+    '     [ $i -eq 20 ] && echo "Failed to terminate service {name}";'
     'done)')
 
 _SERVE_ENDPOINT_WAIT = (

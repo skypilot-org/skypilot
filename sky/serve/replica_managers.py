@@ -279,7 +279,7 @@ class ReplicaStatusProperty:
                 # otherwise we will have a resource leak.
                 return False
             elif self.first_ready_time < 0:
-                # If the service timeout, it is likely the service is not
+                # If the initial delay exceeded, it is likely the service is not
                 # recoverable.
                 return True
         if self.user_app_failed:

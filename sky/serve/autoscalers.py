@@ -75,6 +75,9 @@ class Autoscaler:
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
+        # The latest_version_ever_ready should be smaller than the
+        # latest_version, so we can fail early if the inital version got
+        # unrecoverable failure.
         self.latest_version_ever_ready: int = self.latest_version - 1
         self.update_mode = serve_utils.DEFAULT_UPDATE_MODE
 
@@ -120,7 +123,7 @@ class Autoscaler:
 
     def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""
-        states = {'latset_version_ever_ready': self.latest_version_ever_ready}
+        states = {'latest_version_ever_ready': self.latest_version_ever_ready}
         states.update(self._dump_dynamic_states())
         return states
 
@@ -389,21 +392,24 @@ class RequestRateAutoscaler(Autoscaler):
         override dict. Active migration could require returning both SCALE_UP
         and SCALE_DOWN.
         """
+        latest_replicas: List['replica_managers.ReplicaInfo'] = []
         latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
 
         for info in replica_infos:
             if info.version == self.latest_version:
+                latest_replicas.append(info)
                 if not info.is_terminal:
                     latest_nonterminal_replicas.append(info)
                     if info.is_ready:
                         self.latest_version_ever_ready = self.latest_version
-                elif (info.status_property.unrecoverable_failure() and
-                      self.latest_version_ever_ready < self.latest_version):
-                    # Stop scaling if one of replica of the latest version
-                    # failed, it is likely that a fatal error happens to the
-                    # user application and may lead to a infinte termination
-                    # and restart.
-                    return []
+        for info in latest_replicas:
+            if (info.status_property.unrecoverable_failure() and
+                    self.latest_version_ever_ready < self.latest_version):
+                # Stop scaling if one of replica of the latest version
+                # failed, it is likely that a fatal error happens to the
+                # user application and may lead to a infinte termination
+                # and restart.
+                return []
 
         self._set_target_num_replica_with_hysteresis()
 
