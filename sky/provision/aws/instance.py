@@ -80,7 +80,7 @@ def _default_ec2_resource(region: str) -> Any:
         # loaded {old sky.adaptors.aws}.
         #
         # In controller.py's start(), the inner process may exit due to spot job
-        # exits or `sky spot cancel`, entering outer process'
+        # exits or `sky job cancel`, entering outer process'
         # `finally: ... _cleanup()` path. Inside _cleanup(), we eventually call
         # into `sky.provision.aws` which loads this module for the first time
         # for the outer process. At this point, outer process has loaded

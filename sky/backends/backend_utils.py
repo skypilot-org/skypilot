@@ -2539,7 +2539,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
         optionally accelerator demands.
     """
     # TODO: Custom CPU and other memory resources are not supported yet.
-    # For sky spot/serve controller task, we set the CPU resource to a smaller
+    # For sky job/serve controller task, we set the CPU resource to a smaller
     # value to support a larger number of managed jobs and services.
     resources_dict = {
         'CPU': (constants.CONTROLLER_PROCESS_CPU_DEMAND
@@ -2557,41 +2557,58 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     return resources_dict
 
 
-def get_task_resources_str(task: 'task_lib.Task') -> str:
+def get_task_resources_str(task: 'task_lib.Task',
+                           is_managed_job: bool = False) -> str:
     """Returns the resources string of the task.
 
     The resources string is only used as a display purpose, so we only show
     the accelerator demands (if any). Otherwise, the CPU demand is shown.
     """
-    task_cpu_demand = (constants.CONTROLLER_PROCESS_CPU_DEMAND if
-                       task.is_controller_task() else DEFAULT_TASK_CPU_DEMAND)
+    spot_str = ''
+    task_cpu_demand = (str(constants.CONTROLLER_PROCESS_CPU_DEMAND)
+                       if task.is_controller_task() else
+                       str(DEFAULT_TASK_CPU_DEMAND))
     if task.best_resources is not None:
         accelerator_dict = task.best_resources.accelerators
+        if is_managed_job:
+            if task.best_resources.use_spot:
+                spot_str = '(spot)'
+            task_cpu_demand = task.best_resources.cpus
         if accelerator_dict is None:
             resources_str = f'CPU:{task_cpu_demand}'
         else:
             resources_str = ', '.join(
                 f'{k}:{v}' for k, v in accelerator_dict.items())
-    elif len(task.resources) == 1:
-        resources_dict = list(task.resources)[0].accelerators
-        if resources_dict is None:
-            resources_str = f'CPU:{task_cpu_demand}'
-        else:
-            resources_str = ', '.join(
-                f'{k}:{v}' for k, v in resources_dict.items())
     else:
         resource_accelerators = []
+        min_cpus = 10000
+        spot_type: Set[str] = set()
         for resource in task.resources:
+            task_cpu_demand = '1+'
+            if resource.cpus is not None:
+                task_cpu_demand = resource.cpus
+            min_cpus = min(min_cpus, int(task_cpu_demand.strip('+ ')))
+            if resource.use_spot:
+                spot_type.add('spot')
+            else:
+                spot_type.add('on-demand')
+
             if resource.accelerators is None:
                 continue
             for k, v in resource.accelerators.items():
                 resource_accelerators.append(f'{k}:{v}')
 
+        if is_managed_job:
+            if len(task.resources) > 1:
+                task_cpu_demand = f'{min_cpus}+'
+            if 'spot' in spot_type:
+                spot_str = '|'.join(sorted(spot_type))
+                spot_str = f'({spot_str})'
         if resource_accelerators:
             resources_str = ', '.join(set(resource_accelerators))
         else:
             resources_str = f'CPU:{task_cpu_demand}'
-    resources_str = f'{task.num_nodes}x [{resources_str}]'
+    resources_str = f'{task.num_nodes}x[{resources_str}]{spot_str}'
     return resources_str
 
 

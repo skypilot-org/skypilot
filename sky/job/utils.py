@@ -57,7 +57,7 @@ _JOB_CANCELLED_MESSAGE = (
 
 # The maximum time to wait for the spot job status to transition to terminal
 # state, after the job finished. This is a safeguard to avoid the case where
-# the spot job status fails to be updated and keep the `sky spot logs` blocking
+# the spot job status fails to be updated and keep the `sky job logs` blocking
 # for a long time.
 _FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 20
 
@@ -141,7 +141,7 @@ def update_spot_job_status(job_id: Optional[int] = None):
                 failure_type=state.ManagedJobStatus.FAILED_CONTROLLER,
                 failure_reason=
                 'Controller process has exited abnormally. For more details,'
-                f' run: sky spot logs --controller {job_id_}')
+                f' run: sky job logs --controller {job_id_}')
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
@@ -727,7 +727,8 @@ class ManagedJobCodeGen:
             f'{job_id}, {dag_name!r})',
         ]
         for task_id, task in enumerate(spot_dag.tasks):
-            resources_str = backend_utils.get_task_resources_str(task)
+            resources_str = backend_utils.get_task_resources_str(
+                task, is_managed_job=True)
             code += [
                 f'state.set_pending('
                 f'{job_id}, {task_id}, {task.name!r}, '

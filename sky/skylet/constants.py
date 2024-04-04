@@ -64,7 +64,7 @@ SKYLET_VERSION = '8'
 SKYLET_LIB_VERSION = 1
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
-# `sky spot dashboard`-related
+# `sky job dashboard`-related
 #
 # Port on the remote job controller that the dashboard is running on.
 SPOT_DASHBOARD_REMOTE_PORT = 5000

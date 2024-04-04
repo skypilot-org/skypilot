@@ -115,7 +115,7 @@ def _get_cloud_to_run(config) -> List[str]:
 def pytest_collection_modifyitems(config, items):
     skip_marks = {}
     skip_marks['slow'] = pytest.mark.skip(reason='need --runslow option to run')
-    skip_marks['managed_spot'] = pytest.mark.skip(
+    skip_marks['managed_job'] = pytest.mark.skip(
         reason='skipped, because --managed-spot option is set')
     skip_marks['serve'] = pytest.mark.skip(
         reason='skipped, because --serve option is set')
@@ -144,9 +144,9 @@ def pytest_collection_modifyitems(config, items):
                     continue
                 item.add_marker(skip_marks[cloud])
 
-        if (not 'managed_spot'
+        if (not 'managed_job'
                 in item.keywords) and config.getoption('--managed-spot'):
-            item.add_marker(skip_marks['managed_spot'])
+            item.add_marker(skip_marks['managed_job'])
         if (not 'tpu' in item.keywords) and config.getoption('--tpu'):
             item.add_marker(skip_marks['tpu'])
         if (not 'serve' in item.keywords) and config.getoption('--serve'):

@@ -5,6 +5,7 @@ name: a
 
 resources:
   cpus: 2+
+  use_spot: true
 
 setup: |
   echo setup for train

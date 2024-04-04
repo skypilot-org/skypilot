@@ -1283,12 +1283,12 @@ def _get_managed_jobs(
         controller_status = e.cluster_status
         msg = str(e)
         if controller_status is None:
-            msg += (f' (See: {colorama.Style.BRIGHT}sky spot -h'
+            msg += (f' (See: {colorama.Style.BRIGHT}sky job -h'
                     f'{colorama.Style.RESET_ALL})')
         elif (controller_status == status_lib.ClusterStatus.STOPPED and
               is_called_by_user):
             msg += (f' (See finished jobs: {colorama.Style.BRIGHT}'
-                    f'sky spot queue --refresh{colorama.Style.RESET_ALL})')
+                    f'sky job queue --refresh{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
         msg = ('Failed to query managed jobs due to connection '
                'issues. Try again later. '
@@ -1691,7 +1691,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     managed_jobs_future)
                 if managed_jobs_query_interrupted:
                     # Set to -1, so that the controller is not considered
-                    # down, and the hint for showing sky spot queue
+                    # down, and the hint for showing sky job queue
                     # will still be shown.
                     num_in_progress_jobs = -1
                     msg = 'KeyboardInterrupt'
@@ -2555,7 +2555,7 @@ def _hint_or_raise_for_down_job_controller(controller_name: str):
            'job controller. Please be aware of the following:'
            f'{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
-           'jobs (output of `sky spot queue`) will be lost.')
+           'jobs (output of `sky job queue`) will be lost.')
     click.echo(msg)
     if managed_jobs:
         job_table = managed_job.format_job_table(managed_jobs, show_all=False)
@@ -3381,11 +3381,11 @@ def job_queue(all: bool, refresh: bool, skip_finished: bool):
       controller.
 
     If the job failed, either due to user code or spot unavailability, the
-    error log can be found with ``sky spot logs --controller``, e.g.:
+    error log can be found with ``sky job logs --controller``, e.g.:
 
     .. code-block:: bash
 
-      sky spot logs --controller job_id
+      sky job logs --controller job_id
 
     This also shows the logs for provisioning and any preemption and recovery
     attempts.
@@ -3394,7 +3394,7 @@ def job_queue(all: bool, refresh: bool, skip_finished: bool):
 
     .. code-block:: bash
 
-      watch -n60 sky spot queue
+      watch -n60 sky job queue
 
     """
     click.secho('Fetching managed job statuses...', fg='yellow')
@@ -3444,10 +3444,10 @@ def job_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     .. code-block:: bash
 
       # Cancel managed job with name 'my-job'
-      $ sky spot cancel -n my-job
+      $ sky job cancel -n my-job
       \b
       # Cancel managed jobs with IDs 1, 2, 3
-      $ sky spot cancel 1 2 3
+      $ sky job cancel 1 2 3
     """
     backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.JOB_CONTROLLER,
