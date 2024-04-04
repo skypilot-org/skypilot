@@ -22,7 +22,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet.log_lib import run_bash_command_with_log
 from sky.job import constants as spot_constants
-from sky.job import spot_state
+from sky.job import state
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
@@ -103,7 +103,7 @@ def update_spot_job_status(job_id: Optional[int] = None):
     is called.
     """
     if job_id is None:
-        job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
+        job_ids = state.get_nonterminal_job_ids_by_name(None)
     else:
         job_ids = [job_id]
     for job_id_ in job_ids:
@@ -111,7 +111,7 @@ def update_spot_job_status(job_id: Optional[int] = None):
         if controller_status is None or controller_status.is_terminal():
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
-            tasks = spot_state.get_spot_jobs(job_id_)
+            tasks = state.get_spot_jobs(job_id_)
             for task in tasks:
                 task_name = task['job_name']
                 # Tear down the abnormal spot cluster to avoid resource leakage.
@@ -135,10 +135,10 @@ def update_spot_job_status(job_id: Optional[int] = None):
             # FAILED_CONTROLLER.
             # The `set_failed` will only update the task's status if the
             # status is non-terminal.
-            spot_state.set_failed(
+            state.set_failed(
                 job_id_,
                 task_id=None,
-                failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
+                failure_type=state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=
                 'Controller process has exited abnormally. For more details,'
                 f' run: sky spot logs --controller {job_id_}')
@@ -217,7 +217,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     If job_ids is None, cancel all jobs.
     """
     if job_ids is None:
-        job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
+        job_ids = state.get_nonterminal_job_ids_by_name(None)
     job_ids = list(set(job_ids))
     if len(job_ids) == 0:
         return 'No job to cancel.'
@@ -227,7 +227,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
-        job_status = spot_state.get_status(job_id)
+        job_status = state.get_status(job_id)
         if job_status is None:
             logger.info(f'Job {job_id} not found. Skipped.')
             continue
@@ -262,7 +262,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
 
 def cancel_job_by_name(job_name: str) -> str:
     """Cancel a job by name."""
-    job_ids = spot_state.get_nonterminal_job_ids_by_name(job_name)
+    job_ids = state.get_nonterminal_job_ids_by_name(job_name)
     if len(job_ids) == 0:
         return f'No running job found with name {job_name!r}.'
     if len(job_ids) > 1:
@@ -279,7 +279,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     status_msg = ('[bold cyan]Waiting for controller process to be RUNNING'
                   '{status_str}[/].')
     status_display = rich_utils.safe_status(status_msg.format(status_str=''))
-    num_tasks = spot_state.get_num_tasks(job_id)
+    num_tasks = state.get_num_tasks(job_id)
 
     with status_display:
         prev_msg = None
@@ -299,30 +299,30 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='')
         status_display.update(msg)
         prev_msg = msg
-        spot_job_status = spot_state.get_status(job_id)
+        spot_job_status = state.get_status(job_id)
         while spot_job_status is None:
             time.sleep(1)
-            spot_job_status = spot_state.get_status(job_id)
+            spot_job_status = state.get_status(job_id)
 
         if spot_job_status.is_terminal():
             job_msg = ''
             if spot_job_status.is_failed():
                 job_msg = (
-                    f'\nFailure reason: {spot_state.get_failure_reason(job_id)}'
+                    f'\nFailure reason: {state.get_failure_reason(job_id)}'
                 )
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{spot_job_status.value}. Logs will not be shown.'
                     f'{colorama.Style.RESET_ALL}{job_msg}')
         backend = backends.CloudVmRayBackend()
-        task_id, spot_status = spot_state.get_latest_task_id_status(job_id)
+        task_id, spot_status = state.get_latest_task_id_status(job_id)
 
         # task_id and spot_status can be None if the controller process just
         # started and the spot status has not set to PENDING yet.
         while spot_status is None or not spot_status.is_terminal():
             handle = None
             if task_id is not None:
-                task_name = spot_state.get_task_name(job_id, task_id)
+                task_name = state.get_task_name(job_id, task_id)
                 cluster_name = generate_spot_cluster_name(task_name, job_id)
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
@@ -331,10 +331,10 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # the table before the spot state is updated by the controller. In
             # this case, we should skip the logging, and wait for the next
             # round of status check.
-            if handle is None or spot_status != spot_state.SpotStatus.RUNNING:
+            if handle is None or spot_status != state.SpotStatus.RUNNING:
                 status_str = ''
                 if (spot_status is not None and
-                        spot_status != spot_state.SpotStatus.RUNNING):
+                        spot_status != state.SpotStatus.RUNNING):
                     status_str = f' (status: {spot_status.value})'
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
@@ -345,7 +345,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 task_id, spot_status = (
-                    spot_state.get_latest_task_id_status(job_id))
+                    state.get_latest_task_id_status(job_id))
                 continue
             assert spot_status is not None
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
@@ -377,7 +377,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         original_task_id = task_id
                         while True:
                             task_id, spot_status = (
-                                spot_state.get_latest_task_id_status(job_id))
+                                state.get_latest_task_id_status(job_id))
                             if original_task_id != task_id:
                                 break
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
@@ -394,7 +394,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'INFO: (Log streaming) Got return code {returncode}. '
                     f'Retrying in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             # Finish early if the spot status is already in terminal state.
-            spot_status = spot_state.get_status(job_id)
+            spot_status = state.get_status(job_id)
             assert spot_status is not None, job_id
             if spot_status.is_terminal():
                 break
@@ -410,19 +410,19 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # Wait a bit longer than the controller, so as to make sure the
             # spot state is updated.
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
-            spot_status = spot_state.get_status(job_id)
+            spot_status = state.get_status(job_id)
 
     # The spot_status may not be in terminal status yet, since the controllerhas
     # not updated the spot state yet. We wait for a while, until the spot state
     # is updated.
     wait_seconds = 0
-    spot_status = spot_state.get_status(job_id)
+    spot_status = state.get_status(job_id)
     assert spot_status is not None, job_id
     while (not spot_status.is_terminal() and follow and
            wait_seconds < _FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS):
         time.sleep(1)
         wait_seconds += 1
-        spot_status = spot_state.get_status(job_id)
+        spot_status = state.get_status(job_id)
         assert spot_status is not None, job_id
 
     logger.info(f'Logs finished for job {job_id} '
@@ -432,7 +432,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
 
 def stream_logs_by_name(job_name: str, follow: bool = True) -> str:
     """Stream logs by name."""
-    job_ids = spot_state.get_nonterminal_job_ids_by_name(job_name)
+    job_ids = state.get_nonterminal_job_ids_by_name(job_name)
     if len(job_ids) == 0:
         return (f'{colorama.Fore.RED}No job found with name {job_name!r}.'
                 f'{colorama.Style.RESET_ALL}')
@@ -445,7 +445,7 @@ def stream_logs_by_name(job_name: str, follow: bool = True) -> str:
 
 
 def dump_spot_job_queue() -> str:
-    jobs = spot_state.get_spot_jobs()
+    jobs = state.get_spot_jobs()
 
     for job in jobs:
         end_at = job['end_at']
@@ -453,7 +453,7 @@ def dump_spot_job_queue() -> str:
             end_at = time.time()
 
         job_submitted_at = job['last_recovered_at'] - job['job_duration']
-        if job['status'] == spot_state.SpotStatus.RECOVERING:
+        if job['status'] == state.SpotStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = job['job_duration']
         elif job_submitted_at > 0:
@@ -485,7 +485,7 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     """Load job queue from json string."""
     jobs = common_utils.decode_payload(payload)
     for job in jobs:
-        job['status'] = spot_state.SpotStatus(job['status'])
+        job['status'] = state.SpotStatus(job['status'])
     return jobs
 
 
@@ -552,7 +552,7 @@ def format_job_table(
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
-            spot_status = spot_state.SpotStatus.SUCCEEDED
+            spot_status = state.SpotStatus.SUCCEEDED
             failure_reason = None
             current_task_id = len(job_tasks) - 1
             for task in job_tasks:
@@ -567,7 +567,7 @@ def format_job_table(
                 else:
                     end_at = None
                 recovery_cnt += task['recovery_count']
-                if spot_status == spot_state.SpotStatus.SUCCEEDED:
+                if spot_status == state.SpotStatus.SUCCEEDED:
                     # Use the first non-succeeded status.
                     # TODO(zhwu): we should not blindly use the first non-
                     # succeeded as the status could be changed to SUBMITTED
@@ -577,7 +577,7 @@ def format_job_table(
                     current_task_id = task['task_id']
 
                 if (failure_reason is None and
-                        task['status'] > spot_state.SpotStatus.SUCCEEDED):
+                        task['status'] > state.SpotStatus.SUCCEEDED):
                     failure_reason = task['failure_reason']
 
             job_duration = log_utils.readable_time_duration(0,
@@ -589,7 +589,7 @@ def format_job_table(
                                                               absolute=True)
 
             status_str = spot_status.colored_str()
-            if (spot_status < spot_state.SpotStatus.RUNNING and
+            if (spot_status < state.SpotStatus.RUNNING and
                     current_task_id > 0):
                 status_str += f' (task: {current_task_id})'
 

@@ -18,7 +18,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.skylet import job_lib
-from sky.job import spot_utils
+from sky.job import utils
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -214,7 +214,7 @@ class StrategyExecutor:
                 break
 
             try:
-                status = spot_utils.get_job_status(self.backend,
+                status = utils.get_job_status(self.backend,
                                                    self.cluster_name)
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
@@ -230,7 +230,7 @@ class StrategyExecutor:
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:
                 try:
-                    job_submitted_at = spot_utils.get_job_timestamp(
+                    job_submitted_at = utils.get_job_timestamp(
                         self.backend, self.cluster_name, get_end_time=False)
                     return job_submitted_at
                 except Exception as e:  # pylint: disable=broad-except
@@ -240,7 +240,7 @@ class StrategyExecutor:
                                 'the job start timestamp. Retrying.')
                     continue
             # Wait for the job to be started
-            time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
+            time.sleep(utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
         return None
 
     def _launch(self,

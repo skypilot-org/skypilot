@@ -16,7 +16,7 @@ from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
 from sky.skylet import constants as skylet_constants
 from sky.job import constants
-from sky.job import spot_utils
+from sky.job import utils
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -178,7 +178,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
 
         rich_utils.force_update_status('[cyan] Checking spot jobs - restarting '
                                        'controller[/]')
-        handle = sky.start(spot_utils.SPOT_CONTROLLER_NAME)
+        handle = sky.start(utils.SPOT_CONTROLLER_NAME)
         controller_status = status_lib.ClusterStatus.UP
         rich_utils.force_update_status('[cyan] Checking spot jobs[/]')
 
@@ -187,7 +187,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = spot_utils.SpotCodeGen.get_job_table()
+    code = utils.SpotCodeGen.get_job_table()
     returncode, job_table_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -204,7 +204,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     except exceptions.CommandError as e:
         raise RuntimeError(str(e)) from e
 
-    jobs = spot_utils.load_spot_job_queue(job_table_payload)
+    jobs = utils.load_spot_job_queue(job_table_payload)
     if skip_finished:
         # Filter out the finished jobs. If a multi-task job is partially
         # finished, we will include all its tasks.
@@ -247,12 +247,12 @@ def cancel(name: Optional[str] = None,
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     if all:
-        code = spot_utils.SpotCodeGen.cancel_jobs_by_id(None)
+        code = utils.SpotCodeGen.cancel_jobs_by_id(None)
     elif job_ids:
-        code = spot_utils.SpotCodeGen.cancel_jobs_by_id(job_ids)
+        code = utils.SpotCodeGen.cancel_jobs_by_id(job_ids)
     else:
         assert name is not None, (job_ids, name, all)
-        code = spot_utils.SpotCodeGen.cancel_job_by_name(name)
+        code = utils.SpotCodeGen.cancel_job_by_name(name)
     # The stderr is redirected to stdout
     returncode, stdout, _ = backend.run_on_head(handle,
                                                 code,
@@ -288,7 +288,7 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
     handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
         stopped_message=('Please restart the spot controller with '
-                         f'`sky start {spot_utils.SPOT_CONTROLLER_NAME}`.'))
+                         f'`sky start {utils.SPOT_CONTROLLER_NAME}`.'))
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')

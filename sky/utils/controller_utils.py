@@ -21,7 +21,7 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.serve import serve_utils
 from sky.skylet import constants
-from sky.job import spot_utils
+from sky.job import utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -64,7 +64,7 @@ class Controllers(enum.Enum):
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
     SPOT_CONTROLLER = _ControllerSpec(
         name='managed spot controller',
-        cluster_name=spot_utils.SPOT_CONTROLLER_NAME,
+        cluster_name=utils.SPOT_CONTROLLER_NAME,
         in_progress_hint=(
             '* {job_info}To see all spot jobs: '
             f'{colorama.Style.BRIGHT}sky spot queue{colorama.Style.RESET_ALL}'),
@@ -79,13 +79,13 @@ class Controllers(enum.Enum):
             'guarantee that all the spot jobs are finished. Please wait '
             'until the spot controller is UP or fix it with '
             f'{colorama.Style.BRIGHT}sky start '
-            f'{spot_utils.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.'),
+            f'{utils.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.'),
         decline_down_for_dirty_controller_hint=(
             f'{colorama.Fore.RED}In-progress spot jobs found. To avoid '
             f'resource leakage, cancel all jobs first: {colorama.Style.BRIGHT}'
             f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
         check_cluster_name_hint=(
-            f'Cluster {spot_utils.SPOT_CONTROLLER_NAME} is reserved for '
+            f'Cluster {utils.SPOT_CONTROLLER_NAME} is reserved for '
             'managed spot controller.'),
         default_hint_if_non_existent='No in-progress spot jobs.',
         connection_error_hint=(

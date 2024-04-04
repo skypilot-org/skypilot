@@ -11,14 +11,14 @@ from sky.job.core import queue
 from sky.job.core import tail_logs
 from sky.job.recovery_strategy import SPOT_DEFAULT_STRATEGY
 from sky.job.recovery_strategy import SPOT_STRATEGIES
-from sky.job.spot_state import SpotStatus
-from sky.job.spot_utils import dump_job_table_cache
-from sky.job.spot_utils import dump_spot_job_queue
-from sky.job.spot_utils import format_job_table
-from sky.job.spot_utils import load_job_table_cache
-from sky.job.spot_utils import load_spot_job_queue
-from sky.job.spot_utils import SPOT_CONTROLLER_NAME
-from sky.job.spot_utils import SpotCodeGen
+from sky.job.state import SpotStatus
+from sky.job.utils import dump_job_table_cache
+from sky.job.utils import dump_spot_job_queue
+from sky.job.utils import format_job_table
+from sky.job.utils import load_job_table_cache
+from sky.job.utils import load_spot_job_queue
+from sky.job.utils import SPOT_CONTROLLER_NAME
+from sky.job.utils import SpotCodeGen
 
 pathlib.Path(SPOT_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
                                                               exist_ok=True)

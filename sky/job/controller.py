@@ -18,8 +18,8 @@ from sky.backends import cloud_vm_ray_backend
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.job import recovery_strategy
-from sky.job import spot_state
-from sky.job import spot_utils
+from sky.job import state
+from sky.job import utils
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -135,7 +135,7 @@ class SpotController:
         Other exceptions may be raised depending on the backend.
         """
 
-        callback_func = spot_utils.event_callback_func(job_id=self._job_id,
+        callback_func = utils.event_callback_func(job_id=self._job_id,
                                                        task_id=task_id,
                                                        task=task)
         if task.run is None:
@@ -144,11 +144,11 @@ class SpotController:
             # Call set_started first to initialize columns in the state table,
             # including start_at and last_recovery_at to avoid issues for
             # uninitialized columns.
-            spot_state.set_started(job_id=self._job_id,
+            state.set_started(job_id=self._job_id,
                                    task_id=task_id,
                                    start_time=time.time(),
                                    callback_func=callback_func)
-            spot_state.set_succeeded(job_id=self._job_id,
+            state.set_succeeded(job_id=self._job_id,
                                      task_id=task_id,
                                      end_time=time.time(),
                                      callback_func=callback_func)
@@ -159,7 +159,7 @@ class SpotController:
         if task_id == 0:
             submitted_at = backend_utils.get_timestamp_from_run_timestamp(
                 self._backend.run_timestamp)
-        spot_state.set_submitted(
+        state.set_submitted(
             self._job_id,
             task_id,
             self._backend.run_timestamp,
@@ -170,24 +170,24 @@ class SpotController:
             f'Submitted spot job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
         assert task.name is not None, task
-        cluster_name = spot_utils.generate_spot_cluster_name(
+        cluster_name = utils.generate_spot_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._retry_until_up)
 
         logger.info('Started monitoring.')
-        spot_state.set_starting(job_id=self._job_id,
+        state.set_starting(job_id=self._job_id,
                                 task_id=task_id,
                                 callback_func=callback_func)
         remote_job_submitted_at = self._strategy_executor.launch()
         assert remote_job_submitted_at is not None, remote_job_submitted_at
 
-        spot_state.set_started(job_id=self._job_id,
+        state.set_started(job_id=self._job_id,
                                task_id=task_id,
                                start_time=remote_job_submitted_at,
                                callback_func=callback_func)
         while True:
-            time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+            time.sleep(utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
             # Check the network connection to avoid false alarm for job failure.
             # Network glitch was observed even in the VM.
@@ -196,19 +196,19 @@ class SpotController:
             except exceptions.NetworkError:
                 logger.info(
                     'Network is not available. Retrying again in '
-                    f'{spot_utils.JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+                    f'{utils.JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
                 continue
 
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
-            job_status = spot_utils.get_job_status(self._backend, cluster_name)
+            job_status = utils.get_job_status(self._backend, cluster_name)
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                end_time = spot_utils.get_job_timestamp(self._backend,
+                end_time = utils.get_job_timestamp(self._backend,
                                                         cluster_name,
                                                         get_end_time=True)
                 # The job is done.
-                spot_state.set_succeeded(self._job_id,
+                state.set_succeeded(self._job_id,
                                          task_id,
                                          end_time=end_time,
                                          callback_func=callback_func)
@@ -258,7 +258,7 @@ class SpotController:
                         job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
                 ]:
                     # The user code has probably crashed, fail immediately.
-                    end_time = spot_utils.get_job_timestamp(self._backend,
+                    end_time = utils.get_job_timestamp(self._backend,
                                                             cluster_name,
                                                             get_end_time=True)
                     logger.info(
@@ -266,14 +266,14 @@ class SpotController:
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
                     self._download_log_and_stream(handle)
-                    spot_status_to_set = spot_state.SpotStatus.FAILED
+                    spot_status_to_set = state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
-                        spot_status_to_set = spot_state.SpotStatus.FAILED_SETUP
+                        spot_status_to_set = state.SpotStatus.FAILED_SETUP
                     failure_reason = (
                         'To see the details, run: '
                         f'sky spot logs --controller {self._job_id}')
 
-                    spot_state.set_failed(self._job_id,
+                    state.set_failed(self._job_id,
                                           task_id,
                                           failure_type=spot_status_to_set,
                                           failure_reason=failure_reason,
@@ -300,11 +300,11 @@ class SpotController:
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
-            spot_state.set_recovering(job_id=self._job_id,
+            state.set_recovering(job_id=self._job_id,
                                       task_id=task_id,
                                       callback_func=callback_func)
             recovered_time = self._strategy_executor.recover()
-            spot_state.set_recovered(self._job_id,
+            state.set_recovered(self._job_id,
                                      task_id,
                                      recovered_time=recovered_time,
                                      callback_func=callback_func)
@@ -326,12 +326,12 @@ class SpotController:
                 common_utils.format_exception(reason, use_bracket=True)
                 for reason in e.reasons))
             logger.error(failure_reason)
-            spot_state.set_failed(
+            state.set_failed(
                 self._job_id,
                 task_id=task_id,
-                failure_type=spot_state.SpotStatus.FAILED_PRECHECKS,
+                failure_type=state.SpotStatus.FAILED_PRECHECKS,
                 failure_reason=failure_reason,
-                callback_func=spot_utils.event_callback_func(
+                callback_func=utils.event_callback_func(
                     job_id=self._job_id,
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
@@ -341,12 +341,12 @@ class SpotController:
             logger.error(common_utils.format_exception(e))
             # The spot job should be marked as FAILED_NO_RESOURCE, as the
             # spot job may be able to launch next time.
-            spot_state.set_failed(
+            state.set_failed(
                 self._job_id,
                 task_id=task_id,
-                failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
+                failure_type=state.SpotStatus.FAILED_NO_RESOURCE,
                 failure_reason=common_utils.format_exception(e),
-                callback_func=spot_utils.event_callback_func(
+                callback_func=utils.event_callback_func(
                     job_id=self._job_id,
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
@@ -356,12 +356,12 @@ class SpotController:
             msg = ('Unexpected error occurred: '
                    f'{common_utils.format_exception(e, use_bracket=True)}')
             logger.error(msg)
-            spot_state.set_failed(
+            state.set_failed(
                 self._job_id,
                 task_id=task_id,
-                failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
+                failure_type=state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=msg,
-                callback_func=spot_utils.event_callback_func(
+                callback_func=utils.event_callback_func(
                     job_id=self._job_id,
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
@@ -370,13 +370,13 @@ class SpotController:
             # affect the jobs in terminal states.
             # We need to call set_cancelling before set_cancelled to make sure
             # the table entries are correctly set.
-            callback_func = spot_utils.event_callback_func(
+            callback_func = utils.event_callback_func(
                 job_id=self._job_id,
                 task_id=task_id,
                 task=self._dag.tasks[task_id])
-            spot_state.set_cancelling(job_id=self._job_id,
+            state.set_cancelling(job_id=self._job_id,
                                       callback_func=callback_func)
-            spot_state.set_cancelled(job_id=self._job_id,
+            state.set_cancelled(job_id=self._job_id,
                                      callback_func=callback_func)
 
 
@@ -390,7 +390,7 @@ def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
 
 def _handle_signal(job_id):
     """Handle the signal if the user sent it."""
-    signal_file = pathlib.Path(spot_utils.SIGNAL_FILE_PREFIX.format(job_id))
+    signal_file = pathlib.Path(utils.SIGNAL_FILE_PREFIX.format(job_id))
     user_signal = None
     if signal_file.exists():
         # Filelock is needed to prevent race condition with concurrent
@@ -399,7 +399,7 @@ def _handle_signal(job_id):
             with signal_file.open(mode='r', encoding='utf-8') as f:
                 user_signal = f.read().strip()
                 try:
-                    user_signal = spot_utils.UserSignal(user_signal)
+                    user_signal = utils.UserSignal(user_signal)
                 except ValueError:
                     logger.warning(
                         f'Unknown signal received: {user_signal}. Ignoring.')
@@ -409,7 +409,7 @@ def _handle_signal(job_id):
     if user_signal is None:
         # None or empty string.
         return
-    assert user_signal == spot_utils.UserSignal.CANCEL, (
+    assert user_signal == utils.UserSignal.CANCEL, (
         f'Only cancel signal is supported, but {user_signal} got.')
     raise exceptions.SpotUserCancelledError(
         f'User sent {user_signal.value} signal.')
@@ -430,7 +430,7 @@ def _cleanup(job_id: int, dag_yaml: str):
     # controller, we should keep it in sync with SpotController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
-        cluster_name = spot_utils.generate_spot_cluster_name(task.name, job_id)
+        cluster_name = utils.generate_spot_cluster_name(task.name, job_id)
         recovery_strategy.terminate_cluster(cluster_name)
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
@@ -459,11 +459,11 @@ def start(job_id, dag_yaml, retry_until_up):
             time.sleep(1)
     except exceptions.SpotUserCancelledError:
         dag, _ = _get_dag_and_name(dag_yaml)
-        task_id, _ = (spot_state.get_latest_task_id_status(job_id))
+        task_id, _ = (state.get_latest_task_id_status(job_id))
         logger.info(
             f'Cancelling spot job, job_id: {job_id}, task_id: {task_id}')
-        spot_state.set_cancelling(job_id=job_id,
-                                  callback_func=spot_utils.event_callback_func(
+        state.set_cancelling(job_id=job_id,
+                                  callback_func=utils.event_callback_func(
                                       job_id=job_id,
                                       task_id=task_id,
                                       task=dag.tasks[task_id]))
@@ -492,23 +492,23 @@ def start(job_id, dag_yaml, retry_until_up):
         logger.info(f'Spot cluster of job {job_id} has been cleaned up.')
 
         if cancelling:
-            spot_state.set_cancelled(
+            state.set_cancelled(
                 job_id=job_id,
-                callback_func=spot_utils.event_callback_func(
+                callback_func=utils.event_callback_func(
                     job_id=job_id, task_id=task_id, task=dag.tasks[task_id]))
 
         # We should check job status after 'set_cancelled', otherwise
         # the job status is not terminal.
-        job_status = spot_state.get_status(job_id)
+        job_status = state.get_status(job_id)
         assert job_status is not None
         # The job can be non-terminal if the controller exited abnormally,
         # e.g. failed to launch cluster after reaching the MAX_RETRY.
         if not job_status.is_terminal():
             logger.info(f'Previous spot job status: {job_status.value}')
-            spot_state.set_failed(
+            state.set_failed(
                 job_id,
                 task_id=None,
-                failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
+                failure_type=state.SpotStatus.FAILED_CONTROLLER,
                 failure_reason=('Unexpected error occurred. For details, '
                                 f'run: sky spot logs --controller {job_id}'))
 

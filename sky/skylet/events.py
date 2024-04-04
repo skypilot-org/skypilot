@@ -17,7 +17,7 @@ from sky.clouds import cloud_registry
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
-from sky.job import spot_utils
+from sky.job import utils
 from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -72,7 +72,7 @@ class SpotJobUpdateEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
-        spot_utils.update_spot_job_status()
+        utils.update_spot_job_status()
 
 
 class ServiceUpdateEvent(SkyletEvent):
