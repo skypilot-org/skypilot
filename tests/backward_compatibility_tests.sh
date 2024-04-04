@@ -158,8 +158,8 @@ sky logs ${CLUSTER_NAME}-6 2 --status
 sky logs ${CLUSTER_NAME}-6 2
 fi
 
-# Test spot jobs to make sure existing jobs and new job can run correctly, after
-# the spot controller is updated.
+# Test managed jobs to make sure existing jobs and new job can run correctly, after
+# the job controller is updated.
 if [ "$start_from" -le 7 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
@@ -167,23 +167,23 @@ sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-7-0 "echo hi;
 sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-7-1 "echo hi; sleep 300"
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
-s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-1)
+s=$(sky job logs --no-follow -n ${CLUSTER_NAME}-7-1)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
-sky spot launch -d --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7-2 "echo hi; sleep 10"
-s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-2)
+sky job launch -d --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7-2 "echo hi; sleep 10"
+s=$(sky job logs --no-follow -n ${CLUSTER_NAME}-7-2)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
-s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
+s=$(sky job queue | grep ${CLUSTER_NAME}-7)
 echo "$s"
 echo "$s" | grep "RUNNING" | wc -l | grep 3 || exit 1
-sky spot cancel -y -n ${CLUSTER_NAME}-7-0
+sky job cancel -y -n ${CLUSTER_NAME}-7-0
 sleep 200
-s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
+s=$(sky job queue | grep ${CLUSTER_NAME}-7)
 echo "$s"
 echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
 echo "$s" | grep "CANCELLED" | wc -l | grep 1 || exit 1
 fi
 
 sky down ${CLUSTER_NAME}* -y
-sky spot cancel -n ${CLUSTER_NAME}* -y
+sky job cancel -n ${CLUSTER_NAME}* -y
