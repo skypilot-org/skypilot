@@ -37,7 +37,7 @@ def test_get_controller_resources_spot(controller_type,
                                        custom_controller_resources_config,
                                        expected, enable_all_clouds,
                                        monkeypatch):
-    if controller_type == 'spot':
+    if controller_type == 'managed_job':
         controller_resources_config = job_constants.CONTROLLER_RESOURCES
     else:
         controller_resources_config = serve_constants.CONTROLLER_RESOURCES
