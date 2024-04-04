@@ -2,6 +2,7 @@
 
 # pylint: disable=import-outside-toplevel
 import functools
+import logging
 import threading
 from typing import Optional
 
@@ -80,7 +81,15 @@ def get_client(name: str,
                     container_client = ContainerClient.from_container_url(
                         container_url, credential)
                     try:
+                        # Suppress noisy logs from Azure SDK when attempting
+                        # to run exists() on public container with credentials.
+                        # Reference:
+                        # https://github.com/Azure/azure-sdk-for-python/issues/9422 # pylint: disable=line-too-long
+                        azure_logger = logging.getLogger('azure')
+                        original_level = azure_logger.getEffectiveLevel()
+                        azure_logger.setLevel(logging.CRITICAL)
                         container_client.exists()
+                        azure_logger.setLevel(original_level)
                     except exceptions().ClientAuthenticationError as error:
                         # Caught when user attempted to use incorrect public
                         # container name.
