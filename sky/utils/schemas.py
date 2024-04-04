@@ -671,8 +671,29 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
+            'managed_job': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             **cloud_configs,
-        }
+        },
+        # Avoid spot and managed_job being present at the same time.
+        'oneOf': [{
+            'required': ['spot'],
+            'not': {
+                'required': ['managed_job']
+            }
+        }, {
+            'required': ['managed_job'],
+            'not': {
+                'required': ['spot']
+            }
+        }, {
+            'not': {
+                'anyOf': [{
+                    'required': ['spot']
+                }, {
+                    'required': ['managed_job']
+                }]
+            }
+        }]
     }

@@ -3501,9 +3501,10 @@ def job_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     """Tail the log of a managed managed_job."""
     try:
         if controller:
-            core.tail_logs(managed_job.JOB_CONTROLLER_NAME,
-                           job_id=job_id,
-                           follow=follow)
+            core.tail_logs(
+                controller_utils.Controllers.JOB_CONTROLLER.value.cluster_name,
+                job_id=job_id,
+                follow=follow)
         else:
             managed_job.tail_logs(name=name, job_id=job_id, follow=follow)
     except exceptions.ClusterNotUpError as e:
@@ -3544,8 +3545,9 @@ def job_dashboard(port: Optional[int]):
         free_port = common_utils.find_free_port(remote_port)
     else:
         free_port = port
-    ssh_command = (f'ssh -qNL {free_port}:localhost:{remote_port} '
-                   f'{managed_job.JOB_CONTROLLER_NAME}')
+    ssh_command = (
+        f'ssh -qNL {free_port}:localhost:{remote_port} '
+        f'{controller_utils.Controllers.JOB_CONTROLLER.value.cluster_name}')
     click.echo('Forwarding port: ', nl=False)
     click.secho(f'{ssh_command}', dim=True)
 

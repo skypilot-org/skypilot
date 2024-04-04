@@ -56,10 +56,10 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     stopped_message = ''
     if not refresh:
         stopped_message = ('No in-progress managed jobs.')
+    controller_type = controller_utils.Controllers.JOB_CONTROLLER
     try:
         handle = backend_utils.is_controller_accessible(
-            controller_type=controller_utils.Controllers.JOB_CONTROLLER,
-            stopped_message=stopped_message)
+            controller_type=controller_type, stopped_message=stopped_message)
     except exceptions.ClusterNotUpError as e:
         if not refresh:
             raise
@@ -74,7 +74,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
         rich_utils.force_update_status(
             '[cyan] Checking managed jobs - restarting '
             'controller[/]')
-        handle = sky.start(utils.JOB_CONTROLLER_NAME)
+        handle = sky.start(controller_type.value.cluster_name)
         controller_status = status_lib.ClusterStatus.UP
         rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
 
@@ -179,10 +179,11 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
         sky.exceptions.ClusterNotUpError: the job controller is not up.
     """
     # TODO(zhwu): Automatically restart the job controller
+    controller_type = controller_utils.Controllers.JOB_CONTROLLER
     handle = backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.JOB_CONTROLLER,
+        controller_type=controller_type,
         stopped_message=('Please restart the job controller with '
-                         f'`sky start {utils.JOB_CONTROLLER_NAME}`.'))
+                         f'`sky start {controller_type.value.cluster_name}`.'))
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')
@@ -247,12 +248,13 @@ def launch(
                                      mode='w',
                                      delete=False) as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
-        controller_name = utils.JOB_CONTROLLER_NAME
+        controller_type = controller_utils.Controllers.JOB_CONTROLLER
+        controller_name = controller_type.value.cluster_name
         prefix = constants.JOB_TASK_YAML_PREFIX
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         controller_resources = (controller_utils.get_controller_resources(
-            controller_type='spot',
+            controller_type='managed_job',
             controller_resources_config=constants.CONTROLLER_RESOURCES))
 
         vars_to_fill = {
@@ -267,7 +269,7 @@ def launch(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
-                'spot',
+                'managed_job',
                 remote_user_config_path=remote_user_config_path,
             ),
         }
