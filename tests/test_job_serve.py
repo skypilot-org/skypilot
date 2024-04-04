@@ -261,7 +261,7 @@ class TestSpotOperations:
     @pytest.mark.timeout(60)
     def test_cancel(self, _mock_db_conn):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.spot_cancel, ['-a'])
+        result = cli_runner.invoke(cli.job_cancel, ['-a'])
         assert result.exit_code == 1
         assert controller_utils.Controllers.JOB_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
@@ -269,7 +269,7 @@ class TestSpotOperations:
     @pytest.mark.timeout(60)
     def test_logs(self, _mock_db_conn):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.spot_logs, ['1'])
+        result = cli_runner.invoke(cli.job_logs, ['1'])
         assert result.exit_code == 1
         assert controller_utils.Controllers.JOB_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
@@ -277,7 +277,7 @@ class TestSpotOperations:
     @pytest.mark.timeout(60)
     def test_queue(self, _mock_db_conn):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.spot_queue)
+        result = cli_runner.invoke(cli.job_queue)
         assert result.exit_code == 0
         assert controller_utils.Controllers.JOB_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
