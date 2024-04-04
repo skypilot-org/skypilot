@@ -3613,8 +3613,8 @@ def test_skyserve_failures(generic_cloud: str):
             'echo "Waiting for replica to be failed..."; sleep 5; '
             f's=$(sky serve status {name}); echo "$s"; done;' +
             _check_replica_in_status(
-                name, [(1, True, 'FAILED_PROBING'),
-                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+                name, [(1, False, 'FAILED_PROBING'),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
             # TODO(zhwu): add test for FAILED_PROVISION
         ],
         _TEARDOWN_SERVICE.format(name=name),
