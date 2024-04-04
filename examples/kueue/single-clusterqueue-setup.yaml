@@ -8,6 +8,12 @@ kind: ClusterQueue
 metadata:
   name: "cluster-queue"
 spec:
+  preemption:
+    reclaimWithinCohort: Any
+    borrowWithinCohort:
+      policy: LowerPriority
+      maxPriorityThreshold: 100
+    withinClusterQueue: LowerPriority
   namespaceSelector: {} # match all.
   resourceGroups:
   - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]

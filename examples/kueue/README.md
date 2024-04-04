@@ -1,6 +1,10 @@
 # Using Kueue with SkyPilot
 
-1. Setup Kueue and [enable integration for v1/pod](https://kueue.sigs.k8s.io/docs/tasks/run/plain_pods/#before-you-begin). The following is an example enabling pod integration in `controller_manager_config.yaml` in the Kueue installation manifest:
+SkyPilot can be used with [Kueue](https://kueue.sigs.k8s.io/) to manage queues and priorities in multi-tenant Kubernetes clusters. 
+
+## Setting up Kueue
+
+1. Setup [Kueue](https://kueue.sigs.k8s.io/docs/installation/) and [enable integration for v1/pod](https://kueue.sigs.k8s.io/docs/tasks/run/plain_pods/#before-you-begin). The following is an example enabling pod integration in `controller_manager_config.yaml` in the Kueue installation manifest:
 
 ```yaml
 apiVersion: v1
@@ -40,20 +44,15 @@ data:
            - key: kubernetes.io/metadata.name
              operator: NotIn
              values: [ kube-system, kueue-system ]
-      # Kueue uses podSelector to manage pods with particular 
-      # labels. The default podSelector will match all the pods. 
-      podSelector:
-        matchExpressions:
-          - key: kueue-job
-            operator: In
-            values: [ "true", "True", "yes" ]
 ```
 2. Setup the `ClusterQueue` and `LocalQueue` for Kueue. Make sure `nvidia.com/gpu` is available in the resource flavor and under `coveredResources` in the `ClusterQueue` CR.
 ```console
 kubectl apply -f single-clusterqueue-setup.yaml
 ```
 
-3. Update your SkyPilot config YAML to use the Kueue scheduler by using `kueue.x-k8s.io/queue-name` label in the pod metadata. Additionally, set `provision_timeout: 0` to let jobs queue indefinitely. For example, the following config will use the `user-queue` queue for scheduling the pods:
+## Using Kueue with SkyPilot
+
+1. Update your SkyPilot config YAML to use the Kueue scheduler by using `kueue.x-k8s.io/queue-name` label in the pod metadata. Additionally, set `provision_timeout: 0` to let jobs queue indefinitely. For example, the following config will use the `user-queue` queue for scheduling the pods:
 ```yaml
 kubernetes:
   provision_timeout: 0
@@ -63,7 +62,7 @@ kubernetes:
         kueue.x-k8s.io/queue-name: user-queue
 ```
 
-4. 🎉SkyPilot is ready to go! Launch your SkyPilot clusters as usual. The pods will be scheduled by Kueue based on the queue name specified in the pod metadata.
+2. 🎉SkyPilot is ready to run on Kueue! Launch your SkyPilot clusters as usual. The pods will be scheduled by Kueue based on the queue name specified in the pod metadata.
 
 💡**Hint** - you can use the `--down` flag to simulate a job-like interface that automatically releases resources after the job is done.
 
@@ -82,8 +81,61 @@ pod-job1-2ea4-head-52a69   user-queue   cluster-queue   67s
 pod-job2-2ea4-head-8afd4   user-queue                   54s
 ```
 
-Use `sky status --refresh` to get the updated status of the SkyPilot clusters.
+## Using priorities with Kueue [Optional]
+
+Optionally, you can assign priorities to your SkyPilot jobs, and Kueue will preempt lower-priority jobs to run higher-priority jobs.
+
+1. Before you start, make sure your `ClusterQueue` allows preemption through priorities by setting `withinClusterQueue: LowerPriority`. Refer to `single-clusterqueue-setup.yaml` for an example:
+```yaml
+...
+  preemption:
+    withinClusterQueue: LowerPriority
+```
+
+2. Create the desired `WorkloadPriorityClass` CRs. We have provided an example in `priority-classes.yaml`, which will create two priorities - `high-priority` and `low-priority`:
+```console
+kubectl apply -f priority-classes.yaml
+```
+
+3. Use the `kueue.x-k8s.io/priority-class` label in the pod metadata to set the priority of the pod:
+```yaml
+kubernetes:
+  provision_timeout: 0
+  pod_config:
+    metadata:
+      labels:
+        kueue.x-k8s.io/queue-name: user-queue
+        kueue.x-k8s.io/priority-class: low-priority 
+```
+
+4. 🎉SkyPilot jobs will now run with priorities on Kueue!
+
+To demonstrate an example, first we will run a job with `low-priority` that uses 8 CPUs out of 9 CPU quota. To start, edit your `~/.sky/config` to use `low-priority`:
+```yaml
+...
+kueue.x-k8s.io/priority-class: low-priority 
+```
+
+Then run a job with `low-priority` that uses 8 CPUs out of 9 CPU quota:
+```console
+sky launch -c job1 --cloud kubernetes --cpus 8 --down -- sleep 1200
+```
+
+Now edit your `~/.sky/config`to use `high-priority` for its jobs:
+```yaml
+...
+kueue.x-k8s.io/priority-class: high-priority 
+```
+
+In a new terminal, launch the new job with that also uses 8 CPUs out of 9 CPU quota:
+```console
+sky launch -c job2 --cloud kubernetes --cpus 8 --down -- sleep 1200
+```
+
+You will see that the `low-priority` job will be preempted by the `high-priority` job.
+
+To update your local SkyPilot cluster state, run `sky status --refresh`.
 
 ## Caveats
-* Currently if your pod gets evicted, the job will not be rescheduled. You can re-run it with `sky launch` to reschedule the job. We can look into supporting automatic rescheduling.
-* TODO - Add priority examples.
+* If your SkyPilot cluster gets preempted, it will not be automatically rescheduled. You can get latest state with `sky status --refresh` and re-run failed clusters it with `sky launch` to re-run your job. We can look into supporting automatic rescheduling.
+* The `queue-name` and `priority-class` configs apply globally to all tasks and the user must edit `~/.sky/config.yaml` to switch between queues and priorities. This can be painful, and we can look into supporting per-task queue and priority settings in the task YAML if needed.
