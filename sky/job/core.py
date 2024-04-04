@@ -315,6 +315,6 @@ spot_cancel = common_utils.deprecated_function(cancel,
                                                removing_version='0.7.0')
 spot_tail_logs = common_utils.deprecated_function(
     tail_logs,
-    name='sky.spot.tail_logs',
+    name='sky.job.tail_logs',
     deprecated_name='spot_tail_logs',
     removing_version='0.7.0')

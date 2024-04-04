@@ -1,6 +1,6 @@
 """Constants used for Managed Job."""
 
-JOB_CONTROLLER_TEMPLATE = 'spot-controller.yaml.j2'
+JOB_CONTROLLER_TEMPLATE = 'job-controller.yaml.j2'
 JOB_CONTROLLER_YAML_PREFIX = '~/.sky/spot_controller'
 
 JOB_TASK_YAML_PREFIX = '~/.sky/spot_tasks'

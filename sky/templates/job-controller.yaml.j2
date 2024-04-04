@@ -25,7 +25,7 @@ setup: |
 
 run: |
   # Start the controller for the current spot job.
-  python -u -m sky.spot.controller {{remote_user_yaml_path}} \
+  python -u -m sky.job.controller {{remote_user_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
 
 envs:
