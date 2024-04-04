@@ -249,8 +249,8 @@ class Resources:
                 accelerator_args = f', accelerator_args={self.accelerator_args}'
 
         cpus = ''
-        if self.cpus is not None:
-            cpus = f', cpus={self.cpus}'
+        if self._cpus is not None:
+            cpus = f', cpus={self._cpus}'
 
         memory = ''
         if self.memory is not None:
@@ -718,30 +718,30 @@ class Resources:
         Raises:
             ValueError: if the attributes are invalid.
         """
-        if self.cpus is None and self.memory is None:
+        if self._cpus is None and self._memory is None:
             return
-        if self.instance_type is not None:
+        if self._instance_type is not None:
             # The assertion should be true because we have already executed
             # _try_validate_instance_type() before this method.
             # The _try_validate_instance_type() method infers and sets
             # self.cloud if self.instance_type is not None.
             assert self.cloud is not None
             cpus, mem = self.cloud.get_vcpus_mem_from_instance_type(
-                self.instance_type)
-            if self.cpus is not None:
-                if self.cpus.endswith('+'):
-                    if cpus < float(self.cpus[:-1]):
+                self._instance_type)
+            if self._cpus is not None:
+                if self._cpus.endswith('+'):
+                    if cpus < float(self._cpus[:-1]):
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
                                 f'{self.instance_type} does not have enough '
                                 f'vCPUs. {self.instance_type} has {cpus} '
-                                f'vCPUs, but {self.cpus} is requested.')
-                elif cpus != float(self.cpus):
+                                f'vCPUs, but {self._cpus} is requested.')
+                elif cpus != float(self._cpus):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
                             f'{self.instance_type} does not have the requested '
                             f'number of vCPUs. {self.instance_type} has {cpus} '
-                            f'vCPUs, but {self.cpus} is requested.')
+                            f'vCPUs, but {self._cpus} is requested.')
             if self.memory is not None:
                 if self.memory.endswith(('+', 'x')):
                     if mem < float(self.memory[:-1]):
@@ -1102,7 +1102,7 @@ class Resources:
         return all([
             self.cloud is None,
             self._instance_type is None,
-            self.cpus is None,
+            self._cpus is None,
             self.memory is None,
             self.accelerators is None,
             self.accelerator_args is None,
@@ -1120,7 +1120,7 @@ class Resources:
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
-            cpus=override.pop('cpus', self.cpus),
+            cpus=override.pop('cpus', self._cpus),
             memory=override.pop('memory', self.memory),
             accelerators=override.pop('accelerators', self.accelerators),
             accelerator_args=override.pop('accelerator_args',
@@ -1299,7 +1299,7 @@ class Resources:
 
         add_if_not_none('cloud', str(self.cloud))
         add_if_not_none('instance_type', self.instance_type)
-        add_if_not_none('cpus', self.cpus)
+        add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self.accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
