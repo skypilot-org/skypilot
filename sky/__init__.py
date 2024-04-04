@@ -90,8 +90,6 @@ from sky.core import down
 from sky.core import download_logs
 from sky.core import job_status
 from sky.core import queue
-from sky.core import spot_cancel
-from sky.core import spot_queue
 from sky.core import start
 from sky.core import status
 from sky.core import stop
@@ -104,11 +102,14 @@ from sky.data import StorageMode
 from sky.data import StoreType
 from sky.execution import exec  # pylint: disable=redefined-builtin
 from sky.execution import launch
-from sky.execution import spot_launch
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
+from sky.spot import cancel as spot_cancel
+from sky.spot import launch as spot_launch
+from sky.spot import queue as spot_queue
+from sky.spot import tail_logs as spot_tail_logs
 from sky.status_lib import ClusterStatus
 from sky.task import Task
 
@@ -173,6 +174,7 @@ __all__ = [
     'queue',
     'cancel',
     'tail_logs',
+    'spot_tail_logs',
     'download_logs',
     'job_status',
     # core APIs Spot Job Management
