@@ -161,39 +161,54 @@ class Controllers(enum.Enum):
 # TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
         controller_type: str) -> List[str]:
-    commands = [
-        # aws
-        'pip list | grep boto3 > /dev/null 2>&1 || '
-        'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
-        'boto3>=1.26.1 > /dev/null 2>&1',
-        # gcp
-        'pip list | grep google-api-python-client > /dev/null 2>&1 || '
-        'pip install google-api-python-client>=2.69.0 '
-        '> /dev/null 2>&1',
-        # Have to separate the installation of google-cloud-storage from above
-        # because for a VM launched on GCP, the VM may have
-        # google-api-python-client installed alone.
-        'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
-        'pip install google-cloud-storage > /dev/null 2>&1',
-        f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}',
-        # fluidstack does not need to install any cloud dependencies.
-    ]
-    # k8s and ibm doesn't support open port and spot instance yet, so we don't
-    # install them for either controller.
-    if controller_type == 'spot':
-        # oci doesn't support open port yet, so we don't install oci
-        # dependencies for sky serve controller.
-        commands.append('pip list | grep oci > /dev/null 2>&1 || '
-                        'pip install oci > /dev/null 2>&1')
+    commands = []
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
-    if any(
-            cloud.is_same_cloud(clouds.Azure())
-            for cloud in sky_check.get_cached_enabled_clouds_or_refresh()):
+    # AWS
+    if clouds.cloud_in_list(clouds.AWS(), enabled_clouds):
+        commands.append(
+            'pip list | grep boto3 > /dev/null 2>&1 || '
+            'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
+            'boto3>=1.26.1 > /dev/null 2>&1')
+    # GCP
+    if clouds.cloud_in_list(clouds.GCP(), enabled_clouds):
+        commands.extend([
+            'pip list | grep google-api-python-client > /dev/null 2>&1 || '
+            'pip install google-api-python-client>=2.69.0 google-cloud-storage '
+            '> /dev/null 2>&1', f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}'
+        ])
+    # Azure
+    if clouds.cloud_in_list(clouds.Azure(), enabled_clouds):
         commands.append(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
             'azure-mgmt-network > /dev/null 2>&1')
+    # Kubernetes
+    if clouds.cloud_in_list(clouds.Kubernetes(), enabled_clouds):
+        commands.append(
+            # Install k8s + skypilot dependencies
+            'sudo bash -c "if '
+            '! command -v curl &> /dev/null || '
+            '! command -v socat &> /dev/null || '
+            '! command -v netcat &> /dev/null; '
+            'then apt update && apt install curl socat netcat -y; '
+            'fi" && '
+            # Install kubectl
+            '(command -v kubectl &>/dev/null || '
+            '(curl -LO "https://dl.k8s.io/release/$(curl -L -s '
+            'https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && '
+            'sudo install -o root -g root -m 0755 '
+            'kubectl /usr/local/bin/kubectl)) && ')
+    # OCI
+    if controller_type == 'spot':
+        # oci doesn't support open port yet, so we don't install oci
+        # dependencies for sky serve controller.
+        if clouds.cloud_in_list(clouds.OCI(), enabled_clouds):
+            commands.append('pip list | grep oci > /dev/null 2>&1 || '
+                            'pip install oci > /dev/null 2>&1')
+    # ibm doesn't support open port and spot instance yet, so we don't
+    # install them for either controller.
     return commands
 
 
@@ -553,7 +568,28 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # whenever task.storage_mounts is non-empty.
         logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
                     f'{colorama.Style.RESET_ALL} See: sky storage ls')
-    task.sync_storage_mounts()
+    try:
+        task.sync_storage_mounts()
+    except ValueError as e:
+        if 'No enabled cloud for storage' in str(e):
+            data_src = None
+            if has_local_source_paths_file_mounts:
+                data_src = 'file_mounts'
+            if has_local_source_paths_workdir:
+                if data_src:
+                    data_src += ' and workdir'
+                else:
+                    data_src = 'workdir'
+            store_enabled_clouds = ', '.join(storage_lib.STORE_ENABLED_CLOUDS)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'Unable to use {data_src} - no cloud with object store '
+                    'is enabled. Please enable at least one cloud with '
+                    f'object store support ({store_enabled_clouds}) by running '
+                    f'`sky check`, or remove {data_src} from your task.'
+                    '\nHint: If you do not have any cloud access, you may still'
+                    ' download data and code over the network using curl or '
+                    'other tools in the `setup` section of the task.') from None
 
     # Step 5: Add the file download into the file mounts, such as
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0

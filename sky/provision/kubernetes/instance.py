@@ -218,7 +218,7 @@ def _wait_for_pods_to_run(namespace, new_nodes):
                 node.metadata.name, namespace)
 
             # Continue if pod and all the containers within the
-            # pod are succesfully created and running.
+            # pod are successfully created and running.
             if pod.status.phase == 'Running' and all(
                     container.state.running
                     for container in pod.status.container_statuses):

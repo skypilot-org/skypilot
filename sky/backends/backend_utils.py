@@ -47,7 +47,9 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -107,6 +109,9 @@ CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
+
+_ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
+                            'please retry after a while.')
 
 # Include the fields that will be used for generating tags that distinguishes
 # the cluster in ray, to avoid the stopped cluster being discarded due to
@@ -797,8 +802,11 @@ def write_cluster_config(
     assert cluster_name is not None
     excluded_clouds = []
     remote_identity = skypilot_config.get_nested(
-        (str(cloud).lower(), 'remote_identity'), 'LOCAL_CREDENTIALS')
-    if remote_identity == 'SERVICE_ACCOUNT':
+        (str(cloud).lower(), 'remote_identity'),
+        schemas.REMOTE_IDENTITY_DEFAULT)
+    # For Kubernetes, remote_identity can be 'SERVICE_ACCOUNT',
+    # 'LOCAL_CREDENTIALS' or a string for the service account to use.
+    if remote_identity != 'LOCAL_CREDENTIALS':
         if not cloud.supports_service_account_on_remote():
             raise exceptions.InvalidCloudConfigs(
                 'remote_identity: SERVICE_ACCOUNT is specified in '
@@ -2698,3 +2706,101 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
                     f'not interrupted): {colorama.Style.BRIGHT}sky start -f -y '
                     f'{cluster_name}{colorama.Style.RESET_ALL}'
                     f'\n--- Details ---\n{stderr.strip()}\n')
+
+
+def get_endpoints(cluster: str,
+                  endpoint: Optional[Union[int, str]] = None) -> Dict[int, str]:
+    """Gets the endpoint for a given cluster and port number (endpoint).
+
+    Args:
+        cluster: The name of the cluster.
+        endpoint: The port number to get the endpoint for. If None, ports for
+            all endpoints are returned.
+
+    Returns: A dictionary of port numbers to endpoints. If endpoint is None,
+        the dictionary will contain all ports:endpoints exposed on the cluster.
+
+    Raises:
+        ValueError: if the cluster is not UP or the endpoint is not exposed.
+        RuntimeError: if the cluster has no ports to be exposed or no endpoints
+            are exposed yet.
+    """
+    # Cast endpoint to int if it is not None
+    if endpoint is not None:
+        try:
+            endpoint = int(endpoint)
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid endpoint {endpoint!r}.') from None
+    cluster_records = get_clusters(include_controller=True,
+                                   refresh=False,
+                                   cluster_names=[cluster])
+    cluster_record = cluster_records[0]
+    if cluster_record['status'] != status_lib.ClusterStatus.UP:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
+                               'is not in UP status.')
+    handle = cluster_record['handle']
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Querying IP address is not supported '
+                             'for local clusters.')
+
+    launched_resources = handle.launched_resources
+    cloud = launched_resources.cloud
+    try:
+        cloud.check_features_are_supported(
+            launched_resources, {clouds.CloudImplementationFeatures.OPEN_PORTS})
+    except exceptions.NotSupportedError:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Querying endpoints is not supported '
+                             f'for {cloud}.') from None
+
+    config = common_utils.read_yaml(handle.cluster_yaml)
+    port_details = provision_lib.query_ports(repr(cloud),
+                                             handle.cluster_name_on_cloud,
+                                             handle.launched_resources.ports,
+                                             head_ip=handle.head_ip,
+                                             provider_config=config['provider'])
+
+    # Validation before returning the endpoints
+    if endpoint is not None:
+        # If the requested endpoint was not to be exposed
+        port_set = resources_utils.port_ranges_to_set(
+            handle.launched_resources.ports)
+        if endpoint not in port_set:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Port {endpoint} is not exposed '
+                                 'on cluster '
+                                 f'{cluster_record["name"]!r}.')
+        # If the user requested a specific port endpoint, check if it is exposed
+        if endpoint not in port_details:
+            error_msg = (f'Port {endpoint} not exposed yet. '
+                         f'{_ENDPOINTS_RETRY_MESSAGE} ')
+            if handle.launched_resources.cloud.is_same_cloud(
+                    clouds.Kubernetes()):
+                # Add Kubernetes specific debugging info
+                error_msg += (kubernetes_utils.get_endpoint_debug_message())
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(error_msg)
+        return {endpoint: port_details[endpoint][0].url()}
+    else:
+        if not port_details:
+            # If cluster had no ports to be exposed
+            if handle.launched_resources.ports is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cluster does not have any ports '
+                                     'to be exposed.')
+            # Else ports have not been exposed even though they exist.
+            # In this case, ask the user to retry.
+            else:
+                error_msg = (f'No endpoints exposed yet. '
+                             f'{_ENDPOINTS_RETRY_MESSAGE} ')
+                if handle.launched_resources.cloud.is_same_cloud(
+                        clouds.Kubernetes()):
+                    # Add Kubernetes specific debugging info
+                    error_msg += \
+                        kubernetes_utils.get_endpoint_debug_message()
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(error_msg)
+        return {port: urls[0].url() for port, urls in port_details.items()}
