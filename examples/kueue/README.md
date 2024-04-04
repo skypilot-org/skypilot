@@ -2,7 +2,7 @@
 
 SkyPilot can be used with [Kueue](https://kueue.sigs.k8s.io/) to manage queues and priorities in multi-tenant Kubernetes clusters. 
 
-## Setting up Kueue
+## 🛠️ Setting up Kueue
 
 1. Setup [Kueue](https://kueue.sigs.k8s.io/docs/installation/) and [enable integration for v1/pod](https://kueue.sigs.k8s.io/docs/tasks/run/plain_pods/#before-you-begin). The following is an example enabling pod integration in `controller_manager_config.yaml` in the Kueue installation manifest:
 
@@ -50,7 +50,7 @@ data:
 kubectl apply -f single-clusterqueue-setup.yaml
 ```
 
-## Using Kueue with SkyPilot
+## 🚀 Using Kueue with SkyPilot
 
 1. Update your SkyPilot config YAML to use the Kueue scheduler by using `kueue.x-k8s.io/queue-name` label in the pod metadata. Additionally, set `provision_timeout: 0` to let jobs queue indefinitely. For example, the following config will use the `user-queue` queue for scheduling the pods:
 ```yaml
@@ -81,7 +81,7 @@ pod-job1-2ea4-head-52a69   user-queue   cluster-queue   67s
 pod-job2-2ea4-head-8afd4   user-queue                   54s
 ```
 
-## Using priorities with Kueue [Optional]
+## 🥾 Using priorities + preemption with Kueue [Optional]
 
 Optionally, you can assign priorities to your SkyPilot jobs, and Kueue will preempt lower-priority jobs to run higher-priority jobs.
 
@@ -110,7 +110,7 @@ kubernetes:
 
 4. 🎉SkyPilot jobs will now run with priorities on Kueue!
 
-To demonstrate an example, first we will run a job with `low-priority` that uses 8 CPUs out of 9 CPU quota. To start, edit your `~/.sky/config` to use `low-priority`:
+To demonstrate an example, first we will run a job with `low-priority` that uses 8 CPUs, assuming a 9 CPU quota. To start, edit your `~/.sky/config` to use `low-priority`:
 ```yaml
 ...
 kueue.x-k8s.io/priority-class: low-priority 
@@ -136,6 +136,6 @@ You will see that the `low-priority` job will be preempted by the `high-priority
 
 To update your local SkyPilot cluster state, run `sky status --refresh`.
 
-## Caveats
+## ⚠️ Known Limitations
 * If your SkyPilot cluster gets preempted, it will not be automatically rescheduled. You can get latest state with `sky status --refresh` and re-run failed clusters it with `sky launch` to re-run your job. We can look into supporting automatic rescheduling.
 * The `queue-name` and `priority-class` configs apply globally to all tasks and the user must edit `~/.sky/config.yaml` to switch between queues and priorities. This can be painful, and we can look into supporting per-task queue and priority settings in the task YAML if needed.
