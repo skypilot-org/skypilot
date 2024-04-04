@@ -244,7 +244,8 @@ def launch(
             task_, path='job')
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
-                                     mode='w', delete=False) as f:
+                                     mode='w',
+                                     delete=False) as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = utils.JOB_CONTROLLER_NAME
         prefix = constants.JOB_TASK_YAML_PREFIX

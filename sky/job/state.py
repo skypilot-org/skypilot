@@ -30,9 +30,11 @@ _DB_PATH = str(_DB_PATH)
 _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
 
+# === Database schema ===
 # `spot` table contains all the finest-grained tasks, including all the
-# tasks of a spot job. All tasks of the same job will have the same
-# `spot_job_id`.
+# tasks of a managed job (called spot for legacy reason, as it is generalized
+# from the previous managed spot jobs). All tasks of the same job will have the
+# same `spot_job_id`.
 # The `job_name` column is now deprecated. It now holds the task's name, i.e.,
 # the same content as the `task_name` column.
 # The `job_id` is now not really a job id, but a only a unique
@@ -204,12 +206,13 @@ class ManagedJobStatus(enum.Enum):
     def is_failed(self) -> bool:
         return self in self.failure_statuses()
 
-    def colored_str(self):
+    def colored_str(self) -> str:
         color = _SPOT_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
-    def __lt__(self, other):
-        return (list(ManagedJobStatus).index(self) < list(ManagedJobStatus).index(other))
+    def __lt__(self, other) -> bool:
+        status_list = list(ManagedJobStatus)
+        return status_list.index(self) < status_list.index(other)
 
     @classmethod
     def terminal_statuses(cls) -> List['ManagedJobStatus']:
@@ -326,7 +329,14 @@ def set_started(job_id: int, task_id: int, start_time: float,
             UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
-            (ManagedJobStatus.RUNNING.value, start_time, start_time, job_id, task_id,))
+            (
+                ManagedJobStatus.RUNNING.value,
+                start_time,
+                start_time,
+                job_id,
+                task_id,
+            ),
+        )
     callback_func('STARTED')
 
 
@@ -466,8 +476,9 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
 def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get non-terminal job ids by name."""
     statuses = ', '.join(['?'] * len(ManagedJobStatus.terminal_statuses()))
-    field_values = [status.value
-                    for status in ManagedJobStatus.terminal_statuses()]
+    field_values = [
+        status.value for status in ManagedJobStatus.terminal_statuses()
+    ]
 
     name_filter = ''
     if name is not None:
@@ -495,7 +506,8 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
         return job_ids
 
 
-def _get_all_task_ids_statuses(job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
+def _get_all_task_ids_statuses(
+        job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         id_statuses = cursor.execute(
             """\
