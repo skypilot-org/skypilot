@@ -162,7 +162,4 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
                     raise ValueError('All resources in the task must have'
                                      'the same spot recovery strategy.')
 
-        if isinstance(task_.resources, list):
-            task_.set_resources(new_resources_list)
-        else:
-            task_.set_resources(set(new_resources_list))
+        task_.set_resources(type(task_.resources)(new_resources_list))

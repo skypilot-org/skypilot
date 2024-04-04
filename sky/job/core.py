@@ -33,15 +33,15 @@ def launch(
     stream_logs: bool = True,
     detach_run: bool = False,
     retry_until_up: bool = False,
-) -> None:
+):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Launch a managed spot job.
+    """Launch a managed job.
 
-    Please refer to the sky.cli.spot_launch for the document.
+    Please refer to the sky.cli.job_launch for the document.
 
     Args:
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
-          managed spot job.
+          managed job.
         name: Name of the spot job.
         detach_run: Whether to detach the run.
 
@@ -53,45 +53,42 @@ def launch(
     dag_uuid = str(uuid.uuid4().hex[:4])
 
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    if not dag.is_chain():
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Only single-task or chain DAG is allowed for '
-                             f'sky.spot.launch. Dag:\n{dag}')
+    assert dag.is_chain(), ('Only single-task or chain DAG is '
+                            'allowed for job_launch.', dag)
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
     for task_ in dag.tasks:
         if task_.name in task_names:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Task name {task_.name!r} is duplicated in the DAG. '
-                    'Either change task names to be unique, or specify the DAG '
-                    'name only and comment out the task names (so that they '
-                    'will be auto-generated) .')
+            raise ValueError(
+                f'Task name {task_.name!r} is duplicated in the DAG. Either '
+                'change task names to be unique, or specify the DAG name only '
+                'and comment out the task names (so that they will be auto-'
+                'generated) .')
         task_names.add(task_.name)
 
-    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
+    dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     for task_ in dag.tasks:
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task_, path='spot')
+            task_, path='job')
 
-    with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
-                                     mode='w') as f:
+    with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
+                                     mode='w', delete=False) as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
-        controller_name = spot_utils.SPOT_CONTROLLER_NAME
-        prefix = constants.SPOT_TASK_YAML_PREFIX
+        controller_name = utils.JOB_CONTROLLER_NAME
+        prefix = constants.JOB_TASK_YAML_PREFIX
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
-        controller_resources = controller_utils.get_controller_resources(
+        controller_resources = (controller_utils.get_controller_resources(
             controller_type='spot',
-            controller_resources_config=constants.CONTROLLER_RESOURCES)
+            controller_resources_config=constants.CONTROLLER_RESOURCES))
 
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
-            'spot_controller': controller_name,
+            'job_controller': controller_name,
             # Note: actual spot cluster name will be <task.name>-<spot job ID>
             'dag_name': dag.name,
             'retry_until_up': retry_until_up,
@@ -105,22 +102,28 @@ def launch(
             ),
         }
 
-        yaml_path = os.path.join(constants.SPOT_CONTROLLER_YAML_PREFIX,
+        yaml_path = os.path.join(constants.JOB_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{dag_uuid}.yaml')
-        common_utils.fill_template(constants.SPOT_CONTROLLER_TEMPLATE,
+        common_utils.fill_template(constants.JOB_CONTROLLER_TEMPLATE,
                                    vars_to_fill,
                                    output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
+        assert len(controller_task.resources) == 1, controller_task
+        # Backward compatibility: if the user changed the
+        # job-controller.yaml.j2 to customize the controller resources,
+        # we should use it.
+        controller_task_resources = list(controller_task.resources)[0]
+        if not controller_task_resources.is_empty():
+            controller_resources = controller_task_resources
         controller_task.set_resources(controller_resources)
 
-        controller_task.spot_dag = dag
+        controller_task.managed_job_dag = dag
         assert len(controller_task.resources) == 1
 
-        sky_logging.print(
-            f'{colorama.Fore.YELLOW}'
-            f'Launching managed spot job {dag.name!r} from spot controller...'
-            f'{colorama.Style.RESET_ALL}')
-        sky_logging.print('Launching spot controller...')
+        print(f'{colorama.Fore.YELLOW}'
+              f'Launching managed job {dag.name!r} from job controller...'
+              f'{colorama.Style.RESET_ALL}')
+        print('Launching job controller...')
         sky.launch(task=controller_task,
                    stream_logs=stream_logs,
                    cluster_name=controller_name,
@@ -176,8 +179,9 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
                           'Restarting controller for latest status...'
                           f'{colorama.Style.RESET_ALL}')
 
-        rich_utils.force_update_status('[cyan] Checking managed jobs - restarting '
-                                       'controller[/]')
+        rich_utils.force_update_status(
+            '[cyan] Checking managed jobs - restarting '
+            'controller[/]')
         handle = sky.start(utils.JOB_CONTROLLER_NAME)
         controller_status = status_lib.ClusterStatus.UP
         rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
