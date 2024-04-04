@@ -7,6 +7,7 @@ import subprocess
 import time
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple
+from urllib.parse import urljoin
 
 import colorama
 
@@ -300,11 +301,18 @@ class GCP(clouds.Cloud):
     def _get_image_size(cls, image_id: str) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
+
+        gcp_client_options = {}
+        gcp_compute_override = os.environ.get("CLOUDSDK_API_ENDPOINT_OVERRIDES_COMPUTE", None)
+        if gcp_compute_override is not None:
+            gcp_client_options["api_endpoint"] = urljoin(gcp_compute_override, "/compute/v1/")
+
         try:
             compute = gcp.build('compute',
                                 'v1',
                                 credentials=None,
-                                cache_discovery=False)
+                                cache_discovery=False,
+                                client_options=gcp_client_options)
         except gcp.credential_error_exception():
             return DEFAULT_GCP_IMAGE_GB
         try:

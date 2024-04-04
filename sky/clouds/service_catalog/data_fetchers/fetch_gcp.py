@@ -11,6 +11,7 @@ import multiprocessing
 import os
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Set
+from urllib.parse import urljoin
 
 import google.auth
 from googleapiclient import discovery
@@ -79,7 +80,13 @@ SERIES_TO_DISCRIPTION = {
     't2d': 'T2D AMD Instance',
 }
 creds, project_id = google.auth.default()
-gcp_client = discovery.build('compute', 'v1')
+
+gcp_client_options = None
+gcp_compute_override = os.environ.get("CLOUDSDK_API_ENDPOINT_OVERRIDES_COMPUTE", None)
+if gcp_compute_override is not None:
+    gcp_client_options = {"api_endpoint": urljoin(gcp_compute_override, "/compute/v1/")}
+
+gcp_client = discovery.build('compute', 'v1', client_options=gcp_client_options)
 tpu_client = discovery.build('tpu', 'v1')
 
 SINGLE_THREADED = False

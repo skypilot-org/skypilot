@@ -6,6 +6,7 @@ import time
 from functools import partial
 import typing
 from typing import Dict, List, Set, Tuple
+from urllib.parse import urljoin
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -227,8 +228,17 @@ def _create_iam(gcp_credentials=None):
 
 
 def _create_compute(gcp_credentials=None):
+    gcp_client_options = None
+    gcp_compute_override = os.environ.get("CLOUDSDK_API_ENDPOINT_OVERRIDES_COMPUTE", None)
+    if gcp_compute_override is not None:
+        gcp_client_options = {"api_endpoint": urljoin(gcp_compute_override, "/compute/v1/")}
+
     return discovery.build(
-        "compute", "v1", credentials=gcp_credentials, cache_discovery=False
+        "compute",
+        "v1",
+        credentials=gcp_credentials,
+        cache_discovery=False,
+        client_options=gcp_client_options,
     )
 
 

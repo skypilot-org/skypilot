@@ -29,6 +29,7 @@ import subprocess
 import sys
 from typing import Any, Dict, Tuple
 import uuid
+from urllib.parse import urljoin
 
 import colorama
 from cryptography.hazmat.backends import default_backend
@@ -138,10 +139,16 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config = copy.deepcopy(config)
 
     project_id = config['provider']['project_id']
+
+    gcp_client_options = None
+    gcp_compute_override = os.environ.get("CLOUDSDK_API_ENDPOINT_OVERRIDES_COMPUTE", None)
+    if gcp_compute_override is not None:
+        gcp_client_options = {"api_endpoint": urljoin(gcp_compute_override, "/compute/v1/")}
     compute = gcp.build('compute',
                         'v1',
                         credentials=None,
-                        cache_discovery=False)
+                        cache_discovery=False,
+                        client_options=gcp_client_options)
 
     try:
         project = compute.projects().get(project=project_id).execute()

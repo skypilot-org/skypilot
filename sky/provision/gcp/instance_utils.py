@@ -1,6 +1,8 @@
 """Utilities for GCP instances."""
+import os
 import re
 from typing import Dict, List, Optional
+from urllib.parse import urljoin
 
 from sky import sky_logging
 from sky.adaptors import gcp
@@ -127,10 +129,16 @@ class GCPComputeInstance(GCPInstance):
 
     @classmethod
     def load_resource(cls):
+        gcp_client_options = None
+        gcp_compute_override = os.environ.get("CLOUDSDK_API_ENDPOINT_OVERRIDES_COMPUTE", None)
+        if gcp_compute_override is not None:
+            gcp_client_options = {"api_endpoint": urljoin(gcp_compute_override, "/compute/v1/")}
+
         return gcp.build('compute',
                          'v1',
                          credentials=None,
-                         cache_discovery=False)
+                         cache_discovery=False,
+                         client_options=gcp_client_options)
 
     @classmethod
     def stop(
