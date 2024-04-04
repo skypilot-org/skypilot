@@ -154,7 +154,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
             }
         ]
     Raises:
-        sky.exceptions.ClusterNotUpError: the spot controller is not up or
+        sky.exceptions.ClusterNotUpError: the job controller is not up or
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
@@ -227,7 +227,7 @@ def cancel(name: Optional[str] = None,
     Please refer to the sky.cli.job_cancel for the document.
 
     Raises:
-        sky.exceptions.ClusterNotUpError: the spot controller is not up.
+        sky.exceptions.ClusterNotUpError: the job controller is not up.
         RuntimeError: failed to cancel the job.
     """
     job_ids = [] if job_ids is None else job_ids
@@ -282,12 +282,12 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
 
     Raises:
         ValueError: invalid arguments.
-        sky.exceptions.ClusterNotUpError: the spot controller is not up.
+        sky.exceptions.ClusterNotUpError: the job controller is not up.
     """
-    # TODO(zhwu): Automatically restart the spot controller
+    # TODO(zhwu): Automatically restart the job controller
     handle = backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.JOB_CONTROLLER,
-        stopped_message=('Please restart the spot controller with '
+        stopped_message=('Please restart the job controller with '
                          f'`sky start {utils.JOB_CONTROLLER_NAME}`.'))
 
     if name is not None and job_id is not None:

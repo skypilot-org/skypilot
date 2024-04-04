@@ -2379,7 +2379,7 @@ def get_clusters(
     of the clusters.
 
     Args:
-        include_controller: Whether to include controllers, e.g. spot controller
+        include_controller: Whether to include controllers, e.g. job controller
             or sky serve controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)

@@ -68,7 +68,7 @@ SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky spot dashboard`-related
 #
-# Port on the remote spot controller that the dashboard is running on.
+# Port on the remote job controller that the dashboard is running on.
 SPOT_DASHBOARD_REMOTE_PORT = 5000
 
 # Docker default options
@@ -160,7 +160,7 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
-# will be recognized as the same user (e.g., spot controller or sky serve
+# will be recognized as the same user (e.g., job controller or sky serve
 # controller).
 USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
 

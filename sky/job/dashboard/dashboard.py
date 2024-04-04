@@ -20,7 +20,7 @@ app = flask.Flask(__name__)
 
 
 def _is_running_on_spot_controller() -> bool:
-    """Am I running on spot controller?
+    """Am I running on job controller?
 
     Loads ~/.sky/sky_ray.yml and check cluster_name.
     """

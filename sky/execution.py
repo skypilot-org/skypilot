@@ -318,7 +318,7 @@ def _execute(
         if controller is None and not _is_launched_by_sky_serve_controller:
             # UX: print live clusters to make users aware (to save costs).
             #
-            # Don't print if this job is launched by the spot controller,
+            # Don't print if this job is launched by the job controller,
             # because managed jobs are serverless, there can be many of them, and
             # users tend to continuously monitor managed jobs using `sky spot
             # status`. Also don't print if this job is a skyserve controller

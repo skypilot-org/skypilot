@@ -255,7 +255,7 @@ class TestSpotOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, [job.JOB_CONTROLLER_NAME, '-a'])
         assert result.exit_code == 1
-        assert 'Cancelling the spot controller\'s jobs is not allowed.' in str(
+        assert 'Cancelling the job controller\'s jobs is not allowed.' in str(
             result.output)
 
     @pytest.mark.timeout(60)
