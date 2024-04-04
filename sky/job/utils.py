@@ -661,7 +661,7 @@ def format_job_table(
     return output
 
 
-class SpotCodeGen:
+class ManagedJobCodeGen:
     """Code generator for managed job utility functions.
 
     Usage:

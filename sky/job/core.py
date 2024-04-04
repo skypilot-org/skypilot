@@ -83,7 +83,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = utils.SpotCodeGen.get_job_table()
+    code = utils.ManagedJobCodeGen.get_job_table()
     returncode, job_table_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -142,12 +142,12 @@ def cancel(name: Optional[str] = None,
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     if all:
-        code = utils.SpotCodeGen.cancel_jobs_by_id(None)
+        code = utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
     elif job_ids:
-        code = utils.SpotCodeGen.cancel_jobs_by_id(job_ids)
+        code = utils.ManagedJobCodeGen.cancel_jobs_by_id(job_ids)
     else:
         assert name is not None, (job_ids, name, all)
-        code = utils.SpotCodeGen.cancel_job_by_name(name)
+        code = utils.ManagedJobCodeGen.cancel_job_by_name(name)
     # The stderr is redirected to stdout
     returncode, stdout, _ = backend.run_on_head(handle,
                                                 code,
