@@ -3128,7 +3128,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if managed_job_dag is not None:
             # Add the spot job to spot queue table.
-            managed_job_codegen = managed_job.SpotCodeGen()
+            managed_job_codegen = managed_job.ManagedJobCodeGen()
             managed_job_code = managed_job_codegen.set_pending(
                 job_id, managed_job_dag)
             # Set the spot job to PENDING state to make sure that this spot
@@ -3559,9 +3559,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         if job_name is not None:
-            code = managed_job.SpotCodeGen.stream_logs_by_name(job_name, follow)
+            code = managed_job.ManagedJobCodeGen.stream_logs_by_name(
+                job_name, follow)
         else:
-            code = managed_job.SpotCodeGen.stream_logs_by_id(job_id, follow)
+            code = managed_job.ManagedJobCodeGen.stream_logs_by_id(
+                job_id, follow)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.

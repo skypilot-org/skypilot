@@ -18,7 +18,7 @@ from sky.job.utils import format_job_table
 from sky.job.utils import JOB_CONTROLLER_NAME
 from sky.job.utils import load_job_table_cache
 from sky.job.utils import load_managed_job_queue
-from sky.job.utils import SpotCodeGen
+from sky.job.utils import ManagedJobCodeGen
 
 pathlib.Path(JOB_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
                                                              exist_ok=True)
@@ -38,7 +38,7 @@ __all__ = [
     'queue',
     'tail_logs',
     # utils
-    'SpotCodeGen',
+    'ManagedJobCodeGen',
     'dump_job_table_cache',
     'load_job_table_cache',
     'format_job_table',
