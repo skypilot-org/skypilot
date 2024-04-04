@@ -9,7 +9,7 @@
 resources:
   cloud: aws
   use_spot: true
-  spot_recovery: failover
+  job_recovery: failover
 
 workdir: ./examples
 
