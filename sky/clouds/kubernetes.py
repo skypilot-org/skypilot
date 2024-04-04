@@ -69,9 +69,9 @@ class Kubernetes(clouds.Cloud):
         # directly copying the kubeconfig file to the controller.
         # Support for service accounts for auth will be added in #3377, which
         # will allow us to support hosting controllers.
-        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: 'Kubernetes can '
-                                                             'not host '
-                                                             'controllers.',
+        # clouds.CloudImplementationFeatures.HOST_CONTROLLERS: 'Kubernetes can '
+        #                                                      'not host '
+        #                                                      'controllers.',
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
