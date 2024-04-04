@@ -14,9 +14,9 @@ from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
-from sky.skylet import constants as skylet_constants
 from sky.job import constants
 from sky.job import utils
+from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -233,7 +233,7 @@ def launch(
                 'generated) .')
         task_names.add(task_.name)
 
-    dag_utils.fill_default_spot_config_in_dag_for_job_launch(dag)
+    dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     for task_ in dag.tasks:
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(

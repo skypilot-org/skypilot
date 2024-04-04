@@ -17,8 +17,8 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
-from sky.skylet import job_lib
 from sky.job import utils
+from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -28,7 +28,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-SPOT_STRATEGIES = {}
+RECOVERY_STRATEGIES = {}
 SPOT_DEFAULT_STRATEGY = None
 
 # Waiting time for job from INIT/PENDING to RUNNING
@@ -83,7 +83,7 @@ class StrategyExecutor:
         self.retry_until_up = retry_until_up
 
     def __init_subclass__(cls, name: str, default: bool = False):
-        SPOT_STRATEGIES[name] = cls
+        RECOVERY_STRATEGIES[name] = cls
         if default:
             global SPOT_DEFAULT_STRATEGY
             assert SPOT_DEFAULT_STRATEGY is None, (
@@ -108,7 +108,7 @@ class StrategyExecutor:
         # set the new_task_resources to be the same type (list or set) as the
         # original task.resources
         task.set_resources(type(task.resources)(new_resources_list))
-        return SPOT_STRATEGIES[job_recovery](cluster_name, backend, task,
+        return RECOVERY_STRATEGIES[job_recovery](cluster_name, backend, task,
                                               retry_until_up)
 
     def launch(self) -> float:

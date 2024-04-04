@@ -19,9 +19,9 @@ from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.job import utils
 from sky.serve import serve_utils
 from sky.skylet import constants
-from sky.job import utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils

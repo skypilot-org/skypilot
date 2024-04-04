@@ -8,9 +8,9 @@ import colorama
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
+from sky import job
 from sky import sky_logging
 from sky import skypilot_config
-from sky import job
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
 from sky.skylet import constants
@@ -43,7 +43,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 15
+    _VERSION = 16
 
     def __init__(
         self,
@@ -146,10 +146,10 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-        self._spot_recovery = None
+        self._job_recovery = None
         if job_recovery is not None:
             if job_recovery.strip().lower() != 'none':
-                self._spot_recovery = job_recovery.upper()
+                self._job_recovery = job_recovery.upper()
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -390,7 +390,7 @@ class Resources:
 
     @property
     def job_recovery(self) -> Optional[str]:
-        return self._spot_recovery
+        return self._job_recovery
 
     @property
     def disk_size(self) -> int:
@@ -757,19 +757,14 @@ class Resources:
         Raises:
             ValueError: if the attributes are invalid.
         """
-        if self._spot_recovery is None:
+        if self._job_recovery is None:
             return
-        if not self._use_spot:
+        if self._job_recovery not in job.RECOVERY_STRATEGIES:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Cannot specify job_recovery without use_spot set to True.'
-                )
-        if self._spot_recovery not in job.SPOT_STRATEGIES:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Spot recovery strategy {self._spot_recovery} '
+                    f'Spot recovery strategy {self._job_recovery} '
                     'is not supported. The strategy should be among '
-                    f'{list(job.SPOT_STRATEGIES.keys())}')
+                    f'{list(job.RECOVERY_STRATEGIES.keys())}')
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
@@ -1346,9 +1341,6 @@ class Resources:
         if version < 2:
             self._region = None
 
-        if version < 3:
-            self._spot_recovery = None
-
         if version < 4:
             self._image_id = None
 
@@ -1411,5 +1403,8 @@ class Resources:
             if original_disk_tier is not None:
                 state['_disk_tier'] = resources_utils.DiskTier(
                     original_disk_tier)
+
+        if version < 16:
+            self._job_recovery = state.pop('_spot_recovery', None)
 
         self.__dict__.update(state)

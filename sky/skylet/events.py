@@ -14,10 +14,10 @@ from sky import clouds
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import cloud_registry
+from sky.job import utils
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
-from sky.job import utils
 from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
