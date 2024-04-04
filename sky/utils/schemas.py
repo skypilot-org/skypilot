@@ -5,40 +5,130 @@ https://json-schema.org/
 """
 
 
-def get_single_resources_schema():
+def _resources_properties_without_accelerators():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
+    return {
+        'cloud': {
+            'type': 'string',
+            'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
+        },
+        'region': {
+            'type': 'string',
+        },
+        'zone': {
+            'type': 'string',
+        },
+        'cpus': {
+            'anyOf': [{
+                'type': 'string',
+            }, {
+                'type': 'number',
+            }],
+        },
+        'memory': {
+            'anyOf': [{
+                'type': 'string',
+            }, {
+                'type': 'number',
+            }],
+        },
+        'instance_type': {
+            'type': 'string',
+        },
+        'use_spot': {
+            'type': 'boolean',
+        },
+        'job_recovery': {
+            'type': 'string',
+        },
+        'spot_recovery': {
+            'type': 'string',
+            # Failed to import recovery_strategy.RECOVERY_STRATEGIES due to
+            # circular import.
+        },
+        'disk_size': {
+            'type': 'integer',
+        },
+        'disk_tier': {
+            'type': 'string',
+        },
+        'ports': {
+            'anyOf': [{
+                'type': 'string',
+            }, {
+                'type': 'integer',
+            }, {
+                'type': 'array',
+                'items': {
+                    'anyOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'integer',
+                    }]
+                }
+            }],
+        },
+        'accelerator_args': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'runtime_version': {
+                    'type': 'string',
+                },
+                'tpu_name': {
+                    'type': 'string',
+                },
+                'tpu_vm': {
+                    'type': 'boolean',
+                }
+            }
+        },
+        'image_id': {
+            'anyOf': [{
+                'type': 'string',
+            }, {
+                'type': 'object',
+                'required': [],
+            }]
+        }
+    }
+
+
+def _only_one_of_two_field_config(field1: str, field2: str):
+    return {
+        'oneOf': [{
+            'required': [field1],
+            'not': {
+                'required': [field2]
+            }
+        }, {
+            'required': [field2],
+            'not': {
+                'required': [field1]
+            }
+        }, {
+            'not': {
+                'anyOf': [{
+                    'required': [field1]
+                }, {
+                    'required': [field2]
+                }]
+            }
+        }]
+    }
+
+
+def get_single_resources_schema():
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'cloud': {
-                'type': 'string',
-                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
-            },
-            'region': {
-                'type': 'string',
-            },
-            'zone': {
-                'type': 'string',
-            },
-            'cpus': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
-            'memory': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
             'accelerators': {
                 'anyOf': [{
                     'type': 'string',
@@ -51,61 +141,7 @@ def get_single_resources_schema():
                     }
                 }]
             },
-            'instance_type': {
-                'type': 'string',
-            },
-            'use_spot': {
-                'type': 'boolean',
-            },
-            'job_recovery': {
-                'type': 'string',
-            },
-            'disk_size': {
-                'type': 'integer',
-            },
-            'disk_tier': {
-                'type': 'string',
-            },
-            'ports': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'integer',
-                }, {
-                    'type': 'array',
-                    'items': {
-                        'anyOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'integer',
-                        }]
-                    }
-                }],
-            },
-            'accelerator_args': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'runtime_version': {
-                        'type': 'string',
-                    },
-                    'tpu_name': {
-                        'type': 'string',
-                    },
-                    'tpu_vm': {
-                        'type': 'boolean',
-                    }
-                }
-            },
-            'image_id': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'object',
-                    'required': [],
-                }]
-            }
+            **_resources_properties_without_accelerators()
         }
     }
 
@@ -113,37 +149,12 @@ def get_single_resources_schema():
 def get_resources_schema():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'cloud': {
-                'type': 'string',
-                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
-            },
-            'region': {
-                'type': 'string',
-            },
-            'zone': {
-                'type': 'string',
-            },
-            'cpus': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
-            'memory': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
             'accelerators': {
                 # {'V100:1', 'A100:1'} will be
                 # read as a string and converted to dict.
@@ -166,61 +177,7 @@ def get_resources_schema():
                     }
                 }]
             },
-            'instance_type': {
-                'type': 'string',
-            },
-            'use_spot': {
-                'type': 'boolean',
-            },
-            'job_recovery': {
-                'type': 'string',
-            },
-            'disk_size': {
-                'type': 'integer',
-            },
-            'disk_tier': {
-                'type': 'string',
-            },
-            'ports': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'integer',
-                }, {
-                    'type': 'array',
-                    'items': {
-                        'anyOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'integer',
-                        }]
-                    }
-                }],
-            },
-            'accelerator_args': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'runtime_version': {
-                        'type': 'string',
-                    },
-                    'tpu_name': {
-                        'type': 'string',
-                    },
-                    'tpu_vm': {
-                        'type': 'boolean',
-                    }
-                }
-            },
-            'image_id': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'object',
-                    'required': [],
-                }]
-            },
+            **_resources_properties_without_accelerators(),
             'any_of': {
                 'type': 'array',
                 'items': {
@@ -239,7 +196,9 @@ def get_resources_schema():
                     if k != '$schema'
                 },
             }
-        }
+        },
+        # Avoid job_recovery and spot_recovery being present at the same time.
+        **_only_one_of_two_field_config('job_recovery', 'spot_recovery')
     }
 
 
@@ -677,23 +636,5 @@ def get_config_schema():
             **cloud_configs,
         },
         # Avoid spot and managed_job being present at the same time.
-        'oneOf': [{
-            'required': ['spot'],
-            'not': {
-                'required': ['managed_job']
-            }
-        }, {
-            'required': ['managed_job'],
-            'not': {
-                'required': ['spot']
-            }
-        }, {
-            'not': {
-                'anyOf': [{
-                    'required': ['spot']
-                }, {
-                    'required': ['managed_job']
-                }]
-            }
-        }]
+        **_only_one_of_two_field_config('spot', 'managed_job')
     }
