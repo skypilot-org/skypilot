@@ -85,23 +85,23 @@ Sky Serve CLI
 Managed Spot Jobs CLI
 ---------------------------
 
-.. _sky-spot-launch:
-.. click:: sky.cli:spot_launch
+.. _sky-job-launch:
+.. click:: sky.cli:job_launch
    :prog: sky spot launch
    :nested: full
 
-.. _sky-spot-queue:
-.. click:: sky.cli:spot_queue
+.. _sky-job-queue:
+.. click:: sky.cli:job_queue
    :prog: sky spot queue
    :nested: full
 
-.. _sky-spot-cancel:
-.. click:: sky.cli:spot_cancel
+.. _sky-job-cancel:
+.. click:: sky.cli:job_cancel
    :prog: sky spot cancel
    :nested: full
 
-.. _sky-spot-logs:
-.. click:: sky.cli:spot_logs
+.. _sky-job-logs:
+.. click:: sky.cli:job_logs
    :prog: sky spot logs
    :nested: full
 
