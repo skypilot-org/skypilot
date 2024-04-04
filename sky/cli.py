@@ -1380,7 +1380,7 @@ def _get_services(service_names: Optional[List[str]],
               type=int,
               help=('Get the endpoint URL for the specified port number on the '
                     'cluster. This option will override all other options.'))
-@click.option('--show-spot-jobs/--no-show-spot-jobs',
+@click.option('--show-managed-jobs/--no-show-managed-jobs',
               default=True,
               is_flag=True,
               required=False,

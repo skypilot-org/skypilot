@@ -148,7 +148,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
                 'end_at': (float) timestamp of end,
                 'duration': (float) duration in seconds,
                 'recovery_count': (int) Number of retries,
-                'status': (sky.spot.SpotStatus) of the job,
+                'status': (sky.job.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
             }

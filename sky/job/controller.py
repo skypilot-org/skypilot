@@ -31,9 +31,9 @@ if typing.TYPE_CHECKING:
     import sky
 
 # Use the explicit logger name so that the logger is under the
-# `sky.spot.controller` namespace when executed directly, so as
+# `sky.job.controller` namespace when executed directly, so as
 # to inherit the setup from the `sky` logger.
-logger = sky_logging.init_logger('sky.spot.controller')
+logger = sky_logging.init_logger('sky.job.controller')
 
 
 def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
@@ -266,9 +266,9 @@ class SpotController:
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
                     self._download_log_and_stream(handle)
-                    spot_status_to_set = state.SpotStatus.FAILED
+                    spot_status_to_set = state.ManagedJobStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
-                        spot_status_to_set = state.SpotStatus.FAILED_SETUP
+                        spot_status_to_set = state.ManagedJobStatus.FAILED_SETUP
                     failure_reason = (
                         'To see the details, run: '
                         f'sky spot logs --controller {self._job_id}')
@@ -329,7 +329,7 @@ class SpotController:
             state.set_failed(
                 self._job_id,
                 task_id=task_id,
-                failure_type=state.SpotStatus.FAILED_PRECHECKS,
+                failure_type=state.ManagedJobStatus.FAILED_PRECHECKS,
                 failure_reason=failure_reason,
                 callback_func=utils.event_callback_func(
                     job_id=self._job_id,
@@ -344,7 +344,7 @@ class SpotController:
             state.set_failed(
                 self._job_id,
                 task_id=task_id,
-                failure_type=state.SpotStatus.FAILED_NO_RESOURCE,
+                failure_type=state.ManagedJobStatus.FAILED_NO_RESOURCE,
                 failure_reason=common_utils.format_exception(e),
                 callback_func=utils.event_callback_func(
                     job_id=self._job_id,
@@ -359,7 +359,7 @@ class SpotController:
             state.set_failed(
                 self._job_id,
                 task_id=task_id,
-                failure_type=state.SpotStatus.FAILED_CONTROLLER,
+                failure_type=state.ManagedJobStatus.FAILED_CONTROLLER,
                 failure_reason=msg,
                 callback_func=utils.event_callback_func(
                     job_id=self._job_id,
@@ -508,7 +508,7 @@ def start(job_id, dag_yaml, retry_until_up):
             state.set_failed(
                 job_id,
                 task_id=None,
-                failure_type=state.SpotStatus.FAILED_CONTROLLER,
+                failure_type=state.ManagedJobStatus.FAILED_CONTROLLER,
                 failure_reason=('Unexpected error occurred. For details, '
                                 f'run: sky spot logs --controller {job_id}'))
 

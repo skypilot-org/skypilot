@@ -9,9 +9,9 @@ from sky.job.core import cancel
 from sky.job.core import launch
 from sky.job.core import queue
 from sky.job.core import tail_logs
-from sky.job.recovery_strategy import SPOT_DEFAULT_STRATEGY
 from sky.job.recovery_strategy import RECOVERY_STRATEGIES
-from sky.job.state import SpotStatus
+from sky.job.recovery_strategy import SPOT_DEFAULT_STRATEGY
+from sky.job.state import ManagedJobStatus
 from sky.job.utils import dump_job_table_cache
 from sky.job.utils import dump_spot_job_queue
 from sky.job.utils import format_job_table
@@ -31,7 +31,7 @@ __all__ = [
     'SPOT_CONTROLLER_YAML_PREFIX',
     'SPOT_TASK_YAML_PREFIX',
     # Enums
-    'SpotStatus',
+    'ManagedJobStatus',
     # Core
     'cancel',
     'launch',
