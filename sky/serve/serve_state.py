@@ -101,7 +101,7 @@ class ReplicaStatus(enum.Enum):
     # The replica fails due to user's run/setup.
     FAILED = 'FAILED'
 
-    # The replica fails due to initial delay.
+    # The replica fails due to initial delay exceeded.
     FAILED_INITIAL_DELAY = 'FAILED_INITIAL_DELAY'
 
     # The replica fails due to healthiness check.

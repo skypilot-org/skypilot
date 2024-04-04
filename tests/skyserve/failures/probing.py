@@ -34,5 +34,5 @@ if __name__ == '__main__':
     with socketserver.TCPServer(('', args.port), Handler) as httpd:
         print('serving at port', args.port)
         for i in range(20):
-            # Ends after handle 10 requests
+            # Ends after handle 20 requests
             httpd.handle_request()
