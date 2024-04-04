@@ -27,7 +27,7 @@ def test_spot_nonexist_strategy():
         resources:
             cloud: aws
             use_spot: true
-            spot_recovery: nonexist""")
+            job_recovery: nonexist""")
     with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(task_yaml)
         f.flush()
@@ -142,7 +142,7 @@ def mock_is_controller_accessible(
 
 
 class TestSpotOperations:
-    """Test operations for managed spot."""
+    """Test operations for managed job."""
 
     @pytest.mark.timeout(60)
     def test_down_spot_controller(self, _mock_cluster_state,
@@ -185,7 +185,7 @@ class TestSpotOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.down, [job.SPOT_CONTROLLER_NAME],
                                    input='n')
-        assert 'WARNING: Tearing down the managed spot controller.' in result.output, (
+        assert 'WARNING: Tearing down the managed job controller.' in result.output, (
             result.exception, result.output, result.exc_info)
         assert isinstance(result.exception,
                           SystemExit), (result.exception, result.output)
@@ -195,7 +195,7 @@ class TestSpotOperations:
             mock_get_job_table_one_job)
         result = cli_runner.invoke(cli.down, [job.SPOT_CONTROLLER_NAME],
                                    input='n')
-        assert 'WARNING: Tearing down the managed spot controller.' in result.output, (
+        assert 'WARNING: Tearing down the managed job controller.' in result.output, (
             result.exception, result.output, result.exc_info)
         assert isinstance(result.exception, exceptions.NotSupportedError)
 

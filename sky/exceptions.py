@@ -71,7 +71,7 @@ class ProvisionPrechecksError(Exception):
 class SpotJobReachedMaxRetriesError(Exception):
     """Raised when a spot job fails to be launched after maximum retries.
 
-    Developer note: For now this should only be used by managed spot code
+    Developer note: For now this should only be used by managed job code
     path. Please refer to the docstring of `spot.recovery_strategy._launch`
     for more details about when the error will be raised.
     """

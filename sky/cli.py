@@ -103,7 +103,7 @@ _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
 
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
-                              '`sky spot launch`. `{command}` supports a '
+                              '`sky job launch`. `{command}` supports a '
                               'single task only.')
 
 
@@ -708,8 +708,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     ports: Optional[Tuple[str]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
-    # spot launch specific
-    spot_recovery: Optional[str] = None,
+    # job launch specific
+    job_recovery: Optional[str] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
 
@@ -778,8 +778,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.workdir = workdir
 
     # Spot launch specific.
-    if spot_recovery is not None:
-        override_params['spot_recovery'] = spot_recovery
+    if job_recoveryis not None:
+        override_params['job_recovery'] = job_recovery
 
     task.set_resources_override(override_params)
 
@@ -2517,7 +2517,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                         decline_down_when_failed_to_fetch_status_hint)
             if e.cluster_status is None:
                 click.echo(
-                    'Managed spot controller has already been torn down.')
+                    'Managed job controller has already been torn down.')
                 sys.exit(0)
             # At this point, the spot jobs are failed to be fetched due to the
             # controller being STOPPED or being firstly launched, i.e., there is
@@ -2662,7 +2662,7 @@ def _down_or_stop_clusters(
                     # TODO(zhwu): This hint or raise is not transactional, which
                     # means even if it passed the check with no in-progress spot
                     # or service and prompt the confirmation for termination,
-                    # a user could still do a `sky spot launch` or a
+                    # a user could still do a `sky job launch` or a
                     # `sky serve up` before typing the delete, causing a leaked
                     # spot job or service. We should make this check atomic with
                     # the termination.
@@ -3160,10 +3160,10 @@ def spot():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
-@click.option('--spot-recovery',
+@click.option('--job-recovery',
               default=None,
               type=str,
-              help='Spot recovery strategy to use for the managed spot task.')
+              help='Spot recovery strategy to use for the managed job task.')
 @click.option(
     '--detach-run',
     '-d',
@@ -3205,7 +3205,7 @@ def spot_launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
-    spot_recovery: Optional[str],
+    job_recovery: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
@@ -3225,9 +3225,9 @@ def spot_launch(
     .. code-block:: bash
 
       # You can use normal task YAMLs.
-      sky spot launch task.yaml
+      sky job launch task.yaml
 
-      sky spot launch 'echo hello!'
+      sky job launch 'echo hello!'
     """
     env = _merge_env_vars(env_file, env)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
@@ -3248,7 +3248,7 @@ def spot_launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
-        spot_recovery=spot_recovery,
+        job_recovery=job_recovery,
     )
     # Deprecation.
     if retry_until_up is not None:
@@ -3275,7 +3275,7 @@ def spot_launch(
         dag.name = name
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
-    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
+    dag_utils.fill_default_spot_config_in_dag_for_job_launch(dag)
 
     click.secho(
         f'Managed job {dag.name!r} will be launched on (estimated):',

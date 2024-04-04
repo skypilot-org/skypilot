@@ -233,7 +233,7 @@ def launch(
                 'generated) .')
         task_names.add(task_.name)
 
-    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
+    dag_utils.fill_default_spot_config_in_dag_for_job_launch(dag)
 
     for task_ in dag.tasks:
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(

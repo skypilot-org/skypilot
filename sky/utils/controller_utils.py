@@ -63,7 +63,7 @@ class Controllers(enum.Enum):
     # NOTE(dev): Keep this align with
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
     SPOT_CONTROLLER = _ControllerSpec(
-        name='managed spot controller',
+        name='managed job controller',
         cluster_name=utils.SPOT_CONTROLLER_NAME,
         in_progress_hint=(
             '* {job_info}To see all spot jobs: '
@@ -74,7 +74,7 @@ class Controllers(enum.Enum):
             f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
         decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the spot controller while '
-            'it is in INIT state is not supported (this means a spot launch '
+            'it is in INIT state is not supported (this means a job launch '
             'is in progress or the previous launch failed), as we cannot '
             'guarantee that all the spot jobs are finished. Please wait '
             'until the spot controller is UP or fix it with '
@@ -86,7 +86,7 @@ class Controllers(enum.Enum):
             f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
         check_cluster_name_hint=(
             f'Cluster {utils.SPOT_CONTROLLER_NAME} is reserved for '
-            'managed spot controller.'),
+            'managed job controller.'),
         default_hint_if_non_existent='No in-progress spot jobs.',
         connection_error_hint=(
             'Failed to connect to spot controller, please try again later.'))
@@ -333,7 +333,7 @@ def _setup_proxy_command_on_controller(
     # same config is used).
     #
     # NOTE: suppose that we have a controller in old VPC, then user
-    # changes 'vpc_name' in the config and does a 'spot launch' /
+    # changes 'vpc_name' in the config and does a 'job launch' /
     # 'serve up'. In general, the old controller may not successfully
     # launch the job in the new VPC. This happens if the two VPCs don’t
     # have peering set up. Like other places in the code, we assume

@@ -264,7 +264,7 @@ def start(
         ValueError: argument values are invalid: (1) the specified cluster does
           not exist; (2) if ``down`` is set to True but
           ``idle_minutes_to_autostop`` is None; (3) if the specified cluster is
-          the managed spot controller, and either ``idle_minutes_to_autostop``
+          the managed job controller, and either ``idle_minutes_to_autostop``
           is not None or ``down`` is True (omit them to use the default
           autostop settings).
         sky.exceptions.NotSupportedError: if the cluster to restart was
@@ -317,7 +317,7 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         ValueError: the specified cluster does not exist.
         RuntimeError: failed to stop the cluster.
         sky.exceptions.NotSupportedError: if the specified cluster is a spot
-          cluster, or a TPU VM Pod cluster, or the managed spot controller.
+          cluster, or a TPU VM Pod cluster, or the managed job controller.
     """
     if controller_utils.Controllers.from_name(cluster_name) is not None:
         raise exceptions.NotSupportedError(

@@ -1,4 +1,4 @@
-"""Modules for managed spot clusters."""
+"""Modules for managed job clusters."""
 import pathlib
 
 from sky.job.constants import SPOT_CLUSTER_NAME_PREFIX_LENGTH

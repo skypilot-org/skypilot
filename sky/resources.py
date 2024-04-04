@@ -54,7 +54,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        spot_recovery: Optional[str] = None,
+        job_recovery: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
@@ -103,7 +103,7 @@ class Resources:
             ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
           use_spot: whether to use spot instances. If None, defaults to
             False.
-          spot_recovery: the spot recovery strategy to use for the managed
+          job_recovery: the spot recovery strategy to use for the managed
             spot to recover the cluster from preemption. Refer to
             `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/spot/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
@@ -147,9 +147,9 @@ class Resources:
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
         self._spot_recovery = None
-        if spot_recovery is not None:
-            if spot_recovery.strip().lower() != 'none':
-                self._spot_recovery = spot_recovery.upper()
+        if job_recovery is not None:
+            if job_recovery.strip().lower() != 'none':
+                self._spot_recovery = job_recovery.upper()
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -389,7 +389,7 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def spot_recovery(self) -> Optional[str]:
+    def job_recovery(self) -> Optional[str]:
         return self._spot_recovery
 
     @property
@@ -762,7 +762,7 @@ class Resources:
         if not self._use_spot:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Cannot specify spot_recovery without use_spot set to True.'
+                    'Cannot specify job_recovery without use_spot set to True.'
                 )
         if self._spot_recovery not in job.SPOT_STRATEGIES:
             with ux_utils.print_exception_no_traceback():
@@ -1125,7 +1125,7 @@ class Resources:
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
-            spot_recovery=override.pop('spot_recovery', self.spot_recovery),
+            job_recovery=override.pop('job_recovery', self.job_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
@@ -1263,7 +1263,7 @@ class Resources:
         resources_fields['accelerator_args'] = config.pop(
             'accelerator_args', None)
         resources_fields['use_spot'] = config.pop('use_spot', None)
-        resources_fields['spot_recovery'] = config.pop('spot_recovery', None)
+        resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
         resources_fields['region'] = config.pop('region', None)
         resources_fields['zone'] = config.pop('zone', None)
@@ -1305,7 +1305,7 @@ class Resources:
 
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
-            add_if_not_none('spot_recovery', self.spot_recovery)
+            add_if_not_none('job_recovery', self.job_recovery
         add_if_not_none('disk_size', self.disk_size)
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)

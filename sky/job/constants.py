@@ -1,4 +1,4 @@
-"""Constants used for Managed Spot."""
+"""Constants used for Managed Job."""
 
 SPOT_CONTROLLER_TEMPLATE = 'spot-controller.yaml.j2'
 SPOT_CONTROLLER_YAML_PREFIX = '~/.sky/spot_controller'

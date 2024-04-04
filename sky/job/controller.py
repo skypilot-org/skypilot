@@ -1,4 +1,4 @@
-"""Controller: handles the life cycle of a managed spot cluster (job)."""
+"""Controller: handles the life cycle of a managed job cluster (job)."""
 import argparse
 import multiprocessing
 import os
