@@ -829,18 +829,39 @@ def _with_deprecation_warning(f, original_name, alias_name):
 
     return wrapper
 
+def _override_arguments(callback, override_command_argument: Dict[str, Any]):
+    def wrapper(*args, **kwargs):
+        logger.info(f'Overriding arguments: {override_command_argument}')
+        kwargs.update(override_command_argument)
+        return callback(*args, **kwargs)
+    return wrapper
 
-def _add_command_alias_to_group(group, command, name, hidden):
+def _add_command_alias(group: click.Group,
+                       command: click.Command,
+                       hidden: bool,
+                       new_group: Optional[click.Group] = None,
+                       new_command_name: Optional[str] = None,
+                       override_command_argument: Optional[Dict[str, Any]] = None):
     """Add a alias of a command to a group."""
+    if new_group is None:
+        new_group = group
+    if new_command_name is None:
+        new_command_name = command.name
+    if new_group == group and new_command_name == command.name:
+        raise ValueError('Cannot add an alias to the same command.')
     new_command = copy.deepcopy(command)
     new_command.hidden = hidden
-    new_command.name = name
+    new_command.name = new_command_name
+
+    if override_command_argument:
+        new_command.callback = _override_arguments(new_command.callback, override_command_argument)
+
 
     orig = f'sky {group.name} {command.name}'
-    alias = f'sky {group.name} {name}'
+    alias = f'sky {new_group.name} {new_command_name}'
     new_command.invoke = _with_deprecation_warning(new_command.invoke, orig,
                                                    alias)
-    group.add_command(new_command, name=name)
+    new_group.add_command(new_command, name=new_command_name)
 
 
 def _deprecate_and_hide_command(group, command_to_deprecate,
@@ -3149,8 +3170,9 @@ def bench():
 
 @cli.group(cls=_NaturalOrderGroup)
 def job():
-    """Managed Job CLI (spot instances with auto-recovery)."""
+    """Managed Job CLI (jobs with auto-recovery)."""
     pass
+
 
 
 @job.command('launch', cls=_DocumentedCodeCommand)
@@ -3542,6 +3564,21 @@ def job_dashboard(port: Optional[int]):
                 pass
         finally:
             click.echo('Exiting.')
+
+
+
+# TODO(zhwu): Backward compatibility for the old `sky job launch` command.
+# It is now renamed to `sky job launch` and the old command is deprecated.
+@cli.group(cls=_NaturalOrderGroup)
+def spot():
+    """Alias for Managed Job CLI (default to spot instances)."""
+    pass
+
+_add_command_alias(job, job_launch, hidden=False, new_group=spot, override_command_argument={'use_spot': True})
+_add_command_alias(job, job_queue, hidden=False, new_group=spot)
+_add_command_alias(job, job_logs, hidden=False, new_group=spot)
+_add_command_alias(job, job_cancel, hidden=False, new_group=spot)
+_add_command_alias(job, job_dashboard, hidden=False, new_group=spot)
 
 
 @cli.group(cls=_NaturalOrderGroup)
