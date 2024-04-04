@@ -1,9 +1,9 @@
 """Constants used for Managed Job."""
 
 JOB_CONTROLLER_TEMPLATE = 'job-controller.yaml.j2'
-JOB_CONTROLLER_YAML_PREFIX = '~/.sky/spot_controller'
+JOB_CONTROLLER_YAML_PREFIX = '~/.sky/job_controller'
 
-JOB_TASK_YAML_PREFIX = '~/.sky/spot_tasks'
+JOB_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 
 # Resources as a dict for the job controller.
 # Use default CPU instance type for job controller with >= 24GB, i.e.

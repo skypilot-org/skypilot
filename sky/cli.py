@@ -3308,8 +3308,7 @@ def job_launch(
     default=False,
     is_flag=True,
     required=False,
-    help='Query the latest statuses, restarting the job controller if stopped.'
-)
+    help='Query the latest statuses, restarting the job controller if stopped.')
 @click.option('--skip-finished',
               '-s',
               default=False,

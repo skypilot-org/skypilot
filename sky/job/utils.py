@@ -173,7 +173,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
                                                   job_id) if task.name else None
         logger.info(f'=== START: event callback for {status!r} ===')
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'spot_event',
-                                f'spot-callback-{job_id}-{task_id}.log')
+                                f'job-callback-{job_id}-{task_id}.log')
         result = run_bash_command_with_log(
             bash_command=event_callback,
             log_path=log_path,

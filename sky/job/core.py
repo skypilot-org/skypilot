@@ -71,8 +71,9 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
                           'Restarting controller for latest status...'
                           f'{colorama.Style.RESET_ALL}')
 
-        rich_utils.force_update_status('[cyan] Checking managed jobs - restarting '
-                                       'controller[/]')
+        rich_utils.force_update_status(
+            '[cyan] Checking managed jobs - restarting '
+            'controller[/]')
         handle = sky.start(utils.JOB_CONTROLLER_NAME)
         controller_status = status_lib.ClusterStatus.UP
         rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
@@ -240,10 +241,10 @@ def launch(
 
     for task_ in dag.tasks:
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task_, path='spot')
+            task_, path='job')
 
-    with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
-                                     mode='w') as f:
+    with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
+                                     mode='w', delete=False) as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = utils.JOB_CONTROLLER_NAME
         prefix = constants.JOB_TASK_YAML_PREFIX
