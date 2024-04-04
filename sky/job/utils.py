@@ -170,7 +170,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
             return
         event_callback = event_callback.strip()
         cluster_name = generate_job_cluster_name(task.name,
-                                                  job_id) if task.name else None
+                                                 job_id) if task.name else None
         logger.info(f'=== START: event callback for {status!r} ===')
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'spot_event',
                                 f'job-callback-{job_id}-{task_id}.log')
@@ -308,8 +308,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             job_msg = ''
             if spot_job_status.is_failed():
                 job_msg = (
-                    f'\nFailure reason: {state.get_failure_reason(job_id)}'
-                )
+                    f'\nFailure reason: {state.get_failure_reason(job_id)}')
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{spot_job_status.value}. Logs will not be shown.'
@@ -344,8 +343,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     status_display.update(msg)
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                task_id, spot_status = (
-                    state.get_latest_task_id_status(job_id))
+                task_id, spot_status = (state.get_latest_task_id_status(job_id))
                 continue
             assert spot_status is not None
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
@@ -466,7 +464,7 @@ def dump_spot_job_queue() -> str:
         job['status'] = job['status'].value
 
         cluster_name = generate_job_cluster_name(job['task_name'],
-                                                  job['job_id'])
+                                                 job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -519,8 +517,8 @@ def format_job_table(
         return_rows: If True, return the rows as a list of strings instead of
           all rows concatenated into a single string.
 
-    Returns: A formatted string of managed jobs, if not `return_rows`; otherwise a
-      list of "rows" (each of which is a list of str).
+    Returns: A formatted string of managed jobs, if not `return_rows`; otherwise
+      a list of "rows" (each of which is a list of str).
     """
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',

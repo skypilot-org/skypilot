@@ -109,7 +109,7 @@ class StrategyExecutor:
         # original task.resources
         task.set_resources(type(task.resources)(new_resources_list))
         return RECOVERY_STRATEGIES[job_recovery](cluster_name, backend, task,
-                                              retry_until_up)
+                                                 retry_until_up)
 
     def launch(self) -> float:
         """Launch the spot cluster for the first time.
@@ -214,8 +214,7 @@ class StrategyExecutor:
                 break
 
             try:
-                status = utils.get_job_status(self.backend,
-                                                   self.cluster_name)
+                status = utils.get_job_status(self.backend, self.cluster_name)
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
                 # loop.

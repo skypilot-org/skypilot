@@ -2520,9 +2520,9 @@ def _hint_or_raise_for_down_job_controller(controller_name: str):
             if e.cluster_status is None:
                 click.echo('Managed job controller has already been torn down.')
                 sys.exit(0)
-            # At this point, the managed jobs are failed to be fetched due to the
-            # controller being STOPPED or being firstly launched, i.e., there is
-            # no in-prgress managed jobs.
+            # At this point, the managed jobs are failed to be fetched due to
+            # the controller being STOPPED or being firstly launched, i.e.,
+            # there is no in-prgress managed jobs.
             managed_jobs = []
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
