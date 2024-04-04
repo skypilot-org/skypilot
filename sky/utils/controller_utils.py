@@ -62,32 +62,32 @@ class Controllers(enum.Enum):
     """Skypilot controllers."""
     # NOTE(dev): Keep this align with
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
-    SPOT_CONTROLLER = _ControllerSpec(
+    JOB_CONTROLLER = _ControllerSpec(
         name='managed job controller',
-        cluster_name=utils.SPOT_CONTROLLER_NAME,
+        cluster_name=utils.JOB_CONTROLLER_NAME,
         in_progress_hint=(
-            '* {job_info}To see all spot jobs: '
+            '* {job_info}To see all managed jobs: '
             f'{colorama.Style.BRIGHT}sky spot queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
-            f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
+            f'managed jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
             f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
         decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the spot controller while '
             'it is in INIT state is not supported (this means a job launch '
             'is in progress or the previous launch failed), as we cannot '
-            'guarantee that all the spot jobs are finished. Please wait '
+            'guarantee that all the managed jobs are finished. Please wait '
             'until the spot controller is UP or fix it with '
             f'{colorama.Style.BRIGHT}sky start '
-            f'{utils.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.'),
+            f'{utils.JOB_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.'),
         decline_down_for_dirty_controller_hint=(
-            f'{colorama.Fore.RED}In-progress spot jobs found. To avoid '
+            f'{colorama.Fore.RED}In-progress managed jobs found. To avoid '
             f'resource leakage, cancel all jobs first: {colorama.Style.BRIGHT}'
             f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
         check_cluster_name_hint=(
-            f'Cluster {utils.SPOT_CONTROLLER_NAME} is reserved for '
+            f'Cluster {utils.JOB_CONTROLLER_NAME} is reserved for '
             'managed job controller.'),
-        default_hint_if_non_existent='No in-progress spot jobs.',
+        default_hint_if_non_existent='No in-progress managed jobs.',
         connection_error_hint=(
             'Failed to connect to spot controller, please try again later.'))
     SKY_SERVE_CONTROLLER = _ControllerSpec(

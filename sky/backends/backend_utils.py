@@ -2292,7 +2292,7 @@ def is_controller_accessible(
         # will not start the controller manually from the cloud console.
         #
         # The acquire_lock_timeout is set to 0 to avoid hanging the command when
-        # multiple spot.launch commands are running at the same time. Our later
+        # multiple job.launch commands are running at the same time. Our later
         # code will check if the controller is accessible by directly checking
         # the ssh connection to the controller, if it fails to get accurate
         # status of the controller.
@@ -2540,7 +2540,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     """
     # TODO: Custom CPU and other memory resources are not supported yet.
     # For sky spot/serve controller task, we set the CPU resource to a smaller
-    # value to support a larger number of spot jobs and services.
+    # value to support a larger number of managed jobs and services.
     resources_dict = {
         'CPU': (constants.CONTROLLER_PROCESS_CPU_DEMAND
                 if task.is_controller_task() else DEFAULT_TASK_CPU_DEMAND)

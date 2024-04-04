@@ -1,7 +1,7 @@
 """Test the controller_utils module."""
 import pytest
 
-from sky.job import constants as spot_constants
+from sky.job import constants as job_constants
 from sky.serve import constants as serve_constants
 from sky.utils import controller_utils
 
@@ -38,7 +38,7 @@ def test_get_controller_resources_spot(controller_type,
                                        expected, enable_all_clouds,
                                        monkeypatch):
     if controller_type == 'spot':
-        controller_resources_config = spot_constants.CONTROLLER_RESOURCES
+        controller_resources_config = job_constants.CONTROLLER_RESOURCES
     else:
         controller_resources_config = serve_constants.CONTROLLER_RESOURCES
 

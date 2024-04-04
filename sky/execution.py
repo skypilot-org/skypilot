@@ -108,7 +108,7 @@ def _execute(
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
-    _is_launched_by_spot_controller: bool = False,
+    _is_launched_by_job_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
@@ -160,10 +160,10 @@ def _execute(
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
-    if task.need_spot_recovery:
+    if any(r.job_recovery is not None for r in task.resources):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                'Spot recovery is specified in the task. To launch the '
+                'Job recovery is specified in the task. To launch the '
                 'managed job, please use: sky job launch')
 
     cluster_exists = False
@@ -228,7 +228,7 @@ def _execute(
         # If spot is launched by skyserve controller or managed job controller,
         # We don't need to print out the logger info.
         if (Stage.PROVISION in stages and task.use_spot and
-                not _is_launched_by_spot_controller and
+                not _is_launched_by_job_controller and
                 not _is_launched_by_sky_serve_controller):
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
@@ -319,8 +319,8 @@ def _execute(
             # UX: print live clusters to make users aware (to save costs).
             #
             # Don't print if this job is launched by the spot controller,
-            # because spot jobs are serverless, there can be many of them, and
-            # users tend to continuously monitor spot jobs using `sky spot
+            # because managed jobs are serverless, there can be many of them, and
+            # users tend to continuously monitor managed jobs using `sky spot
             # status`. Also don't print if this job is a skyserve controller
             # job or launched by a skyserve controller job, because the
             # redirect for this subprocess.run won't success and it will
@@ -354,7 +354,7 @@ def launch(
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
-    _is_launched_by_spot_controller: bool = False,
+    _is_launched_by_job_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
@@ -464,7 +464,7 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
-        _is_launched_by_spot_controller=_is_launched_by_spot_controller,
+        _is_launched_by_job_controller=_is_launched_by_job_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
     )

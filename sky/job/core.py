@@ -136,7 +136,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed jobs.
 
-    Please refer to the sky.cli.spot_queue for the documentation.
+    Please refer to the sky.cli.job_queue for the documentation.
 
     Returns:
         [
@@ -156,14 +156,14 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     Raises:
         sky.exceptions.ClusterNotUpError: the spot controller is not up or
             does not exist.
-        RuntimeError: if failed to get the spot jobs with ssh.
+        RuntimeError: if failed to get the managed jobs with ssh.
     """
     stopped_message = ''
     if not refresh:
-        stopped_message = 'No in-progress spot jobs.'
+        stopped_message = 'No in-progress managed jobs.'
     try:
         handle = backend_utils.is_controller_accessible(
-            controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+            controller_type=controller_utils.Controllers.JOB_CONTROLLER,
             stopped_message=stopped_message)
     except exceptions.ClusterNotUpError as e:
         if not refresh:
@@ -176,11 +176,11 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
                           'Restarting controller for latest status...'
                           f'{colorama.Style.RESET_ALL}')
 
-        rich_utils.force_update_status('[cyan] Checking spot jobs - restarting '
+        rich_utils.force_update_status('[cyan] Checking managed jobs - restarting '
                                        'controller[/]')
-        handle = sky.start(utils.SPOT_CONTROLLER_NAME)
+        handle = sky.start(utils.JOB_CONTROLLER_NAME)
         controller_status = status_lib.ClusterStatus.UP
-        rich_utils.force_update_status('[cyan] Checking spot jobs[/]')
+        rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
 
     assert handle is not None, (controller_status, refresh)
 
@@ -204,7 +204,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     except exceptions.CommandError as e:
         raise RuntimeError(str(e)) from e
 
-    jobs = utils.load_spot_job_queue(job_table_payload)
+    jobs = utils.load_managed_job_queue(job_table_payload)
     if skip_finished:
         # Filter out the finished jobs. If a multi-task job is partially
         # finished, we will include all its tasks.
@@ -224,7 +224,7 @@ def cancel(name: Optional[str] = None,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel managed jobs.
 
-    Please refer to the sky.cli.spot_cancel for the document.
+    Please refer to the sky.cli.job_cancel for the document.
 
     Raises:
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
@@ -232,7 +232,7 @@ def cancel(name: Optional[str] = None,
     """
     job_ids = [] if job_ids is None else job_ids
     handle = backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+        controller_type=controller_utils.Controllers.JOB_CONTROLLER,
         stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
@@ -278,7 +278,7 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
-    Please refer to the sky.cli.spot_logs for the document.
+    Please refer to the sky.cli.job_logs for the document.
 
     Raises:
         ValueError: invalid arguments.
@@ -286,16 +286,19 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
     """
     # TODO(zhwu): Automatically restart the spot controller
     handle = backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+        controller_type=controller_utils.Controllers.JOB_CONTROLLER,
         stopped_message=('Please restart the spot controller with '
-                         f'`sky start {utils.SPOT_CONTROLLER_NAME}`.'))
+                         f'`sky start {utils.JOB_CONTROLLER_NAME}`.'))
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     # Stream the realtime logs
-    backend.tail_spot_logs(handle, job_id=job_id, job_name=name, follow=follow)
+    backend.tail_managed_job_logs(handle,
+                                  job_id=job_id,
+                                  job_name=name,
+                                  follow=follow)
 
 
 spot_launch = common_utils.deprecated_function(launch,

@@ -1,9 +1,9 @@
 """Constants used for Managed Job."""
 
-SPOT_CONTROLLER_TEMPLATE = 'spot-controller.yaml.j2'
-SPOT_CONTROLLER_YAML_PREFIX = '~/.sky/spot_controller'
+JOB_CONTROLLER_TEMPLATE = 'spot-controller.yaml.j2'
+JOB_CONTROLLER_YAML_PREFIX = '~/.sky/spot_controller'
 
-SPOT_TASK_YAML_PREFIX = '~/.sky/spot_tasks'
+JOB_TASK_YAML_PREFIX = '~/.sky/spot_tasks'
 
 # Resources as a dict for the spot controller.
 # Use default CPU instance type for spot controller with >= 24GB, i.e.
@@ -19,4 +19,4 @@ CONTROLLER_RESOURCES = {'cpus': '8+', 'memory': '3x', 'disk_size': 50}
 # 4+1 chars, and we assume the maximum length of the job id is 4+1, so the max
 # length of the cluster name prefix is 25 to avoid the cluster name being too
 # long and truncated twice during the cluster creation.
-SPOT_CLUSTER_NAME_PREFIX_LENGTH = 25
+JOB_CLUSTER_NAME_PREFIX_LENGTH = 25

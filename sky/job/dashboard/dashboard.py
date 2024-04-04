@@ -1,4 +1,4 @@
-"""Dashboard for spot jobs based on Flask.
+"""Dashboard for managed jobs based on Flask.
 
 TODO(zongheng): This is a basic version. In the future we can beef up the web
 frameworks used (e.g.,
@@ -38,7 +38,7 @@ def home():
         all_spot_jobs = sky.spot_queue(refresh=True, skip_finished=False)
     else:
         job_table = job.dump_spot_job_queue()
-        all_spot_jobs = job.load_spot_job_queue(job_table)
+        all_spot_jobs = job.load_managed_job_queue(job_table)
 
     timestamp = datetime.datetime.utcnow()
     rows = job.format_job_table(all_spot_jobs, show_all=True, return_rows=True)

@@ -271,9 +271,9 @@ class Task:
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
 
-        # Only set when 'self' is a spot controller task: 'self.spot_dag' is
-        # the underlying managed job dag (sky.Dag object).
-        self.spot_dag: Optional['sky.Dag'] = None
+        # Only set when 'self' is a spot controller task: 'self.managed_job_dag'
+        # is the underlying managed job dag (sky.Dag object).
+        self.managed_job_dag: Optional['sky.Dag'] = None
 
         # Only set when 'self' is a sky serve controller task.
         self.service_name: Optional[str] = None
@@ -548,10 +548,6 @@ class Task:
             self.resources = _with_docker_login_config(self.resources,
                                                        self._envs)
         return self
-
-    @property
-    def need_spot_recovery(self) -> bool:
-        return any(r.job_recovery is not None for r in self.resources)
 
     @property
     def use_spot(self) -> bool:
@@ -989,7 +985,7 @@ class Task:
 
     def is_controller_task(self) -> bool:
         """Returns whether this task is a spot/serve controller process."""
-        return self.spot_dag is not None or self.service_name is not None
+        return self.managed_job_dag is not None or self.service_name is not None
 
     def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=cloud URL).
