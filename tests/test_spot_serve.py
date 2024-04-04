@@ -15,7 +15,7 @@ from sky import cli
 from sky import exceptions
 from sky import global_user_state
 from sky import serve
-from sky import spot
+from sky import job
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import db_utils
@@ -97,8 +97,8 @@ def _mock_cluster_state(_mock_db_conn):
 @pytest.fixture
 def _mock_spot_controller(_mock_db_conn):
     handle = backends.CloudVmRayResourceHandle(
-        cluster_name=spot.SPOT_CONTROLLER_NAME,
-        cluster_name_on_cloud=spot.SPOT_CONTROLLER_NAME,
+        cluster_name=job.SPOT_CONTROLLER_NAME,
+        cluster_name_on_cloud=job.SPOT_CONTROLLER_NAME,
         cluster_yaml='/tmp/spot_controller.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(sky.AWS(),
@@ -106,7 +106,7 @@ def _mock_spot_controller(_mock_db_conn):
                                          region='us-west-1'),
     )
     global_user_state.add_or_update_cluster(
-        spot.SPOT_CONTROLLER_NAME,
+        job.SPOT_CONTROLLER_NAME,
         handle,
         requested_resources={handle.launched_resources},
         ready=True)
@@ -183,7 +183,7 @@ class TestSpotOperations:
             mock_get_job_table_no_job)
 
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.down, [spot.SPOT_CONTROLLER_NAME],
+        result = cli_runner.invoke(cli.down, [job.SPOT_CONTROLLER_NAME],
                                    input='n')
         assert 'WARNING: Tearing down the managed spot controller.' in result.output, (
             result.exception, result.output, result.exc_info)
@@ -193,7 +193,7 @@ class TestSpotOperations:
         monkeypatch.setattr(
             'sky.backends.cloud_vm_ray_backend.CloudVmRayBackend.run_on_head',
             mock_get_job_table_one_job)
-        result = cli_runner.invoke(cli.down, [spot.SPOT_CONTROLLER_NAME],
+        result = cli_runner.invoke(cli.down, [job.SPOT_CONTROLLER_NAME],
                                    input='n')
         assert 'WARNING: Tearing down the managed spot controller.' in result.output, (
             result.exception, result.output, result.exc_info)
@@ -219,9 +219,9 @@ class TestSpotOperations:
     def test_stop_spot_controller(self, _mock_cluster_state,
                                   _mock_spot_controller):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.stop, [spot.SPOT_CONTROLLER_NAME])
+        result = cli_runner.invoke(cli.stop, [job.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
-        assert (f'Stopping controller(s) \'{spot.SPOT_CONTROLLER_NAME}\' is '
+        assert (f'Stopping controller(s) \'{job.SPOT_CONTROLLER_NAME}\' is '
                 'currently not supported' in result.output)
 
         result = cli_runner.invoke(cli.stop, ['sky-spot-con*'])
@@ -236,10 +236,10 @@ class TestSpotOperations:
     def test_autostop_spot_controller(self, _mock_cluster_state,
                                       _mock_spot_controller):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.autostop, [spot.SPOT_CONTROLLER_NAME])
+        result = cli_runner.invoke(cli.autostop, [job.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
         assert ('Scheduling autostop on controller(s) '
-                f'\'{spot.SPOT_CONTROLLER_NAME}\' is currently not supported'
+                f'\'{job.SPOT_CONTROLLER_NAME}\' is currently not supported'
                 in result.output)
 
         result = cli_runner.invoke(cli.autostop, ['sky-spot-con*'])
@@ -254,7 +254,7 @@ class TestSpotOperations:
                                        _mock_spot_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel,
-                                   [spot.SPOT_CONTROLLER_NAME, '-a'])
+                                   [job.SPOT_CONTROLLER_NAME, '-a'])
         assert result.exit_code == 1
         assert 'Cancelling the spot controller\'s jobs is not allowed.' in str(
             result.output)

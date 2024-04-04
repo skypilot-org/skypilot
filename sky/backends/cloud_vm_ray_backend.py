@@ -33,7 +33,7 @@ from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import spot as spot_lib
+from sky import job as spot_lib
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -4553,7 +4553,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
+        # If it is a managed job, the TASK_ID_ENV_VAR will have been
         # already set by the controller.
         job_run_id = task.envs.get(
             constants.TASK_ID_ENV_VAR,
@@ -4609,7 +4609,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
+        # If it is a managed job, the TASK_ID_ENV_VAR will have been
         # already set by the controller.
         job_run_id = task.envs.get(
             constants.TASK_ID_ENV_VAR,

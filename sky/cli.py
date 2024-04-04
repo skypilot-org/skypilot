@@ -54,7 +54,7 @@ from sky import global_user_state
 from sky import provision as provision_lib
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import spot as spot_lib
+from sky import job as spot_lib
 from sky import status_lib
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
@@ -1658,7 +1658,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         spot_jobs_query_interrupted = False
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed spot jobs{colorama.Style.RESET_ALL}')
+                       f'Managed jobs{colorama.Style.RESET_ALL}')
             with rich_utils.safe_status('[cyan]Checking spot jobs[/]'):
                 spot_jobs_query_interrupted, result = _try_get_future_result(
                     spot_jobs_future)
@@ -3215,7 +3215,7 @@ def spot_launch(
     retry_until_up: bool,
     yes: bool,
 ):
-    """Launch a managed spot job from a YAML or a command.
+    """Launch a managed job from a YAML or a command.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command.
@@ -3257,7 +3257,7 @@ def spot_launch(
             flag_str = '--no-retry-until-up'
         click.secho(
             f'Flag {flag_str} is deprecated and will be removed in a '
-            'future release (managed spot jobs will always be retried). '
+            'future release (managed jobs will always be retried). '
             'Please file an issue if this does not work for you.',
             fg='yellow')
     else:
@@ -3278,7 +3278,7 @@ def spot_launch(
     dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
 
     click.secho(
-        f'Managed spot job {dag.name!r} will be launched on (estimated):',
+        f'Managed job {dag.name!r} will be launched on (estimated):',
         fg='yellow')
     dag = sky.optimize(dag)
 
@@ -3319,7 +3319,7 @@ def spot_launch(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_queue(all: bool, refresh: bool, skip_finished: bool):
-    """Show statuses of managed spot jobs.
+    """Show statuses of managed jobs.
 
     Each spot job can have one of the following statuses:
 
@@ -3372,7 +3372,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
       watch -n60 sky spot queue
 
     """
-    click.secho('Fetching managed spot job statuses...', fg='yellow')
+    click.secho('Fetching managed job statuses...', fg='yellow')
     with rich_utils.safe_status('[cyan]Checking spot jobs[/]'):
         _, msg = _get_spot_jobs(refresh=refresh,
                                 skip_finished=skip_finished,
@@ -3383,7 +3383,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     else:
         in_progress_only_hint = ' (showing in-progress jobs only)'
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-               f'Managed spot jobs{colorama.Style.RESET_ALL}'
+               f'Managed jobs{colorama.Style.RESET_ALL}'
                f'{in_progress_only_hint}\n{msg}')
 
 
@@ -3392,14 +3392,14 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
               '-n',
               required=False,
               type=str,
-              help='Managed spot job name to cancel.')
+              help='Managed job name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
 @click.option('--all',
               '-a',
               is_flag=True,
               default=False,
               required=False,
-              help='Cancel all managed spot jobs.')
+              help='Cancel all managed jobs.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3409,7 +3409,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
-    """Cancel managed spot jobs.
+    """Cancel managed jobs.
 
     You can provide either a job name or a list of job IDs to be cancelled.
     They are exclusive options.
@@ -3418,15 +3418,15 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     .. code-block:: bash
 
-      # Cancel managed spot job with name 'my-job'
+      # Cancel managed job with name 'my-job'
       $ sky spot cancel -n my-job
       \b
-      # Cancel managed spot jobs with IDs 1, 2, 3
+      # Cancel managed jobs with IDs 1, 2, 3
       $ sky spot cancel 1 2 3
     """
     backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
-        stopped_message='All managed spot jobs should have finished.',
+        stopped_message='All managed jobs should have finished.',
         exit_if_not_accessible=True)
 
     job_id_str = ','.join(map(str, job_ids))
@@ -3439,10 +3439,10 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
             f'Provided {argument_str!r}.')
 
     if not yes:
-        job_identity_str = (f'managed spot jobs with IDs {job_id_str}'
+        job_identity_str = (f'managed jobs with IDs {job_id_str}'
                             if job_ids else repr(name))
         if all:
-            job_identity_str = 'all managed spot jobs'
+            job_identity_str = 'all managed jobs'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
                       abort=True,
@@ -3456,7 +3456,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
               '-n',
               required=False,
               type=str,
-              help='Managed spot job name.')
+              help='Managed job name.')
 @click.option(
     '--follow/--no-follow',
     is_flag=True,
@@ -3473,7 +3473,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 @usage_lib.entrypoint
 def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool):
-    """Tail the log of a managed spot job."""
+    """Tail the log of a managed job."""
     try:
         if controller:
             core.tail_logs(spot_lib.SPOT_CONTROLLER_NAME,
