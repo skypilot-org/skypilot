@@ -13,6 +13,7 @@ import colorama
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
@@ -48,14 +49,34 @@ LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 class _ControllerSpec:
     """Spec for skypilot controllers."""
     name: str
-    cluster_name: str
+    # Use a list of strings to support fallback to old names.
+    candidate_cluster_names: List[str]
     in_progress_hint: str
     decline_cancel_hint: str
-    decline_down_when_failed_to_fetch_status_hint: str
+    _decline_down_when_failed_to_fetch_status_hint: str
     decline_down_for_dirty_controller_hint: str
-    check_cluster_name_hint: str
+    _check_cluster_name_hint: str
     default_hint_if_non_existent: str
     connection_error_hint: str
+
+    @property
+    def cluster_name(self) -> str:
+        """Returns the cluster name that exists."""
+        for candidate_name in self.candidate_cluster_names:
+            record = global_user_state.get_cluster_from_name(candidate_name)
+            if record is not None:
+                return candidate_name
+        return self.candidate_cluster_names[0]
+
+    @property
+    def decline_down_when_failed_to_fetch_status_hint(self) -> str:
+        return self._decline_down_when_failed_to_fetch_status_hint.format(
+            cluster_name=self.cluster_name)
+
+    @property
+    def check_cluster_name_hint(self) -> str:
+        return self._check_cluster_name_hint.format(
+            cluster_name=self.cluster_name)
 
 
 class Controllers(enum.Enum):
@@ -64,7 +85,9 @@ class Controllers(enum.Enum):
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
     JOB_CONTROLLER = _ControllerSpec(
         name='managed job controller',
-        cluster_name=utils.JOB_CONTROLLER_NAME,
+        candidate_cluster_names=[
+            utils.JOB_CONTROLLER_NAME, utils.LEGACY_JOB_CONTROLLER_NAME
+        ],
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
             f'{colorama.Style.BRIGHT}sky job queue{colorama.Style.RESET_ALL}'),
@@ -72,40 +95,40 @@ class Controllers(enum.Enum):
             'Cancelling the job controller\'s jobs is not allowed.\nTo cancel '
             f'managed jobs, use: {colorama.Style.BRIGHT}sky job cancel <spot '
             f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
-        decline_down_when_failed_to_fetch_status_hint=(
+        _decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the job controller while '
             'it is in INIT state is not supported (this means a job launch '
             'is in progress or the previous launch failed), as we cannot '
             'guarantee that all the managed jobs are finished. Please wait '
             'until the job controller is UP or fix it with '
             f'{colorama.Style.BRIGHT}sky start '
-            f'{utils.JOB_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.'),
+            '{cluster_name}'
+            f'{colorama.Style.RESET_ALL}.'),
         decline_down_for_dirty_controller_hint=(
             f'{colorama.Fore.RED}In-progress managed jobs found. To avoid '
             f'resource leakage, cancel all jobs first: {colorama.Style.BRIGHT}'
             f'sky job cancel -a{colorama.Style.RESET_ALL}\n'),
-        check_cluster_name_hint=(
-            f'Cluster {utils.JOB_CONTROLLER_NAME} is reserved for '
-            'managed job controller.'),
+        _check_cluster_name_hint=('Cluster {cluster_name} is reserved for '
+                                  'managed job controller.'),
         default_hint_if_non_existent='No in-progress managed jobs.',
         connection_error_hint=(
             'Failed to connect to job controller, please try again later.'))
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         name='serve controller',
-        cluster_name=serve_utils.SKY_SERVE_CONTROLLER_NAME,
+        candidate_cluster_names=[serve_utils.SKY_SERVE_CONTROLLER_NAME],
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status -a{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
-        decline_down_when_failed_to_fetch_status_hint=(
+        _decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the sky serve controller '
             'while it is in INIT state is not supported (this means a sky '
             'serve up is in progress or the previous launch failed), as we '
             'cannot guarantee that all the services are terminated. Please '
             'wait until the sky serve controller is UP or fix it with '
             f'{colorama.Style.BRIGHT}sky start '
-            f'{serve_utils.SKY_SERVE_CONTROLLER_NAME}'
+            '{cluster_name}'
             f'{colorama.Style.RESET_ALL}.'),
         decline_down_for_dirty_controller_hint=(
             f'{colorama.Fore.RED}Tearing down the sky serve controller is not '
@@ -113,9 +136,8 @@ class Controllers(enum.Enum):
             '{service_names}. Please terminate the services first with '
             f'{colorama.Style.BRIGHT}sky serve down -a'
             f'{colorama.Style.RESET_ALL}.'),
-        check_cluster_name_hint=(
-            f'Cluster {serve_utils.SKY_SERVE_CONTROLLER_NAME} is reserved for '
-            'sky serve controller.'),
+        _check_cluster_name_hint=('Cluster {cluster_name} is reserved for '
+                                  'sky serve controller.'),
         default_hint_if_non_existent='No live services.',
         connection_error_hint=(
             'Failed to connect to serve controller, please try again later.'))
@@ -129,7 +151,7 @@ class Controllers(enum.Enum):
             Otherwise, returns None.
         """
         for controller in cls:
-            if controller.value.cluster_name == name:
+            if name in controller.value.candidate_cluster_names:
                 return controller
         return None
 
@@ -286,6 +308,12 @@ def get_controller_resources(
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
+        elif controller_type == 'managed_job':
+            # TODO(zhwu): Backward compatibility for the old config for managed
+            # spot controller.
+            controller_resources_config_copied.update(
+                skypilot_config.get_nested(('spot', 'controller', 'resources'),
+                                           {}))
 
     try:
         controller_resources = resources.Resources.from_yaml_config(

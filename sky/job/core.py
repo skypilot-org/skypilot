@@ -78,12 +78,13 @@ def launch(
                                      mode='w',
                                      delete=False) as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
-        controller_name = utils.JOB_CONTROLLER_NAME
+        controller_type = controller_utils.Controllers.JOB_CONTROLLER
+        controller_name = controller_type.value.cluster_name
         prefix = constants.JOB_TASK_YAML_PREFIX
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         controller_resources = (controller_utils.get_controller_resources(
-            controller_type='spot',
+            controller_type='managed_job',
             controller_resources_config=constants.CONTROLLER_RESOURCES))
 
         vars_to_fill = {
@@ -98,7 +99,7 @@ def launch(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
-                'spot',
+                'managed_job',
                 remote_user_config_path=remote_user_config_path,
             ),
         }

@@ -8,12 +8,12 @@ from sky.utils import controller_utils
 
 @pytest.mark.parametrize(
     ('controller_type', 'custom_controller_resources_config', 'expected'), [
-        ('spot', {}, {
+        ('managed_job', {}, {
             'cpus': '8+',
             'memory': '3x',
             'disk_size': 50
         }),
-        ('spot', {
+        ('managed_job', {
             'cpus': '4+',
             'disk_size': 100
         }, {
