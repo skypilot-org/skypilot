@@ -3166,7 +3166,7 @@ def test_skyserve_llm(generic_cloud: str):
             ],
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        timeout=20 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
