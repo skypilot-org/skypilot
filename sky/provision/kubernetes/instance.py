@@ -169,7 +169,7 @@ def _wait_for_pods_to_schedule(namespace, new_nodes, timeout: int):
     """
     start_time = time.time()
 
-    def _evaluate_timeout():
+    def _evaluate_timeout() -> bool:
         # If timeout is set to zero, retry indefinitely.
         if timeout == 0:
             return True

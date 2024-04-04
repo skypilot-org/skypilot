@@ -43,7 +43,7 @@ class Kubernetes(clouds.Cloud):
     # Note that this timeout includes time taken by the Kubernetes scheduler
     # itself, which can be upto 2-3 seconds.
     # For non-autoscaling clusters, we conservatively set this to 10s.
-    TIMEOUT = skypilot_config.get_nested(['kubernetes', 'provision_timeout'],
+    timeout = skypilot_config.get_nested(['kubernetes', 'provision_timeout'],
                                          10)
 
     _DEFAULT_NUM_VCPUS = 2
@@ -265,7 +265,7 @@ class Kubernetes(clouds.Cloud):
             'cpus': str(cpus),
             'memory': str(mem),
             'accelerator_count': str(acc_count),
-            'timeout': str(self.TIMEOUT),
+            'timeout': str(self.timeout),
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
