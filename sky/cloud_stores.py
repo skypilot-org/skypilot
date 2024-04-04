@@ -157,8 +157,8 @@ class GcsCloudStorage(CloudStorage):
 class AzureCloudStorage(CloudStorage):
     """Azure Blob Storage."""
 
-    # Installing latest available version for consistent behavior
     # Installation reference: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux?pivots=apt#option-2-step-by-step-installation-instructions # pylint: disable=line-too-long
+    _AZ_CLI_VERSION = '2.58.0'
     _GET_AZCLI = [
         'az --version >/dev/null 2>&1 || '
         '(sudo apt-get update; '
@@ -175,7 +175,8 @@ class AzureCloudStorage(CloudStorage):
         'https://packages.microsoft.com/repos/azure-cli/ $AZ_DIST main" | '
         'sudo tee /etc/apt/sources.list.d/azure-cli.list; '
         'sudo apt-get update; '
-        'sudo apt-get install azure-cli -y)'
+        f'AZ_VER={_AZ_CLI_VERSION}; '
+        'sudo apt-get install azure-cli=$AZ_VER-1~$AZ_DIST -y)'
     ]
 
     def is_directory(self, url: str) -> bool:
