@@ -6,8 +6,8 @@ import copy
 import io
 import multiprocessing.pool
 import os
-import subprocess
 import shlex
+import subprocess
 import sys
 import tempfile
 import textwrap

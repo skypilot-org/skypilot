@@ -4536,6 +4536,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'spot': int(handle.launched_resources.use_spot),
             })
         }
+
     def _get_task_env_vars(self, task: task_lib.Task, job_id: int,
                            handle: CloudVmRayResourceHandle) -> Dict[str, str]:
         """Returns the environment variables for the task."""
