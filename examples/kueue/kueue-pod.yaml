@@ -1,0 +1,19 @@
+# Example pod for testing
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kueue-pod
+  labels:
+    kueue.x-k8s.io/queue-name: user-queue
+spec:
+  containers:
+    - name: sleep
+      image: busybox
+      command:
+        - sleep
+      args:
+        - 600s
+      resources:
+        requests:
+          cpu: 3
+  restartPolicy: OnFailure
