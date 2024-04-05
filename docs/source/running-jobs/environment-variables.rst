@@ -117,7 +117,7 @@ Environment variables for ``setup``
        Refer to the description in the :ref:`environment variables for run <env-vars-for-run>`.
      - sky-2023-07-06-21-18-31-563597_myclus_1
      
-       For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-1
+       For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
