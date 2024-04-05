@@ -44,7 +44,7 @@ We can launch it with the following:
 .. code-block:: yaml
 
   # bert_qa.yaml
-  name: bert_qa
+  name: bert-qa
 
   resources:
     accelerators: V100:1
@@ -121,7 +121,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
   :emphasize-lines: 12-15,41-44
 
   # bert_qa.yaml
-  name: bert_qa
+  name: bert-qa
 
   resources:
     accelerators: V100:1
