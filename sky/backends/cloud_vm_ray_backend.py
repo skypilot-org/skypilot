@@ -4527,6 +4527,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 storage_metadata, sync_on_reconstruction=False)
         return storage_mounts
 
+    def _skypilot_predefined_envs(
+            self, handle: CloudVmRayResourceHandle) -> Dict[str, str]:
+        """Returns the SkyPilot predefined environment variables."""
+        return {
+            'SKYPILOT_CLUSTER_INFO': json.dumps({
+                'cluster_name': handle.cluster_name,
+                'cloud': handle.launched_resources.cloud,
+                'region': handle.launched_resources.region,
+                'zone': handle.launched_resources.zone,
+            })
+        }
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                detach_run: bool) -> None:
@@ -4545,7 +4557,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stable_cluster_internal_ips=internal_ips,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
-            envs=task.envs,
+            envs=dict(**task.envs, **self._skypilot_predefined_envs(handle)),
         )
 
         if callable(task.run):
@@ -4564,7 +4576,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         command_for_node = task.run if isinstance(task.run, str) else None
         codegen.add_ray_task(
             bash_script=command_for_node,
-            env_vars=task.envs,
+            env_vars=dict(**task.envs,
+                          **self._skypilot_predefined_envs(handle)),
             task_name=task.name,
             job_run_id=job_run_id,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
@@ -4602,7 +4615,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stable_cluster_internal_ips=internal_ips,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
-            envs=task.envs)
+            envs=dict(**task.envs, **self._skypilot_predefined_envs(handle)))
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
