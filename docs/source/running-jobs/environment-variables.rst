@@ -111,13 +111,13 @@ Environment variables for ``setup``
    * - ``SKYPILOT_TASK_ID``
      - A unique ID assigned to each task.
        
-       Please refer to the description in the :ref:`environment variables for run <env-vars-for-run>`.
-
        This environment variable is available only when the task is submitted 
        with :code:`sky launch --detach-setup`, or run as a managed spot job.
+       
+       Refer to the description in the :ref:`environment variables for run <env-vars-for-run>`.
      - sky-2023-07-06-21-18-31-563597_myclus_1
      
-       managed spot job: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-1
+       For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-1
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
