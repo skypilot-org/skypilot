@@ -4528,7 +4528,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return {
             'SKYPILOT_CLUSTER_INFO': json.dumps({
                 'cluster_name': handle.cluster_name,
-                'cloud': handle.launched_resources.cloud,
+                'num_nodes': handle.launched_nodes,
+                'cloud': str(handle.launched_resources.cloud),
                 'region': handle.launched_resources.region,
                 'zone': handle.launched_resources.zone,
                 'spot': int(handle.launched_resources.use_spot),
