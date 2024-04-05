@@ -217,6 +217,16 @@ class RequestRateAutoscaler(Autoscaler):
         """
         self.request_timestamps.extend(
             request_aggregator_info.get('timestamps', []))
+
+        # In the LB-HA framework, multiple load balancer instances will send request info
+        # to the controller. We need to sort the timestamps to calculate the QPS correctly.
+        # This is an example:
+        #     Load balancer 1 sends timestamps: [1, 4, 7, 10, 13]
+        #     Load balancer 2 sends timestamps: [2, 5, 8, 11, 14]
+        #     Load balancer 3 sends timestamps: [3, 6, 9, 12, 15]
+        # The controller will receive timestamps: [1,4,7,10,13,2,5,8,11,14,3,6,9,12,15]
+        self.request_timestamps.sort()
+
         current_time = time.time()
         index = bisect.bisect_left(self.request_timestamps,
                                    current_time - self.qps_window_size)
