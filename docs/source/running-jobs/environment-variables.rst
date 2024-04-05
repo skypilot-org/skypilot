@@ -148,15 +148,15 @@ Environment variables for ``run``
        more :ref:`here <dist-jobs>`.
      - 0
    * - ``SKYPILOT_TASK_ID``
-     - A unique ID assigned to each task.
+     - A unique ID assigned to each task in the format ``sky-<timestamp>_<cluster-name>_<task-id>``.
        Useful for logging purposes: e.g., use a unique output path on the cluster; pass to Weights & Biases; etc.
        Each task's logs are stored on the cluster at ``~/sky_logs/${SKYPILOT_TASK_ID%%_*}/tasks/*.log``.
 
        If a task is run as a :ref:`managed spot job <spot-jobs>`, then all
-       recoveries of that job will have the same ID value. Read more :ref:`here <spot-jobs-end-to-end>`.
+       recoveries of that job will have the same ID value. The ID is in the format ``sky-managed-<timestamp>_<job-name>(_<task-name>)_<job-id>-<task-id>``, where ``<task-name>`` will appear when a pipeline is used, i.e., more than one task in a job. Read more :ref:`here <spot-jobs-end-to-end>`.
      - sky-2023-07-06-21-18-31-563597_myclus_1
      
-       For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-1
+       For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
