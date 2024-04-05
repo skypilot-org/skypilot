@@ -76,7 +76,7 @@ class Autoscaler:
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
         # The latest_version_ever_ready should be smaller than the
-        # latest_version, so we can fail early if the inital version got
+        # latest_version, so we can fail early if the initial version got
         # unrecoverable failure.
         self.latest_version_ever_ready: int = self.latest_version - 1
         self.update_mode = serve_utils.DEFAULT_UPDATE_MODE
