@@ -185,7 +185,7 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    del provider_config, worker_only  # unused
+    del provider_config  # unused
     client = utils.PaperspaceCloudClient()
     all_instances = _filter_instances(cluster_name_on_cloud, [
         'ready', 'serviceready', 'upgrading', 'provisioning', 'starting',

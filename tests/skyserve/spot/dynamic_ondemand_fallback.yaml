@@ -6,6 +6,8 @@ service:
     min_replicas: 2
     max_replicas: 3
     dynamic_ondemand_fallback: true
+    # Use a large qps per replica to avoid scale up for testing purpose.
+    target_qps_per_replica: 10000
 
 resources:
   ports: 8080

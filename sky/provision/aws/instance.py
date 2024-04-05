@@ -588,6 +588,8 @@ def terminate_instances(
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     sg_name = provider_config['security_group']['GroupName']
+    managed_by_skypilot = provider_config['security_group'].get(
+        'ManagedBySkyPilot', True)
     ec2 = _default_ec2_resource(region)
     filters = [
         {
@@ -608,9 +610,11 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances.terminate()
-    if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
-        # Using default AWS SG. We don't need to wait for the
-        # termination of the instances.
+    if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
+            not managed_by_skypilot):
+        # Using default AWS SG or user specified security group. We don't need
+        # to wait for the termination of the instances, as we do not need to
+        # delete the SG.
         return
     # If ports are specified, we need to delete the newly created Security
     # Group. Here we wait for all instances to be terminated, since the
@@ -755,9 +759,13 @@ def cleanup_ports(
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
-    if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
-        # Using default AWS SG. We only want to delete the SG that is dedicated
-        # to this cluster (i.e., this cluster have opened some ports).
+    managed_by_skypilot = provider_config['security_group'].get(
+        'ManagedBySkyPilot', True)
+    if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
+            not managed_by_skypilot):
+        # 1) Using default AWS SG or 2) the SG is specified by the user.
+        # We only want to delete the SG that is dedicated to this cluster (i.e.,
+        # this cluster have opened some ports).
         return
     sg = _get_sg_from_name(ec2, sg_name)
     if sg is None:

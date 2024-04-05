@@ -12,15 +12,21 @@ import subprocess
 import sys
 import textwrap
 import traceback
+import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
-import pandas as pd
 
 from sky import exceptions
 from sky.adaptors import aws
+from sky.adaptors import common as adaptors_common
 from sky.utils import log_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import pandas as pd
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
 # Enable most of the regions. Each user's account may have a subset of these
 # enabled; this is ok because we take the intersection of the list here with
@@ -98,7 +104,7 @@ def get_enabled_regions() -> Set[str]:
     return regions_enabled
 
 
-def _get_instance_types(region: str) -> pd.DataFrame:
+def _get_instance_types(region: str) -> 'pd.DataFrame':
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_types')
     items = []
@@ -109,7 +115,7 @@ def _get_instance_types(region: str) -> pd.DataFrame:
     return pd.DataFrame(items)
 
 
-def _get_instance_type_offerings(region: str) -> pd.DataFrame:
+def _get_instance_type_offerings(region: str) -> 'pd.DataFrame':
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_type_offerings')
     items = []
@@ -122,7 +128,7 @@ def _get_instance_type_offerings(region: str) -> pd.DataFrame:
         columns={'Location': 'AvailabilityZoneName'})
 
 
-def _get_availability_zones(region: str) -> pd.DataFrame:
+def _get_availability_zones(region: str) -> 'pd.DataFrame':
     client = aws.client('ec2', region_name=region)
     zones = []
     try:
@@ -156,7 +162,7 @@ def _get_availability_zones(region: str) -> pd.DataFrame:
     return pd.DataFrame(zones)
 
 
-def _get_pricing_table(region: str) -> pd.DataFrame:
+def _get_pricing_table(region: str) -> 'pd.DataFrame':
     print(f'{region} downloading pricing table')
     url = PRICING_TABLE_URL_FMT.format(region=region)
     df = pd.read_csv(url, skiprows=5, low_memory=False)
@@ -174,7 +180,7 @@ def _get_pricing_table(region: str) -> pd.DataFrame:
               ]]
 
 
-def _get_spot_pricing_table(region: str) -> pd.DataFrame:
+def _get_spot_pricing_table(region: str) -> 'pd.DataFrame':
     """Get spot pricing table for a region.
 
     Example output:
@@ -203,8 +209,8 @@ def _get_spot_pricing_table(region: str) -> pd.DataFrame:
     return df
 
 
-def _patch_p4de(region: str, df: pd.DataFrame,
-                pricing_df: pd.DataFrame) -> pd.DataFrame:
+def _patch_p4de(region: str, df: 'pd.DataFrame',
+                pricing_df: 'pd.DataFrame') -> 'pd.DataFrame':
     # Hardcoded patch for p4de.24xlarge, as our credentials doesn't have access
     # to the instance type.
     # Columns:
@@ -232,7 +238,7 @@ def _patch_p4de(region: str, df: pd.DataFrame,
     return df
 
 
-def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
+def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
     try:
         # Fetch the zone info first to make sure the account has access to the
         # region.
@@ -341,7 +347,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     return df
 
 
-def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
+def get_all_regions_instance_types_df(regions: Set[str]) -> 'pd.DataFrame':
     with mp_pool.Pool() as pool:
         df_or_regions = pool.map(_get_instance_types_df, regions)
     new_dfs = []
@@ -413,7 +419,7 @@ def _get_image_row(
     return tag, region, 'ubuntu', ubuntu_version, image_id, date
 
 
-def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
+def get_all_regions_images_df(regions: Set[str]) -> 'pd.DataFrame':
     image_metas = [
         (r, *i) for r, i in itertools.product(regions, _GPU_UBUNTU_DATE_PYTORCH)
     ]
@@ -426,7 +432,7 @@ def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
     return result_df
 
 
-def fetch_availability_zone_mappings() -> pd.DataFrame:
+def fetch_availability_zone_mappings() -> 'pd.DataFrame':
     """Fetch the availability zone mappings from ID to Name.
 
     Example output:
@@ -504,7 +510,7 @@ if __name__ == '__main__':
         raise RuntimeError('The following regions are not enabled: '
                            f'{set(ALL_REGIONS) - user_regions}')
 
-    def _check_regions_integrity(df: pd.DataFrame, name: str):
+    def _check_regions_integrity(df: 'pd.DataFrame', name: str):
         # Check whether the fetched regions match the requested regions to
         # guard against network issues or glitches in the AWS API.
         fetched_regions = set(df['Region'].unique())

@@ -630,7 +630,10 @@ def get_config_schema():
                             'required': ['namespace']
                         }]
                     }
-                }
+                },
+                'provision_timeout': {
+                    'type': 'integer',
+                },
             }
         },
         'oci': {
