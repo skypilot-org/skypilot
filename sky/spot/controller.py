@@ -62,7 +62,7 @@ class SpotController:
         job_id_env_vars = []
         for i in range(len(self._dag.tasks)):
             task_name = self._dag_name
-            if len(self._dag.name) > 1:
+            if len(self._dag.tasks) > 1:
                 task_name = f'{self._dag_name}_{task_name}'
             job_id_env_var = common_utils.get_global_job_id(
                 self._backend.run_timestamp,
