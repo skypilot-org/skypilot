@@ -4536,6 +4536,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'cloud': handle.launched_resources.cloud,
                 'region': handle.launched_resources.region,
                 'zone': handle.launched_resources.zone,
+                'spot': int(handle.launched_resources.use_spot),
             })
         }
 
