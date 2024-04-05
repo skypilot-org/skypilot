@@ -61,7 +61,9 @@ class SpotController:
         #   Example value: sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-1
         job_id_env_vars = []
         for i in range(len(self._dag.tasks)):
-            task_name = self._dag.tasks[i].name
+            task_name = self._dag_name
+            if len(self._dag.name) > 1:
+                task_name = f'{self._dag_name}_{task_name}'
             job_id_env_var = common_utils.get_global_job_id(
                 self._backend.run_timestamp,
                 f'{task_name}_spot',
