@@ -200,12 +200,16 @@ def cluster_name_in_hint(cluster_name: str, cluster_name_on_cloud: str) -> str:
 def get_global_job_id(job_timestamp: str,
                       cluster_name: Optional[str],
                       job_id: str,
-                      task_id: Optional[int] = None) -> str:
+                      task_id: Optional[int] = None,
+                      is_managed_job: bool = False) -> str:
     """Returns a unique job run id for each job run.
 
     A job run is defined as the lifetime of a job that has been launched.
     """
-    global_job_id = f'{job_timestamp}_{cluster_name}_id-{job_id}'
+    managed_job_str = '_managed' if is_managed_job else ''
+    _, sep, timestamp = job_timestamp.partition('sky-')
+    job_timestamp = f'{sep}{managed_job_str}{timestamp}'
+    global_job_id = f'{job_timestamp}_{cluster_name}_{job_id}'
     if task_id is not None:
         global_job_id += f'-{task_id}'
     return global_job_id

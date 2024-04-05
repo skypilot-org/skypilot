@@ -108,11 +108,23 @@ Environment variables for ``setup``
    * - ``SKYPILOT_SETUP_NODE_IPS``
      - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
      - 1.2.3.4
+    * - ``SKYPILOT_TASK_ID``
+     - A unique ID assigned to each task.
+       
+       Please refer to the description in the :ref:`environment variables for run <env-vars-for-run>`.
+
+       This environment variable is available only when the task is submitted 
+       with :code:`sky launch --detach-setup`, or run as a managed spot job.
+     - sky-2023-07-06-21-18-31-563597_myclus_1
+     
+       managed spot job: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-1
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
 
 Since setup commands always run on all nodes of a cluster, SkyPilot ensures both of these environment variables (the ranks and the IP list) never change across multiple setups on the same cluster.
+
+.. _env-vars-for-run:
 
 Environment variables for ``run``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -142,9 +154,9 @@ Environment variables for ``run``
 
        If a task is run as a :ref:`managed spot job <spot-jobs>`, then all
        recoveries of that job will have the same ID value. Read more :ref:`here <spot-jobs-end-to-end>`.
-     - sky-2023-07-06-21-18-31-563597_myclus_id-1
+     - sky-2023-07-06-21-18-31-563597_myclus_1
      
-       managed spot job: sky-2023-07-06-21-18-31-563597_my-job-name_spot_id-1-1
+       managed spot job: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-1
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
