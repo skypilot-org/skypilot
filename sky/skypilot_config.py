@@ -129,7 +129,7 @@ def _try_load_config() -> None:
     global _dict, _loaded_config_path
     config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if config_path_via_env_var is not None:
-        config_path = config_path_via_env_var
+        config_path = os.path.expanduser(config_path_via_env_var)
         if not os.path.exists(config_path):
             with ux_utils.print_exception_no_traceback():
                 raise FileNotFoundError(
