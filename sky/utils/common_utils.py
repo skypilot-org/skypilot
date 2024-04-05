@@ -206,7 +206,7 @@ def get_global_job_id(job_timestamp: str,
 
     A job run is defined as the lifetime of a job that has been launched.
     """
-    managed_job_str = '-managed' if is_managed_job else ''
+    managed_job_str = 'managed-' if is_managed_job else ''
     _, sep, timestamp = job_timestamp.partition('sky-')
     job_timestamp = f'{sep}{managed_job_str}{timestamp}'
     global_job_id = f'{job_timestamp}_{cluster_name}_{job_id}'
