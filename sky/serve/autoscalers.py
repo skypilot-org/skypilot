@@ -402,14 +402,14 @@ class RequestRateAutoscaler(Autoscaler):
                     latest_nonterminal_replicas.append(info)
                     if info.is_ready:
                         self.latest_version_ever_ready = self.latest_version
-        for info in latest_replicas:
-            if (info.status_property.unrecoverable_failure() and
-                    self.latest_version_ever_ready < self.latest_version):
-                # Stop scaling if one of replica of the latest version
-                # failed, it is likely that a fatal error happens to the
-                # user application and may lead to a infinte termination
-                # and restart.
-                return []
+        if self.latest_version_ever_ready < self.latest_version:
+            for info in latest_replicas:
+                if info.status_property.unrecoverable_failure():
+                    # Stop scaling if one of replica of the latest version
+                    # failed, it is likely that a fatal error happens to the
+                    # user application and may lead to a infinte termination
+                    # and restart.
+                    return []
 
         self._set_target_num_replica_with_hysteresis()
 
