@@ -108,7 +108,7 @@ Environment variables for ``setup``
    * - ``SKYPILOT_SETUP_NODE_IPS``
      - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
      - 1.2.3.4
-    * - ``SKYPILOT_TASK_ID``
+   * - ``SKYPILOT_TASK_ID``
      - A unique ID assigned to each task.
        
        Please refer to the description in the :ref:`environment variables for run <env-vars-for-run>`.
