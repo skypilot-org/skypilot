@@ -120,7 +120,7 @@ Environment variables for ``setup``
        For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
    * - ``SKYPILOT_CLUSTER_INFO``
      - A JSON string containing information about the cluster.
-     - {"cluster_name": "myclus", "num_nodes": 2, "cloud": "GCP", "region": "us-central1", "zone": "us-central1-a", "spot": 1}
+     - {cluster_name: myclus, num_nodes: 2, cloud: GCP, region: us-central1, zone: us-central1-a, spot: 1}
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
@@ -162,7 +162,7 @@ Environment variables for ``run``
        For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
    * - ``SKYPILOT_CLUSTER_INFO``
      - A JSON string containing information about the cluster.
-     - {"cluster_name": "myclus", "num_nodes": 2, "cloud": "GCP", "region": "us-central1", "zone": "us-central1-a", "spot": 1}
+     - {cluster_name: myclus, num_nodes: 2, cloud: GCP, region: us-central1, zone: us-central1-a, spot: 1}
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1

@@ -234,9 +234,10 @@ class RayCodeGen:
             import io
             import os
             import pathlib
-            import sys
             import selectors
+            import shlex
             import subprocess
+            import sys
             import tempfile
             import textwrap
             import time
