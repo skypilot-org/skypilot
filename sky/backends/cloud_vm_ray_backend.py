@@ -4527,10 +4527,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         env_vars = task.envs.copy()
         # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
         # already set by the controller.
-        env_vars[constants.TASK_ID_ENV_VAR] = common_utils.get_global_job_id(
-            self.run_timestamp,
-            cluster_name=handle.cluster_name,
-            job_id=str(job_id))
+        if constants.TASK_ID_ENV_VAR not in env_vars:
+            env_vars[constants.TASK_ID_ENV_VAR] = common_utils.get_global_job_id(
+                self.run_timestamp,
+                cluster_name=handle.cluster_name,
+                job_id=str(job_id))
         return env_vars
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
