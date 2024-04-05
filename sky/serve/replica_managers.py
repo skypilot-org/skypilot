@@ -278,7 +278,7 @@ class ReplicaStatusProperty:
                 # For replica with a failed sky.down, we cannot restart it since
                 # otherwise we will have a resource leak.
                 return False
-            elif self.first_ready_time < 0:
+            else:
                 # If the initial delay exceeded, it is likely the service is not
                 # recoverable.
                 return True
