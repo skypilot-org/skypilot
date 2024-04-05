@@ -140,6 +140,7 @@ sky job launch -n job2 --cloud kubernetes --cpus 8 --down -- sleep 1200
 
 Now, if you run `sky job status`, you will see that the `low-priority` job is preempted by the `high-priority` job.
 
+<!-- source https://docs.google.com/drawings/d/18tb04cJEIyF5afKxAPL2XKlHXIc2lLYR-PXOa1ImDnw/edit?usp=sharing -->
 <p align="center">
   <img src="https://i.imgur.com/xbEcAWH.png" alt="Preemption example" width="600"/>
 </p>
