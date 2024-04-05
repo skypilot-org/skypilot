@@ -156,7 +156,7 @@ Environment variables for ``run``
        recoveries of that job will have the same ID value. Read more :ref:`here <spot-jobs-end-to-end>`.
      - sky-2023-07-06-21-18-31-563597_myclus_1
      
-       managed spot job: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-1
+       For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-1
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
