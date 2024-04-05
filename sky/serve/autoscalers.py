@@ -76,7 +76,7 @@ class Autoscaler:
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
         # The latest_version_ever_ready should be smaller than the
-        # latest_version, so we can fail early if the inital version got
+        # latest_version, so we can fail early if the initial version got
         # unrecoverable failure.
         self.latest_version_ever_ready: int = self.latest_version - 1
         self.update_mode = serve_utils.DEFAULT_UPDATE_MODE
@@ -402,14 +402,14 @@ class RequestRateAutoscaler(Autoscaler):
                     latest_nonterminal_replicas.append(info)
                     if info.is_ready:
                         self.latest_version_ever_ready = self.latest_version
-        for info in latest_replicas:
-            if (info.status_property.unrecoverable_failure() and
-                    self.latest_version_ever_ready < self.latest_version):
-                # Stop scaling if one of replica of the latest version
-                # failed, it is likely that a fatal error happens to the
-                # user application and may lead to a infinte termination
-                # and restart.
-                return []
+        if self.latest_version_ever_ready < self.latest_version:
+            for info in latest_replicas:
+                if info.status_property.unrecoverable_failure():
+                    # Stop scaling if one of replica of the latest version
+                    # failed, it is likely that a fatal error happens to the
+                    # user application and may lead to a infinte termination
+                    # and restart.
+                    return []
 
         self._set_target_num_replica_with_hysteresis()
 
