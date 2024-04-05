@@ -372,7 +372,7 @@ To submit the pipeline, the same command :code:`sky spot launch` is used. The pi
 .. note::
 
   The :code:`$SKYPILOT_TASK_ID` environment variable is also available in the :code:`run` section of each task. It is unique for each task in the pipeline.
-  For the :code:`eval` task, the :code:`$SKYPILOT_TASK_ID` will be:
+  For example, the :code:`$SKYPILOT_TASK_ID` for the :code:`eval` task above is:
   :code:`sky-2022-10-06-05-17-09-750781_pipeline_eval_spot_id-8-1`.
 
 .. code-block:: console
