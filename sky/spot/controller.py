@@ -68,7 +68,7 @@ class SpotController:
                 self._backend.run_timestamp,
                 f'{task_name}_spot',
                 str(self._job_id),
-                task_id=i)
+                task_id=i+1)
             job_id_env_vars.append(job_id_env_var)
 
         for i, task in enumerate(self._dag.tasks):
