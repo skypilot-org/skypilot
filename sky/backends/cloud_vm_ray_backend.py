@@ -4521,13 +4521,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 storage_metadata, sync_on_reconstruction=False)
         return storage_mounts
 
-    def _get_task_env_vars(self, task: task_lib.Task, job_id: int, handle: CloudVmRayResourceHandle) -> Dict[str, str]:
+    def _get_task_env_vars(self, task: task_lib.Task, job_id: int,
+                           handle: CloudVmRayResourceHandle) -> Dict[str, str]:
         """Returns the environment variables for the task."""
         env_vars = task.envs.copy()
         # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
         # already set by the controller.
         env_vars[constants.TASK_ID_ENV_VAR] = common_utils.get_global_job_id(
-            self.run_timestamp, cluster_name=handle.cluster_name, job_id=str(job_id))
+            self.run_timestamp,
+            cluster_name=handle.cluster_name,
+            job_id=str(job_id))
         return env_vars
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
@@ -4557,7 +4560,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
-
 
         command_for_node = task.run if isinstance(task.run, str) else None
         codegen.add_ray_task(
@@ -4606,7 +4608,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
-
 
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
