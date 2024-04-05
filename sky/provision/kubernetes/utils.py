@@ -552,7 +552,7 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
             mode is used for remote_identity in ~/.sky/config.yaml.
         str: Error message if exec-based authentication is used, None otherwise
     """
-    k8s = kubernetes.get_kubernetes()
+    k8s = kubernetes.kubernetes
     try:
         k8s.config.load_kube_config()
     except kubernetes.config_exception():
