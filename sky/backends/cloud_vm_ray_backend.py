@@ -326,7 +326,7 @@ class RayCodeGen:
         stable_cluster_internal_ips: List[str],
         setup_cmd: Optional[str] = None,
         setup_log_path: Optional[str] = None,
-        envs: Optional[Dict[str, str]] = None,
+        env_vars: Optional[Dict[str, str]] = None,
     ) -> None:
         """Create the gang scheduling placement group for a Task.
 
@@ -415,7 +415,7 @@ class RayCodeGen:
                     .remote(
                         setup_cmd,
                         os.path.expanduser({setup_log_path!r}),
-                        env_vars={envs!r},
+                        env_vars={env_vars!r},
                         stream_logs=True,
                         with_ray=True,
                     ) for i in range(total_num_nodes)]
@@ -484,7 +484,6 @@ class RayCodeGen:
     def add_ray_task(self,
                      bash_script: Optional[str],
                      task_name: Optional[str],
-                     job_run_id: Optional[str],
                      ray_resources_dict: Dict[str, float],
                      log_dir: str,
                      env_vars: Optional[Dict[str, str]] = None,
@@ -538,11 +537,6 @@ class RayCodeGen:
         if env_vars is not None:
             sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
                                          for k, v in env_vars.items())
-        if job_run_id is not None:
-            sky_env_vars_dict_str += [
-                f'sky_env_vars_dict[{constants.TASK_ID_ENV_VAR!r}]'
-                f' = {job_run_id!r}',
-            ]
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
         options_str = ', '.join(options)
@@ -4527,6 +4521,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 storage_metadata, sync_on_reconstruction=False)
         return storage_mounts
 
+    def _get_task_env_vars(self, task: task_lib.Task, job_id: int,
+                           handle: CloudVmRayResourceHandle) -> Dict[str, str]:
+        """Returns the environment variables for the task."""
+        env_vars = task.envs.copy()
+        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
+        # already set by the controller.
+        if constants.TASK_ID_ENV_VAR not in env_vars:
+            env_vars[
+                constants.TASK_ID_ENV_VAR] = common_utils.get_global_job_id(
+                    self.run_timestamp,
+                    cluster_name=handle.cluster_name,
+                    job_id=str(job_id))
+        return env_vars
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                detach_run: bool) -> None:
@@ -4537,6 +4545,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
+        task_env_vars = self._get_task_env_vars(task, job_id, handle)
+
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
         codegen.add_gang_scheduling_placement_group_and_setup(
@@ -4545,7 +4555,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stable_cluster_internal_ips=internal_ips,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
-            envs=task.envs,
+            env_vars=task_env_vars,
         )
 
         if callable(task.run):
@@ -4553,20 +4563,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
-        # already set by the controller.
-        job_run_id = task.envs.get(
-            constants.TASK_ID_ENV_VAR,
-            common_utils.get_global_job_id(self.run_timestamp,
-                                           cluster_name=handle.cluster_name,
-                                           job_id=str(job_id)))
-
         command_for_node = task.run if isinstance(task.run, str) else None
         codegen.add_ray_task(
             bash_script=command_for_node,
-            env_vars=task.envs,
+            env_vars=task_env_vars,
             task_name=task.name,
-            job_run_id=job_run_id,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
             log_dir=log_dir)
 
@@ -4593,6 +4594,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
+        task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
@@ -4602,20 +4604,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stable_cluster_internal_ips=internal_ips,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
-            envs=task.envs)
+            env_vars=task_env_vars)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
-
-        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
-        # already set by the controller.
-        job_run_id = task.envs.get(
-            constants.TASK_ID_ENV_VAR,
-            common_utils.get_global_job_id(self.run_timestamp,
-                                           cluster_name=handle.cluster_name,
-                                           job_id=str(job_id)))
 
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
@@ -4626,9 +4620,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # the corresponding node, represented by private IPs.
             codegen.add_ray_task(
                 bash_script=command_for_node,
-                env_vars=task.envs,
+                env_vars=task_env_vars,
                 task_name=task.name,
-                job_run_id=job_run_id,
                 ray_resources_dict=backend_utils.get_task_demands_dict(task),
                 log_dir=log_dir,
                 gang_scheduling_id=i)
