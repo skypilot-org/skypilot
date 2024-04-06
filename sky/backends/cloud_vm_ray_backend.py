@@ -4526,7 +4526,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _skypilot_predefined_env_vars(
             self, handle: CloudVmRayResourceHandle) -> Dict[str, str]:
         """Returns the SkyPilot predefined environment variables.
-        
+
         TODO(zhwu): Check if a single variable for all the cluster info is more
         desirable or separate variables for each piece of info.
         NOTE: In order to avoid complication in a potential future separation
