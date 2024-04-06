@@ -3017,7 +3017,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         def _setup_node(node_id: int) -> None:
             setup_envs = task.envs.copy()
-            setup_envs.update(self._skypilot_predefined_envs(handle))
+            setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
             runner = command_runner.SSHCommandRunner(ip_list[node_id],
@@ -4523,17 +4523,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 storage_metadata, sync_on_reconstruction=False)
         return storage_mounts
 
-    def _skypilot_predefined_envs(
+    def _skypilot_predefined_env_vars(
             self, handle: CloudVmRayResourceHandle) -> Dict[str, str]:
-        """Returns the SkyPilot predefined environment variables."""
+        """Returns the SkyPilot predefined environment variables.
+        
+        TODO(zhwu): Check if a single variable for all the cluster info is more
+        desirable or separate variables for each piece of info.
+        NOTE: In order to avoid complication in a potential future separation
+        of the info into multiple env vars, we should not treat this json format
+        as a sink for all the cluster info.
+        """
         return {
             'SKYPILOT_CLUSTER_INFO': json.dumps({
                 'cluster_name': handle.cluster_name,
-                'num_nodes': handle.launched_nodes,
                 'cloud': str(handle.launched_resources.cloud),
                 'region': handle.launched_resources.region,
                 'zone': handle.launched_resources.zone,
-                'spot': int(handle.launched_resources.use_spot),
             })
         }
 
@@ -4549,7 +4554,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     self.run_timestamp,
                     cluster_name=handle.cluster_name,
                     job_id=str(job_id))
-        env_vars.update(self._skypilot_predefined_envs(handle))
+        env_vars.update(self._skypilot_predefined_env_vars(handle))
         return env_vars
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
