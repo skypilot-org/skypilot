@@ -238,7 +238,7 @@ def _execute(
                 f'automatically recover from preemptions.{reset}\n{yellow}To '
                 'get automatic recovery, use managed spot instead: '
                 f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
-                f'{bold}sky.spot_launch(){reset}.')
+                f'{bold}sky.spot.launch(){reset}.')
 
         if Stage.OPTIMIZE in stages:
             if task.best_resources is None:

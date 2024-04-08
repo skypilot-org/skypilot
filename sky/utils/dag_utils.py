@@ -12,7 +12,7 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
+# Message thrown when APIs sky.{exec,launch,spot.launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
 # this.
 _ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
@@ -31,7 +31,7 @@ The command can then be run as:
 
   sky.launch(task, ...)
 
-  sky.spot_launch(task, ...)
+  sky.spot.launch(task, ...)
 """.strip()
 
 
@@ -44,7 +44,8 @@ def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
     # see their own program in the stacktrace. Our CLI impl would not trigger
     # these errors.
     if isinstance(entrypoint, str):
-        raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
+        with ux_utils.print_exception_no_traceback():
+            raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
     elif isinstance(entrypoint, dag_lib.Dag):
         return copy.deepcopy(entrypoint)
     elif isinstance(entrypoint, task_lib.Task):
@@ -54,9 +55,10 @@ def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
             dag.name = entrypoint.name
         return dag
     else:
-        raise TypeError(
-            'Expected a sky.Task or sky.Dag but received argument of type: '
-            f'{type(entrypoint)}')
+        with ux_utils.print_exception_no_traceback():
+            raise TypeError(
+                'Expected a sky.Task or sky.Dag but received argument of type: '
+                f'{type(entrypoint)}')
 
 
 def load_chain_dag_from_yaml(

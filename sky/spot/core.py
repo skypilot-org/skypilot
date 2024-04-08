@@ -27,6 +27,110 @@ from sky.utils import ux_utils
 
 
 @usage_lib.entrypoint
+def launch(
+    task: Union['sky.Task', 'sky.Dag'],
+    name: Optional[str] = None,
+    stream_logs: bool = True,
+    detach_run: bool = False,
+    retry_until_up: bool = False,
+) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Launch a managed spot job.
+
+    Please refer to the sky.cli.spot_launch for the document.
+
+    Args:
+        task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
+          managed spot job.
+        name: Name of the spot job.
+        detach_run: Whether to detach the run.
+
+    Raises:
+        ValueError: cluster does not exist.
+        sky.exceptions.NotSupportedError: the feature is not supported.
+    """
+    entrypoint = task
+    dag_uuid = str(uuid.uuid4().hex[:4])
+
+    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    if not dag.is_chain():
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Only single-task or chain DAG is allowed for '
+                             f'sky.spot.launch. Dag:\n{dag}')
+
+    dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
+
+    task_names = set()
+    for task_ in dag.tasks:
+        if task_.name in task_names:
+            raise ValueError(
+                f'Task name {task_.name!r} is duplicated in the DAG. Either '
+                'change task names to be unique, or specify the DAG name only '
+                'and comment out the task names (so that they will be auto-'
+                'generated) .')
+        task_names.add(task_.name)
+
+    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
+
+    for task_ in dag.tasks:
+        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+            task_, path='spot')
+
+    with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
+                                     mode='w') as f:
+        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+        controller_name = spot_utils.SPOT_CONTROLLER_NAME
+        prefix = constants.SPOT_TASK_YAML_PREFIX
+        remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
+        remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
+        controller_resources = controller_utils.get_controller_resources(
+            controller_type='spot',
+            controller_resources_config=constants.CONTROLLER_RESOURCES)
+
+        vars_to_fill = {
+            'remote_user_yaml_path': remote_user_yaml_path,
+            'user_yaml_path': f.name,
+            'spot_controller': controller_name,
+            # Note: actual spot cluster name will be <task.name>-<spot job ID>
+            'dag_name': dag.name,
+            'retry_until_up': retry_until_up,
+            'remote_user_config_path': remote_user_config_path,
+            'sky_python_cmd': skylet_constants.SKY_PYTHON_CMD,
+            'modified_catalogs':
+                service_catalog_common.get_modified_catalog_file_mounts(),
+            **controller_utils.shared_controller_vars_to_fill(
+                'spot',
+                remote_user_config_path=remote_user_config_path,
+            ),
+        }
+
+        yaml_path = os.path.join(constants.SPOT_CONTROLLER_YAML_PREFIX,
+                                 f'{name}-{dag_uuid}.yaml')
+        common_utils.fill_template(constants.SPOT_CONTROLLER_TEMPLATE,
+                                   vars_to_fill,
+                                   output_path=yaml_path)
+        controller_task = task_lib.Task.from_yaml(yaml_path)
+        controller_task.set_resources(controller_resources)
+
+        controller_task.spot_dag = dag
+        assert len(controller_task.resources) == 1
+
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Launching managed spot job {dag.name!r} from spot controller...'
+            f'{colorama.Style.RESET_ALL}')
+        sky_logging.print('Launching spot controller...')
+        sky.launch(task=controller_task,
+                   stream_logs=stream_logs,
+                   cluster_name=controller_name,
+                   detach_run=detach_run,
+                   idle_minutes_to_autostop=skylet_constants.
+                   CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                   retry_until_up=True,
+                   _disable_controller_check=True)
+
+
+@usage_lib.entrypoint
 def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
@@ -135,8 +239,9 @@ def cancel(name: Optional[str] = None,
         argument_str = f'job_ids={job_id_str}' if len(job_ids) > 0 else ''
         argument_str += f' name={name}' if name is not None else ''
         argument_str += ' all' if all else ''
-        raise ValueError('Can only specify one of JOB_IDS or name or all. '
-                         f'Provided {argument_str!r}.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Can only specify one of JOB_IDS or name or all. '
+                             f'Provided {argument_str!r}.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -157,7 +262,8 @@ def cancel(name: Optional[str] = None,
                                            'Failed to cancel managed spot job',
                                            stdout)
     except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(e.error_msg) from e
 
     sky_logging.print(stdout)
     if 'Multiple jobs found with name' in stdout:
@@ -189,111 +295,3 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     # Stream the realtime logs
     backend.tail_spot_logs(handle, job_id=job_id, job_name=name, follow=follow)
-
-
-@usage_lib.entrypoint
-def launch(
-    task: Union['sky.Task', 'sky.Dag'],
-    name: Optional[str] = None,
-    stream_logs: bool = True,
-    detach_run: bool = False,
-    retry_until_up: bool = False,
-):
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Launch a managed spot job.
-
-    Please refer to the sky.cli.spot_launch for the document.
-
-    Args:
-        task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
-          managed spot job.
-        name: Name of the spot job.
-        detach_run: Whether to detach the run.
-
-    Raises:
-        ValueError: cluster does not exist.
-        sky.exceptions.NotSupportedError: the feature is not supported.
-    """
-    entrypoint = task
-    dag_uuid = str(uuid.uuid4().hex[:4])
-
-    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    assert dag.is_chain(), ('Only single-task or chain DAG is '
-                            'allowed for spot_launch.', dag)
-
-    dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
-
-    task_names = set()
-    for task_ in dag.tasks:
-        if task_.name in task_names:
-            raise ValueError(
-                f'Task name {task_.name!r} is duplicated in the DAG. Either '
-                'change task names to be unique, or specify the DAG name only '
-                'and comment out the task names (so that they will be auto-'
-                'generated) .')
-        task_names.add(task_.name)
-
-    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
-
-    for task_ in dag.tasks:
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task_, path='spot')
-
-    with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
-                                     mode='w') as f:
-        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
-        controller_name = spot_utils.SPOT_CONTROLLER_NAME
-        prefix = constants.SPOT_TASK_YAML_PREFIX
-        remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
-        remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
-        controller_resources = (controller_utils.get_controller_resources(
-            controller_type='spot',
-            controller_resources_config=constants.CONTROLLER_RESOURCES))
-
-        vars_to_fill = {
-            'remote_user_yaml_path': remote_user_yaml_path,
-            'user_yaml_path': f.name,
-            'spot_controller': controller_name,
-            # Note: actual spot cluster name will be <task.name>-<spot job ID>
-            'dag_name': dag.name,
-            'retry_until_up': retry_until_up,
-            'remote_user_config_path': remote_user_config_path,
-            'sky_python_cmd': skylet_constants.SKY_PYTHON_CMD,
-            'modified_catalogs':
-                service_catalog_common.get_modified_catalog_file_mounts(),
-            **controller_utils.shared_controller_vars_to_fill(
-                'spot',
-                remote_user_config_path=remote_user_config_path,
-            ),
-        }
-
-        yaml_path = os.path.join(constants.SPOT_CONTROLLER_YAML_PREFIX,
-                                 f'{name}-{dag_uuid}.yaml')
-        common_utils.fill_template(constants.SPOT_CONTROLLER_TEMPLATE,
-                                   vars_to_fill,
-                                   output_path=yaml_path)
-        controller_task = task_lib.Task.from_yaml(yaml_path)
-        assert len(controller_task.resources) == 1, controller_task
-        # Backward compatibility: if the user changed the
-        # spot-controller.yaml.j2 to customize the controller resources,
-        # we should use it.
-        controller_task_resources = list(controller_task.resources)[0]
-        if not controller_task_resources.is_empty():
-            controller_resources = controller_task_resources
-        controller_task.set_resources(controller_resources)
-
-        controller_task.spot_dag = dag
-        assert len(controller_task.resources) == 1
-
-        print(f'{colorama.Fore.YELLOW}'
-              f'Launching managed spot job {dag.name!r} from spot controller...'
-              f'{colorama.Style.RESET_ALL}')
-        print('Launching spot controller...')
-        sky.launch(task=controller_task,
-                   stream_logs=stream_logs,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=skylet_constants.
-                   CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   retry_until_up=True,
-                   _disable_controller_check=True)

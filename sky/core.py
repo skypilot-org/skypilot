@@ -227,7 +227,7 @@ def start(
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
-) -> None:
+) -> backends.CloudVmRayResourceHandle:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart a cluster.
 
@@ -276,11 +276,11 @@ def start(
     if down and idle_minutes_to_autostop is None:
         raise ValueError(
             '`idle_minutes_to_autostop` must be set if `down` is True.')
-    _start(cluster_name,
-           idle_minutes_to_autostop,
-           retry_until_up,
-           down,
-           force=force)
+    return _start(cluster_name,
+                  idle_minutes_to_autostop,
+                  retry_until_up,
+                  down,
+                  force=force)
 
 
 def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
