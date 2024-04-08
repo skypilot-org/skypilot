@@ -55,7 +55,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     """
     stopped_message = ''
     if not refresh:
-        stopped_message = ('No in-progress spot jobs.')
+        stopped_message = 'No in-progress spot jobs.'
     try:
         handle = backend_utils.is_controller_accessible(
             controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
