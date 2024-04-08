@@ -1,0 +1,32 @@
+# Runs an NVIDIA Triton inference server for ImageNet classification on a pretrained resnet model.
+# This demo includes code to create a TorchScripted model checkpoint, a minimal config to run it,
+# and a python client to send requests to it. Triton can also serve tensorflow, ONNX, TensorRT and more. 
+# More information about triton can be found in their docs:
+# https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/contents.html
+
+# More details about serving torch on triton can be found here:
+# https://pytorch.org/TensorRT/tutorials/serving_torch_tensorrt_with_triton.html
+#
+# To launch the server:
+#   $ sky launch -c triton tritonserver.yaml
+#
+# To send an inference request (from your laptop to the server):
+#   $ pip install tritonclient[http] numpy
+#   $ export TRITONSERVER=$(sky status --ip triton)
+#   $ python triton_client.py
+
+resources:
+  accelerators: V100:1
+  ports: 8000
+
+workdir: ./
+
+setup: |
+  set -ex
+  pip install torch torchvision
+  python trace_resnet.py
+
+run: |
+  docker run --gpus all --rm -p 8000:8000 -p 8001:8001 -p 8002:8002 \
+    -v $(pwd)/models:/models nvcr.io/nvidia/tritonserver:23.10-py3 \
+    tritonserver --model-repository=/models
