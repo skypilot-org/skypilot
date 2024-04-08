@@ -35,3 +35,4 @@ class KubernetesPortMode(enum.Enum):
     """
     INGRESS = 'ingress'
     LOADBALANCER = 'loadbalancer'
+    PODIP = 'podip'
