@@ -295,3 +295,22 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     # Stream the realtime logs
     backend.tail_spot_logs(handle, job_id=job_id, job_name=name, follow=follow)
+
+
+spot_launch = common_utils.deprecated_function(launch,
+                                               name='sky.spot.launch',
+                                               deprecated_name='spot_launch',
+                                               removing_version='0.7.0')
+spot_queue = common_utils.deprecated_function(queue,
+                                              name='sky.spot.queue',
+                                              deprecated_name='spot_queue',
+                                              removing_version='0.7.0')
+spot_cancel = common_utils.deprecated_function(cancel,
+                                               name='sky.spot.cancel',
+                                               deprecated_name='spot_cancel',
+                                               removing_version='0.7.0')
+spot_tail_logs = common_utils.deprecated_function(
+    tail_logs,
+    name='sky.spot.tail_logs',
+    deprecated_name='spot_tail_logs',
+    removing_version='0.7.0')

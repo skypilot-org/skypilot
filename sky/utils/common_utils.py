@@ -626,3 +626,20 @@ def fill_template(template_name: str, variables: Dict,
     content = j2_template.render(**variables)
     with open(output_path, 'w', encoding='utf-8') as fout:
         fout.write(content)
+
+
+def deprecated_function(func: Callable, name: str, deprecated_name: str,
+                        removing_version: str) -> Callable:
+    """Decorator for creating deprecated functions, for backward compatibility.
+
+    It will result in a warning being emitted when the function is used.
+    """
+
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        logger.warning(
+            f'Call to deprecated function {deprecated_name}, which will be '
+            f'removed in {removing_version}. Please use {name}() instead.')
+        return func(*args, **kwargs)
+
+    return new_func
