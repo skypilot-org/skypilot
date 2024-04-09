@@ -23,7 +23,7 @@ SkyPilot can operate using either of the following three authentication methods:
 2. **Creating a service account**: SkyPilot can automatically create the service
    account and roles for itself to manage resources in the Kubernetes cluster.
    To use this method, set ``remote_identity: SERVICE_ACCOUNT`` to your
-   Kubernetes configuration in the ``~/.sky/config.yaml`` file:
+   Kubernetes configuration in the :ref:`~/.sky/config.yaml <config-yaml>` file:
 
    .. code-block:: yaml
 
@@ -35,7 +35,7 @@ SkyPilot can operate using either of the following three authentication methods:
 
 3. **Using a custom service account**: If you have a custom service account
    with the `necessary permissions <k8s-permissions_>`__, you can configure
-   SkyPilot to use it by adding this to your ``~/.sky/config.yaml`` file:
+   SkyPilot to use it by adding this to your :ref:`~/.sky/config.yaml <config-yaml>` file:
 
    .. code-block:: yaml
 
@@ -44,17 +44,17 @@ SkyPilot can operate using either of the following three authentication methods:
 
 .. note::
 
-    Service account based authentication applies only when the SkyPiolt
-    controller is running inside the Kubernetes cluster. When running outside
-    the cluster (e.g., on AWS), SkyPilot will use the local ``~/.kube/config``
-    file for authentication.
+    Service account based authentication applies only when the remote SkyPilot
+    cluster (including spot and serve controller) is launched inside the
+    Kubernetes cluster. When running outside the cluster (e.g., on AWS),
+    SkyPilot will use the local ``~/.kube/config`` file for authentication.
 
 Below are the permissions required by SkyPilot and an example service account YAML that you can use to create a service account with the necessary permissions.
 
 .. _k8s-permissions:
 
-Permissions required by SkyPilot
---------------------------------
+Permissions required for SkyPilot
+---------------------------------
 
 SkyPilot requires permissions equivalent to the following roles to be able to manage the resources in the Kubernetes cluster:
 
@@ -103,6 +103,7 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
       resources: ["services"]
       verbs: ["list", "get"]
 
+These roles must apply to both the user account configured in the kubeconfig file and the service account used by SkyPilot (if configured).
 
 .. _k8s-sa-example:
 
