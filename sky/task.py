@@ -1066,6 +1066,30 @@ class Task:
             })
         return config
 
+    def get_required_cloud_features(
+            self) -> Set[clouds.CloudImplementationFeatures]:
+        """Returns the required features for this task (but not for resources).
+
+        Features required by the resources are checked separately in
+        cloud.get_feasible_launchable_resources().
+
+        INTERNAL: this method is internal-facing.
+        """
+        required_features = set()
+
+        # Multi-node
+        if self.num_nodes > 1:
+            required_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
+
+        # Storage mounting
+        for _, storage_mount in self.storage_mounts.items():
+            if storage_mount.mode == storage_lib.StorageMode.MOUNT:
+                required_features.add(
+                    clouds.CloudImplementationFeatures.STORAGE_MOUNTING)
+                break
+
+        return required_features
+
     def __rshift__(self, b):
         sky.dag.get_current_dag().add_edge(self, b)
 

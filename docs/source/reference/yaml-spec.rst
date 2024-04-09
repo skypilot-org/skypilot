@@ -194,6 +194,10 @@ Available fields:
       # Or machine image: https://cloud.google.com/compute/docs/machine-images
       # image_id: projects/my-project/global/machineImages/my-machine-image
       #
+      # Azure
+      # To find Azure images: https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
+      # image_id: microsoft-dsvm:ubuntu-2004:2004:21.11.04
+      #
       # IBM
       # Create a private VPC image and paste its ID in the following format:
       # image_id: <unique_image_id>

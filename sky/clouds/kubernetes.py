@@ -43,8 +43,8 @@ class Kubernetes(clouds.Cloud):
     # Note that this timeout includes time taken by the Kubernetes scheduler
     # itself, which can be upto 2-3 seconds.
     # For non-autoscaling clusters, we conservatively set this to 10s.
-    # TODO(romilb): Make the timeout configurable.
-    TIMEOUT = 10
+    timeout = skypilot_config.get_nested(['kubernetes', 'provision_timeout'],
+                                         10)
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
@@ -88,17 +88,6 @@ class Kubernetes(clouds.Cloud):
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
-        curr_context = kubernetes_utils.get_current_kube_config_context_name()
-        if curr_context == kubernetes_utils.KIND_CONTEXT_NAME:
-            # If we are using KIND, the loadbalancer service will never be
-            # assigned an external IP. Users may use ingress, but that requires
-            # blocking HTTP port 80.
-            # For now, we disable port opening feature on kind clusters.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.OPEN_PORTS] = (
-                    'Opening ports is not supported in Kubernetes when '
-                    'using local kind cluster.')
-
         is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
         if is_exec_auth:
             assert isinstance(message, str), message
@@ -296,7 +285,7 @@ class Kubernetes(clouds.Cloud):
             'cpus': str(cpus),
             'memory': str(mem),
             'accelerator_count': str(acc_count),
-            'timeout': str(self.TIMEOUT),
+            'timeout': str(self.timeout),
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
@@ -407,7 +396,7 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
-        k8s = kubernetes.get_kubernetes()
+        k8s = kubernetes.kubernetes
         try:
             _, current_context = k8s.config.list_kube_config_contexts()
             if 'namespace' in current_context['context']:

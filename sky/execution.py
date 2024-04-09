@@ -234,13 +234,12 @@ def _execute(
     # Requested features that some clouds support and others don't.
     requested_features = set()
 
-    # If task is controller, request HOST_CONTROLLERS feature.
     if controller_utils.Controllers.from_name(cluster_name) is not None:
         requested_features.add(
             clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
 
-    if task.num_nodes > 1:
-        requested_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
+    # Add requested features from the task
+    requested_features |= task.get_required_cloud_features()
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):

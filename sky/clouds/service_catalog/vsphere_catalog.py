@@ -4,12 +4,15 @@ import os
 import typing
 from typing import Dict, List, Optional, Tuple
 
-import pandas as pd
-
+from sky.adaptors import common as adaptors_common
 from sky.clouds.service_catalog import common
 
 if typing.TYPE_CHECKING:
+    import pandas as pd
+
     from sky.clouds import cloud
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
 _DEFAULT_NUM_VCPUS = 2
 _DEFAULT_MEMORY_CPU_RATIO = 4
@@ -23,7 +26,7 @@ _LOCAL_CATALOG = common.get_catalog_path('vsphere/vms.csv')
 _df = None
 
 
-def _get_df() -> pd.DataFrame:
+def _get_df() -> 'pd.DataFrame':
     """Returns the catalog as a DataFrame."""
     global _df
     if _df is not None:

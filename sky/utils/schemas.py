@@ -633,6 +633,9 @@ def get_config_schema():
                         }]
                     }
                 },
+                'provision_timeout': {
+                    'type': 'integer',
+                },
                 'remote_identity': {
                     'type': 'string'
                 }

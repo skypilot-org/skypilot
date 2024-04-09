@@ -166,6 +166,31 @@ wait_for_skypilot_cpu_image_pull() {
     echo "SkyPilot CPU image loaded into kind cluster."
 }
 
+wait_for_nginx_ingress_controller_install() {
+    echo "Starting installation of Nginx Ingress Controller..."
+
+    SECONDS=0
+    TIMEOUT=600  # 10 minutes in seconds
+
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+
+    while true; do
+        if kubectl get pod -n ingress-nginx -l app.kubernetes.io/component=controller -o wide | grep 'Running'; then
+            echo "Nginx Ingress Controller installed."
+            break
+        elif [ $SECONDS -ge $TIMEOUT ]; then
+            echo "Timed out waiting for installation of Nginx Ingress Controller."
+            exit 1
+        else
+            echo "Waiting for Nginx Ingress Controller Installation..."
+            echo "To check status, check Nginx Ingress Controller pods:"
+            echo "kubectl get pod -n ingress-nginx -l app.kubernetes.io/component=controller -o wide"
+            sleep 5
+        fi
+    done
+
+}
+
 if $ENABLE_GPUS; then
     echo "Enabling GPU support..."
     # Run patch for missing ldconfig.real
@@ -195,6 +220,9 @@ fi
 
 # Load local skypilot image on to the cluster for faster startup
 wait_for_skypilot_cpu_image_pull
+
+# Install the Nginx Ingress Controller
+wait_for_nginx_ingress_controller_install
 
 # Print CPUs available on the local cluster
 NUM_CPUS=$(kubectl get nodes -o jsonpath='{.items[0].status.capacity.cpu}')

@@ -1,4 +1,5 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
+import base64
 import copy
 import enum
 import getpass
@@ -37,6 +38,7 @@ from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
+from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -232,9 +234,10 @@ class RayCodeGen:
             import io
             import os
             import pathlib
-            import sys
             import selectors
+            import shlex
             import subprocess
+            import sys
             import tempfile
             import textwrap
             import time
@@ -324,7 +327,7 @@ class RayCodeGen:
         stable_cluster_internal_ips: List[str],
         setup_cmd: Optional[str] = None,
         setup_log_path: Optional[str] = None,
-        envs: Optional[Dict[str, str]] = None,
+        env_vars: Optional[Dict[str, str]] = None,
     ) -> None:
         """Create the gang scheduling placement group for a Task.
 
@@ -413,7 +416,7 @@ class RayCodeGen:
                     .remote(
                         setup_cmd,
                         os.path.expanduser({setup_log_path!r}),
-                        env_vars={envs!r},
+                        env_vars={env_vars!r},
                         stream_logs=True,
                         with_ray=True,
                     ) for i in range(total_num_nodes)]
@@ -482,7 +485,6 @@ class RayCodeGen:
     def add_ray_task(self,
                      bash_script: Optional[str],
                      task_name: Optional[str],
-                     job_run_id: Optional[str],
                      ray_resources_dict: Dict[str, float],
                      log_dir: str,
                      env_vars: Optional[Dict[str, str]] = None,
@@ -536,11 +538,6 @@ class RayCodeGen:
         if env_vars is not None:
             sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
                                          for k, v in env_vars.items())
-        if job_run_id is not None:
-            sky_env_vars_dict_str += [
-                f'sky_env_vars_dict[{constants.TASK_ID_ENV_VAR!r}]'
-                f' = {job_run_id!r}',
-            ]
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
         options_str = ', '.join(options)
@@ -750,7 +747,7 @@ class FailoverCloudErrorHandlerV1:
         # Sometimes, LambdaCloudError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in clouds.Lambda.regions():
+                for r in service_catalog.regions('lambda'):
                     if e.find(r.name) == -1:
                         _add_to_blocked_resources(
                             blocked_resources,
@@ -822,7 +819,7 @@ class FailoverCloudErrorHandlerV1:
         # Sometimes, SCPError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
-                for r in clouds.SCP.regions():
+                for r in service_catalog.regions('scp'):
                     if e.find(r.name) == -1:
                         _add_to_blocked_resources(
                             blocked_resources,
@@ -1075,7 +1072,8 @@ class FailoverCloudErrorHandlerV2:
                     blocked_resources,
                     launchable_resources.copy(region=None, zone=None))
             elif code == 'SUBNET_NOT_FOUND_FOR_VPC':
-                if (any(acc.lower().startswith('tpu-v4')
+                if (launchable_resources.accelerators is not None and any(
+                        acc.lower().startswith('tpu-v4')
                         for acc in launchable_resources.accelerators.keys()) and
                         region.name == 'us-central2'):
                     # us-central2 is a TPU v4 only region. The subnet for
@@ -3019,6 +3017,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         def _setup_node(node_id: int) -> None:
             setup_envs = task.envs.copy()
+            setup_envs.update(self._skypilot_predefined_env_vars(handle))
             setup_envs['SKYPILOT_SETUP_NODE_IPS'] = '\n'.join(internal_ips)
             setup_envs['SKYPILOT_SETUP_NODE_RANK'] = str(node_id)
             runner = command_runner.SSHCommandRunner(ip_list[node_id],
@@ -3102,28 +3101,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Executes generated code on the head node."""
         style = colorama.Style
         fore = colorama.Fore
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user, handle.ssh_user)
-        head_ssh_port = handle.head_ssh_port
-        runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                 port=head_ssh_port,
-                                                 **ssh_credentials)
-        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-            fp.write(codegen)
-            fp.flush()
-            script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
-            # We choose to sync code + exec, because the alternative of 'ray
-            # submit' may not work as it may use system python (python2) to
-            # execute the script.  Happens for AWS.
-            runner.rsync(source=fp.name,
-                         target=script_path,
-                         up=True,
-                         stream_logs=False)
+
+        script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
+        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
+                      f'touch {remote_log_path}')
+        encoded_script = base64.b64encode(
+            codegen.encode('utf-8')).decode('utf-8')
+        create_script_code = (f'{{ echo "{encoded_script}" | base64 --decode > '
+                              f'{script_path}; }}')
         job_submit_cmd = (
             f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
@@ -3133,10 +3123,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} 2> /dev/null"'
         )
 
-        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
-                      f'touch {remote_log_path}')
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-        job_submit_cmd = mkdir_code + ' && ' + code
+        job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
         if spot_dag is not None:
             # Add the spot job to spot queue table.
@@ -4543,6 +4531,40 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 storage_metadata, sync_on_reconstruction=False)
         return storage_mounts
 
+    def _skypilot_predefined_env_vars(
+            self, handle: CloudVmRayResourceHandle) -> Dict[str, str]:
+        """Returns the SkyPilot predefined environment variables.
+
+        TODO(zhwu): Check if a single variable for all the cluster info is more
+        desirable or separate variables for each piece of info.
+        NOTE: In order to avoid complication in a potential future separation
+        of the info into multiple env vars, we should not treat this json format
+        as a sink for all the cluster info.
+        """
+        return {
+            'SKYPILOT_CLUSTER_INFO': json.dumps({
+                'cluster_name': handle.cluster_name,
+                'cloud': str(handle.launched_resources.cloud),
+                'region': handle.launched_resources.region,
+                'zone': handle.launched_resources.zone,
+            })
+        }
+
+    def _get_task_env_vars(self, task: task_lib.Task, job_id: int,
+                           handle: CloudVmRayResourceHandle) -> Dict[str, str]:
+        """Returns the environment variables for the task."""
+        env_vars = task.envs.copy()
+        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
+        # already set by the controller.
+        if constants.TASK_ID_ENV_VAR not in env_vars:
+            env_vars[
+                constants.TASK_ID_ENV_VAR] = common_utils.get_global_job_id(
+                    self.run_timestamp,
+                    cluster_name=handle.cluster_name,
+                    job_id=str(job_id))
+        env_vars.update(self._skypilot_predefined_env_vars(handle))
+        return env_vars
+
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
                                detach_run: bool) -> None:
@@ -4553,6 +4575,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
+        task_env_vars = self._get_task_env_vars(task, job_id, handle)
+
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
         codegen.add_gang_scheduling_placement_group_and_setup(
@@ -4561,7 +4585,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stable_cluster_internal_ips=internal_ips,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
-            envs=task.envs,
+            env_vars=task_env_vars,
         )
 
         if callable(task.run):
@@ -4569,20 +4593,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
-        # already set by the controller.
-        job_run_id = task.envs.get(
-            constants.TASK_ID_ENV_VAR,
-            common_utils.get_global_job_id(self.run_timestamp,
-                                           cluster_name=handle.cluster_name,
-                                           job_id=str(job_id)))
-
         command_for_node = task.run if isinstance(task.run, str) else None
         codegen.add_ray_task(
             bash_script=command_for_node,
-            env_vars=task.envs,
+            env_vars=task_env_vars,
             task_name=task.name,
-            job_run_id=job_run_id,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
             log_dir=log_dir)
 
@@ -4609,6 +4624,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
+        task_env_vars = self._get_task_env_vars(task, job_id, handle)
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
@@ -4618,20 +4634,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stable_cluster_internal_ips=internal_ips,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
-            envs=task.envs)
+            env_vars=task_env_vars)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
-
-        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
-        # already set by the controller.
-        job_run_id = task.envs.get(
-            constants.TASK_ID_ENV_VAR,
-            common_utils.get_global_job_id(self.run_timestamp,
-                                           cluster_name=handle.cluster_name,
-                                           job_id=str(job_id)))
 
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
@@ -4642,9 +4650,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # the corresponding node, represented by private IPs.
             codegen.add_ray_task(
                 bash_script=command_for_node,
-                env_vars=task.envs,
+                env_vars=task_env_vars,
                 task_name=task.name,
-                job_run_id=job_run_id,
                 ray_resources_dict=backend_utils.get_task_demands_dict(task),
                 log_dir=log_dir,
                 gang_scheduling_id=i)
