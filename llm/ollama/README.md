@@ -1,4 +1,4 @@
-# Ollama: Run quantized LLMs on CPUs
+# Ollama: Run quantized LLMs on CPUs and GPUs and scale with SkyServe
 <p align="center">
   <img src="https://i.imgur.com/HfqnGVA.png" width="400">
 </p>
@@ -20,8 +20,18 @@ For detailed installation instructions, please refer to the [installation guide]
 
 Once installed, run `sky check` to verify you have cloud access.
 
-**💡Tip:** if you do not have any cloud access, you can run this recipe on your local machine
-by creating a local Kubernetes cluster with `sky local up`. 
+### [Optional] Running locally on your machine
+If you do not have cloud access, you also can run this recipe on your local machine by creating a local Kubernetes cluster with `sky local up`.
+
+Make sure you have KinD installed and Docker running with 5 or more CPUs and 10GB or more of memory allocated to the [docker runtime](https://docs.docker.com/desktop/settings/mac/).
+
+To create a local Kubernetes cluster, run:
+
+```console
+sky local up
+``` 
+
+After running this, `sky check` should show that you have access to a Kubernetes cluster.
 
 ## SkyPilot YAML
 To run Ollama with SkyPilot, create a YAML file with the following content:
@@ -90,7 +100,7 @@ run: |
 ```
 </details>
 
-You can also get the full YAML file [here](https://github.com/skypilot-org/skypilot/tree/master/llm/ollama/ollama.yaml).
+You can also get the full YAML [here](https://github.com/skypilot-org/skypilot/tree/master/llm/ollama/ollama.yaml).
 
 ## Serving Llama2 with a CPU instance 
 Start serving Llama2 on a 4 CPU instance with the following command:
@@ -207,7 +217,7 @@ sky local down
 
 ## Serving LLMs on CPUs at scale with SkyServe
 
-After experimenting with the model, you can deploy the model with autoscaling and load-balancing using SkyServe.
+After experimenting with the model, you can deploy multiple replicas of the model with autoscaling and load-balancing using SkyServe.
 
 With no change to the YAML, launch a fully managed service on your infra:
 ```console
@@ -240,7 +250,7 @@ Get a single endpoint that load-balances across replicas:
 ENDPOINT=$(sky serve status --endpoint ollama)
 ```
 
-> **Tip:** SkyServe fully manages the lifecycle of your replicas. For example, if a spot replica is preempted, the controller will automatically replace it. This significantly reduces the operational burden while saving costs.
+**💡Tip:** SkyServe fully manages the lifecycle of your replicas. For example, if a spot replica is preempted, the controller will automatically replace it. This significantly reduces the operational burden while saving costs.
 
 To curl the endpoint:
 ```console
