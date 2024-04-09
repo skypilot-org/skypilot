@@ -23,13 +23,30 @@ Once installed, run `sky check` to verify you have cloud access.
 ### [Optional] Running locally on your machine
 If you do not have cloud access, you also can run this recipe on your local machine by creating a local Kubernetes cluster with `sky local up`.
 
-Make sure you have KinD installed and Docker running with 5 or more CPUs and 10GB or more of memory allocated to the [docker runtime](https://docs.docker.com/desktop/settings/mac/).
+Make sure you have KinD installed and Docker running with 5 or more CPUs and 10GB or more of memory allocated to the [Docker runtime](https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop).
 
 To create a local Kubernetes cluster, run:
 
 ```console
 sky local up
 ``` 
+
+<details>
+<summary>Example outputs:</summary>
+
+```console
+$ sky local up
+Creating local cluster...
+To view detailed progress: tail -n100 -f ~/sky_logs/sky-2024-04-09-19-14-03-599730/local_up.log
+I 04-09 19:14:33 log_utils.py:79] Kubernetes is running.
+I 04-09 19:15:33 log_utils.py:117] SkyPilot CPU image pulled.
+I 04-09 19:15:49 log_utils.py:123] Nginx Ingress Controller installed.
+⠸ Running sky check...
+Local Kubernetes cluster created successfully with 16 CPUs.
+`sky launch` can now run tasks locally.
+Hint: To change the number of CPUs, change your docker runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.
+```
+</details>
 
 After running this, `sky check` should show that you have access to a Kubernetes cluster.
 
