@@ -65,10 +65,10 @@ def launch(
         if task_.name in task_names:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Task name {task_.name!r} is duplicated in the DAG. Either '
-                    'change task names to be unique, or specify the DAG name '
-                    'only and comment out the task names (so that they will be '
-                    'auto-generated) .')
+                    f'Task name {task_.name!r} is duplicated in the DAG. '
+                    'Either change task names to be unique, or specify the DAG '
+                    'name only and comment out the task names (so that they '
+                    'will be auto-generated) .')
         task_names.add(task_.name)
 
     dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
