@@ -164,7 +164,7 @@ if [ "$start_from" -le 7 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
 sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-7-0 "echo hi; sleep 1000"
-sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-7-1 "echo hi; sleep 300"
+sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-7-1 "echo hi; sleep 350"
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-1)
@@ -178,7 +178,7 @@ s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
 echo "$s"
 echo "$s" | grep "RUNNING" | wc -l | grep 3 || exit 1
 sky spot cancel -y -n ${CLUSTER_NAME}-7-0
-sleep 200
+sky spot logs "${CLUSTER_NAME}-7-1"
 s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
 echo "$s"
 echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
