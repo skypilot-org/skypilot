@@ -532,8 +532,10 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         gpu_msg = str(e)
     if exec_msg and gpu_msg:
         return True, f'{gpu_msg}\n    Additionally, {exec_msg}'
-    elif gpu_msg or exec_msg:
-        return True, gpu_msg or exec_msg
+    elif gpu_msg:
+        return True, gpu_msg
+    elif exec_msg:
+        return True, exec_msg
     else:
         return True, None
 
