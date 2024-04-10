@@ -27,6 +27,7 @@
 
 ----
 :fire: *News* :fire:
+- [Apr, 2024] Using [**Ollama**](https://github.com/ollama/ollama) to deploy quantized LLMs on CPUs and GPUs: [**example**](./llm/ollama/)
 - [Mar, 2024] Serve and deploy [**Databricks DBRX**](https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm) on your infra: [**example**](./llm/dbrx/)
 - [Feb, 2024] Deploying and scaling [**Gemma**](https://blog.google/technology/developers/gemma-open-models/) with SkyServe: [**example**](./llm/gemma/)
 - [Feb, 2024] Speed up your LLM deployments with [**SGLang**](https://github.com/sgl-project/sglang) for 5x throughput on SkyServe: [**example**](./llm/sglang/)
@@ -159,7 +160,7 @@ Runnable examples:
   - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
   - [Train your own Vicuna on Llama-2](./llm/vicuna-llama-2/)
   - [Self-Hosted Llama-2 Chatbot](./llm/llama-2/)
-  - [Quantized Llama2, Mistral and more on CPUs](./llm/ollama/)
+  - [Ollama: Quantized LLMs on CPUs](./llm/ollama/)
   - [LoRAX](./llm/lorax/)
   - [QLoRA](https://github.com/artidoro/qlora/pull/132)
   - [LLaMA-LoRA-Tuner](https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot)

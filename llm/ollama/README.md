@@ -1,4 +1,4 @@
-# Ollama: Run quantized LLMs on CPUs and GPUs and scale with SkyServe
+# Ollama: Run quantized LLMs on CPUs and GPUs
 <p align="center">
   <img src="https://i.imgur.com/HfqnGVA.png" width="400">
 </p>

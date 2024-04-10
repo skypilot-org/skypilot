@@ -78,7 +78,7 @@ Runnable examples:
   * `Vicuna chatbots: Training & Serving <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_ (from official Vicuna team)
   * `Train your own Vicuna on Llama-2 <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna-llama-2>`_
   * `Self-Hosted Llama-2 Chatbot <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2>`_
-  * `Quantized Llama2, Mistral and more on CPUs <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2>`_
+  * `Ollama: Quantized LLMs on CPUs <https://github.com/skypilot-org/skypilot/tree/master/llm/ollama>`_
   * `LoRAX <https://github.com/skypilot-org/skypilot/tree/master/llm/lorax/>`_
   * `QLoRA <https://github.com/artidoro/qlora/pull/132>`_
   * `LLaMA-LoRA-Tuner <https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot>`_
