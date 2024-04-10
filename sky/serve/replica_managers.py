@@ -437,7 +437,7 @@ class ReplicaInfo:
             if not endpoint.startswith('http'):
                 endpoint = 'http://' + endpoint
             return endpoint
-        except RuntimeError:
+        except (RuntimeError, exceptions.ClusterNotUpError):
             return None
 
     @property

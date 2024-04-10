@@ -2692,13 +2692,13 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
 
 
 def get_endpoints(cluster: str,
-                  endpoint: Optional[Union[int, str]] = None) -> Dict[int, str]:
+                  port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
         cluster: The name of the cluster.
-        endpoint: The port number to get the endpoint for. If None, ports for
-            all endpoints are returned.
+        port: The port number to get the endpoint for. If None, endpoints
+            for all ports are returned.
 
     Returns: A dictionary of port numbers to endpoints. If endpoint is None,
         the dictionary will contain all ports:endpoints exposed on the cluster.
@@ -2709,19 +2709,19 @@ def get_endpoints(cluster: str,
             are exposed yet.
     """
     # Cast endpoint to int if it is not None
-    if endpoint is not None:
+    if port is not None:
         try:
-            endpoint = int(endpoint)
+            port = int(port)
         except ValueError:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Invalid endpoint {endpoint!r}.') from None
+                raise ValueError(f'Invalid endpoint {port!r}.') from None
     cluster_records = get_clusters(include_controller=True,
                                    refresh=False,
                                    cluster_names=[cluster])
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
+            raise exceptions.ClusterNotUpError(f'Cluster {cluster_record["name"]!r} '
                                'is not in UP status.')
     handle = cluster_record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
@@ -2747,18 +2747,18 @@ def get_endpoints(cluster: str,
                                              provider_config=config['provider'])
 
     # Validation before returning the endpoints
-    if endpoint is not None:
+    if port is not None:
         # If the requested endpoint was not to be exposed
         port_set = resources_utils.port_ranges_to_set(
             handle.launched_resources.ports)
-        if endpoint not in port_set:
+        if port not in port_set:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Port {endpoint} is not exposed '
+                raise ValueError(f'Port {port} is not exposed '
                                  'on cluster '
                                  f'{cluster_record["name"]!r}.')
         # If the user requested a specific port endpoint, check if it is exposed
-        if endpoint not in port_details:
-            error_msg = (f'Port {endpoint} not exposed yet. '
+        if port not in port_details:
+            error_msg = (f'Port {port} not exposed yet. '
                          f'{_ENDPOINTS_RETRY_MESSAGE} ')
             if handle.launched_resources.cloud.is_same_cloud(
                     clouds.Kubernetes()):
@@ -2766,7 +2766,7 @@ def get_endpoints(cluster: str,
                 error_msg += (kubernetes_utils.get_endpoint_debug_message())
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(error_msg)
-        return {endpoint: port_details[endpoint][0].url()}
+        return {port: port_details[port][0].url()}
     else:
         if not port_details:
             # If cluster had no ports to be exposed
@@ -2786,4 +2786,4 @@ def get_endpoints(cluster: str,
                         kubernetes_utils.get_endpoint_debug_message()
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(error_msg)
-        return {port: urls[0].url() for port, urls in port_details.items()}
+        return {port_num: urls[0].url() for port_num, urls in port_details.items()}

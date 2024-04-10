@@ -735,7 +735,7 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
         endpoint = backend_utils.get_endpoints(
             handle.cluster_name, load_balancer_port)[load_balancer_port]
         assert isinstance(endpoint, str)
-    except RuntimeError:
+    except (RuntimeError, exceptions.ClusterNotUpError):
         return '-'
     return endpoint
 
