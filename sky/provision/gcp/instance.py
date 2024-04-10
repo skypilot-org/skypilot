@@ -267,6 +267,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             for instance_id in resumed_instance_ids:
                 resource.start_instance(instance_id, project_id,
                                         availability_zone)
+                resource.resize_disk(project_id, availability_zone, config.node_config, instance_id)
                 resource.set_labels(project_id, availability_zone, instance_id,
                                     labels)
         to_start_count -= len(resumed_instance_ids)
