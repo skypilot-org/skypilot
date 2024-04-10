@@ -541,6 +541,18 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
 def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
     """Checks if the kubeconfig file uses exec-based authentication
 
+    Exec-based auth is commonly used for authenticating with cloud hosted
+    Kubernetes services, such as GKE. Here is an example snippet from a
+    kubeconfig using exec-based authentication for a GKE cluster:
+    - name: mycluster
+      user:
+        exec:
+          apiVersion: client.authentication.k8s.io/v1beta1
+          command: /Users/romilb/google-cloud-sdk/bin/gke-gcloud-auth-plugin
+          installHint: Install gke-gcloud-auth-plugin ...
+          provideClusterInfo: true
+
+
     Using exec-based authentication is problematic when used in conjunction
     with kubernetes.remote_identity = LOCAL_CREDENTIAL in ~/.sky/config.yaml.
     This is because the exec-based authentication may not have the relevant
