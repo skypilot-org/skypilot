@@ -170,7 +170,7 @@ rm -r  ~/.sky/wheels || true
 s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-1)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
-sky spot launch -d --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7-2 "echo hi; sleep 20"
+sky spot launch -d --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7-2 "echo hi; sleep 60"
 s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-2)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
