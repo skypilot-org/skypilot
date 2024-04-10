@@ -152,6 +152,9 @@ class SkyServeController:
         logger.info('SkyServe Controller started on '
                     f'http://localhost:{self._port}')
 
+        # We expose the controller to the public network to allow external
+        # load balancers (example, for high availability load balancers) to
+        # communicate with the controller.
         uvicorn.run(self._app, host='0.0.0.0', port=self._port)
 
 
