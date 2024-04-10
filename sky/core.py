@@ -111,6 +111,26 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
                                       refresh=refresh,
                                       cluster_names=cluster_names)
 
+def endpoints(cluster: str,
+              endpoint: Optional[Union[int, str]] = None) -> Dict[int, str]:
+    """Gets the endpoint for a given cluster and port number (endpoint).
+
+    Args:
+        cluster: The name of the cluster.
+        endpoint: The port number to get the endpoint for. If None, ports for
+            all endpoints are returned.
+
+    Returns: A dictionary of port numbers to endpoints. If endpoint is None,
+        the dictionary will contain all ports:endpoints exposed on the cluster.
+
+    Raises:
+        ValueError: if the cluster is not UP or the endpoint is not exposed.
+        RuntimeError: if the cluster has no ports to be exposed or no endpoints
+            are exposed yet.
+    """
+    return backend_utils.get_endpoints(cluster=cluster,
+                                       port=endpoint)
+
 
 @usage_lib.entrypoint
 def cost_report() -> List[Dict[str, Any]]:
