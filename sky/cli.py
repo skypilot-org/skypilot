@@ -2451,6 +2451,18 @@ def down(
 
 
 def _hint_or_raise_for_down_spot_controller(controller_name: str):
+    """
+    Helper function to check spot controller status before tearing it down.
+
+    Raises helpful exceptions and errors if the controller is not in a safe
+    state to be torn down.
+
+    Raises:
+        RuntimeError: if failed to get the job queue.
+        exceptions.NotSupportedError: if the controller is not in a safe state
+            to be torn down (e.g., because it has jobs running or
+            it is in init state)
+    """
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
@@ -2493,6 +2505,18 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
+    """
+    Helper function to check serve controller status before tearing it down.
+
+    Raises helpful exceptions and errors if the controller is not in a safe
+    state to be torn down.
+
+    Raises:
+        RuntimeError: if failed to get the service status.
+        exceptions.NotSupportedError: if the controller is not in a safe state
+            to be torn down (e.g., because it has services running or
+            it is in init state)
+    """
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
     with rich_utils.safe_status('[bold cyan]Checking for live services[/]'):
