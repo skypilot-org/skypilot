@@ -6,6 +6,7 @@
 [Ollama](https://github.com/ollama/ollama) is popular library for running LLMs on both CPUs and GPUs. 
 It supports a wide range of models, including quantized versions of `llama2`, `llama2:70b`, `mistral`, `phi`, `gemma:7b` and many [more](https://ollama.com/library). 
 You can use SkyPilot to run these models on CPU instances on any cloud provider, Kubernetes cluster, or even on your local machine. 
+And if your instance has GPUs, Ollama will automatically use them for faster inference. 
 
 In this example, you will run a quantized version of Llama2 on 4 CPUs with 8GB of memory, and then scale it up to more replicas with SkyServe. 
 
@@ -62,8 +63,9 @@ envs:
   OLLAMA_HOST: 0.0.0.0:8888  # Host and port for Ollama to listen on
 
 resources:
-  cpus: 4+  # No GPUs necessary for Ollama
+  cpus: 4+
   memory: 8+  # 8 GB+ for 7B models, 16 GB+ for 13B models, 32 GB+ for 33B models
+  # accelerators: L4:1  # No GPUs necessary for Ollama, but you can use them to run inference faster
   ports: 8888
 
 service:
@@ -216,6 +218,7 @@ curl $ENDPOINT/v1/chat/completions \
 ```
 </details>
 
+**💡Tip:** To speed up inference, you can use GPUs by specifying the `accelerators` field in the YAML.
 
 To stop the instance:
 ```console

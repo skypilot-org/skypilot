@@ -19,7 +19,7 @@ Contents
 
 .. toctree::
    :maxdepth: 1
-   :caption: Inference Engines
+   :caption: Inference Frameworks
 
    vLLM <frameworks/vllm>
    Hugging Face TGI <frameworks/tgi>

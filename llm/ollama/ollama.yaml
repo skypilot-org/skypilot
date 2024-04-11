@@ -28,8 +28,9 @@ envs:
   OLLAMA_HOST: 0.0.0.0:8888  # Host and port for Ollama to listen on
 
 resources:
-  cpus: 4+  # No GPUs necessary for Ollama
+  cpus: 4+
   memory: 8+  # 8 GB+ for 7B models, 16 GB+ for 13B models, 32 GB+ for 33B models
+  # accelerators: L4:1  # No GPUs necessary for Ollama, but you can use them to run inference faster
   ports: 8888
 
 service:
