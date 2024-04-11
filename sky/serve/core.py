@@ -8,6 +8,7 @@ import colorama
 
 import sky
 from sky import backends
+from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -279,7 +280,7 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            endpoint = backend_utils.get_endpoints(
+            endpoint = core.endpoints(
                 controller_handle.cluster_name, lb_port)[lb_port]
 
         sky_logging.print(

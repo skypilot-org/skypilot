@@ -17,6 +17,7 @@ import requests
 
 import sky
 from sky import backends
+from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -430,7 +431,7 @@ class ReplicaInfo:
             return None
         try:
             replica_port_int = int(self.replica_port)
-            endpoint = backend_utils.get_endpoints(
+            endpoint = core.get_endpoints(
                 handle.cluster_name, replica_port_int)[replica_port_int]
             assert isinstance(endpoint, str)
             # If replica doesn't start with http or https, add http://

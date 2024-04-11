@@ -21,6 +21,7 @@ import psutil
 import requests
 
 from sky import backends
+from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import status_lib
@@ -732,7 +733,7 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     if load_balancer_port is None:
         return '-'
     try:
-        endpoint = backend_utils.get_endpoints(
+        endpoint = core.endpoints(
             handle.cluster_name, load_balancer_port)[load_balancer_port]
         assert isinstance(endpoint, str)
     except (RuntimeError, exceptions.ClusterNotUpError):
@@ -819,7 +820,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         service_name = record['service_name']
         replica_id = record['replica_id']
         version = (record['version'] if 'version' in record else '-')
-        replica_ip = endpoint if endpoint else '-'
+        replica_endpoint = endpoint if endpoint else '-'
         launched_at = log_utils.readable_time_duration(record['launched_at'])
         resources_str = '-'
         replica_status = record['status']
@@ -840,7 +841,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
             service_name,
             replica_id,
             version,
-            replica_ip,
+            replica_endpoint,
             launched_at,
             resources_str,
             status_str,
