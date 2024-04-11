@@ -129,8 +129,7 @@ def endpoints(cluster: str,
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
     """
-    return backend_utils.get_endpoints(cluster=cluster,
-                                       port=port)
+    return backend_utils.get_endpoints(cluster=cluster, port=port)
 
 
 @usage_lib.entrypoint

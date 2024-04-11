@@ -21,7 +21,6 @@ import psutil
 import requests
 
 from sky import backends
-from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import status_lib
@@ -733,7 +732,7 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     if load_balancer_port is None:
         return '-'
     try:
-        endpoint = core.endpoints(
+        endpoint = backend_utils.get_endpoints(
             handle.cluster_name, load_balancer_port)[load_balancer_port]
         assert isinstance(endpoint, str)
     except (RuntimeError, exceptions.ClusterNotUpError):

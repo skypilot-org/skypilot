@@ -1563,12 +1563,11 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             head_ip = handle.external_ips()[0]
             if show_endpoints:
                 if endpoint:
-                    cluster_endpoint = core.endpoints(
-                        cluster_record['name'], endpoint)[endpoint]
+                    cluster_endpoint = core.endpoints(cluster_record['name'],
+                                                      endpoint)[endpoint]
                     click.echo(cluster_endpoint)
                 else:
-                    cluster_endpoints = core.endpoints(
-                        cluster_record['name'])
+                    cluster_endpoints = core.endpoints(cluster_record['name'])
                     assert isinstance(cluster_endpoints, dict)
                     for port, port_endpoint in cluster_endpoints.items():
                         click.echo(
@@ -2451,8 +2450,7 @@ def down(
 
 
 def _hint_or_raise_for_down_spot_controller(controller_name: str):
-    """
-    Helper function to check spot controller status before tearing it down.
+    """Helper function to check spot controller status before tearing it down.
 
     Raises helpful exceptions and errors if the controller is not in a safe
     state to be torn down.
@@ -2505,8 +2503,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
-    """
-    Helper function to check serve controller status before tearing it down.
+    """Helper function to check serve controller status before tearing it down.
 
     Raises helpful exceptions and errors if the controller is not in a safe
     state to be torn down.

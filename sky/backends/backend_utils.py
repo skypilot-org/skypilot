@@ -2721,8 +2721,9 @@ def get_endpoints(cluster: str,
     cluster_record = cluster_records[0]
     if cluster_record['status'] != status_lib.ClusterStatus.UP:
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(f'Cluster {cluster_record["name"]!r} '
-                               'is not in UP status.')
+            raise exceptions.ClusterNotUpError(
+                f'Cluster {cluster_record["name"]!r} '
+                'is not in UP status.', cluster_record['status'])
     handle = cluster_record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         with ux_utils.print_exception_no_traceback():
@@ -2786,4 +2787,6 @@ def get_endpoints(cluster: str,
                         kubernetes_utils.get_endpoint_debug_message()
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(error_msg)
-        return {port_num: urls[0].url() for port_num, urls in port_details.items()}
+        return {
+            port_num: urls[0].url() for port_num, urls in port_details.items()
+        }

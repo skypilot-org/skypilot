@@ -431,8 +431,8 @@ class ReplicaInfo:
             return None
         try:
             replica_port_int = int(self.replica_port)
-            endpoint = core.get_endpoints(
-                handle.cluster_name, replica_port_int)[replica_port_int]
+            endpoint = core.endpoints(handle.cluster_name,
+                                      replica_port_int)[replica_port_int]
             assert isinstance(endpoint, str)
             # If replica doesn't start with http or https, add http://
             if not endpoint.startswith('http'):
