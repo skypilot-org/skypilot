@@ -229,6 +229,15 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                     f'The `image_env` is:\n{image_env}')
                 raise e
 
+            # Edit docker config first to avoid the know issue in
+            # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
+            self.run(
+                'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
+                '/etc/docker/daemon.json > /tmp/daemon.json;'
+                'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
+                'sudo systemctl restart docker',
+                run_env='host')
+
             user_docker_run_options = self.docker_config.get(
                 'run_options', []) + self.docker_config.get(
                     f'{"head" if as_head else "worker"}_run_options', [])

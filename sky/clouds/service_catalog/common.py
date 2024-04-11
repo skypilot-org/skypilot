@@ -559,6 +559,7 @@ def list_accelerators_impl(
 
     try:
         gpu_info_df = df['GpuInfo'].apply(ast.literal_eval)
+        # df['GpuInfo'].to_csv(f'@temp/a_{cloud}.csv')
         df['DeviceMemoryGiB'] = gpu_info_df.apply(
             lambda row: row['Gpus'][0]['MemoryInfo']['SizeInMiB']) / 1024.0
     except (ValueError, SyntaxError):
