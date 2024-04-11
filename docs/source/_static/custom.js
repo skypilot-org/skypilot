@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.caption-text', text: 'SkyServe: Model Serving' },
         { selector: '.toctree-l1 > a', text: 'Running on Kubernetes' },
         { selector: '.toctree-l1 > a', text: 'DBRX (Databricks)' },
+        { selector: '.toctree-l1 > a', text: 'Ollama' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
