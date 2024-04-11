@@ -170,7 +170,7 @@ rm -r  ~/.sky/wheels || true
 s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-1)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
-sky spot launch -d --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7-2 "echo hi; sleep 10"
+sky spot launch -d --cloud ${CLOUD} -y -n ${CLUSTER_NAME}-7-2 "echo hi; sleep 60"
 s=$(sky spot logs --no-follow -n ${CLUSTER_NAME}-7-2)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
@@ -178,7 +178,7 @@ s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
 echo "$s"
 echo "$s" | grep "RUNNING" | wc -l | grep 3 || exit 1
 sky spot cancel -y -n ${CLUSTER_NAME}-7-0
-sleep 200
+sky spot logs -n "${CLUSTER_NAME}-7-1"
 s=$(sky spot queue | grep ${CLUSTER_NAME}-7)
 echo "$s"
 echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
