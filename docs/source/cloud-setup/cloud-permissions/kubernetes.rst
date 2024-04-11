@@ -31,7 +31,7 @@ SkyPilot can operate using either of the following three authentication methods:
          remote_identity: SERVICE_ACCOUNT
 
    For details on the permissions that are granted to the service account,
-   refer to the `Permissions required by SkyPilot`_ section below.
+   refer to the `Permissions required for SkyPilot`_ section below.
 
 3. **Using a custom service account**: If you have a custom service account
    with the `necessary permissions <k8s-permissions_>`__, you can configure
