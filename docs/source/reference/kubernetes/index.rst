@@ -208,7 +208,18 @@ FAQs
 
 * **Are autoscaling Kubernetes clusters supported?**
 
-  To run on an autoscaling cluster, you may need to adjust the resource provisioning timeout (:code:`Kubernetes.TIMEOUT` in `clouds/kubernetes.py`) to a large value to give enough time for the cluster to autoscale. We are working on a better interface to adjust this timeout - stay tuned!
+  Support for autoscaling clusters is experimental.
+  To run on autoscaling clusters, set the :code:`provision_timeout` key in :code:`~/.sky/config.yaml` to a large value to give enough time for the cluster autoscaler to provision new nodes.
+  This will allow SkyPilot to wait for the cluster to scale up before launching the task. Example:
+
+  .. code-block:: yaml
+
+      # ~/.sky/config.yaml
+      kubernetes:
+        provision_timeout: 900  # Wait 15 minutes for nodes to get provisioned before fail over
+
+  The timeout can be set to -1 to wait indefinitely for the cluster to scale up. More details in :ref:`config-yaml`.
+
 
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
