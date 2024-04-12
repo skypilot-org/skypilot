@@ -254,6 +254,7 @@ class Kubernetes(clouds.Cloud):
                 kubernetes_utils.get_gpu_label_key_value(acc_type)
 
         port_mode = network_utils.get_port_mode(None)
+        networking_mode = network_utils.get_networking_mode(None)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -266,6 +267,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
+            'k8s_networking_mode': networking_mode.value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
