@@ -30,7 +30,7 @@ def launch(name: str, data_center_id: str, ssh_key: str, machine_type: str,
 
     try:
         api = cudo.cudo.cudo_api.virtual_machines()
-        vm = api.create_vm(cudo.cudo.cudo_api.project_id(), request)
+        vm = api.create_vm(cudo.cudo.cudo_api.project_id_throwable(), request)
         return vm.to_dict()['id']
     except cudo.cudo.rest.ApiException as e:
         raise e
@@ -52,7 +52,7 @@ def remove(instance_id: str):
     retry_interval = 5
     retry_count = 0
     state = 'unknown'
-    project_id = cudo.cudo.cudo_api.project_id()
+    project_id = cudo.cudo.cudo_api.project_id_throwable()
     while retry_count < max_retries:
         try:
             vm = api.get_vm(project_id, instance_id)
@@ -91,7 +91,7 @@ def set_tags(instance_id: str, tags: Dict):
 def get_instance(vm_id):
     try:
         api = cudo.cudo.cudo_api.virtual_machines()
-        vm = api.get_vm(cudo.cudo.cudo_api.project_id(), vm_id)
+        vm = api.get_vm(cudo.cudo.cudo_api.project_id_throwable(), vm_id)
         vm_dict = vm.to_dict()
         return vm_dict
     except cudo.cudo.rest.ApiException as e:
@@ -101,7 +101,7 @@ def get_instance(vm_id):
 def list_instances():
     try:
         api = cudo.cudo.cudo_api.virtual_machines()
-        vms = api.list_vms(cudo.cudo.cudo_api.project_id())
+        vms = api.list_vms(cudo.cudo.cudo_api.project_id_throwable())
         instances = {}
         for vm in vms.to_dict()['vms']:
             ex_ip = vm['external_ip_address']
