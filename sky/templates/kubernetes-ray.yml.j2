@@ -258,7 +258,7 @@ available_node_types:
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]
-          args: ['trap : TERM INT; sleep infinity & wait;']
+          args: ['trap : TERM INT; mkdir -p ~/sky_logs; touch ~/sky_logs/global.log; tail -f ~/sky_logs/global.log || true; sleep infinity & wait;']
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: {{ray_port}}  # Redis port

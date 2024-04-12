@@ -3125,6 +3125,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          stream_logs=False)
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
+        global_log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                       'global.log')
 
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
@@ -3135,10 +3137,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
             # Redirect stderr to /dev/null to avoid distracting error from ray.
-            f'"{executable} -u {script_path} > {remote_log_path} 2> /dev/null"')
+            f'"{executable} -u {script_path} | '
+            f'tee -a {remote_log_path} {global_log_path} > '
+            f'/dev/null 2> /dev/null"')
 
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
-                      f'touch {remote_log_path}')
+                      f'touch {remote_log_path} && touch {global_log_path}')
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = mkdir_code + ' && ' + code
 
