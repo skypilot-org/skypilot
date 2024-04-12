@@ -233,7 +233,8 @@ def get_loadbalancer_ip(namespace: str, service_name: str) -> Optional[str]:
 def get_pod_ip(namespace: str, pod_name: str) -> Optional[str]:
     """Returns the IP address of the pod."""
     core_api = kubernetes.core_api()
-    pod = core_api.read_namespaced_pod(
-        pod_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+    pod = core_api.read_namespaced_pod(pod_name,
+                                       namespace,
+                                       _request_timeout=kubernetes.API_TIMEOUT)
 
     return pod.status.pod_ip if pod.status.pod_ip is not None else None
