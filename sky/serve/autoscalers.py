@@ -473,6 +473,10 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         self.base_ondemand_fallback_replicas: int = (
             spec.base_ondemand_fallback_replicas
             if spec.base_ondemand_fallback_replicas is not None else 0)
+        # Default value to 1.
+        self.num_overprovision: int = (
+            spec.num_overprovision if spec.num_overprovision is not None else 1)
+
         # Assert: Either dynamic_ondemand_fallback is set
         # or base_ondemand_fallback_replicas is greater than 0.
         assert spec.use_ondemand_fallback
@@ -567,7 +571,8 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             self.select_outdated_replicas_to_scale_down(replica_infos))
 
         # Decide how many spot instances to launch.
-        num_spot_to_provision = (self.target_num_replicas -
+        num_spot_to_provision = (self.target_num_replicas +
+                                 self.num_overprovision -
                                  self.base_ondemand_fallback_replicas)
         if num_nonterminal_spot < num_spot_to_provision:
             # Not enough spot instances, scale up.

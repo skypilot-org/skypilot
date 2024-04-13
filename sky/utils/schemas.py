@@ -340,6 +340,10 @@ def get_service_schema():
                     'dynamic_ondemand_fallback': {
                         'type': 'boolean',
                     },
+                    'num_overprovision': {
+                        'type': 'number',
+                        'minimum': 0,
+                    },
                     'base_ondemand_fallback_replicas': {
                         'type': 'integer',
                         'minimum': 0,

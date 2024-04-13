@@ -25,6 +25,7 @@ class SkyServiceSpec:
         post_data: Optional[Dict[str, Any]] = None,
         dynamic_ondemand_fallback: Optional[bool] = None,
         base_ondemand_fallback_replicas: Optional[int] = None,
+        num_overprovision: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         # The following arguments are deprecated.
@@ -75,6 +76,7 @@ class SkyServiceSpec:
             bool] = dynamic_ondemand_fallback
         self._base_ondemand_fallback_replicas: Optional[
             int] = base_ondemand_fallback_replicas
+        self._num_overprovision: Optional[int] = num_overprovision
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
 
@@ -155,6 +157,8 @@ class SkyServiceSpec:
                     'base_ondemand_fallback_replicas', None)
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
+            service_config['num_overprovision'] = policy_section.get(
+                'num_overprovision', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -279,6 +283,10 @@ class SkyServiceSpec:
     @property
     def base_ondemand_fallback_replicas(self) -> Optional[int]:
         return self._base_ondemand_fallback_replicas
+
+    @property
+    def num_overprovision(self) -> Optional[int]:
+        return self._num_overprovision
 
     @property
     def dynamic_ondemand_fallback(self) -> Optional[bool]:

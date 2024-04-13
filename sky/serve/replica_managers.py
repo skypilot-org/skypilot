@@ -72,7 +72,7 @@ def launch_cluster(replica_id: int,
     try:
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         task = sky.Task.from_yaml_config(config)
-        logger.info('resources_override: ', resources_override)
+        logger.info(f'resources_override: {resources_override}')
         if resources_override is not None:
             resources = task.resources
             overrided_resources = [
@@ -802,6 +802,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.error(f'Cannot find location for replica {info.replica_id}. '
                          'Skipping adding to preemption list.')
         elif self._use_spot_placer:
+            logger.info(f'Adding {info.location} to '
+                        'preemption history.')
             self.preemption_history.append(info.location)
         self._terminate_replica(info.replica_id,
                                 sync_down_logs=False,
@@ -862,6 +864,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                         elif self._use_spot_placer:
                             # If a spot fails to launch in a given zone.
                             if p.exitcode != 0:
+                                logger.info(f'Adding {info.location} to '
+                                            'preemption history.')
                                 self.preemption_history.append(info.location)
                             else:
                                 self.active_history.append(info.location)
