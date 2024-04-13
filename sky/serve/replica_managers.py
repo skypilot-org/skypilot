@@ -99,7 +99,7 @@ def launch_cluster(replica_id: int,
                        cluster_name,
                        detach_setup=True,
                        detach_run=True,
-                       retry_until_up=True,
+                       retry_until_up=False,
                        _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,

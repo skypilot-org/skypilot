@@ -1,7 +1,7 @@
 service:
   readiness_probe: /v1/models
   replica_policy:
-    min_replicas: 2
+    min_replicas: 3
     max_replicas: 3
     target_qps_per_replica: 1
     dynamic_ondemand_fallback: true
