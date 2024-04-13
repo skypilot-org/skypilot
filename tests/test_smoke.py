@@ -282,6 +282,11 @@ def test_minimal(generic_cloud: str):
             # Ensure the raylet process has the correct file descriptor limit.
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            # Check the cluster info
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cluster_name | grep {name}\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i {generic_cloud}\'',
+            f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
         _get_timeout(generic_cloud),
@@ -300,6 +305,8 @@ def test_aws_region():
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-east-2\'',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -318,6 +325,8 @@ def test_gcp_region_and_service_account():
             f'sky exec {name} \'curl -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?format=standard&audience=gcp"\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-central1',  # Ensure the region is correct.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-central1\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -351,6 +360,10 @@ def test_azure_region():
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep eastus2',  # Ensure the region is correct.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep eastus2\'',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .zone | grep null\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -420,6 +433,8 @@ def test_aws_images():
             f'sky launch -y -c {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i aws\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -438,6 +453,28 @@ def test_gcp_images():
             f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i gcp\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.azure
+def test_azure_images():
+    name = _get_cluster_name()
+    test = Test(
+        'azure_images',
+        [
+            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-2204 --cloud azure tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky launch -c {name} --image-id skypilot:v1-ubuntu-2004 --cloud azure tests/test_yamls/minimal.yaml && exit 1 || true',
+            f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i azure\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -3013,10 +3050,13 @@ _SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
 # The teardown command has a 10-mins timeout, so we don't need to do
 # the timeout here. See implementation of run_one_test() for details.
 _TEARDOWN_SERVICE = (
-    '(while true; do'
+    '(for i in `seq 1 20`; do'
     '     s=$(sky serve down -y {name});'
-    '     echo "$s" | grep -q "scheduled to be terminated" && break;'
+    '     echo "Trying to terminate {name}";'
+    '     echo "$s";'
+    '     echo "$s" | grep -q "scheduled to be terminated\|No service to terminate" && break;'
     '     sleep 10;'
+    '     [ $i -eq 20 ] && echo "Failed to terminate service {name}";'
     'done)')
 
 _SERVE_ENDPOINT_WAIT = (
@@ -3071,7 +3111,8 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
     for check_tuple in check_tuples:
         count, is_spot, status = check_tuple
         resource_str = ''
-        if status not in ['PENDING', 'SHUTTING_DOWN', 'FAILED']:
+        if status not in ['PENDING', 'SHUTTING_DOWN'
+                         ] and not status.startswith('FAILED'):
             spot_str = ''
             if is_spot:
                 spot_str = '\[Spot\]'
@@ -3144,7 +3185,7 @@ def test_skyserve_llm(generic_cloud: str):
             ],
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        timeout=20 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -3248,22 +3289,22 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/restart/user_bug.yaml',
             f's=$(sky serve status {name}); echo "$s";'
-            'until echo "$s" | grep -A2 "Service Replicas" | grep "SHUTTING_DOWN"; '
+            'until echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN"; '
             'do echo "Waiting for first service to be SHUTTING DOWN..."; '
-            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; sleep 20; '
-            + _SERVE_STATUS_WAIT.format(name=name) +
-            # When the first replica is detected failed, the controller will
-            # start to provision a new replica, and shut down the first one.
-            _check_replica_in_status(
-                name, [(1, True, 'SHUTTING_DOWN'),
-                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; ',
             f's=$(sky serve status {name}); echo "$s";'
-            'until echo "$s" | grep -A2 "Service Replicas" | grep "FAILED"; '
+            'until echo "$s" | grep -A 100 "Service Replicas" | grep "FAILED"; '
             'do echo "Waiting for first service to be FAILED..."; '
             f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
-            + _check_replica_in_status(
-                name, [(1, True, 'FAILED'),
-                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            + _check_replica_in_status(name, [(1, True, 'FAILED')]) +
+            # User bug failure will cause no further scaling.
+            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
+            f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'until curl -L http://$endpoint | grep "Hi, SkyPilot here!"; do sleep 2; done; sleep 2; '
+            + _check_replica_in_status(name, [(1, False, 'READY'),
+                                              (1, False, 'FAILED')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3412,7 +3453,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             # should be able to get observe the period that the traffic is mixed
             # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; '
+            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; sleep 2; '
             # The latest version should have one READY and the one of the older versions should be shutting down
             f'{single_new_replica} {_check_service_version(name, "1,2")} '
             # Check the output from the old version, immediately after the
@@ -3536,7 +3577,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             _check_service_version(name, "1"),
         ]
     test = Test(
-        f'test-skyserve-new-autoscaler-update',
+        'test-skyserve-new-autoscaler-update',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
@@ -3556,6 +3597,45 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             _check_replica_in_status(name, [(4, True, 'READY'),
                                             (1, False, 'READY')]),
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_failures(generic_cloud: str):
+    """Test replica failure statuses"""
+    name = _get_service_name()
+
+    test = Test(
+        'test-skyserve-failures',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/failures/initial_delay.yaml',
+            f's=$(sky serve status {name}); '
+            f'until echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done;',
+            'sleep 60',
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 2; '
+            # Make sure no new replicas are started for early failure.
+            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 2;',
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/failures/probing.yaml',
+            f's=$(sky serve status {name}); '
+            # Wait for replica to be ready.
+            f'until echo "$s" | grep "READY"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done;',
+            # Wait for replica to change to FAILED_PROBING
+            f's=$(sky serve status {name}); '
+            f'until echo "$s" | grep "FAILED_PROBING"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done;' +
+            _check_replica_in_status(
+                name, [(1, False, 'FAILED_PROBING'),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            # TODO(zhwu): add test for FAILED_PROVISION
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,

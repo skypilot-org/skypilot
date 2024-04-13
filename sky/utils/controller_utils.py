@@ -32,7 +32,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Message thrown when APIs sky.spot_launch(),sky.serve.up() received an invalid
+# Message thrown when APIs sky.spot.launch(),sky.serve.up() received an invalid
 # controller resources spec.
 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type} controller resources is not valid, please check '
@@ -146,8 +146,13 @@ def _get_cloud_dependencies_installation_commands(
         'boto3>=1.26.1 > /dev/null 2>&1',
         # gcp
         'pip list | grep google-api-python-client > /dev/null 2>&1 || '
-        'pip install google-api-python-client>=2.69.0 google-cloud-storage '
+        'pip install google-api-python-client>=2.69.0 '
         '> /dev/null 2>&1',
+        # Have to separate the installation of google-cloud-storage from above
+        # because for a VM launched on GCP, the VM may have
+        # google-api-python-client installed alone.
+        'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
+        'pip install google-cloud-storage > /dev/null 2>&1',
         f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}',
         # fluidstack does not need to install any cloud dependencies.
     ]

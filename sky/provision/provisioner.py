@@ -465,7 +465,7 @@ def _post_provision_setup(
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:
             status.update(
-                '[bold cyan]Lauching - Initializing docker container[/]')
+                '[bold cyan]Launching - Initializing docker container[/]')
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
