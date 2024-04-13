@@ -72,6 +72,7 @@ def launch_cluster(replica_id: int,
     try:
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         task = sky.Task.from_yaml_config(config)
+        logger.info('resources_override: ', resources_override)
         if resources_override is not None:
             resources = task.resources
             overrided_resources = [

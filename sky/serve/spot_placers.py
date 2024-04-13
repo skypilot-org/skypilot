@@ -36,7 +36,9 @@ class Location:
         return hash(self.cloud + self.region + self.zone)
 
     def to_dict(self) -> Dict[str, str]:
-        return {'cloud': self.cloud, 'region': self.region, 'zone': self.zone}
+        # Temporary fix. 
+        # Remove self.cloud, as needs to be cloud object as override dict.
+        return {'region': self.region, 'zone': self.zone}
 
 
 class LocationStatus(enum.Enum):
@@ -85,6 +87,8 @@ class SpotPlacer:
         self.location2type: Dict[Location, LocationStatus] = {
             location: LocationStatus.ACTIVE for location in feasible_locations
         }
+        logger.info('SpotPlacer initialized with feasible locations: ',
+                    feasible_locations)
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
                num_replicas: int) -> List[Location]:

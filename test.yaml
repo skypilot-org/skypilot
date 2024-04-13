@@ -1,0 +1,45 @@
+service:
+  readiness_probe: /v1/models
+  replica_policy:
+    min_replicas: 2
+    max_replicas: 3
+    target_qps_per_replica: 1
+    dynamic_ondemand_fallback: true
+
+envs:
+  MODEL_NAME: meta-llama/Llama-2-70b-chat-hf
+  HF_TOKEN: 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  # Change to your own huggingface token, or use --env to pass.
+
+resources:
+  any_of:
+  - region: us-east-2
+  - region: us-west-2
+  - region: eu-central-1
+  - region: eu-west-2
+  accelerators: A10G:8
+  use_spot: true
+  ports: 9000  # Expose to internet traffic.
+
+setup: |
+  conda activate vllm
+  if [ $? -ne 0 ]; then
+    conda create -n vllm python=3.10 -y
+    conda activate vllm
+  fi
+
+  pip install fschat==0.2.36 accelerate==0.28.0 vllm==0.3.3
+  python -c "import huggingface_hub; huggingface_hub.login('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')"
+
+run: |
+  conda activate vllm
+  echo 'Starting vllm api server...'
+
+  # https://github.com/vllm-project/vllm/issues/3098
+  export PATH=$PATH:/sbin
+
+  python -u -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 --port 9000 \
+    --model $MODEL_NAME \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+      --max-num-seqs 64 \
+    2>&1 | tee api_server.log
