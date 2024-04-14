@@ -1,0 +1,7 @@
+kubernetes:
+  remote_identity: SERVICE_ACCOUNT
+  provision_timeout: 900
+serve:
+  controller:
+    resources:
+      cloud: kubernetes

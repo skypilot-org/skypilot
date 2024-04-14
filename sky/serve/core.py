@@ -47,13 +47,13 @@ def _validate_service_task(task: 'sky.Task') -> None:
     ]
     # TODO(MaoZiming): Allow mixed on-demand and spot specification in resources
     # On-demand fallback should go to the resources specified as on-demand.
-    if len(spot_resources) not in [0, len(task.resources)]:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Resources must either all use spot or none use spot. '
-                'To use on-demand and spot instances together, '
-                'use `dynamic_ondemand_fallback` or set '
-                'base_ondemand_fallback_replicas.')
+    # if len(spot_resources) not in [0, len(task.resources)]:
+    #     with ux_utils.print_exception_no_traceback():
+    #         raise ValueError(
+    #             'Resources must either all use spot or none use spot. '
+    #             'To use on-demand and spot instances together, '
+    #             'use `dynamic_ondemand_fallback` or set '
+    #             'base_ondemand_fallback_replicas.')
 
     if task.service is None:
         with ux_utils.print_exception_no_traceback():

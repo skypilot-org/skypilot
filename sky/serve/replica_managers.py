@@ -190,9 +190,8 @@ def _should_use_spot(task_yaml: str,
     spot_use_resources = [
         resources for resources in task.resources if resources.use_spot
     ]
-    # Either resources all use spot or none use spot.
-    assert len(spot_use_resources) in [0, len(task.resources)]
-    return len(spot_use_resources) == len(task.resources)
+    # Hack - enable preemption handling if even single resource type is spot
+    return len(spot_use_resources) > 0
 
 
 def with_lock(func):
