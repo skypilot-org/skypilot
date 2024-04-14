@@ -4,9 +4,10 @@ import collections
 import enum
 import os
 import typing
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import sky
+from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
 from sky.utils import common_utils
@@ -35,10 +36,12 @@ class Location:
     def __hash__(self) -> int:
         return hash(self.cloud + self.region + self.zone)
 
-    def to_dict(self) -> Dict[str, str]:
-        # Temporary fix.
-        # Remove self.cloud, as needs to be cloud object as override dict.
-        return {'region': self.region, 'zone': self.zone}
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'cloud': clouds.CLOUD_REGISTRY.from_str(self.cloud),
+            'region': self.region,
+            'zone': self.zone
+        }
 
     def json(self) -> Dict[str, str]:
         return {'cloud': self.cloud, 'region': self.region, 'zone': self.zone}

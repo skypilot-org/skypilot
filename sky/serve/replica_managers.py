@@ -208,7 +208,8 @@ def _get_location(
         zone = resource_override.get('zone', None)
         # For Azure, zone can be None.
         if cloud is not None and region is not None:
-            location = spot_placers.Location(cloud, region, zone)
+            cloud_str = type(cloud).__name__.lower()
+            location = spot_placers.Location(cloud_str, region, zone)
             return location
     return None
 
