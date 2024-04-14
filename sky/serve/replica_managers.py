@@ -1,10 +1,12 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
+import base64
 import dataclasses
 import enum
 import functools
 import multiprocessing
 from multiprocessing import pool as mp_pool
 import os
+import pickle
 import threading
 import time
 import traceback
@@ -193,7 +195,7 @@ def _should_use_spot(task_yaml: str,
     ]
     # Either resources all use spot or none use spot.
     assert len(spot_use_resources) in [0, len(task.resources)]
-    return spot_use_resources == len(task.resources)
+    return len(spot_use_resources) == len(task.resources)
 
 
 def _get_location(
@@ -387,6 +389,18 @@ class ReplicaStatusProperty:
             # No readiness probe passed and sky.launch finished
             return serve_state.ReplicaStatus.STARTING
 
+    def json(self) -> Dict[str, Any]:
+        return {
+            'sky_launch_status': self.sky_launch_status.value if
+                                 self.sky_launch_status is not None else None,
+            'user_app_failed': self.user_app_failed,
+            'service_ready_now': self.service_ready_now,
+            'first_ready_time': self.first_ready_time,
+            'sky_down_status': self.sky_down_status.value
+                               if self.sky_down_status is not None else None,
+            'preempted': self.preempted,
+        }
+
 
 class ReplicaInfo:
     """Replica info for each replica."""
@@ -465,6 +479,21 @@ class ReplicaInfo:
         if with_handle:
             info_dict['handle'] = self.handle(cluster_record)
         return info_dict
+
+    def json(self) -> Dict[str, Any]:
+        cluster_record = global_user_state.get_cluster_from_name(
+            self.cluster_name)
+        return {
+            'replica_id': self.replica_id,
+            'cluster_name': self.cluster_name,
+            'is_spot': self.is_spot,
+            'status': self.status.value,
+            'status_property': self.status_property.json(),
+            'location': self.location.json()
+                        if self.location is not None else None,
+            'cluster_record': base64.b64encode(pickle.dumps(cluster_record)
+                                              ).decode('utf-8'),
+        }
 
     def __repr__(self) -> str:
         info_dict = self.to_info_dict(
@@ -867,6 +896,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                                 logger.info(f'Adding {info.location} to '
                                             'preemption history.')
                                 self.preemption_history.append(info.location)
+                                # Hack: set to INTERRUPTED to
+                                # remove it from the database.
+                                info.status_property.sky_launch_status = (
+                                    ProcessStatus.INTERRUPTED)
                             else:
                                 self.active_history.append(info.location)
                 serve_state.add_or_update_replica(self._service_name,

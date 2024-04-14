@@ -40,6 +40,13 @@ class Location:
         # Remove self.cloud, as needs to be cloud object as override dict.
         return {'region': self.region, 'zone': self.zone}
 
+    def json(self) -> Dict[str, str]:
+        return {'cloud': self.cloud, 'region': self.region, 'zone': self.zone}
+
+    def __repr__(self) -> str:
+        return (f'Location(cloud={self.cloud!r}, region={self.region!r}, '
+                f'zone={self.zone!r})')
+
 
 class LocationStatus(enum.Enum):
     """Location Spot Status."""

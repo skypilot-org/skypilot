@@ -534,6 +534,10 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
+        if self.spot_placer is not None:
+            logger.info(
+                f'Current zone to type: {self.spot_placer.location2type}')
+
         latest_nonterminal_replicas = list(
             filter(
                 lambda info: not info.is_terminal and info.version == self.
