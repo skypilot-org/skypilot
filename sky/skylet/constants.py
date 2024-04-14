@@ -110,6 +110,8 @@ RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 # backend_utils.write_cluster_config.
 RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
+    # Print the PATH in provision.log to help debug PATH issues.
+    'echo PATH=$PATH; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -123,15 +125,18 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # latest ray port 6380, but those existing cluster launched before #1790
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
-    'echo PATH=$PATH; '
     f'{SKY_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
     f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
-    # Add missing PATH to make sure ray is in the PATH, when the
-    # previous ray installation happens in user's `~/.local` directory.
-    # ~/.local/bin is added to the end of PATH to avoid conflicts with ray just
-    # installed in the conda environment.
+    # In some envs, e.g. pip does not have permission to write under /opt/conda
+    # ray package will be installed under ~/.local/bin. If the user's PATH does
+    # not include ~/.local/bin (the pip install will have the output: `WARNING: 
+    # The scripts ray, rllib, serve and tune are installed in '~/.local/bin'
+    # which is not on PATH.`), causing an empty SKY_RAY_PATH_FILE later.
+    #
+    # Here, we add ~/.local/bin to the end of the PATH to make sure the issues
+    # mentioned above are resolved.
     'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE}; '
