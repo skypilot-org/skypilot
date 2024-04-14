@@ -131,7 +131,7 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
-    # not include ~/.local/bin (the pip install will have the output: `WARNING: 
+    # not include ~/.local/bin (the pip install will have the output: `WARNING:
     # The scripts ray, rllib, serve and tune are installed in '~/.local/bin'
     # which is not on PATH.`), causing an empty SKY_RAY_PATH_FILE later.
     #
