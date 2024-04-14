@@ -162,7 +162,7 @@ fi
 # the spot controller is updated.
 # Get a new uuid to avoid conflict with previous back-compat tests.
 uuid=$(uuidgen)
-SPOT_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}-7
+SPOT_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}
 if [ "$start_from" -le 7 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
@@ -173,7 +173,7 @@ rm -r  ~/.sky/wheels || true
 s=$(sky spot logs --no-follow -n ${SPOT_JOB_JOB_NAME}-7-1)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
-sky spot launch -d --cloud ${CLOUD} -y -n ${SPOT_JOB_JOB_NAME}-7-2 "echo hi; sleep 60"
+sky spot launch -d --cloud ${CLOUD} -y -n ${SPOT_JOB_JOB_NAME}-7-2 "echo hi; sleep 40"
 s=$(sky spot logs --no-follow -n ${SPOT_JOB_JOB_NAME}-7-2)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
