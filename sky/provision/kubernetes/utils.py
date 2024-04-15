@@ -1063,9 +1063,9 @@ def check_port_forward_mode_dependencies() -> None:
 
     # Ensure netcat is installed
     #
-    # In some cases, the user may have the default MacOS nc installed but
-    # they need GNU nc installed. Checking for this case, reflected in
-    # `nc_mac_installed`, helps give a more specific error message
+    # In some cases, the user may have the default MacOS nc installed, which
+    # does not support the -z flag. To use the -z flag for port scanning,
+    # they need GNU nc installed. We check for this case and raise an error.
     try:
         netcat_output = subprocess.run(['nc', '-h'],
                                        capture_output=True,
