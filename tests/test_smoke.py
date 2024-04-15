@@ -2169,7 +2169,7 @@ def test_spot(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_pipeline(generic_cloud: str):
-    """Test a spot pipeline."""
+    """Test a spot pipeline."""
     name = _get_cluster_name()
     test = Test(
         'spot-pipeline',
@@ -2358,7 +2358,7 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
             # separated by `-`.
             (
                 f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
-                'cut -d\'-\' -f2 | rev`;'
+                'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`;'
                 f'aws ec2 terminate-instances --region {region} --instance-ids $('
                 f'aws ec2 describe-instances --region {region} '
                 # TODO(zhwu): fix the name for spot cluster.
@@ -2407,7 +2407,7 @@ def test_spot_pipeline_recovery_gcp():
             # SKYPILOT_TASK_ID, which gets the second to last field
             # separated by `-`.
             (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
-             f'cut -d\'-\' -f2 | rev`;{terminate_cmd}'),
+             f'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`; {terminate_cmd}'),
             'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
