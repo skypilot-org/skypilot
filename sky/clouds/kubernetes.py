@@ -24,6 +24,8 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
 CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
+SKY_SYSTEM_NAMESPACE = 'sky-system'
+
 
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
@@ -255,6 +257,12 @@ class Kubernetes(clouds.Cloud):
 
         port_mode = network_utils.get_port_mode(None)
 
+        # TODO(romilb): We force requiring FUSE mount support to avoid handling
+        #  the case when an existing cluster was launched without FUSE support
+        #  and then a task is launched that requires FUSE support. This should
+        #  be fixed by adding _fuse_required as a field in Resources.
+        requires_fuse_mount = True
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -271,6 +279,9 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_value': k8s_acc_label_value,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
+            'k8s_requires_fuse_mount': requires_fuse_mount,
+            # Namespace to run the FUSE device manager in
+            'k8s_fuse_device_manager_namespace': SKY_SYSTEM_NAMESPACE,
             'image_id': image_id,
         }
 

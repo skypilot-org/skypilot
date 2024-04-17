@@ -1271,3 +1271,25 @@ def check_secret_exists(secret_name: str, namespace: str) -> bool:
         raise
     else:
         return True
+
+
+def create_namespace(namespace: str) -> None:
+    """Creates a namespace in the cluster.
+
+    If the namespace already exists, logs a message and does nothing.
+
+    Args:
+        namespace: Name of the namespace to create
+    """
+    kubernetes_client = kubernetes.kubernetes.client
+    ns_metadata = dict(name=namespace, labels={'parent': 'skypilot'})
+    merge_custom_metadata(ns_metadata)
+    namespace_obj = kubernetes_client.V1Namespace(metadata=ns_metadata)
+    try:
+        kubernetes.core_api().create_namespace(namespace_obj)
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.info(f'Namespace {namespace} already exists in the cluster.')
+        else:
+            raise
+

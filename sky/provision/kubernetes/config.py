@@ -2,7 +2,9 @@
 import copy
 import logging
 import math
+import os
 from typing import Any, Dict, Union
+import yaml
 
 from sky.adaptors import kubernetes
 from sky.provision import common
@@ -23,6 +25,10 @@ def bootstrap_instances(
     _configure_services(namespace, config.provider_config)
 
     config = _configure_ssh_jump(namespace, config)
+
+    logger.info(config.provider_config.get('requires_fuse_mount', 'false'))
+    if config.provider_config.get('requires_fuse_mount', False):
+        _configure_fuse_mounting(config.provider_config)
 
     if not config.provider_config.get('_operator'):
         # These steps are unecessary when using the Operator.
@@ -309,6 +315,62 @@ def _configure_ssh_jump(namespace, config: common.ProvisionConfig):
     kubernetes_utils.setup_ssh_jump_pod(ssh_jump_name, ssh_jump_image,
                                         ssh_key_secret_name, namespace)
     return config
+
+
+def _configure_fuse_mounting(config: common.ProvisionConfig) -> None:
+    """Creates sidecars required for FUSE mounting
+
+    FUSE mounting in Kubernetes without privileged containers requires us to
+    run a sidecar container with the necessary capabilities. We run a daemonset
+    which exposes the host /dev/fuse device as a Kubernetes resource. The
+    SkyPilot pod requests this resource to mount the FUSE filesystem.
+    """
+
+    logger.info('_configure_fuse_mounting: Setting up FUSE device manager.')
+
+    fuse_device_manager_namespace = config.get('fuse_device_manager_namespace', 'default')
+    kubernetes_utils.create_namespace(fuse_device_manager_namespace)
+
+    # Read the device manager YAMLs from the sky/utils/kubernetes directory
+    root_dir = os.path.dirname(os.path.dirname(__file__))
+    logger.info(f'root_dir: {root_dir}')
+
+    # Load and create the ConfigMap
+    logger.info(f'_configure_fuse_mounting: Creating configmap.')
+    config_map_path = os.path.join(root_dir, 'kubernetes/manifests/smarter-device-manager-configmap.yaml')
+    with open(config_map_path, 'r') as file:
+        config_map = yaml.safe_load(file)
+    kubernetes_utils.merge_custom_metadata(config_map['metadata'])
+    try:
+        kubernetes.core_api().create_namespaced_config_map(
+            fuse_device_manager_namespace, config_map)
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.info(f'_configure_fuse_mounting: ConfigMap already exists in namespace: {fuse_device_manager_namespace}')
+        else:
+            raise
+    else:
+        logger.info(f'_configure_fuse_mounting: ConfigMap created in namespace: {fuse_device_manager_namespace}')
+
+    # Load and create the DaemonSet
+    logger.info(f'_configure_fuse_mounting: Creating daemonset.')
+    daemonset_path = os.path.join(root_dir, 'kubernetes/manifests/smarter-device-manager-daemonset.yaml')
+    with open(daemonset_path, 'r') as file:
+        daemonset = yaml.safe_load(file)
+    kubernetes_utils.merge_custom_metadata(daemonset['metadata'])
+    try:
+        kubernetes.apps_api().create_namespaced_daemon_set(
+            fuse_device_manager_namespace, daemonset)
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.info(f'_configure_fuse_mounting: DaemonSet already exists in namespace: {fuse_device_manager_namespace}')
+        else:
+            raise
+    else:
+        logger.info(f'_configure_fuse_mounting: DaemonSet created in namespace: {fuse_device_manager_namespace}')
+
+    logger.info(
+        'FUSE device manager setup complete in namespace: ' + fuse_device_manager_namespace)
 
 
 def _configure_services(namespace: str, provider_config: Dict[str,
