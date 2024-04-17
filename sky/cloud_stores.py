@@ -158,26 +158,34 @@ class AzureCloudStorage(CloudStorage):
     """Azure Blob Storage."""
 
     # Installation reference: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux?pivots=apt#option-2-step-by-step-installation-instructions # pylint: disable=line-too-long
-    _AZ_CLI_VERSION = '2.58.0'
-    _GET_AZCLI = [
-        'az --version >/dev/null 2>&1 || '
-        '(sudo apt-get update; '
-        'sudo apt-get install ca-certificates curl apt-transport-https '
-        'lsb-release gnupg -y; '
-        'sudo mkdir -p /etc/apt/keyrings; '
-        'curl -sLS https://packages.microsoft.com/keys/microsoft.asc | '
-        'gpg --dearmor | '
-        'sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null; '
-        'sudo chmod go+r /etc/apt/keyrings/microsoft.gpg; '
-        'AZ_DIST=$(lsb_release -cs); '
-        'echo "deb [arch=`dpkg --print-architecture` '
-        'signed-by=/etc/apt/keyrings/microsoft.gpg] '
-        'https://packages.microsoft.com/repos/azure-cli/ $AZ_DIST main" | '
-        'sudo tee /etc/apt/sources.list.d/azure-cli.list; '
-        'sudo apt-get update; '
-        f'AZ_VER={_AZ_CLI_VERSION}; '
-        'sudo apt-get install azure-cli=$AZ_VER-1~$AZ_DIST -y)'
+    # _AZ_CLI_VERSION = '2.58.0'
+    # _GET_AZCLI = [
+    #     'az --version >/dev/null 2>&1 || '
+    #     '(sudo apt-get update; '
+    #     'sudo apt-get install ca-certificates curl apt-transport-https '
+    #     'lsb-release gnupg -y; '
+    #     'sudo mkdir -p /etc/apt/keyrings; '
+    #     'curl -sLS https://packages.microsoft.com/keys/microsoft.asc | '
+    #     'gpg --dearmor | '
+    #     'sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null; '
+    #     'sudo chmod go+r /etc/apt/keyrings/microsoft.gpg; '
+    #     'AZ_DIST=$(lsb_release -cs); '
+    #     'echo "deb [arch=`dpkg --print-architecture` '
+    #     'signed-by=/etc/apt/keyrings/microsoft.gpg] '
+    #     'https://packages.microsoft.com/repos/azure-cli/ $AZ_DIST main" | '
+    #     'sudo tee /etc/apt/sources.list.d/azure-cli.list; '
+    #     'sudo apt-get update; '
+    #     f'AZ_VER={_AZ_CLI_VERSION}; '
+    #     'sudo apt-get install azure-cli=$AZ_VER-1~$AZ_DIST -y)'
+    # ]
+    _GET_AZCOPY = [
+        'azcopy --version > /dev/null 2>&1 || '
+        'mkdir -p /usr/local/bin; '
+        'curl -L https://aka.ms/downloadazcopy-v10-linux -o azcopy.tar.gz; '
+        'tar -xvzf azcopy.tar.gz --strip-components=1 -C /usr/local/bin --exclude=*.txt; '
+        'chmod +x /usr/local/bin/azcopy'
     ]
+
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' of the AZ Container is a directory.
@@ -208,8 +216,9 @@ class AzureCloudStorage(CloudStorage):
         # A directory with few or no items
         return True
 
+
     def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Downloads a directory using AZ CLI."""
+        """Downloads a directory using AZCOPY."""
         container_name, _, storage_account_name = data_utils.split_az_path(
             source)
         resource_group_name = data_utils.get_az_resource_group(
@@ -217,40 +226,98 @@ class AzureCloudStorage(CloudStorage):
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
         if storage_account_key is None:
-            storage_account_key = ''
-        storage_account_key = ('--account-key '
-                               f'{shlex.quote(storage_account_key)} ')
-        download_command = ('az storage blob download-batch '
-                            f'--account-name {storage_account_name} '
-                            f'{storage_account_key}'
-                            f'--source {container_name} '
-                            f'--destination {destination}')
-
-        all_commands = list(self._GET_AZCLI)
+            # public containers does not require SAS token for access
+            sas_token = ''
+        else:
+            sas_token = data_utils.get_az_container_sas_token(
+                storage_account_name,
+                storage_account_key,
+                container_name
+                )
+        source = (f'https://{storage_account_name}.blob.core.windows.net/'
+                  f'{container_name}/{sas_token}')
+        source = shlex.quote(source)
+        destination = f'{destination}/'
+        destination = shlex.quote(destination)
+        download_command = (f'azcopy sync {source} {destination} '
+                            '--recursive --delete-destination=false')
+        all_commands = list(self._GET_AZCOPY)
         all_commands.append(download_command)
         return ' && '.join(all_commands)
 
+
     def make_sync_file_command(self, source: str, destination: str) -> str:
-        """Downloads a file using AZ CLI."""
-        container_name, path, storage_account_name = data_utils.split_az_path(
-            source)
+        """Downloads a file using AZCOPY."""
+        container_name, blob_path, storage_account_name = (
+            data_utils.split_az_path(source))
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
         if storage_account_key is None:
-            storage_account_key = ''
-        storage_account_key = ('--account-key '
-                               f'{shlex.quote(storage_account_key)} ')
-        download_command = ('az storage blob download '
-                            f'--account-name {storage_account_name} '
-                            f'{storage_account_key}'
-                            f'--name {path} --file {destination} '
-                            f'--container-name {container_name}')
-
-        all_commands = list(self._GET_AZCLI)
+            # public containers does not require SAS token for access
+            sas_token = ''
+        else:
+            sas_token = data_utils.get_az_blob_sas_token(
+                storage_account_name,
+                storage_account_key,
+                container_name,
+                blob_path
+                )
+        source = (f'https://{storage_account_name}.blob.core.windows.net/'
+                  f'{container_name}/{blob_path}{sas_token}')
+        source = shlex.quote(source)
+        destination = f'{destination}'
+        destination = shlex.quote(destination)
+        download_command = f'azcopy copy {source} {destination}'
+        all_commands = list(self._GET_AZCOPY)
         all_commands.append(download_command)
         return ' && '.join(all_commands)
+
+
+    # def make_sync_dir_command(self, source: str, destination: str) -> str:
+    #     """Downloads a directory using AZ CLI."""
+    #     container_name, _, storage_account_name = data_utils.split_az_path(
+    #         source)
+    #     resource_group_name = data_utils.get_az_resource_group(
+    #         storage_account_name)
+    #     storage_account_key = data_utils.get_az_storage_account_key(
+    #         storage_account_name, resource_group_name)
+    #     if storage_account_key is None:
+    #         storage_account_key = ''
+    #     storage_account_key = ('--account-key '
+    #                            f'{shlex.quote(storage_account_key)} ')
+    #     download_command = ('az storage blob download-batch '
+    #                         f'--account-name {storage_account_name} '
+    #                         f'{storage_account_key}'
+    #                         f'--source {container_name} '
+    #                         f'--destination {destination}')
+
+    #     all_commands = list(self._GET_AZCLI)
+    #     all_commands.append(download_command)
+    #     return ' && '.join(all_commands)
+
+    # def make_sync_file_command(self, source: str, destination: str) -> str:
+    #     """Downloads a file using AZ CLI."""
+    #     container_name, path, storage_account_name = data_utils.split_az_path(
+    #         source)
+    #     resource_group_name = data_utils.get_az_resource_group(
+    #         storage_account_name)
+    #     storage_account_key = data_utils.get_az_storage_account_key(
+    #         storage_account_name, resource_group_name)
+    #     if storage_account_key is None:
+    #         storage_account_key = ''
+    #     storage_account_key = ('--account-key '
+    #                            f'{shlex.quote(storage_account_key)} ')
+    #     download_command = ('az storage blob download '
+    #                         f'--account-name {storage_account_name} '
+    #                         f'{storage_account_key}'
+    #                         f'--name {path} --file {destination} '
+    #                         f'--container-name {container_name}')
+
+    #     all_commands = list(self._GET_AZCLI)
+    #     all_commands.append(download_command)
+    #     return ' && '.join(all_commands)
 
 
 class R2CloudStorage(CloudStorage):

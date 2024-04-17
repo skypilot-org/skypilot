@@ -1,6 +1,7 @@
 """Miscellaneous Utils for Sky Data
 """
 import concurrent.futures
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from multiprocessing import pool
 import os
@@ -10,6 +11,7 @@ import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 
+from azure.storage.blob import BlobSasPermissions, ContainerSasPermissions, generate_blob_sas, generate_container_sas
 from filelock import FileLock
 
 from sky import exceptions
@@ -243,6 +245,68 @@ def get_az_storage_account_key(
                 key.value for key in storage_account_keys.keys
             ]
     return storage_account_keys[0]
+
+
+def get_az_container_sas_token(
+    storage_account_name: str,
+    storage_account_key: str,
+    container_name: str,) -> str:
+    """Returns SAS token used to access container.
+
+    Args:
+        storage_account_name: str; Name of the storage account
+        storage_account_key: str; access key for the given storage
+            account
+        container_name: str; name of the mounting container
+
+    Returns:
+        SAS token prepended with the delimiter character, ?
+    """
+    sas_token = generate_container_sas(
+        account_name=storage_account_name,
+        container_name=container_name,
+        account_key=storage_account_key,
+        permission=ContainerSasPermissions(read=True,
+                                           write=True,
+                                           list=True,
+                                           delete=True,
+                                           create=True),
+        expiry=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+    # ? is a delimiter character used when SAS token is attached to the
+    # container endpoint.
+    # Reference: https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/how-to-guides/create-sas-tokens?tabs=Containers # pylint: disable=line-too-long
+    return f'?{sas_token}'
+
+
+def get_az_blob_sas_token(
+    storage_account_name: str,
+    storage_account_key: str,
+    container_name: str,
+    blob_name: str) -> str:
+    """Returns SAS token used to access a blob.
+
+    Args:
+        storage_account_name: str; Name of the storage account
+        storage_account_key: str; access key for the given storage
+            account
+        container_name: str; name of the mounting container
+        blob_name: str; path to the blob(file)
+
+    Returns:
+        SAS token prepended with the delimiter character, ?
+    """
+    sas_token = generate_blob_sas(
+        account_name=storage_account_name,
+        container_name=container_name,
+        blob_name=blob_name,
+        account_key=storage_account_key,
+        permission=BlobSasPermissions(read=True, write=True, delete=True),
+        expiry=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+    # ? is a delimiter character used when SAS token is attached to the
+    # blob endpoint.
+    return f'?{sas_token}'
 
 
 def create_r2_client(region: str = 'auto') -> Client:
