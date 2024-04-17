@@ -46,27 +46,27 @@ class Resources:
     _VERSION = 16
 
     def __init__(
-        self,
-        cloud: Optional[clouds.Cloud] = None,
-        instance_type: Optional[str] = None,
-        cpus: Union[None, int, float, str] = None,
-        memory: Union[None, int, float, str] = None,
-        accelerators: Union[None, str, Dict[str, int]] = None,
-        accelerator_args: Optional[Dict[str, str]] = None,
-        use_spot: Optional[bool] = None,
-        spot_recovery: Optional[str] = None,
-        region: Optional[str] = None,
-        zone: Optional[str] = None,
-        image_id: Union[Dict[str, str], str, None] = None,
-        disk_size: Optional[int] = None,
-        disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
-        ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
-        # Internal use only.
-        # pylint: disable=invalid-name
-        _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
-        _is_image_managed: Optional[bool] = None,
-        _requires_fuse: Optional[bool] = None
-    ):
+            self,
+            cloud: Optional[clouds.Cloud] = None,
+            instance_type: Optional[str] = None,
+            cpus: Union[None, int, float, str] = None,
+            memory: Union[None, int, float, str] = None,
+            accelerators: Union[None, str, Dict[str, int]] = None,
+            accelerator_args: Optional[Dict[str, str]] = None,
+            use_spot: Optional[bool] = None,
+            spot_recovery: Optional[str] = None,
+            region: Optional[str] = None,
+            zone: Optional[str] = None,
+            image_id: Union[Dict[str, str], str, None] = None,
+            disk_size: Optional[int] = None,
+            disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
+            ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
+            # Internal use only.
+            # pylint: disable=invalid-name
+            _docker_login_config: Optional[
+                docker_utils.DockerLoginConfig] = None,
+            _is_image_managed: Optional[bool] = None,
+            _requires_fuse: Optional[bool] = None):
         """Initialize a Resources object.
 
         All fields are optional.  ``Resources.is_launchable`` decides whether
@@ -421,6 +421,10 @@ class Resources:
     @property
     def requires_fuse(self) -> Optional[bool]:
         return self._requires_fuse
+
+    @requires_fuse.setter
+    def requires_fuse(self, value: Optional[bool]) -> None:
+        self._requires_fuse = value
 
     def _set_cpus(
         self,
@@ -1081,7 +1085,7 @@ class Resources:
                 if not self_ports <= other_ports:
                     return False
 
-        if self._requires_fuse and not other._requires_fuse:
+        if self.requires_fuse and not other.requires_fuse:
             # On Kubernetes, we can't launch a task that requires FUSE on a pod
             # that wasn't initialized with FUSE support at the start.
             # Other clouds don't have this limitation.

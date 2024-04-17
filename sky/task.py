@@ -621,7 +621,7 @@ class Task:
         for _, storage_obj in self.storage_mounts.items():
             if storage_obj.mode == storage_lib.StorageMode.MOUNT:
                 for r in self.resources:
-                    r._requires_fuse = True
+                    r.requires_fuse = True
                 break
 
         return self
@@ -815,7 +815,7 @@ class Task:
             self.storage_mounts = {}
             # Clear the requires_fuse flag if no storage mounts are set.
             for r in self.resources:
-                r._requires_fuse = False
+                r.requires_fuse = False
             return self
         for target, storage_obj in storage_mounts.items():
             # TODO(zhwu): /home/username/sky_workdir as the target path need
@@ -840,7 +840,7 @@ class Task:
                 # If any storage is using MOUNT mode, we need to enable FUSE in
                 # the resources.
                 for r in self.resources:
-                    r._requires_fuse = True
+                    r.requires_fuse = True
         # Storage source validation is done in Storage object
         self.storage_mounts = storage_mounts
         return self

@@ -1292,4 +1292,3 @@ def create_namespace(namespace: str) -> None:
             logger.info(f'Namespace {namespace} already exists in the cluster.')
         else:
             raise
-
