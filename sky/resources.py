@@ -63,8 +63,7 @@ class Resources:
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
-        _docker_login_config: Optional[
-            docker_utils.DockerLoginConfig] = None,
+        _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None
     ):
