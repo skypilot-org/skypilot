@@ -28,7 +28,7 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: smarter-device-manager
-        image: registry.gitlab.com/arm-research/smarter/smarter-device-manager:v1.1.2
+        image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/smarter-device-manager:v1.1.2
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false

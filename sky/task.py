@@ -616,6 +616,14 @@ class Task:
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs)
+
+        # Evaluate if the task requires FUSE and set the requires_fuse flag
+        for _, storage_obj in self.storage_mounts.items():
+            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+                for r in self.resources:
+                    r._requires_fuse = True
+                break
+
         return self
 
     def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
@@ -805,8 +813,11 @@ class Task:
         """
         if storage_mounts is None:
             self.storage_mounts = {}
+            # Clear the requires_fuse flag if no storage mounts are set.
+            for r in self.resources:
+                r._requires_fuse = False
             return self
-        for target, _ in storage_mounts.items():
+        for target, storage_obj in storage_mounts.items():
             # TODO(zhwu): /home/username/sky_workdir as the target path need
             # to be filtered out as well.
             if (target == constants.SKY_REMOTE_WORKDIR and
@@ -824,6 +835,12 @@ class Task:
                     raise ValueError(
                         'Storage mount destination path cannot be cloud storage'
                     )
+
+            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+                # If any storage is using MOUNT mode, we need to enable FUSE in
+                # the resources.
+                for r in self.resources:
+                    r._requires_fuse = True
         # Storage source validation is done in Storage object
         self.storage_mounts = storage_mounts
         return self
