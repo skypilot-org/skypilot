@@ -43,7 +43,9 @@ def get_port_mode(
     return port_mode
 
 
-def get_networking_mode(mode_str: Optional[str] = None) -> kubernetes_enums.KubernetesNetworkingMode:
+def get_networking_mode(
+    mode_str: Optional[str] = None
+) -> kubernetes_enums.KubernetesNetworkingMode:
     """Get the networking mode from the provider config."""
     mode_str = mode_str or skypilot_config.get_nested(
         ('kubernetes', 'networking_mode'),
