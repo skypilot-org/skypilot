@@ -193,7 +193,7 @@ def query_ports(
             )
         else:
             return {}
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             return {}
         raise e

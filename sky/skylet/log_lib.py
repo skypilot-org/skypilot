@@ -6,6 +6,7 @@ import copy
 import io
 import multiprocessing.pool
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -275,7 +276,7 @@ def make_task_bash_script(codegen: str,
     ]
     if env_vars is not None:
         for k, v in env_vars.items():
-            script.append(f'export {k}="{v}"')
+            script.append(f'export {k}={shlex.quote(str(v))}')
     script += [
         codegen,
         '',  # New line at EOF.
