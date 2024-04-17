@@ -226,7 +226,9 @@ class DockerInitializer:
                     f'image {running_image} instead of {specific_image} (which '
                     'was provided in the YAML)')
         else:
-            # Edit docker config first to avoid the know issue in
+            # Edit docker config first to avoid disconnecting the container
+            # from GPUs when a systemctl command is called. This is a known
+            # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             self._run(
                 'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '

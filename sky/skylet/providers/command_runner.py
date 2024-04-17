@@ -229,7 +229,9 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                     f'The `image_env` is:\n{image_env}')
                 raise e
 
-            # Edit docker config first to avoid the know issue in
+            # Edit docker config first to avoid disconnecting the container
+            # from GPUs when a systemctl command is called. This is a known
+            # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             self.run(
                 'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
