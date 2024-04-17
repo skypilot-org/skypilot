@@ -122,13 +122,17 @@ class LambdaCloudClient:
 
     def __init__(self) -> None:
         self.credentials = os.path.expanduser(CREDENTIALS_PATH)
-        assert os.path.exists(self.credentials), 'Credentials not found'
-        with open(self.credentials, 'r', encoding='utf-8') as f:
-            lines = [line.strip() for line in f.readlines() if ' = ' in line]
-            self._credentials = {
-                line.split(' = ')[0]: line.split(' = ')[1] for line in lines
-            }
-        self.api_key = self._credentials['api_key']
+        if os.path.isfile(self.credentials):
+            with open(self.credentials, 'r', encoding='utf-8') as f:
+                lines = [line.strip() for line in f.readlines() if ' = ' in line]
+                self._credentials = {
+                    line.split(' = ')[0]: line.split(' = ')[1] for line in lines
+                }
+            self.api_key = self._credentials['api_key']
+        else:
+            api_key = os.environ.get('LAMBDA_LABS_API_KEY', None)
+            assert api_key, 'Credentials not found'
+            self.api_key = api_key
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
 
     def create_instances(self,
