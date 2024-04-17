@@ -1223,7 +1223,7 @@ def combine_metadata_fields(cluster_yaml_path: str) -> None:
         yaml_obj['available_node_types']['ray_head_default']['node_config']
         ['metadata'],
         # Services for pods
-        *[svc['metadata'] for svc in yaml_obj['provider']['services']]
+        *[svc['metadata'] for svc in yaml_obj['provider'].get('services', [])]
     ]
 
     for destination in combination_destinations:
