@@ -44,7 +44,7 @@ We can launch it with the following:
 .. code-block:: yaml
 
   # bert_qa.yaml
-  name: bert_qa
+  name: bert-qa
 
   resources:
     accelerators: V100:1
@@ -121,7 +121,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
   :emphasize-lines: 12-15,41-44
 
   # bert_qa.yaml
-  name: bert_qa
+  name: bert-qa
 
   resources:
     accelerators: V100:1
@@ -176,7 +176,7 @@ We also set :code:`--run_name` to :code:`$SKYPILOT_TASK_ID` so that the logs for
 to the same run in Weights & Biases.
 
 .. note::
-  The environment variable :code:`$SKYPILOT_TASK_ID` (example: "sky-2022-10-06-05-17-09-750781_spot_id-22") can be used to identify the same job, i.e., it is kept identical across all
+  The environment variable :code:`$SKYPILOT_TASK_ID` (example: "sky-managed-2022-10-06-05-17-09-750781_pipeline_eval_8-1") can be used to identify the same job, i.e., it is kept identical across all
   recoveries of the job.
   It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
   via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to
@@ -368,6 +368,12 @@ To use Spot Pipeline, you can specify the sequence of jobs in a YAML file. Here 
 The above YAML file defines a pipeline with two tasks. The first :code:`name: pipeline` names the pipeline. The first task has name :code:`train` and the second task has name :code:`eval`. The tasks are separated by a line with three dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and :code:`run` sections. The :code:`setup` and :code:`run` sections are executed sequentially.
 
 To submit the pipeline, the same command :code:`sky spot launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky spot queue` or :code:`sky spot dashboard`.
+
+.. note::
+
+  The :code:`$SKYPILOT_TASK_ID` environment variable is also available in the :code:`run` section of each task. It is unique for each task in the pipeline.
+  For example, the :code:`$SKYPILOT_TASK_ID` for the :code:`eval` task above is:
+  "sky-managed-2022-10-06-05-17-09-750781_pipeline_eval_8-1".
 
 .. code-block:: console
 
