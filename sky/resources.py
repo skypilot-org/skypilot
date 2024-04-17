@@ -134,7 +134,8 @@ class Resources:
             docker login.
           _requires_fuse: whether the task requires FUSE mounting support. This
             is used internally by certain cloud implementations to do additional
-            setup for FUSE mounting. This flag also safeguards against
+            setup for FUSE mounting. This flag also safeguards against using
+            FUSE mounting on existing clusters that do not support it.
 
         Raises:
             ValueError: if some attributes are invalid.

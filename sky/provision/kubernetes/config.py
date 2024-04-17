@@ -338,9 +338,8 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
         'fuse_device_manager_namespace', 'default')
     kubernetes_utils.create_namespace(fuse_device_manager_namespace)
 
-    # Read the device manager YAMLs from the sky/utils/kubernetes directory
+    # Read the device manager YAMLs from the manifests directory
     root_dir = os.path.dirname(os.path.dirname(__file__))
-    logger.info(f'root_dir: {root_dir}')
 
     # Load and create the ConfigMap
     logger.info('_configure_fuse_mounting: Creating configmap.')
