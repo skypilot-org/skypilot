@@ -1,4 +1,4 @@
-# Serving Databricks Llama-3 on your own infra.
+# Serving Meta Llama-3 on your own infra.
 #
 # Usage:
 #
@@ -28,6 +28,30 @@
 #
 #   Running on local URL:  http://127.0.0.1:8811
 #   Running on public URL: https://<hash>.gradio.live
+#
+# Scale up with SkyServe:
+#  HF_TOKEN=xxx sky serve up llama3.yaml -n llama3 --env HF_TOKEN
+#
+# curl /v1/chat/completions:
+#
+#   ENDPOINT=$(sky serve status --endpoint llama3)
+#   curl -L $ENDPOINT/v1/models
+#   curl -L http://$ENDPOINT/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -d '{
+#       "model": "databricks/llama3-instruct",
+#       "messages": [
+#         {
+#           "role": "system",
+#           "content": "You are a helpful assistant."
+#         },
+#         {
+#           "role": "user",
+#           "content": "Who are you?"
+#         }
+#       ]
+#     }'
+
 
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3-70B-Instruct
