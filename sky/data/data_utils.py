@@ -12,6 +12,7 @@ import urllib.parse
 
 from filelock import FileLock
 
+from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import aws
@@ -402,6 +403,7 @@ class Rclone():
     # to their respective profile prefix
     class RcloneClouds(Enum):
         IBM = 'sky-ibm-'
+        GCP = 'sky-gcp'
 
     @staticmethod
     def generate_rclone_bucket_profile_name(bucket_name: str,
@@ -422,10 +424,10 @@ class Rclone():
 
     @staticmethod
     def get_rclone_config(bucket_name: str, cloud: RcloneClouds,
-                          region: str) -> str:
-        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-            bucket_name, cloud)
+                          region: Optional[str]) -> str:
         if cloud is Rclone.RcloneClouds.IBM:
+            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+                bucket_name, cloud)
             access_key_id, secret_access_key = ibm.get_hmac_keys()
             config_data = textwrap.dedent(f"""\
                 [{bucket_rclone_profile}]
@@ -437,6 +439,13 @@ class Rclone():
                 endpoint = s3.{region}.cloud-object-storage.appdomain.cloud
                 location_constraint = {region}-smart
                 acl = private
+                """)
+        elif cloud is Rclone.RcloneClouds.GCP:
+            config_data = textwrap.dedent(f"""\
+                [{Rclone.RcloneClouds.GCP}]
+                type = google cloud storage
+                project_number = {clouds.GCP.get_project_id()}
+                bucket_acl = private
                 """)
         else:
             with ux_utils.print_exception_no_traceback():

@@ -12,7 +12,9 @@ _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '1.3.0'
-
+RCLONE_INSTALL_COMMAND = ('rclone version >/dev/null 2>&1 || '
+                          '(curl https://rclone.org/install.sh | '
+                          'sudo bash)')
 
 def get_s3_mount_install_cmd() -> str:
     """Returns a command to install S3 mount utility goofys."""
@@ -53,6 +55,31 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
                  f'{bucket_name} {mount_path}')
     return mount_cmd
 
+def get_gcs_mount_install_cmd_rclone() -> str:
+    return RCLONE_INSTALL_COMMAND
+
+def get_gcs_mount_cmd_rclone(rclone_config_data: str, rclone_config_path: str,
+                              bucket_rclone_profile: str, bucket_name: str,
+                              mount_path: str) -> str:
+    """Returns a command to mount an GCP GCS bucket using rclone."""
+    # creates a fusermount soft link on older (<22) Ubuntu systems for
+    # rclone's mount utility.
+    set_fuser3_soft_link = ('[ ! -f /bin/fusermount3 ] && '
+                            'sudo ln -s /bin/fusermount /bin/fusermount3 || '
+                            'true')
+    # stores bucket profile in rclone config file at the cluster's nodes.
+    configure_rclone_profile = (f'{set_fuser3_soft_link}; '
+                                'mkdir -p ~/.config/rclone/ && '
+                                f'echo "{rclone_config_data}" >> '
+                                f'{rclone_config_path}')
+    # --daemon will keep the mounting process running in the background.
+    mount_cmd = (f'{configure_rclone_profile} && '
+                 'rclone mount '
+                 f'{bucket_rclone_profile}:{bucket_name} {mount_path} '
+                 '--daemon --daemon --daemon-wait 0 \
+                  --allow-other --rc --vfs-cache-mode full &&' #todo: figure out if this should be a semicolon or an &&
+                  'rclone rc vfs/refresh')
+    return mount_cmd
 
 def get_r2_mount_cmd(r2_credentials_path: str, r2_profile_name: str,
                      endpoint_url: str, bucket_name: str,
@@ -69,10 +96,7 @@ def get_r2_mount_cmd(r2_credentials_path: str, r2_profile_name: str,
 
 def get_cos_mount_install_cmd() -> str:
     """Returns a command to install IBM COS mount utility rclone."""
-    install_cmd = ('rclone version >/dev/null 2>&1 || '
-                   '(curl https://rclone.org/install.sh | '
-                   'sudo bash)')
-    return install_cmd
+    return RCLONE_INSTALL_COMMAND
 
 
 def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,

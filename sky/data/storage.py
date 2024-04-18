@@ -140,6 +140,7 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
+    RCLONE = 'RCLONE'
 
 
 def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
@@ -1808,6 +1809,23 @@ class GcsStore(AbstractStore):
             f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
+            
+    
+    def mount_command_rclone(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_gcs_mount_install_cmd_rclone()
+        rclone_config_data = Rclone.get_rclone_config(
+            self.bucket.name,
+            Rclone.RcloneClouds.GCP,
+            None
+        )
+        mount_cmd = mounting_utils.get_gcs_mount_cmd_rclone(rclone_config_data,
+                                                            Rclone.RCLONE_CONFIG_PATH,
+                                                            Rclone.RcloneClouds.GCP,
+                                                            self.bucket.name,
+                                                            mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                    mount_cmd)
+
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket

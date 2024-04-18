@@ -4388,7 +4388,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT
+            if (storage_mount.mode == storage_lib.StorageMode.MOUNT or
+                storage_mount.mode == storage_lib.StorageMode.RCLONE)
         }
 
         # Handle cases when there aren't any Storages with MOUNT mode.
@@ -4424,7 +4425,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'successfully without mounting the bucket.')
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
-            mount_cmd = store.mount_command(dst)
+            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+                mount_cmd = store.mount_command(dst)
+            else:
+                mount_cmd = store.mount_command_rclone(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):

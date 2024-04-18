@@ -1,0 +1,9 @@
+file_mounts:
+  /my_data:
+    source: gs://hriday-test/
+    mode: RCLONE
+    store: GCS
+
+workdir: /Users/hriday/sky-unsloth/skypilot/hriday
+
+run: python3 cloud-storage.py
