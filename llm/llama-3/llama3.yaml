@@ -86,10 +86,11 @@ setup: |
     conda activate vllm
   fi
 
-  pip install vllm==0.4.0.post1 flash-attn==2.5.7
-
+  pip install vllm==0.4.0.post1
   # Install Gradio for web UI.
   pip install gradio openai
+  pip install flash-attn==2.5.7
+
 
 run: |
   conda activate vllm

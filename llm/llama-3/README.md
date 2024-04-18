@@ -3,10 +3,16 @@
 <!-- $END_REMOVE -->
 <!-- $UNCOMMENT# Llama-3: Open LLM from Meta -->
 
-[Llama-3](https://github.com/facebookresearch/llama/tree/main) is the top open-source models on the [Open LLM leaderboard](https://huggingface.co/spaces/HuggingFaceH4/open_llm_leaderboard) today. It has been released with a license that authorizes commercial use. You can deploy a private Llama-3 chatbot with SkyPilot in your own cloud with just one simple command.
+[Llama-3](https://github.com/meta-llama/llama3) is the latest top open-source models. It has been released with a license that authorizes commercial use. You can deploy a private Llama-3 chatbot with SkyPilot in your own cloud with just one simple command.
 
-* [Llama-3 release](https://github.com/facebookresearch/llama/tree/main)
-* [Llama-3 paper](https://ai.meta.com/research/publications/Llama-3-open-foundation-and-fine-tuned-chat-models/)
+* [Llama-3 release](https://github.com/meta-llama/llama3)
+* [Llama-3 blog](https://ai.meta.com/blog/meta-llama-3/)
+
+
+<p align="center">
+<img src="https://i.imgur.com/lTfaRpN.gif" alt="Gradio UI serving Llama-3" style="height: 600px;">
+</p>
+
 
 ## Why use SkyPilot to deploy over commercial hosted solutions?
 
@@ -219,7 +225,6 @@ curl http://$IP:8081/v1/chat/completions \
         "content": "Who are you?"
       }
     ],
-    "max_tokens": 256,
     "stop_token_ids": [128009,  128001]
   }'
 ```
@@ -229,9 +234,7 @@ To use the Gradio UI, open the URL shown in the logs:
 (task, pid=17433) Running on public URL: https://xxxxxxxxxx.gradio.live
 ```
 
-<p align="center">
-<img src="https://i.imgur.com/lTfaRpN.gif" alt="Gradio UI serving Llama-3" style="height: 600px;">
-</p>
+Check the demo at the top of this page for an example of the Gradio UI.
 
 To stop the instance:
 ```console
