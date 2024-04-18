@@ -48,4 +48,4 @@ run: |
 
   echo 'Starting gradio server...'
   python -u -m fastchat.serve.gradio_web_server --share \
-    --register-openai-compatible-models ~/model_info.json | tee ~/gradio.log
+    --register ~/model_info.json | tee ~/gradio.log
