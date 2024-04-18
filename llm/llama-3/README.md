@@ -10,7 +10,7 @@
 
 
 <p align="center">
-<img src="https://i.imgur.com/lTfaRpN.gif" alt="Gradio UI serving Llama-3" style="height: 600px;">
+<img src="https://imgur.com/zPpY2Bg.gif" alt="Gradio UI serving Llama-3" style="width: 80%;">
 </p>
 
 
