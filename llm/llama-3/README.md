@@ -1,5 +1,5 @@
 <!-- $REMOVE -->
-# Llama-3 on Any Cloud and On-Premise with SkyPilot
+# Scale Serving Llama-3 on Any Cloud or Kubernetes with SkyPilot
 <!-- $END_REMOVE -->
 <!-- $UNCOMMENT# Llama-3: Open LLM from Meta -->
 
