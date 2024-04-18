@@ -10,6 +10,7 @@
 # you can click on it to open the GUI.
 
 envs:
+  MODEL_NAME: meta-llama/Meta-Llama-3-70B-Instruct
   ENDPOINT: x.x.x.x:3031 # Address of the API server running llama3. 
 
 resources:
@@ -34,11 +35,11 @@ run: |
 
   cat <<EOF > ~/model_info.json
   {
-    "meta/llama3": {
-      "model_name": "meta/llama3",
+    "${MODEL_NAME}": {
+      "model_name": "${MODEL_NAME}",
       "api_base": "http://${ENDPOINT}/v1",
       "api_key": "empty",
-      "model_path": "meta/llama3"
+      "model_path": "${MODEL_NAME}"
     }
   }
   EOF
