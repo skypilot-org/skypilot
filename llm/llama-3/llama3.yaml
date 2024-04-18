@@ -30,7 +30,7 @@
 #   Running on public URL: https://<hash>.gradio.live
 
 envs:
-  MODEL_NAME: databricks/llama3-instruct
+  MODEL_NAME: meta-llama/Meta-Llama-3-70B-Instruct
   HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token, or use --env to pass.
 
 service:
@@ -46,11 +46,10 @@ service:
       max_tokens: 1
 
 resources:
-  accelerators: {A100-80GB:8, A100-80GB:4, A100:8, A100:16}
+  accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
   cpus: 32+
-  memory: 512+
   use_spot: True
-  disk_size: 512  # Ensure model checkpoints (~246GB) can fit.
+  disk_size: 512  # Ensure model checkpoints can fit.
   disk_tier: best
   ports: 8081  # Expose to internet traffic.
 

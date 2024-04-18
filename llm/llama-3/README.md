@@ -21,7 +21,7 @@
 
 ## Prerequisites
 
-- Go to the [HuggingFace model page](https://huggingface.co/todo/todo) and request access to the model `todo/todo`.
+- Go to the [HuggingFace model page](https://huggingface.co/meta-llama/Meta-Llama-3-70B-Instruct) and request access to the model `meta-llama/Meta-Llama-3-70B-Instruct`.
 - Check that you have installed SkyPilot ([docs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)).
 - Check that `sky check` shows clouds or Kubernetes are enabled.
 
@@ -32,7 +32,7 @@
 
 ```yaml
 envs:
-  MODEL_NAME: databricks/llama3-instruct
+  MODEL_NAME: meta-llama/Meta-Llama-3-70B-Instruct
   HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token, or use --env to pass.
 
 service:
@@ -48,11 +48,10 @@ service:
       max_tokens: 1
 
 resources:
-  accelerators: {A100-80GB:8, A100-80GB:4, A100:8, A100:16}
+  accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
   cpus: 32+
-  memory: 512+
   use_spot: True
-  disk_size: 512  # Ensure model checkpoints (~246GB) can fit.
+  disk_size: 512  # Ensure model checkpoints can fit.
   disk_tier: best
   ports: 8081  # Expose to internet traffic.
 
@@ -110,23 +109,28 @@ HF_TOKEN=xxx sky launch llama3.yaml -c llama3 --env HF_TOKEN
 
 ```console
 ...
-I 03-28 08:40:47 optimizer.py:690] == Optimizer ==
-I 03-28 08:40:47 optimizer.py:701] Target: minimizing cost
-I 03-28 08:40:47 optimizer.py:713] Estimated cost: $2.44 / hour
-I 03-28 08:40:47 optimizer.py:713]
-I 03-28 08:40:47 optimizer.py:836] Considered resources (1 node):
-I 03-28 08:40:47 optimizer.py:906] ----------------------------------------------------------------------------------------------------------------------
-I 03-28 08:40:47 optimizer.py:906]  CLOUD        INSTANCE                          vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE      COST ($)   CHOSEN   
-I 03-28 08:40:47 optimizer.py:906] ----------------------------------------------------------------------------------------------------------------------
-I 03-28 08:40:47 optimizer.py:906]  Azure        Standard_NC96ads_A100_v4[Spot]    96      880       A100-80GB:4    eastus           2.44          ✔      
-I 03-28 08:40:47 optimizer.py:906]  AWS          p4d.24xlarge[Spot]                96      1152      A100:8         us-east-2b       4.15                
-I 03-28 08:40:47 optimizer.py:906]  Azure        Standard_ND96asr_v4[Spot]         96      900       A100:8         eastus           4.82                
-I 03-28 08:40:47 optimizer.py:906]  Azure        Standard_ND96amsr_A100_v4[Spot]   96      1924      A100-80GB:8    southcentralus   5.17                
-I 03-28 08:40:47 optimizer.py:906]  GCP          a2-ultragpu-4g[Spot]              48      680       A100-80GB:4    us-east4-c       7.39                
-I 03-28 08:40:47 optimizer.py:906]  GCP          a2-highgpu-8g[Spot]               96      680       A100:8         us-central1-a    11.75               
-I 03-28 08:40:47 optimizer.py:906]  GCP          a2-ultragpu-8g[Spot]              96      1360      A100-80GB:8    us-east4-c       14.79               
-I 03-28 08:40:47 optimizer.py:906]  GCP          a2-megagpu-16g[Spot]              96      1360      A100:16        us-central1-a    22.30               
-I 03-28 08:40:47 optimizer.py:906] ----------------------------------------------------------------------------------------------------------------------
+I 04-18 16:31:30 optimizer.py:693] == Optimizer ==
+I 04-18 16:31:30 optimizer.py:704] Target: minimizing cost
+I 04-18 16:31:30 optimizer.py:716] Estimated cost: $1.2 / hour
+I 04-18 16:31:30 optimizer.py:716] 
+I 04-18 16:31:30 optimizer.py:839] Considered resources (1 node):
+I 04-18 16:31:30 optimizer.py:909] -----------------------------------------------------------------------------------------------------------------
+I 04-18 16:31:30 optimizer.py:909]  CLOUD   INSTANCE                          vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE      COST ($)   CHOSEN   
+I 04-18 16:31:30 optimizer.py:909] -----------------------------------------------------------------------------------------------------------------
+I 04-18 16:31:30 optimizer.py:909]  Azure   Standard_NC48ads_A100_v4[Spot]    48      440       A100-80GB:2    eastus           1.22          ✔     
+I 04-18 16:31:30 optimizer.py:909]  AWS     g6.48xlarge[Spot]                 192     768       L4:8           us-east-1b       1.43                
+I 04-18 16:31:30 optimizer.py:909]  Azure   Standard_NC96ads_A100_v4[Spot]    96      880       A100-80GB:4    eastus           2.44                
+I 04-18 16:31:30 optimizer.py:909]  AWS     g5.48xlarge[Spot]                 192     768       A10G:8         us-east-2b       2.45                
+I 04-18 16:31:30 optimizer.py:909]  GCP     g2-standard-96[Spot]              96      384       L4:8           asia-east1-a     2.49                
+I 04-18 16:31:30 optimizer.py:909]  Azure   Standard_ND96asr_v4[Spot]         96      900       A100:8         eastus           4.82                
+I 04-18 16:31:30 optimizer.py:909]  GCP     a2-highgpu-4g[Spot]               48      340       A100:4         europe-west4-a   4.82                
+I 04-18 16:31:30 optimizer.py:909]  AWS     p4d.24xlarge[Spot]                96      1152      A100:8         us-east-2b       4.90                
+I 04-18 16:31:30 optimizer.py:909]  Azure   Standard_ND96amsr_A100_v4[Spot]   96      1924      A100-80GB:8    southcentralus   5.17                
+I 04-18 16:31:30 optimizer.py:909]  GCP     a2-ultragpu-4g[Spot]              48      680       A100-80GB:4    us-east4-c       7.39                
+I 04-18 16:31:30 optimizer.py:909]  GCP     a2-highgpu-8g[Spot]               96      680       A100:8         europe-west4-a   9.65                
+I 04-18 16:31:30 optimizer.py:909]  GCP     a2-ultragpu-8g[Spot]              96      1360      A100-80GB:8    us-east4-c       14.79               
+I 04-18 16:31:30 optimizer.py:909] -----------------------------------------------------------------------------------------------------------------
+I 04-18 16:31:30 optimizer.py:909] 
 ...
 ```
 
@@ -140,27 +144,35 @@ To run on Kubernetes or use an on-demand instance, pass `--no-use-spot` to the a
 ```console
 $ HF_TOKEN=xxx sky launch llama3.yaml -c llama3 --env HF_TOKEN --no-use-spot
 ...
-I 03-28 08:47:27 optimizer.py:690] == Optimizer ==
-I 03-28 08:47:27 optimizer.py:701] Target: minimizing cost
-I 03-28 08:47:27 optimizer.py:713] Estimated cost: $0.0 / hour
-I 03-28 08:47:27 optimizer.py:713] 
-I 03-28 08:47:27 optimizer.py:836] Considered resources (1 node):
-I 03-28 08:47:27 optimizer.py:906] ------------------------------------------------------------------------------------------------------------------
-I 03-28 08:47:27 optimizer.py:906]  CLOUD        INSTANCE                    vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE        COST ($)   CHOSEN   
-I 03-28 08:47:27 optimizer.py:906] ------------------------------------------------------------------------------------------------------------------
-I 03-28 08:47:27 optimizer.py:906]  Kubernetes   32CPU--512GB--8A100         32      512       A100:8         kubernetes         0.00          ✔     
-I 03-28 08:47:27 optimizer.py:906]  Azure        Standard_NC96ads_A100_v4    96      880       A100-80GB:4    eastus             14.69               
-I 03-28 08:47:27 optimizer.py:906]  Fluidstack   recUYj6oGJCvAvCXC7KQo5Fc7   252     960       A100-80GB:8    generic_1_canada   19.79               
-I 03-28 08:47:27 optimizer.py:906]  GCP          a2-ultragpu-4g              48      680       A100-80GB:4    us-central1-a      20.11               
-I 03-28 08:47:27 optimizer.py:906]  Paperspace   A100-80Gx8                  96      640       A100-80GB:8    East Coast (NY2)   25.44               
-I 03-28 08:47:27 optimizer.py:906]  Azure        Standard_ND96asr_v4         96      900       A100:8         eastus             27.20               
-I 03-28 08:47:27 optimizer.py:906]  GCP          a2-highgpu-8g               96      680       A100:8         us-central1-a      29.39               
-I 03-28 08:47:27 optimizer.py:906]  Azure        Standard_ND96amsr_A100_v4   96      1924      A100-80GB:8    eastus             32.77               
-I 03-28 08:47:27 optimizer.py:906]  AWS          p4d.24xlarge                96      1152      A100:8         us-east-1          32.77               
-I 03-28 08:47:27 optimizer.py:906]  GCP          a2-ultragpu-8g              96      1360      A100-80GB:8    us-central1-a      40.22               
-I 03-28 08:47:27 optimizer.py:906]  AWS          p4de.24xlarge               96      1152      A100-80GB:8    us-east-1          40.97               
-I 03-28 08:47:27 optimizer.py:906]  GCP          a2-megagpu-16g              96      1360      A100:16        us-central1-a      55.74               
-I 03-28 08:47:27 optimizer.py:906] ------------------------------------------------------------------------------------------------------------------
+I 04-18 16:34:13 optimizer.py:693] == Optimizer ==
+I 04-18 16:34:13 optimizer.py:704] Target: minimizing cost
+I 04-18 16:34:13 optimizer.py:716] Estimated cost: $5.0 / hour
+I 04-18 16:34:13 optimizer.py:716] 
+I 04-18 16:34:13 optimizer.py:839] Considered resources (1 node):
+I 04-18 16:34:13 optimizer.py:909] ------------------------------------------------------------------------------------------------------------------
+I 04-18 16:34:13 optimizer.py:909]  CLOUD        INSTANCE                    vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE        COST ($)   CHOSEN   
+I 04-18 16:34:13 optimizer.py:909] ------------------------------------------------------------------------------------------------------------------
+I 04-18 16:34:13 optimizer.py:909]  Kubernetes   32CPU--512GB--8A100         32      512       A100:8         kubernetes         0.00          ✔     
+I 04-18 16:34:13 optimizer.py:909]  Fluidstack   recE2ZDQmqR9HBKYs5xSnjtPw   64      240       A100-80GB:2    generic_1_canada   4.96               
+I 04-18 16:34:13 optimizer.py:909]  Fluidstack   recUiB2e6s3XDxwE9           60      440       A100:4         calgary_1_canada   5.88                
+I 04-18 16:34:13 optimizer.py:909]  Azure        Standard_NC48ads_A100_v4    48      440       A100-80GB:2    eastus             7.35                
+I 04-18 16:34:13 optimizer.py:909]  GCP          g2-standard-96              96      384       L4:8           us-east4-a         7.98                
+I 04-18 16:34:13 optimizer.py:909]  Fluidstack   recWGm4oJ9AB3XVPxzRaujgbx   126     480       A100-80GB:4    generic_1_canada   9.89                
+I 04-18 16:34:13 optimizer.py:909]  Paperspace   A100-80Gx4                  46      320       A100-80GB:4    East Coast (NY2)   12.72               
+I 04-18 16:34:13 optimizer.py:909]  AWS          g6.48xlarge                 192     768       L4:8           us-east-1          13.35               
+I 04-18 16:34:13 optimizer.py:909]  GCP          a2-highgpu-4g               48      340       A100:4         us-central1-a      14.69               
+I 04-18 16:34:13 optimizer.py:909]  Azure        Standard_NC96ads_A100_v4    96      880       A100-80GB:4    eastus             14.69               
+I 04-18 16:34:13 optimizer.py:909]  AWS          g5.48xlarge                 192     768       A10G:8         us-east-1          16.29               
+I 04-18 16:34:13 optimizer.py:909]  Fluidstack   recUYj6oGJCvAvCXC7KQo5Fc7   252     960       A100-80GB:8    generic_1_canada   19.79               
+I 04-18 16:34:13 optimizer.py:909]  GCP          a2-ultragpu-4g              48      680       A100-80GB:4    us-central1-a      20.11               
+I 04-18 16:34:13 optimizer.py:909]  Paperspace   A100-80Gx8                  96      640       A100-80GB:8    East Coast (NY2)   25.44               
+I 04-18 16:34:13 optimizer.py:909]  Azure        Standard_ND96asr_v4         96      900       A100:8         eastus             27.20               
+I 04-18 16:34:13 optimizer.py:909]  GCP          a2-highgpu-8g               96      680       A100:8         us-central1-a      29.39               
+I 04-18 16:34:13 optimizer.py:909]  Azure        Standard_ND96amsr_A100_v4   96      1924      A100-80GB:8    eastus             32.77               
+I 04-18 16:34:13 optimizer.py:909]  AWS          p4d.24xlarge                96      1152      A100:8         us-east-1          32.77               
+I 04-18 16:34:13 optimizer.py:909]  GCP          a2-ultragpu-8g              96      1360      A100-80GB:8    us-central1-a      40.22               
+I 04-18 16:34:13 optimizer.py:909]  AWS          p4de.24xlarge               96      1152      A100-80GB:8    us-east-1          40.97               
+I 04-18 16:34:13 optimizer.py:909] ------------------------------------------------------------------------------------------------------------------
 ...
 ```
 
@@ -194,7 +206,7 @@ IP=$(sky status --ip llama3)
 curl http://$IP:8081/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "databricks/llama3-instruct",
+    "model": "meta-llama/Meta-Llama-3-70B-Instruct",
     "messages": [
       {
         "role": "system",
@@ -271,7 +283,7 @@ To curl the endpoint:
 curl -L $ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "databricks/llama3-instruct",
+    "model": "meta-llama/Meta-Llama-3-70B-Instruct",
     "messages": [
       {
         "role": "system",
