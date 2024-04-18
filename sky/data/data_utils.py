@@ -1,7 +1,7 @@
 """Miscellaneous Utils for Sky Data
 """
 import concurrent.futures
-from datetime import datetime, timedelta, timezone
+import datetime
 from enum import Enum
 from multiprocessing import pool
 import os
@@ -11,7 +11,6 @@ import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 
-from azure.storage.blob import BlobSasPermissions, ContainerSasPermissions, generate_blob_sas, generate_container_sas
 from filelock import FileLock
 
 from sky import exceptions
@@ -250,7 +249,8 @@ def get_az_storage_account_key(
 def get_az_container_sas_token(
     storage_account_name: str,
     storage_account_key: str,
-    container_name: str,) -> str:
+    container_name: str,
+) -> str:
     """Returns SAS token used to access container.
 
     Args:
@@ -262,28 +262,27 @@ def get_az_container_sas_token(
     Returns:
         SAS token prepended with the delimiter character, ?
     """
-    sas_token = generate_container_sas(
-        account_name=storage_account_name,
-        container_name=container_name,
-        account_key=storage_account_key,
-        permission=ContainerSasPermissions(read=True,
-                                           write=True,
-                                           list=True,
-                                           delete=True,
-                                           create=True),
-        expiry=datetime.now(timezone.utc) + timedelta(hours=1)
-    )
+    expiry_time_utc = datetime.datetime.now(datetime.timezone.utc) \
+        + datetime.timedelta(hours=1)
+    expiry_time_utc = expiry_time_utc.strftime('%Y-%m-%dT%H:%MZ')
+    cmd = ('az storage container generate-sas '
+           f'--account-name {storage_account_name} '
+           f'--account-key {storage_account_key} --expiry {expiry_time_utc} '
+           f'--name {container_name} --permissions rwcl')
+    p = subprocess.run(cmd,
+                       stdout=subprocess.PIPE,
+                       shell=True,
+                       check=True,
+                       executable='/bin/bash')
+    sas_token = p.stdout.decode().strip('\n').strip('"')
     # ? is a delimiter character used when SAS token is attached to the
     # container endpoint.
     # Reference: https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/how-to-guides/create-sas-tokens?tabs=Containers # pylint: disable=line-too-long
     return f'?{sas_token}'
 
 
-def get_az_blob_sas_token(
-    storage_account_name: str,
-    storage_account_key: str,
-    container_name: str,
-    blob_name: str) -> str:
+def get_az_blob_sas_token(storage_account_name: str, storage_account_key: str,
+                          container_name: str, blob_name: str) -> str:
     """Returns SAS token used to access a blob.
 
     Args:
@@ -296,14 +295,21 @@ def get_az_blob_sas_token(
     Returns:
         SAS token prepended with the delimiter character, ?
     """
-    sas_token = generate_blob_sas(
-        account_name=storage_account_name,
-        container_name=container_name,
-        blob_name=blob_name,
-        account_key=storage_account_key,
-        permission=BlobSasPermissions(read=True, write=True, delete=True),
-        expiry=datetime.now(timezone.utc) + timedelta(hours=1)
-    )
+    expiry_time_utc = datetime.datetime.now(datetime.timezone.utc) \
+        + datetime.timedelta(hours=1)
+    expiry_time_utc = expiry_time_utc.strftime('%Y-%m-%dT%H:%MZ')
+    blob_url = (f'https://{storage_account_name}.blob.core.windows.net/'
+                f'{container_name}/{blob_name}')
+    cmd = (
+        f'az storage blob generate-sas --account-name {storage_account_name} '
+        f'--account-key {storage_account_key} --expiry {expiry_time_utc} '
+        f'--blob-url {blob_url} --permissions rwc')
+    p = subprocess.run(cmd,
+                       stdout=subprocess.PIPE,
+                       shell=True,
+                       check=True,
+                       executable='/bin/bash')
+    sas_token = p.stdout.decode().strip('\n').strip('"')
     # ? is a delimiter character used when SAS token is attached to the
     # blob endpoint.
     return f'?{sas_token}'
