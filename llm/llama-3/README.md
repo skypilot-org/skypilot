@@ -239,7 +239,11 @@ To shut down all resources:
 sky down llama3
 ```
 
-
+**Note**: If you would like to try the 8B model, you can use the following accelerators:
+```yaml
+resources:
+  accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB}
+```
 
 ## Serving Llama-3: scaling up with SkyServe
 
