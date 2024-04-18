@@ -61,8 +61,7 @@ setup: |
     conda activate vllm
   fi
 
-  # Llama-3 merged on master, 3/27/2024
-  pip install vllm>0.4
+  pip install vllm==0.4.0.post1
 
   pip install gradio tiktoken==0.6.0 openai
 
