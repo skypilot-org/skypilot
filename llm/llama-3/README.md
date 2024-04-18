@@ -203,10 +203,12 @@ To curl `/v1/chat/completions`:
 ```console
 IP=$(sky status --ip llama3)
 
+# We need to manually specify the stop_token_ids to make sure the model finish
+# on <|eot_id|>.
 curl http://$IP:8081/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "meta-llama/Meta-Llama-3-70B-Instruct",
+    "model": "meta-llama/Meta-Llama-3-8B-Instruct",
     "messages": [
       {
         "role": "system",
@@ -216,7 +218,9 @@ curl http://$IP:8081/v1/chat/completions \
         "role": "user",
         "content": "Who are you?"
       }
-    ]
+    ],
+    "max_tokens": 256,
+    "stop_token_ids": [128009,  128001]
   }'
 ```
 

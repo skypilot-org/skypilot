@@ -23,8 +23,8 @@ setup: |
     conda activate llama3
   fi
 
-  pip install "fschat[model_worker,webui]"
-  pip install "openai<1"
+  # Install Gradio for web UI.
+  pip install gradio openai
 
 run: |
   conda activate llama3
@@ -33,19 +33,10 @@ run: |
   CONTROLLER_PORT=21001
   WORKER_PORT=21002
 
-  cat <<EOF > ~/model_info.json
-  {
-    "${MODEL_NAME}": {
-      "model_name": "${MODEL_NAME}",
-      "api_base": "http://${ENDPOINT}/v1",
-      "api_key": "empty",
-      "model_path": "${MODEL_NAME}"
-    }
-  }
-  EOF
-
-  python3 -m fastchat.serve.controller --host 0.0.0.0 --port ${CONTROLLER_PORT} > ~/controller.log 2>&1 &
-
   echo 'Starting gradio server...'
-  python -u -m fastchat.serve.gradio_web_server --share \
-    --register ~/model_info.json | tee ~/gradio.log
+  git clone https://github.com/vllm-project/vllm.git || true
+  python vllm/examples/gradio_openai_chatbot_webserver.py \
+    -m $MODEL_NAME \
+    --port 8811 \
+    --model-url http://$ENDPOINT/v1 \
+    --stop-token-ids 128009,128001 | tee ~/gradio.log
