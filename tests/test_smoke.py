@@ -1212,6 +1212,8 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
             'sleep 5',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 3',
+            # Make sure the GPU is still visible to the container.
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
             f'sky stop -y {name}',
             # Make sure the job status preserve after stop and start the
             # cluster. This is also a test for the docker container to be
@@ -1222,8 +1224,10 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep CANCELLED',
             f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
+            # Make sure it is still visible after an stop & start cycle.
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
         ],
         f'sky down -y {name}',
     )
