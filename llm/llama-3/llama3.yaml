@@ -89,6 +89,7 @@ setup: |
   pip install vllm==0.4.0.post1
 
   pip install gradio tiktoken==0.6.0 openai
+  pip install "fschat[model_worker,webui]" "openai<1"
 
 run: |
   conda activate vllm
@@ -111,8 +112,20 @@ run: |
   done
 
   echo 'Starting gradio server...'
-  git clone https://github.com/vllm-project/vllm.git || true
-  python vllm/examples/gradio_openai_chatbot_webserver.py \
-    -m $MODEL_NAME \
-    --port 8811 \
-    --model-url http://localhost:8081/v1
+  cat <<EOF > ~/model_info.json
+  {
+    "${MODEL_NAME}": {
+      "model_name": "${MODEL_NAME}",
+      "api_base": "http://127.0.0.1:8081/v1",
+      "api_key": "empty",
+      "model_path": "${MODEL_NAME}"
+    }
+  }
+  EOF
+
+  python3 -m fastchat.serve.controller --host 0.0.0.0 --port ${CONTROLLER_PORT} > ~/controller.log 2>&1 &
+
+  echo 'Starting gradio server...'
+  python -u -m fastchat.serve.gradio_web_server --share \
+    --register-openai-compatible-models ~/model_info.json | tee ~/gradio.log
+
