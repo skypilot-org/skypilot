@@ -89,7 +89,7 @@ setup: |
   pip install vllm==0.4.0.post1
 
   pip install gradio tiktoken==0.6.0 openai
-  pip install "fschat[model_worker,webui]" "openai<1"
+  pip install "fschat[model_worker,webui]==0.2.36" "openai<1"
 
 run: |
   conda activate vllm
