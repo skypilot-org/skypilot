@@ -6,7 +6,7 @@
 # Usage:
 #
 #  1. If you have a endpoint started on a cluster (sky launch):
-#     `sky launch -c llama3-gui ./gui.yaml --env ENDPOINT=$(sky status --ip llama3):8000`
+#     `sky launch -c llama3-gui ./gui.yaml --env ENDPOINT=$(sky status --endpoint 8081 llama3)`
 #  2. If you have a SkyPilot Service started (sky serve up) called llama3:
 #     `sky launch -c llama3-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint llama3)`
 #

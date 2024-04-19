@@ -5,7 +5,7 @@
 
 
 <p align="center">
-<img src="https://imgur.com/fOCr394.png" alt="Llama-3 x SkyPilot" style="width: 60%;">
+<img src="https://imgur.com/BwY6PUQ.png" alt="Llama-3 x SkyPilot" style="width: 60%;">
 </p>
 
 [Llama-3](https://github.com/meta-llama/llama3) is the latest top open-source LLM from Meta. It has been released with a license that authorizes commercial use. You can deploy a private Llama-3 chatbot with SkyPilot in your own cloud with just one simple command.
@@ -219,11 +219,11 @@ You can play with the model via
 
 To curl `/v1/chat/completions`:
 ```console
-IP=$(sky status --ip llama3)
+ENDPOINT=$(sky status --endpoint 8081 llama3)
 
 # We need to manually specify the stop_token_ids to make sure the model finish
 # on <|eot_id|>.
-curl http://$IP:8081/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Meta-Llama-3-8B-Instruct",

@@ -6,12 +6,14 @@
 #
 # curl /v1/chat/completions:
 #
-#   IP=$(sky status --ip llama3)
-#   curl $IP:8081/v1/models
-#   curl http://$IP:8081/v1/chat/completions \
+#   ENDPOINT=$(sky status --endpoint 8081 llama3)
+#  
+#   # We need to manually specify the stop_token_ids to make sure the model finish
+#   # on <|eot_id|>.
+#   curl http://$ENDPOINT/v1/chat/completions \
 #     -H "Content-Type: application/json" \
 #     -d '{
-#       "model": "databricks/llama3-instruct",
+#       "model": "meta-llama/Meta-Llama-3-8B-Instruct",
 #       "messages": [
 #         {
 #           "role": "system",
@@ -21,7 +23,8 @@
 #           "role": "user",
 #           "content": "Who are you?"
 #         }
-#       ]
+#       ],
+#       "stop_token_ids": [128009,  128001]
 #     }'
 #
 # Chat with model with Gradio UI:
