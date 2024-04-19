@@ -342,6 +342,6 @@ sky launch -c llama3-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint
 Note that you may get better results to use a higher temperature and top_p value.
 
 
-## Finetunning Llama-3
+## Finetuning Llama-3
 
 You can finetune Llama-3 on your own data. We have an tutorial for finetunning Llama-2 for Vicuna on SkyPilot, which can be adapted for Llama-3. You can find the tutorial [here](https://skypilot.readthedocs.io/en/latest/gallery/tutorials/finetuning.html) and a detailed blog post [here](https://blog.skypilot.co/finetuning-llama2-operational-guide/).
