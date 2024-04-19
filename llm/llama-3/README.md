@@ -5,7 +5,7 @@
 
 
 <p align="center">
-<img src="https://imgur.com/BwY6PUQ.png" alt="Llama-3 x SkyPilot" style="width: 60%;">
+<img src="https://imgur.com/BwY6PUQ.png" alt="Llama-3 x SkyPilot" style="width: 50%;">
 </p>
 
 [Llama-3](https://github.com/meta-llama/llama3) is the latest top open-source LLM from Meta. It has been released with a license that authorizes commercial use. You can deploy a private Llama-3 chatbot with SkyPilot in your own cloud with just one simple command.
