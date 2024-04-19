@@ -1441,6 +1441,9 @@ class Resources:
                     original_disk_tier)
 
         if version < 16:
-            state['_requires_fuse'] = state.get('_requires_fuse', None)
+            # Kubernetes clusters launched prior to version 16 run in privileged
+            # mode and have FUSE support enabled by default. As a result, we
+            # set the default to True for backward compatibility.
+            state['_requires_fuse'] = state.get('_requires_fuse', True)
 
         self.__dict__.update(state)
