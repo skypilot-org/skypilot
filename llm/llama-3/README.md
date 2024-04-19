@@ -347,7 +347,6 @@ sky launch -c llama3-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint
 | INFO | stdout | Running on public URL: https://6141e84201ce0bb4ed.gradio.live
 ```
 
-Note that you may get better results to use a higher temperature and top_p value.
 
 
 ## Finetuning Llama-3
