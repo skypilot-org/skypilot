@@ -1,11 +1,15 @@
 # Starts a GUI server that connects to the Llama-3 OpenAI API server.
+#
 # This works with the endpoint.yaml, please refer to llm/llama-3/README.md
 # for more details.
+#
 # Usage:
+#
 #  1. If you have a endpoint started on a cluster (sky launch):
 #     `sky launch -c llama3-gui ./gui.yaml --env ENDPOINT=$(sky status --ip llama3):8000`
 #  2. If you have a SkyPilot Service started (sky serve up) called llama3:
 #     `sky launch -c llama3-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint llama3)`
+#
 # After the GUI server is started, you will see a gradio link in the output and
 # you can click on it to open the GUI.
 
