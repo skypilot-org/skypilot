@@ -66,7 +66,7 @@ class Resources:
             _docker_login_config: Optional[
                 docker_utils.DockerLoginConfig] = None,
             _is_image_managed: Optional[bool] = None,
-            _requires_fuse: Optional[bool] = None):
+            _requires_fuse: Optional[bool] = None,):
         """Initialize a Resources object.
 
         All fields are optional.  ``Resources.is_launchable`` decides whether
@@ -135,7 +135,8 @@ class Resources:
           _requires_fuse: whether the task requires FUSE mounting support. This
             is used internally by certain cloud implementations to do additional
             setup for FUSE mounting. This flag also safeguards against using
-            FUSE mounting on existing clusters that do not support it.
+            FUSE mounting on existing clusters that do not support it. If None,
+             defaults to False.
 
         Raises:
             ValueError: if some attributes are invalid.
@@ -205,7 +206,8 @@ class Resources:
 
         self._docker_login_config = _docker_login_config
 
-        self._requires_fuse = _requires_fuse
+        self._requires_fuse = (_requires_fuse
+                               if _requires_fuse is not None else False)
 
         self._set_cpus(cpus)
         self._set_memory(memory)

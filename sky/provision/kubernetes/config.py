@@ -319,7 +319,7 @@ def _configure_ssh_jump(namespace, config: common.ProvisionConfig):
 
 
 def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
-    """Creates sidecars required for FUSE mounting
+    """Creates sidecars required for FUSE mounting.
 
     FUSE mounting in Kubernetes without privileged containers requires us to
     run a sidecar container with the necessary capabilities. We run a daemonset
