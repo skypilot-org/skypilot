@@ -109,6 +109,8 @@ run: |
     --model-url http://localhost:8081/v1 \
     --stop-token-ids 128009,128001
 
+```
+
 </details>
 
 You can also get the full YAML file [here](https://github.com/skypilot-org/skypilot/tree/master/llm/llama3/llama3.yaml).
