@@ -1198,7 +1198,7 @@ def test_job_queue(generic_cloud: str):
     ])
 def test_job_queue_with_docker(generic_cloud: str, image_id: str):
     name = _get_cluster_name() + image_id[len('docker:'):][:4]
-    total_timeout_minutes = 30 if generic_cloud == 'azure' else 15
+    total_timeout_minutes = 40 if generic_cloud == 'azure' else 15
     test = Test(
         'job_queue_with_docker',
         [
