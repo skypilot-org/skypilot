@@ -27,8 +27,7 @@ def bootstrap_instances(
 
     config = _configure_ssh_jump(namespace, config)
 
-    logger.info(config.provider_config.get('requires_fuse_mount', 'false'))
-    if config.provider_config.get('requires_fuse_mount', False):
+    if config.provider_config.get('fuse_device_required', False):
         _configure_fuse_mounting(config.provider_config)
 
     if not config.provider_config.get('_operator'):
