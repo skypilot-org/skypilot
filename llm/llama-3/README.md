@@ -335,7 +335,8 @@ See more details in [SkyServe docs](https://skypilot.readthedocs.io/en/latest/se
 
 
 
-It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat).
+It is also possible to access the Code Llama service with a separate GUI frontend, so the requests
+get load balanced across multiple service replicas automatically.
 
 1. Start the chat web UI:
 ```bash
