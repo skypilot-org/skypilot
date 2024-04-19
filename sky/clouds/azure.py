@@ -294,8 +294,8 @@ class Azure(clouds.Cloud):
         else:
             custom_resources = None
 
-        if resources.image_id is None or resources.extract_docker_image(
-        ) is not None:
+        if (resources.image_id is None or
+                resources.extract_docker_image() is not None):
             # pylint: disable=import-outside-toplevel
             from sky.clouds.service_catalog import azure_catalog
             gen_version = azure_catalog.get_gen_version_from_instance_type(
