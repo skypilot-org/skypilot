@@ -60,6 +60,7 @@ def launch_cluster(replica_id: int,
                    task_yaml_path: str,
                    cluster_name: str,
                    resources_override: Optional[Dict[str, Any]] = None,
+                   use_spot: bool = False,
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
 
@@ -101,7 +102,7 @@ def launch_cluster(replica_id: int,
                        cluster_name,
                        detach_setup=True,
                        detach_run=True,
-                       retry_until_up=False,
+                       retry_until_up=not use_spot,
                        _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
@@ -208,9 +209,7 @@ def _get_location(
         zone = resource_override.get('zone', None)
         # For Azure, zone can be None.
         if cloud is not None and region is not None:
-            cloud_str = type(cloud).__name__.lower()
-            location = spot_placers.Location(cloud_str, region, zone)
-            return location
+            return spot_placers.Location(str(cloud), region, zone)
     return None
 
 
@@ -673,16 +672,16 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
+        use_spot = _should_use_spot(self._task_yaml_path, resources_override)
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
                 log_file_name,
             ).run,
             args=(replica_id, self._task_yaml_path, cluster_name,
-                  resources_override),
+                  resources_override, use_spot),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
-        use_spot = _should_use_spot(self._task_yaml_path, resources_override)
         location = _get_location(resources_override)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
