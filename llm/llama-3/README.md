@@ -14,7 +14,7 @@
 </p>
 
 
-## Why use SkyPilot to deploy over commercial hosted solutions?
+## Why use SkyPilot vs. commercial hosted solutions?
 
 * No lock-in: run on any supported cloud - AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI
 * Everything stays in your cloud account (your VMs & buckets)
