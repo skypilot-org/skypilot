@@ -136,7 +136,7 @@ class Resources:
             is used internally by certain cloud implementations to do additional
             setup for FUSE mounting. This flag also safeguards against using
             FUSE mounting on existing clusters that do not support it. If None,
-             defaults to False.
+            defaults to False.
 
         Raises:
             ValueError: if some attributes are invalid.
