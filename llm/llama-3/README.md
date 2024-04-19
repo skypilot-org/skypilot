@@ -3,15 +3,18 @@
 <!-- $END_REMOVE -->
 <!-- $UNCOMMENT# Llama-3: Open LLM from Meta -->
 
+
+<p align="center">
+<img src="https://imgur.com/zrGTTQH.png" alt="Llama-3 x SkyPilot" style="width: 80%;">
+</p>
+
 [Llama-3](https://github.com/meta-llama/llama3) is the latest top open-source LLM from Meta. It has been released with a license that authorizes commercial use. You can deploy a private Llama-3 chatbot with SkyPilot in your own cloud with just one simple command.
 
 * [Llama-3 release](https://github.com/meta-llama/llama3)
 * [Llama-3 blog](https://ai.meta.com/blog/meta-llama-3/)
 
 
-<p align="center">
-<img src="https://imgur.com/zPpY2Bg.gif" alt="Gradio UI serving Llama-3" style="width: 80%;">
-</p>
+
 
 
 ## Why use SkyPilot vs. commercial hosted solutions?
@@ -241,7 +244,10 @@ To use the Gradio UI, open the URL shown in the logs:
 (task, pid=17433) Running on public URL: https://xxxxxxxxxx.gradio.live
 ```
 
-Check the demo at the top of this page for an example of the Gradio UI.
+
+<p align="center">
+<img src="https://imgur.com/zPpY2Bg.gif" alt="Gradio UI serving Llama-3" style="width: 80%;">
+</p>
 
 To stop the instance:
 ```console
