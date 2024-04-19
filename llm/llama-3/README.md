@@ -5,7 +5,7 @@
 
 
 <p align="center">
-<img src="https://imgur.com/BwY6PUQ.png" alt="Llama-3 x SkyPilot" style="width: 50%;">
+<img src="https://imgur.com/1NEZs9f.png" alt="Llama-3 x SkyPilot" style="width: 50%;">
 </p>
 
 [Llama-3](https://github.com/meta-llama/llama3) is the latest top open-source LLM from Meta. It has been released with a license that authorizes commercial use. You can deploy a private Llama-3 chatbot with SkyPilot in your own cloud with just one simple command.
@@ -335,7 +335,7 @@ See more details in [SkyServe docs](https://skypilot.readthedocs.io/en/latest/se
 
 
 
-It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat).
+It is also possible to access the Code Llama service with a separate GUI frontend, so the user requests send to the GUI will be load-balanced across replicas.
 
 1. Start the chat web UI:
 ```bash
