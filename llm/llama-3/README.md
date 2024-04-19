@@ -3,7 +3,7 @@
 <!-- $END_REMOVE -->
 <!-- $UNCOMMENT# Llama-3: Open LLM from Meta -->
 
-[Llama-3](https://github.com/meta-llama/llama3) is the latest top open-source models. It has been released with a license that authorizes commercial use. You can deploy a private Llama-3 chatbot with SkyPilot in your own cloud with just one simple command.
+[Llama-3](https://github.com/meta-llama/llama3) is the latest top open-source LLM from Meta. It has been released with a license that authorizes commercial use. You can deploy a private Llama-3 chatbot with SkyPilot in your own cloud with just one simple command.
 
 * [Llama-3 release](https://github.com/meta-llama/llama3)
 * [Llama-3 blog](https://ai.meta.com/blog/meta-llama-3/)
