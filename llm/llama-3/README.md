@@ -3,7 +3,7 @@
 <!-- $END_REMOVE -->
 <!-- $UNCOMMENT# Llama-3: Open LLM from Meta -->
 
-[Llama-3](https://github.com/meta-llama/llama3) is the latest top open-source models. It has been released with a license that authorizes commercial use. You can deploy a private Llama-3 chatbot with SkyPilot in your own cloud with just one simple command.
+[Llama-3](https://github.com/meta-llama/llama3) is the latest top open-source LLM from Meta. It has been released with a license that authorizes commercial use. You can deploy a private Llama-3 chatbot with SkyPilot in your own cloud with just one simple command.
 
 * [Llama-3 release](https://github.com/meta-llama/llama3)
 * [Llama-3 blog](https://ai.meta.com/blog/meta-llama-3/)
@@ -14,7 +14,7 @@
 </p>
 
 
-## Why use SkyPilot to deploy over commercial hosted solutions?
+## Why use SkyPilot vs. commercial hosted solutions?
 
 * No lock-in: run on any supported cloud - AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI
 * Everything stays in your cloud account (your VMs & buckets)
@@ -37,8 +37,10 @@
 <summary>Click to see the full recipe YAML</summary>
 
 ```yaml
+
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3-70B-Instruct
+  # MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
   HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token, or use --env to pass.
 
 service:
@@ -55,6 +57,7 @@ service:
 
 resources:
   accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+  # accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB} # We can use cheaper accelerators for 8B model.
   cpus: 32+
   use_spot: True
   disk_size: 512  # Ensure model checkpoints can fit.
@@ -69,8 +72,10 @@ setup: |
   fi
 
   pip install vllm==0.4.0.post1
+  # Install Gradio for web UI.
+  pip install gradio openai
+  pip install flash-attn==2.5.7
 
-  pip install gradio tiktoken==0.6.0 openai
 
 run: |
   conda activate vllm
@@ -85,6 +90,7 @@ run: |
     --model $MODEL_NAME \
     --trust-remote-code --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
     --gpu-memory-utilization 0.95 \
+    --max-num-seqs 64 \
     2>&1 | tee api_server.log &
 
   while ! `cat api_server.log | grep -q 'Uvicorn running on'`; do
@@ -97,8 +103,9 @@ run: |
   python vllm/examples/gradio_openai_chatbot_webserver.py \
     -m $MODEL_NAME \
     --port 8811 \
-    --model-url http://localhost:8081/v1
-```
+    --model-url http://localhost:8081/v1 \
+    --stop-token-ids 128009,128001
+
 </details>
 
 You can also get the full YAML file [here](https://github.com/skypilot-org/skypilot/tree/master/llm/llama3/llama3.yaml).
