@@ -33,7 +33,7 @@ logger = sky_logging.init_logger(__name__)
 CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
-_VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
+_VALID_NAME_REGEX = '[a-zA-Z0-9]+(?:[._-]{1,2}[a-zA-Z0-9]+)*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
                      ' uppercase letters, digits, underscores, periods,'
                      ' and dashes. Must start and end with alphanumeric'
