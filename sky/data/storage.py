@@ -2050,7 +2050,7 @@ class AzureBlobStore(AbstractStore):
             self.storage_account_name = storage_account_name
             self.resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
-        # Creating new container
+        # Creating new resource group and storage account
         else:
             # If resource group or storage account names are not provided from
             # config, then use default names.
@@ -2091,6 +2091,8 @@ class AzureBlobStore(AbstractStore):
                             'The storage account name '
                             f'{self.storage_account_name!r} is already taken. '
                             'Please try with another name.')
+            # wait until new resource creation propagates to Azure server.
+            time.sleep(1)
 
         # resource_group_name is set to None when using non-sky-managed
         # public container or private container without authorization.
