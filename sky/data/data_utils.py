@@ -404,6 +404,7 @@ class Rclone():
     class RcloneClouds(Enum):
         IBM = 'sky-ibm-'
         GCP = 'sky-gcp'
+        AWS = 'sky-aws'
 
     @staticmethod
     def generate_rclone_bucket_profile_name(bucket_name: str,
@@ -425,9 +426,9 @@ class Rclone():
     @staticmethod
     def get_rclone_config(bucket_name: str, cloud: RcloneClouds,
                           region: Optional[str]) -> str:
-        if cloud is Rclone.RcloneClouds.IBM:
-            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
                 bucket_name, cloud)
+        if cloud is Rclone.RcloneClouds.IBM:
             access_key_id, secret_access_key = ibm.get_hmac_keys()
             config_data = textwrap.dedent(f"""\
                 [{bucket_rclone_profile}]
@@ -442,10 +443,19 @@ class Rclone():
                 """)
         elif cloud is Rclone.RcloneClouds.GCP:
             config_data = textwrap.dedent(f"""\
-                [{Rclone.RcloneClouds.GCP}]
+                [{bucket_rclone_profile}]
                 type = google cloud storage
                 project_number = {clouds.GCP.get_project_id()}
                 bucket_acl = private
+                """)
+        elif cloud is Rclone.RcloneClouds.AWS:
+            config_data = textwrap.dedent(f"""\
+                [{bucket_rclone_profile}]
+                type = s3
+                provider = AWS
+                access_key_id = {aws.session().get_credentials().get_frozen_credentials().access_key}
+                secret_access_key = {aws.session().get_credentials().get_frozen_credentials().secret_key}
+                acl = private
                 """)
         else:
             with ux_utils.print_exception_no_traceback():
