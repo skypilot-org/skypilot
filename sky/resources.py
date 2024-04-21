@@ -43,7 +43,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 16
+    _VERSION = 17
 
     def __init__(
         self,
@@ -65,6 +65,7 @@ class Resources:
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
+        _requires_fuse: Optional[bool] = None,
     ):
         """Initialize a Resources object.
 
@@ -131,6 +132,11 @@ class Resources:
           _docker_login_config: the docker configuration to use. This include
             the docker username, password, and registry server. If None, skip
             docker login.
+          _requires_fuse: whether the task requires FUSE mounting support. This
+            is used internally by certain cloud implementations to do additional
+            setup for FUSE mounting. This flag also safeguards against using
+            FUSE mounting on existing clusters that do not support it. If None,
+            defaults to False.
 
         Raises:
             ValueError: if some attributes are invalid.
@@ -199,6 +205,9 @@ class Resources:
         self._ports = ports
 
         self._docker_login_config = _docker_login_config
+
+        self._requires_fuse = (_requires_fuse
+                               if _requires_fuse is not None else False)
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -417,6 +426,14 @@ class Resources:
     @property
     def is_image_managed(self) -> Optional[bool]:
         return self._is_image_managed
+
+    @property
+    def requires_fuse(self) -> Optional[bool]:
+        return self._requires_fuse
+
+    @requires_fuse.setter
+    def requires_fuse(self, value: Optional[bool]) -> None:
+        self._requires_fuse = value
 
     def _set_cpus(
         self,
@@ -1072,6 +1089,13 @@ class Resources:
                 if not self_ports <= other_ports:
                     return False
 
+        if self.requires_fuse and not other.requires_fuse:
+            # On Kubernetes, we can't launch a task that requires FUSE on a pod
+            # that wasn't initialized with FUSE support at the start.
+            # Other clouds don't have this limitation.
+            if other.cloud.is_same_cloud(clouds.Kubernetes()):
+                return False
+
         # self <= other
         return True
 
@@ -1137,6 +1161,7 @@ class Resources:
                                               self._docker_login_config),
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
+            _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
         )
         assert len(override) == 0
         return resources
@@ -1275,6 +1300,7 @@ class Resources:
             '_docker_login_config', None)
         resources_fields['_is_image_managed'] = config.pop(
             '_is_image_managed', None)
+        resources_fields['_requires_fuse'] = config.pop('_requires_fuse', None)
 
         if resources_fields['cpus'] is not None:
             resources_fields['cpus'] = str(resources_fields['cpus'])
@@ -1316,6 +1342,8 @@ class Resources:
         add_if_not_none('ports', self.ports)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
+        if self._requires_fuse is not None:
+            config['_requires_fuse'] = self._requires_fuse
         return config
 
     def __setstate__(self, state):
@@ -1411,6 +1439,12 @@ class Resources:
                     original_disk_tier)
 
         if version < 16:
+            # Kubernetes clusters launched prior to version 16 run in privileged
+            # mode and have FUSE support enabled by default. As a result, we
+            # set the default to True for backward compatibility.
+            state['_requires_fuse'] = state.get('_requires_fuse', True)
+        
+        if version < 17:
             self._job_recovery = state.pop('_spot_recovery', None)
 
         self.__dict__.update(state)
