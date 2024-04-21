@@ -1,0 +1,126 @@
+# Serving Meta Llama-3 on your own infra.
+#
+# Usage:
+#
+#  HF_TOKEN=xxx sky launch llama3.yaml -c llama3 --env HF_TOKEN
+#
+# curl /v1/chat/completions:
+#
+#   ENDPOINT=$(sky status --endpoint 8081 llama3)
+#  
+#   # We need to manually specify the stop_token_ids to make sure the model finish
+#   # on <|eot_id|>.
+#   curl http://$ENDPOINT/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -d '{
+#       "model": "meta-llama/Meta-Llama-3-8B-Instruct",
+#       "messages": [
+#         {
+#           "role": "system",
+#           "content": "You are a helpful assistant."
+#         },
+#         {
+#           "role": "user",
+#           "content": "Who are you?"
+#         }
+#       ],
+#       "stop_token_ids": [128009,  128001]
+#     }'
+#
+# Chat with model with Gradio UI:
+#
+#   Running on local URL:  http://127.0.0.1:8811
+#   Running on public URL: https://<hash>.gradio.live
+#
+# Scale up with SkyServe:
+#  HF_TOKEN=xxx sky serve up llama3.yaml -n llama3 --env HF_TOKEN
+#
+# curl /v1/chat/completions:
+#
+#   ENDPOINT=$(sky serve status --endpoint llama3)
+#   curl -L $ENDPOINT/v1/models
+#   curl -L http://$ENDPOINT/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -d '{
+#       "model": "databricks/llama3-instruct",
+#       "messages": [
+#         {
+#           "role": "system",
+#           "content": "You are a helpful assistant."
+#         },
+#         {
+#           "role": "user",
+#           "content": "Who are you?"
+#         }
+#       ]
+#     }'
+
+
+envs:
+  MODEL_NAME: meta-llama/Meta-Llama-3-70B-Instruct
+  # MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
+  HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token, or use --env to pass.
+
+service:
+  replicas: 2
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
+
+resources:
+  accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+  # accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB} # We can use cheaper accelerators for 8B model.
+  cpus: 32+
+  use_spot: True
+  disk_size: 512  # Ensure model checkpoints can fit.
+  disk_tier: best
+  ports: 8081  # Expose to internet traffic.
+
+setup: |
+  conda activate vllm
+  if [ $? -ne 0 ]; then
+    conda create -n vllm python=3.10 -y
+    conda activate vllm
+  fi
+
+  pip install vllm==0.4.0.post1
+  # Install Gradio for web UI.
+  pip install gradio openai
+  pip install flash-attn==2.5.7
+
+
+run: |
+  conda activate vllm
+  echo 'Starting vllm api server...'
+
+  # https://github.com/vllm-project/vllm/issues/3098
+  export PATH=$PATH:/sbin
+
+  # NOTE: --gpu-memory-utilization 0.95 needed for 4-GPU nodes.
+  python -u -m vllm.entrypoints.openai.api_server \
+    --port 8081 \
+    --model $MODEL_NAME \
+    --trust-remote-code --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --gpu-memory-utilization 0.95 \
+    --max-num-seqs 64 \
+    2>&1 | tee api_server.log &
+
+  while ! `cat api_server.log | grep -q 'Uvicorn running on'`; do
+    echo 'Waiting for vllm api server to start...'
+    sleep 5
+  done
+
+  echo 'Starting gradio server...'
+  git clone https://github.com/vllm-project/vllm.git || true
+  python vllm/examples/gradio_openai_chatbot_webserver.py \
+    -m $MODEL_NAME \
+    --port 8811 \
+    --model-url http://localhost:8081/v1 \
+    --stop-token-ids 128009,128001
+

@@ -32,7 +32,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Message thrown when APIs sky.spot_launch(),sky.serve.up() received an invalid
+# Message thrown when APIs sky.spot.launch(),sky.serve.up() received an invalid
 # controller resources spec.
 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type} controller resources is not valid, please check '

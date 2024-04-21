@@ -60,9 +60,15 @@ class SpotController:
         # the user can have the same id for multiple recoveries.
         #   Example value: sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0
         job_id_env_vars = []
-        for i in range(len(self._dag.tasks)):
-            task_name = self._dag_name
-            if len(self._dag.tasks) > 1:
+        for i, task in enumerate(self._dag.tasks):
+            if len(self._dag.tasks) <= 1:
+                task_name = self._dag_name
+            else:
+                task_name = task.name
+                # This is guaranteed by the spot_launch API, where we fill in
+                # the task.name with
+                # dag_utils.maybe_infer_and_fill_dag_and_task_names.
+                assert task_name is not None, self._dag
                 task_name = f'{self._dag_name}_{task_name}'
             job_id_env_var = common_utils.get_global_job_id(
                 self._backend.run_timestamp,
