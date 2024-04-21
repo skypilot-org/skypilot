@@ -122,10 +122,10 @@ def launch(
         controller_task.managed_job_dag = dag
         assert len(controller_task.resources) == 1
 
-        print(f'{colorama.Fore.YELLOW}'
+        sky_logging.print(f'{colorama.Fore.YELLOW}'
               f'Launching managed job {dag.name!r} from job controller...'
               f'{colorama.Style.RESET_ALL}')
-        print('Launching job controller...')
+        sky_logging.print('Launching job controller...')
         sky.launch(task=controller_task,
                    stream_logs=stream_logs,
                    cluster_name=controller_name,
@@ -253,12 +253,12 @@ def cancel(name: Optional[str] = None,
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     if all:
-        code = utils.SpotCodeGen.cancel_jobs_by_id(None)
+        code = utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
     elif job_ids:
-        code = utils.SpotCodeGen.cancel_jobs_by_id(job_ids)
+        code = utils.ManagedJobCodeGen.cancel_jobs_by_id(job_ids)
     else:
         assert name is not None, (job_ids, name, all)
-        code = utils.SpotCodeGen.cancel_job_by_name(name)
+        code = utils.ManagedJobCodeGen.cancel_job_by_name(name)
     # The stderr is redirected to stdout
     returncode, stdout, _ = backend.run_on_head(handle,
                                                 code,
