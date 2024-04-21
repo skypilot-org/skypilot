@@ -403,8 +403,8 @@ class Rclone():
     # to their respective profile prefix
     class RcloneClouds(Enum):
         IBM = 'sky-ibm-'
-        GCP = 'sky-gcp'
-        AWS = 'sky-aws'
+        GCP = 'sky-gcp-'
+        AWS = 'sky-aws-'
 
     @staticmethod
     def generate_rclone_bucket_profile_name(bucket_name: str,
