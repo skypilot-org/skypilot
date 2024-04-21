@@ -193,7 +193,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = utils.SpotCodeGen.get_job_table()
+    code = utils.ManagedJobCodeGen.get_job_table()
     returncode, job_table_payload, stderr = backend.run_on_head(
         handle,
         code,
