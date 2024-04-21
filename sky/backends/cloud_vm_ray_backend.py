@@ -2563,6 +2563,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'{zone_str}')
                 if (example_resource.requires_fuse and
                         not launched_resources.requires_fuse):
+                    # Will not be reached for non-k8s case since the
+                    # less_demanding_than only fails fuse requirement when
+                    # the cloud is Kubernetes AND the cluster doesn't have fuse.
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
                             'Task requires FUSE support for mounting object '
