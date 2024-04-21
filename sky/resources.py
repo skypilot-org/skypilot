@@ -1443,7 +1443,7 @@ class Resources:
             # mode and have FUSE support enabled by default. As a result, we
             # set the default to True for backward compatibility.
             state['_requires_fuse'] = state.get('_requires_fuse', True)
-        
+
         if version < 17:
             self._job_recovery = state.pop('_spot_recovery', None)
 
