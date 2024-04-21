@@ -122,9 +122,10 @@ def launch(
         controller_task.managed_job_dag = dag
         assert len(controller_task.resources) == 1
 
-        sky_logging.print(f'{colorama.Fore.YELLOW}'
-              f'Launching managed job {dag.name!r} from job controller...'
-              f'{colorama.Style.RESET_ALL}')
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Launching managed job {dag.name!r} from job controller...'
+            f'{colorama.Style.RESET_ALL}')
         sky_logging.print('Launching job controller...')
         sky.launch(task=controller_task,
                    stream_logs=stream_logs,
