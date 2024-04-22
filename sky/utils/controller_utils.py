@@ -96,8 +96,7 @@ class Controllers(enum.Enum):
         default_hint_if_non_existent='No in-progress spot jobs.',
         connection_error_hint=(
             'Failed to connect to spot controller, please try again later.'),
-        default_resources_config=spot_constants.CONTROLLER_RESOURCES,
-    )
+        default_resources_config=spot_constants.CONTROLLER_RESOURCES)
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
@@ -128,8 +127,7 @@ class Controllers(enum.Enum):
         default_hint_if_non_existent='No live services.',
         connection_error_hint=(
             'Failed to connect to serve controller, please try again later.'),
-        default_resources_config=serve_constants.CONTROLLER_RESOURCES,
-    )
+        default_resources_config=serve_constants.CONTROLLER_RESOURCES)
 
     @classmethod
     def from_name(cls, name: Optional[str]) -> Optional['Controllers']:
@@ -146,6 +144,12 @@ class Controllers(enum.Enum):
 
     @classmethod
     def from_type(cls, controller_type: str) -> Optional['Controllers']:
+        """Get the controller by controller type.
+
+        Returns:
+            The controller if the controller type is valid.
+            Otherwise, returns None.
+        """
         for controller in cls:
             if controller.value.controller_type == controller_type:
                 return controller

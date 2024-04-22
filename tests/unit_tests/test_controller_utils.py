@@ -1,7 +1,6 @@
 """Test the controller_utils module."""
 import pytest
 
-# from sky import resources
 import sky
 from sky.serve import constants as serve_constants
 from sky.spot import constants as spot_constants
