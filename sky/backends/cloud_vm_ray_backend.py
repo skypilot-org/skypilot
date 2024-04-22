@@ -269,10 +269,11 @@ class RayCodeGen:
                 returncodes = [1] * len(futures)
                 # Wait for 1 task to be ready.
                 ready = []
-                # Recall ray.wait if ready is empty. This is because ray.wait
-                # with timeout=None will only wait for 10**6 seconds, which will
-                # cause the task longer than 12 days returned before it is
-                # ready. Reference: https://github.com/ray-project/ray/blob/ray-2.9.3/python/ray/_private/worker.py#L2845-L2846
+                # Keep invoking ray.wait if ready is empty. This is because
+                # ray.wait with timeout=None will only wait for 10**6 seconds,
+                # which will cause the task longer than 12 days returned before
+                # it is ready.
+                # Reference: https://github.com/ray-project/ray/blob/ray-2.9.3/python/ray/_private/worker.py#L2845-L2846
                 while not ready:
                     ready, unready = ray.wait(futures)
                 idx = futures.index(ready[0])
