@@ -105,7 +105,30 @@ def get_single_resources_schema():
                     'type': 'object',
                     'required': [],
                 }]
-            }
+            },
+            # The following fields are for internal use only.
+            '_docker_login_config': {
+                'type': 'object',
+                'required': ['username', 'password', 'server'],
+                'additionalProperties': False,
+                'properties': {
+                    'username': {
+                        'type': 'string',
+                    },
+                    'password': {
+                        'type': 'string',
+                    },
+                    'server': {
+                        'type': 'string',
+                    }
+                }
+            },
+            '_is_image_managed': {
+                'type': 'boolean',
+            },
+            '_requires_fuse': {
+                'type': 'boolean',
+            },
         }
     }
 
@@ -114,36 +137,15 @@ def get_resources_schema():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
+    single_resource_schema = get_single_resources_schema()
+    single_resource_schema.pop('accelerators')
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'cloud': {
-                'type': 'string',
-                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
-            },
-            'region': {
-                'type': 'string',
-            },
-            'zone': {
-                'type': 'string',
-            },
-            'cpus': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
-            'memory': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
+            **single_resource_schema,
             'accelerators': {
                 # {'V100:1', 'A100:1'} will be
                 # read as a string and converted to dict.
@@ -164,61 +166,6 @@ def get_resources_schema():
                     'items': {
                         'type': 'string',
                     }
-                }]
-            },
-            'instance_type': {
-                'type': 'string',
-            },
-            'use_spot': {
-                'type': 'boolean',
-            },
-            'spot_recovery': {
-                'type': 'string',
-            },
-            'disk_size': {
-                'type': 'integer',
-            },
-            'disk_tier': {
-                'type': 'string',
-            },
-            'ports': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'integer',
-                }, {
-                    'type': 'array',
-                    'items': {
-                        'anyOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'integer',
-                        }]
-                    }
-                }],
-            },
-            'accelerator_args': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'runtime_version': {
-                        'type': 'string',
-                    },
-                    'tpu_name': {
-                        'type': 'string',
-                    },
-                    'tpu_vm': {
-                        'type': 'boolean',
-                    }
-                }
-            },
-            'image_id': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'object',
-                    'required': [],
                 }]
             },
             'any_of': {
