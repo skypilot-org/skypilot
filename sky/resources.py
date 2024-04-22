@@ -43,7 +43,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 16
+    _VERSION = 17
 
     def __init__(
         self,
@@ -61,6 +61,7 @@ class Resources:
         disk_size: Optional[int] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
+        labels: Optional[Dict[str, str]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -203,6 +204,8 @@ class Resources:
                 # cli, which will comes in as an empty tuple.
                 ports = None
         self._ports = ports
+
+        self._labels = labels
 
         self._docker_login_config = _docker_login_config
 
@@ -415,6 +418,10 @@ class Resources:
     @property
     def ports(self) -> Optional[List[str]]:
         return self._ports
+
+    @property
+    def labels(self) -> Optional[Dict[str, str]]:
+        return self._labels
 
     @property
     def is_image_managed(self) -> Optional[bool]:
@@ -1157,6 +1164,7 @@ class Resources:
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
             ports=override.pop('ports', self.ports),
+            labels=override.pop('labels', self.labels),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
             _is_image_managed=override.pop('_is_image_managed',
@@ -1296,6 +1304,7 @@ class Resources:
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
+        resources_fields['labels'] = config.pop('labels', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
         resources_fields['_is_image_managed'] = config.pop(
@@ -1340,6 +1349,7 @@ class Resources:
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
+        add_if_not_none('labels', self.labels)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         if self._requires_fuse is not None:
@@ -1446,5 +1456,8 @@ class Resources:
             # mode and have FUSE support enabled by default. As a result, we
             # set the default to True for backward compatibility.
             state['_requires_fuse'] = state.get('_requires_fuse', True)
+
+        if version < 17:
+            state['labels'] = state.get('_labels', None)
 
         self.__dict__.update(state)

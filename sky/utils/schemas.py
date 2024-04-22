@@ -82,6 +82,12 @@ def get_single_resources_schema():
                     }
                 }],
             },
+            'labels': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                }
+            },
             'accelerator_args': {
                 'type': 'object',
                 'required': [],
@@ -196,6 +202,12 @@ def get_resources_schema():
                         }]
                     }
                 }],
+            },
+            'labels': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                }
             },
             'accelerator_args': {
                 'type': 'object',

@@ -840,13 +840,17 @@ def write_cluster_config(
             ssh_proxy_command = ssh_proxy_command_config[region_name]
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
-    # User-supplied instance tags.
-    instance_tags = {}
+    # User-supplied global instance tags from ~/.sky/config.yaml.
     instance_tags = skypilot_config.get_nested(
         (str(cloud).lower(), 'instance_tags'), {})
     # instance_tags is a dict, which is guaranteed by the type check in
     # schemas.py
     assert isinstance(instance_tags, dict), instance_tags
+
+    # Get labels from resources to be used as instance tags and override on to
+    # the instance_tags.
+    if to_provision.labels:
+        instance_tags.update(to_provision.labels)
 
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
