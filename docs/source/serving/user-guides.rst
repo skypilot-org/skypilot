@@ -5,3 +5,4 @@ Serving User Guides
 
    autoscaling
    update
+   fast-replica-startup
