@@ -86,10 +86,10 @@ storage_setup_commands = [
 # are running in parallel, the job controller may be in INIT and
 # the job queue/cancel command will return staled table.
 _JOB_QUEUE_WAIT = ('s=$(sky job queue); '
-                    'until ! echo "$s" | grep "jobs will not be shown until"; '
-                    'do echo "Waiting for job queue to be ready..."; '
-                    'sleep 5; s=$(sky job queue); done; echo "$s"; '
-                    'echo; echo; echo "$s"')
+                   'until ! echo "$s" | grep "jobs will not be shown until"; '
+                   'do echo "Waiting for job queue to be ready..."; '
+                   'sleep 5; s=$(sky job queue); done; echo "$s"; '
+                   'echo; echo; echo "$s"')
 _JOB_CANCEL_WAIT = (
     's=$(sky job cancel -y -n {job_name}); '
     'until ! echo "$s" | grep "Please wait for the controller to be ready."; '
