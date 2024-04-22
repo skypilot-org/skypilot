@@ -134,7 +134,7 @@ def get_single_resources_schema():
 
 
 def get_resources_schema():
-    single_resource_schema = get_single_resources_schema()
+    single_resource_schema = get_single_resources_schema()['properties']
     single_resource_schema.pop('accelerators')
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
