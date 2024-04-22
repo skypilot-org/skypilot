@@ -134,9 +134,6 @@ def get_single_resources_schema():
 
 
 def get_resources_schema():
-    # To avoid circular imports, only import when needed.
-    # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
     single_resource_schema = get_single_resources_schema()
     single_resource_schema.pop('accelerators')
     return {

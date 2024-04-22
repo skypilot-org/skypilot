@@ -1341,7 +1341,8 @@ class Resources:
             config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
         if self._docker_login_config is not None:
-            config['_docker_login_config'] = dataclasses.asdict(self._docker_login_config)
+            config['_docker_login_config'] = dataclasses.asdict(
+                self._docker_login_config)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         if self._requires_fuse is not None:
