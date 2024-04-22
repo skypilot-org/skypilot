@@ -163,8 +163,8 @@ def up(
         # ports here. Or, we should have a nginx traffic control to refuse
         # any connection to the unregistered ports.
         controller_resources = {
-            res.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
-            for res in controller_resources
+            r.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+            for r in controller_resources
         }
         controller_task.set_resources(controller_resources)
 
