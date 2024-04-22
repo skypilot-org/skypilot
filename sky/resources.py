@@ -206,8 +206,7 @@ class Resources:
 
         self._docker_login_config = _docker_login_config
 
-        self._requires_fuse = (_requires_fuse
-                               if _requires_fuse is not None else False)
+        self._requires_fuse = _requires_fuse
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -422,7 +421,9 @@ class Resources:
         return self._is_image_managed
 
     @property
-    def requires_fuse(self) -> Optional[bool]:
+    def requires_fuse(self) -> bool:
+        if self._requires_fuse is None:
+            return False
         return self._requires_fuse
 
     @requires_fuse.setter
