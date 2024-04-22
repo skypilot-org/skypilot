@@ -2561,6 +2561,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'{example_resource.zone!r},'
                             'but the existing cluster '
                             f'{zone_str}')
+                if (example_resource.requires_fuse and
+                        not launched_resources.requires_fuse):
+                    # Will not be reached for non-k8s case since the
+                    # less_demanding_than only fails fuse requirement when
+                    # the cloud is Kubernetes AND the cluster doesn't have fuse.
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesMismatchError(
+                            'Task requires FUSE support for mounting object '
+                            'stores, but the existing cluster with '
+                            f'{launched_resources!r} does not support FUSE '
+                            f'mounting. Launch a new cluster to run this task.')
             requested_resource_str = ', '.join(requested_resource_list)
             if isinstance(task.resources, list):
                 requested_resource_str = f'[{requested_resource_str}]'
