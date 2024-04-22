@@ -3205,11 +3205,11 @@ def test_skyserve_spot_recovery():
             f'sky serve up -n {name} -y tests/skyserve/spot/recovery.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            'request_output=$(curl -L http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
             _terminate_gcp_replica(name, zone, 1),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            'request_output=$(curl -L http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3353,7 +3353,7 @@ def test_skyserve_auto_restart():
             f'sky serve up -n {name} -y tests/skyserve/auto_restart.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            'request_output=$(curl -L http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
             # sleep for 20 seconds (initial delay) to make sure it will
             # be restarted
             f'sleep 20',
@@ -3373,7 +3373,7 @@ def test_skyserve_auto_restart():
             '     sleep 10;'
             f'done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            'request_output=$(curl -L http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
