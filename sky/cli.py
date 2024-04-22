@@ -1488,7 +1488,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
     # query in parallel to speed up. The pool provides a AsyncResult object that
     # can be used as a future.
     with multiprocessing.Pool(2) as pool:
-        # Do not show spot queue if user specifies clusters, and if user
+        # Do not show job queue if user specifies clusters, and if user
         # specifies --ip or --endpoint(s).
         show_managed_jobs = show_managed_jobs and not any(
             [clusters, ip, endpoints])
