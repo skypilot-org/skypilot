@@ -2890,6 +2890,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         open_new_ports = bool(
             resources_utils.port_ranges_to_set(current_ports) -
             resources_utils.port_ranges_to_set(prev_ports))
+        # TODO(tian): Skip open ports if VPN is used.
         if open_new_ports:
             with rich_utils.safe_status(
                     '[bold cyan]Launching - Opening new ports'):

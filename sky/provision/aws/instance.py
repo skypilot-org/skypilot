@@ -19,6 +19,7 @@ from sky.provision import common
 from sky.provision.aws import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -610,6 +611,9 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances.terminate()
+    # TODO(tian): Cleanup vpn record
+    if provider_config.get('vpn_unique_id', None) is not None:
+        pass
     if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
             not managed_by_skypilot):
         # Using default AWS SG or user specified security group. We don't need
@@ -843,7 +847,7 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
-    del provider_config  # unused
+    assert provider_config is not None
     ec2 = _default_ec2_resource(region)
     filters = [
         {
@@ -863,10 +867,33 @@ def get_cluster_info(
         tags = [(t['Key'], t['Value']) for t in inst.tags]
         # sort tags by key to support deterministic unit test stubbing
         tags.sort(key=lambda x: x[0])
+        vpn_unique_id = provider_config.get('vpn_unique_id', None)
+        if vpn_unique_id is None:
+            private_ip = inst.private_ip_address
+        else:
+            # TODO(tian): Using cluster name as hostname is problematic for
+            # multi-node cluster. Should use f'{unique_id}-{node_id}'
+            # TODO(tian): max_retry=1000 ==> infinite retry.
+            # TODO(tian): Should we wait here? Or use the cloud Private IP
+            # to setup and only use the VPN Private IP for traffics?
+            query_cmd = f'tailscale ip -4 {vpn_unique_id}'
+            rc, stdout, stderr = subprocess_utils.run_with_retries(
+                query_cmd,
+                max_retry=1000,
+                retry_wait_time=5,
+                retry_stderrs=['no such host', 'server misbehaving'])
+            subprocess_utils.handle_returncode(
+                rc,
+                query_cmd,
+                error_msg=('Failed to query Private IP in VPN '
+                           f'for cluster {cluster_name_on_cloud} '
+                           f'with unique id {vpn_unique_id}'),
+                stderr=stdout + stderr)
+            private_ip = stdout.strip()
         instances[inst.id] = [
             common.InstanceInfo(
                 instance_id=inst.id,
-                internal_ip=inst.private_ip_address,
+                internal_ip=private_ip,
                 external_ip=inst.public_ip_address,
                 tags=dict(tags),
             )

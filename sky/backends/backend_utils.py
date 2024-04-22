@@ -854,6 +854,9 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
+    # TODO(tian): Hack. Reformat here.
+    default_use_internal_ips = 'vpn_authkey' in resources_vars
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -874,7 +877,8 @@ def write_cluster_config(
 
                 # Networking configs
                 'use_internal_ips': skypilot_config.get_nested(
-                    (str(cloud).lower(), 'use_internal_ips'), False),
+                    (str(cloud).lower(), 'use_internal_ips'),
+                    default_use_internal_ips),
                 'ssh_proxy_command': ssh_proxy_command,
                 'vpc_name': skypilot_config.get_nested(
                     (str(cloud).lower(), 'vpc_name'), None),

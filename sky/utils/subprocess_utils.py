@@ -144,6 +144,7 @@ def kill_children_processes(
 def run_with_retries(
         cmd: str,
         max_retry: int = 3,
+        retry_wait_time: float = 2.0,
         retry_returncode: Optional[List[int]] = None,
         retry_stderrs: Optional[List[str]] = None) -> Tuple[int, str, str]:
     """Run a command and retry if it fails due to the specified reasons.
@@ -151,6 +152,8 @@ def run_with_retries(
     Args:
         cmd: The command to run.
         max_retry: The maximum number of retries.
+        retry_wait_time: The time to wait between retries. The actual wait time
+            will be a random value between 0 and this value.
         retry_returncode: The returncodes that should be retried.
         retry_stderr: The cmd needs to be retried if the stderr contains any of
             the strings in this list.
@@ -170,7 +173,7 @@ def run_with_retries(
                 logger.debug(
                     f'Retrying command due to returncode {returncode}: {cmd}')
                 retry_cnt += 1
-                time.sleep(random.uniform(0, 1) * 2)
+                time.sleep(random.uniform(0, 1) * retry_wait_time)
                 continue
 
             if retry_stderrs is None:
@@ -179,8 +182,11 @@ def run_with_retries(
             need_retry = False
             for retry_err in retry_stderrs:
                 if retry_err in stderr:
+                    logger.debug(
+                        f'Retrying command due to retry err {retry_err!r}: '
+                        f'{cmd}, stderr: {stderr}')
                     retry_cnt += 1
-                    time.sleep(random.uniform(0, 1) * 2)
+                    time.sleep(random.uniform(0, 1) * retry_wait_time)
                     need_retry = True
                     break
             if need_retry:

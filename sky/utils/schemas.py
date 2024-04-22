@@ -484,6 +484,19 @@ def get_cluster_schema():
     }
 
 
+_VPN_CONFIG_SCHEMA = {
+    'vpn': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'tailscale': {
+                'type': 'string',
+            },
+        }
+    }
+}
+
 _NETWORK_CONFIG_SCHEMA = {
     'vpc_name': {
         'oneOf': [{
@@ -570,6 +583,7 @@ def get_config_schema():
                 'security_group_name': {
                     'type': 'string',
                 },
+                **_VPN_CONFIG_SCHEMA,
                 **_INSTANCE_TAGS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             }

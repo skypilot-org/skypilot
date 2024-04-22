@@ -456,7 +456,7 @@ def _post_provision_setup(
         logger.debug(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
         wait_for_ssh(cluster_info, ssh_credentials)
-        logger.debug(f'SSH Conection ready for {cluster_name!r}')
+        logger.debug(f'SSH Connection ready for {cluster_name!r}')
         plural = '' if len(cluster_info.instances) == 1 else 's'
         logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
                     f'or found existing instance{plural}.'
