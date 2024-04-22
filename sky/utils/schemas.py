@@ -5,7 +5,8 @@ https://json-schema.org/
 """
 
 
-def get_single_resources_schema():
+def _get_single_resources_schema():
+    """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
@@ -134,15 +135,18 @@ def get_single_resources_schema():
 
 
 def get_resources_schema():
-    single_resource_schema = get_single_resources_schema()['properties']
-    single_resource_schema.pop('accelerators')
+    """Resource schema in task config."""
+    single_resources_schema = _get_single_resources_schema()['properties']
+    single_resources_schema.pop('accelerators')
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            **single_resource_schema,
+            **single_resources_schema,
+            # We redefine the 'accelerators' field to allow one line list or
+            # a set of accelerators.
             'accelerators': {
                 # {'V100:1', 'A100:1'} will be
                 # read as a string and converted to dict.
@@ -169,7 +173,7 @@ def get_resources_schema():
                 'type': 'array',
                 'items': {
                     k: v
-                    for k, v in get_single_resources_schema().items()
+                    for k, v in _get_single_resources_schema().items()
                     # Validation may fail if $schema is included.
                     if k != '$schema'
                 },
@@ -178,7 +182,7 @@ def get_resources_schema():
                 'type': 'array',
                 'items': {
                     k: v
-                    for k, v in get_single_resources_schema().items()
+                    for k, v in _get_single_resources_schema().items()
                     # Validation may fail if $schema is included.
                     if k != '$schema'
                 },
