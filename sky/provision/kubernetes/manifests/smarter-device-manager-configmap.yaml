@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smarter-device-manager
+  labels:
+    parent: skypilot
+data:
+  conf.yaml: |
+    - devicematch: ^fuse$
+      nummaxdevices: 1000  # Max number of simultaneous pods that can use fuse
