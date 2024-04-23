@@ -439,6 +439,7 @@ def _terminate_failed_services(
     # replicas, so we don't need to try again here.
     for replica_info in serve_state.get_replica_infos(service_name):
         # TODO(tian): Refresh latest status of the cluster.
+        terminate_cluster(replica_info.cluster_name)
         if global_user_state.get_cluster_from_name(
                 replica_info.cluster_name) is not None:
             remaining_replica_clusters.append(f'{replica_info.cluster_name!r}')
