@@ -144,6 +144,20 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
             'or KEY.')
     return ret[0], ret[1]
 
+def _parse_env_var(env_var: str) -> Tuple[str, str]:
+    """Parse env vars into a (KEY, VAL) pair."""
+    if '=' not in env_var:
+        value = os.environ.get(env_var)
+        if value is None:
+            raise click.UsageError(
+                f'{env_var} is not set in local environment.')
+        return (env_var, value)
+    ret = tuple(env_var.split('=', 1))
+    if len(ret) != 2:
+        raise click.UsageError(
+            f'Invalid env var: {env_var}. Must be in the form of KEY=VAL '
+            'or KEY.')
+    return ret[0], ret[1]
 
 def _merge_env_vars(env_dict: Optional[Dict[str, str]],
                     env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
@@ -239,6 +253,26 @@ _TASK_OPTIONS = [
         ``--env``, the ``--env`` value will be preferred."""),
     click.option(
         '--env',
+        required=False,
+        type=_parse_env_var,
+        multiple=True,
+        help="""\
+        Environment variable to set on the remote node.
+        It can be specified multiple times.
+        Examples:
+
+        \b
+        1. ``--env MY_ENV=1``: set ``$MY_ENV`` on the cluster to be 1.
+
+        2. ``--env MY_ENV2=$HOME``: set ``$MY_ENV2`` on the cluster to be the
+        same value of ``$HOME`` in the local environment where the CLI command
+        is run.
+
+        3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
+        same value of ``$MY_ENV3`` in the local environment.""",
+    ),
+    click.option(
+        '--label',
         required=False,
         type=_parse_env_var,
         multiple=True,
@@ -473,7 +507,8 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
-        ports: Optional[Tuple[str]] = None) -> Dict[str, Any]:
+        ports: Optional[Tuple[str]] = None,
+        labels: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -527,6 +562,8 @@ def _parse_override_params(
             override_params['disk_tier'] = disk_tier
     if ports:
         override_params['ports'] = ports
+    if labels:
+        override_params['labels'] = labels
     return override_params
 
 
@@ -706,6 +743,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
     ports: Optional[Tuple[str]] = None,
+    labels: Optional[Dict[str, str]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # spot launch specific
@@ -747,7 +785,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
-                                             ports=ports)
+                                             ports=ports,
+                                             labels=labels)
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
                                                   field_to_ignore)
@@ -1003,6 +1042,7 @@ def launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
+    labels: Optional[Tuple[str, str]],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -1043,6 +1083,7 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
+        labels=labels
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(

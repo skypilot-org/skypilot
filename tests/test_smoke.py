@@ -1754,6 +1754,20 @@ def test_paperspace_http_server_with_custom_ports():
     )
     run_one_test(test)
 
+# ---------- Labels from task on AWS (instance_tags) ----------
+@pytest.mark.aws
+def test_aws_task_labels():
+    name = _get_cluster_name()
+    test = Test(
+        'aws_task_labels',
+        [
+            f'sky launch -y -c {name} examples/instance_tags.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
 
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
