@@ -1,4 +1,6 @@
 """Test the controller_utils module."""
+from typing import Any, Dict
+
 import pytest
 
 import sky
@@ -34,9 +36,13 @@ from sky.utils import controller_utils
             'disk_size': 200
         }),
     ])
-def test_get_controller_resources(controller_type,
-                                  custom_controller_resources_config, expected,
-                                  enable_all_clouds, monkeypatch):
+def test_get_controller_resources(
+    controller_type: str,
+    custom_controller_resources_config: Dict[str, Any],
+    expected: Dict[str, Any],
+    enable_all_clouds,
+    monkeypatch,
+):
 
     def get_custom_controller_resources(keys, default):
         if keys == (controller_type, 'controller', 'resources'):
@@ -63,7 +69,10 @@ def test_get_controller_resources(controller_type,
     ('serve', serve_constants.CONTROLLER_RESOURCES),
 ])
 def test_get_controller_resources_with_task_resources(
-        controller_type, default_controller_resources, enable_all_clouds):
+    controller_type: str,
+    default_controller_resources: Dict[str, Any],
+    enable_all_clouds,
+):
 
     # 1. All resources has cloud specified. All of them
     # could host controllers. Return a set, each item has
