@@ -144,20 +144,6 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
             'or KEY.')
     return ret[0], ret[1]
 
-def _parse_env_var(env_var: str) -> Tuple[str, str]:
-    """Parse env vars into a (KEY, VAL) pair."""
-    if '=' not in env_var:
-        value = os.environ.get(env_var)
-        if value is None:
-            raise click.UsageError(
-                f'{env_var} is not set in local environment.')
-        return (env_var, value)
-    ret = tuple(env_var.split('=', 1))
-    if len(ret) != 2:
-        raise click.UsageError(
-            f'Invalid env var: {env_var}. Must be in the form of KEY=VAL '
-            'or KEY.')
-    return ret[0], ret[1]
 
 def _merge_env_vars(env_dict: Optional[Dict[str, str]],
                     env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
@@ -167,6 +153,16 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     for (key, value) in env_list:
         env_dict[key] = value
     return list(env_dict.items())
+
+
+def _parse_label(label: str) -> Tuple[str, str]:
+    """Parse label into a (KEY, VAL) pair."""
+    ret = tuple(label.split('=', 1))
+    if len(ret) != 2:
+        raise click.UsageError(
+            f'Invalid label: {label}. Must be in the form of KEY=VAL '
+            'or KEY.')
+    return ret[0], ret[1]
 
 
 _TASK_OPTIONS = [
@@ -274,22 +270,18 @@ _TASK_OPTIONS = [
     click.option(
         '--label',
         required=False,
-        type=_parse_env_var,
+        type=_parse_label,
         multiple=True,
         help="""\
-        Environment variable to set on the remote node.
+        Label to attach to resource(s) provisioned.
+        On AWS and GCP, this is attached as an instance tag to the VM(s).
+        On Kubernetes, this is attached as a label to the pod(s).
+        On other clouds, this flag is ignored.
         It can be specified multiple times.
-        Examples:
-
-        \b
-        1. ``--env MY_ENV=1``: set ``$MY_ENV`` on the cluster to be 1.
-
-        2. ``--env MY_ENV2=$HOME``: set ``$MY_ENV2`` on the cluster to be the
-        same value of ``$HOME`` in the local environment where the CLI command
-        is run.
-
-        3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
-        same value of ``$MY_ENV3`` in the local environment.""",
+        
+        Example: ``--label MY_LABEL=MY_VALUE`` sets ``MY_LABEL`` label 
+        to ``MY_VALUE``.
+        """,
     )
 ]
 _TASK_OPTIONS_WITH_NAME = [
@@ -508,7 +500,7 @@ def _parse_override_params(
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
         ports: Optional[Tuple[str]] = None,
-        labels: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        labels: Optional[List[Tuple[str, str]]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -563,7 +555,8 @@ def _parse_override_params(
     if ports:
         override_params['ports'] = ports
     if labels:
-        override_params['labels'] = labels
+        # Convert list of tuples to dict
+        override_params['labels'] = dict(labels)
     return override_params
 
 
@@ -1042,7 +1035,7 @@ def launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
-    labels: Optional[Tuple[str, str]],
+    label: List[Tuple[str, str]],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -1083,7 +1076,7 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
-        labels=labels
+        labels=label
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
@@ -1162,6 +1155,7 @@ def exec(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    label: List[Tuple[str, str]],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
@@ -1248,7 +1242,9 @@ def exec(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
-        field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
+        labels=label,
+        field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports',
+                         'labels']
     )
 
     if isinstance(task_or_dag, sky.Dag):
@@ -3252,6 +3248,7 @@ def spot_launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
+    label: List[Tuple[str, str]],
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
@@ -3289,6 +3286,7 @@ def spot_launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
+        labels=label,
         spot_recovery=spot_recovery,
     )
     # Deprecation.
@@ -3607,6 +3605,7 @@ def _generate_task_with_service(
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Tuple[str],
+    label: List[Tuple[str, str]],
     cpus: Optional[str],
     memory: Optional[str],
     disk_size: Optional[int],
@@ -3634,6 +3633,7 @@ def _generate_task_with_service(
         num_nodes=num_nodes,
         use_spot=use_spot,
         image_id=image_id,
+        labels=label,
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
@@ -3713,6 +3713,7 @@ def serve_up(
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Tuple[str],
+    label: List[Tuple[str, str]],
     cpus: Optional[str],
     memory: Optional[str],
     disk_size: Optional[int],
@@ -3769,6 +3770,7 @@ def serve_up(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
+        label=label,
         not_supported_cmd='sky serve up',
     )
     click.secho('Service Spec:', fg='cyan')
@@ -3830,6 +3832,7 @@ def serve_update(
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Tuple[str],
+    label: List[Tuple[str, str]],
     cpus: Optional[str],
     memory: Optional[str],
     disk_size: Optional[int],
@@ -3882,6 +3885,7 @@ def serve_update(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        label=label,
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
@@ -4275,6 +4279,7 @@ def benchmark_launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
+    label: List[Tuple[str, str]],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ) -> None:
@@ -4384,7 +4389,8 @@ def benchmark_launch(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
-                                             ports=ports)
+                                             ports=ports,
+                                             labels=label)
     _pop_and_ignore_fields_in_override_params(
         override_params, field_to_ignore=['cpus', 'memory'])
     resources_config.update(override_params)
