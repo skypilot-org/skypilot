@@ -123,7 +123,7 @@ def launch_cluster(replica_id: int,
         else:  # No exception, the launch succeeds.
             return
 
-        terminate_cluster(cluster_name)
+        serve_utils.terminate_cluster(cluster_name)
         if retry_cnt >= max_retry:
             raise RuntimeError('Failed to launch the sky serve replica cluster '
                                f'{cluster_name} after {max_retry} retries.')
@@ -131,39 +131,6 @@ def launch_cluster(replica_id: int,
         logger.info('Retrying to launch the sky serve replica cluster '
                     f'in {gap_seconds:.1f} seconds.')
         time.sleep(gap_seconds)
-
-
-# TODO(tian): Combine this with
-# sky/spot/recovery_strategy.py::terminate_cluster
-def terminate_cluster(cluster_name: str,
-                      replica_drain_delay_seconds: int = 0,
-                      max_retry: int = 3) -> None:
-    """Terminate the sky serve replica cluster."""
-    time.sleep(replica_drain_delay_seconds)
-    retry_cnt = 0
-    backoff = common_utils.Backoff()
-    while True:
-        retry_cnt += 1
-        try:
-            usage_lib.messages.usage.set_internal()
-            sky.down(cluster_name)
-            return
-        except ValueError:
-            # The cluster is already terminated.
-            logger.info(
-                f'Replica cluster {cluster_name} is already terminated.')
-            return
-        except Exception as e:  # pylint: disable=broad-except
-            if retry_cnt >= max_retry:
-                raise RuntimeError('Failed to terminate the sky serve replica '
-                                   f'cluster {cluster_name}.') from e
-            gap_seconds = backoff.current_backoff()
-            logger.error(
-                'Failed to terminate the sky serve replica cluster '
-                f'{cluster_name}. Retrying after {gap_seconds} seconds.'
-                f'Details: {common_utils.format_exception(e)}')
-            logger.error(f'  Traceback: {traceback.format_exc()}')
-            time.sleep(gap_seconds)
 
 
 def _get_resources_ports(task_yaml: str) -> str:
@@ -730,8 +697,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         logger.info(f'preempted: {info.status_property.preempted}, '
                     f'replica_id: {replica_id}')
         p = multiprocessing.Process(
-            target=ux_utils.RedirectOutputForProcess(terminate_cluster,
-                                                     log_file_name, 'a').run,
+            target=ux_utils.RedirectOutputForProcess(
+                serve_utils.terminate_cluster, log_file_name, 'a').run,
             args=(info.cluster_name, replica_drain_delay_seconds),
         )
         info.status_property.sky_down_status = ProcessStatus.RUNNING

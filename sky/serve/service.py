@@ -90,7 +90,7 @@ def _cleanup(service_name: str) -> bool:
     info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
     for info in replica_infos:
-        p = multiprocessing.Process(target=replica_managers.terminate_cluster,
+        p = multiprocessing.Process(target=serve_utils.terminate_cluster,
                                     args=(info.cluster_name,))
         p.start()
         info2proc[info] = p
