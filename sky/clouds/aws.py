@@ -398,9 +398,13 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       r.instance_type)
 
+        tailscale_config = skypilot_config.get_nested(
+            ('aws', 'vpn', 'tailscale'), None)
+
         user_security_group = skypilot_config.get_nested(
             ('aws', 'security_group_name'), None)
-        if resources.ports is not None:
+        # Only open ports if VPN is not enabled.
+        if resources.ports is not None and tailscale_config is None:
             # Already checked in Resources._try_validate_ports
             assert user_security_group is None
             security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
@@ -423,9 +427,6 @@ class AWS(clouds.Cloud):
                 str(security_group != user_security_group).lower(),
             **AWS._get_disk_specs(r.disk_tier)
         }
-
-        tailscale_config = skypilot_config.get_nested(
-            ('aws', 'vpn', 'tailscale'), None)
         if tailscale_config is not None:
             resources_vars['vpn_unique_id'] = cluster_name_on_cloud
             resources_vars['vpn_auth_key'] = tailscale_config['auth_key']

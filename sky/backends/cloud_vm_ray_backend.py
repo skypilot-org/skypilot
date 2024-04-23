@@ -1478,6 +1478,7 @@ class RetryingVmProvisioner(object):
                 launched_resources = launched_resources.copy(zone=zones[0].name)
 
             prev_cluster_ips, prev_ssh_ports = None, None
+            # TODO(tian): Raise if prev handle does not use VPN, and vise versa.
             if prev_handle is not None:
                 prev_cluster_ips = prev_handle.stable_internal_external_ips
                 prev_ssh_ports = prev_handle.stable_ssh_ports
@@ -2109,11 +2110,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Launched num nodes
     - (optional) Launched resources
     - (optional) Docker user name
+    - (optional) Whether the cluster uses VPN
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
     # Bump if any fields get added/removed/changed, and add backward
-    # compaitibility logic in __setstate__.
-    _VERSION = 7
+    # compatibility logic in __setstate__.
+    _VERSION = 8
 
     def __init__(
             self,
@@ -2146,6 +2148,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
         self.ssh_user: Optional[str] = None
+        self.use_vpn: bool = common_utils.read_yaml(self.cluster_yaml).get(
+            'provider', {}).get('vpn_unique_id', None) is not None
         # Deprecated. SkyPilot new provisioner API handles the TPU node
         # creation/deletion.
         # Backward compatibility for TPU nodes created before #2943.
@@ -2168,6 +2172,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
                 f'\n\tssh_user={self.ssh_user},'
+                f'\n\tuse_vpn={self.use_vpn},'
                 # TODO (zhwu): Remove this after 0.6.0.
                 f'\n\ttpu_create_script={self.tpu_create_script}, '
                 f'\n\ttpu_delete_script={self.tpu_delete_script})')
@@ -2438,6 +2443,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 7:
             self.ssh_user = None
+
+        if version < 8:
+            self.use_vpn = False
 
         self.__dict__.update(state)
 
@@ -2848,6 +2856,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return handle
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
+        if handle.use_vpn:
+            # Skip opening any ports if VPN is used.
+            return
         cloud = handle.launched_resources.cloud
         logger.debug(
             f'Opening ports {handle.launched_resources.ports} for {cloud}')
@@ -3958,7 +3969,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Failed to delete cloned image {image_id}. Please '
                     'remove it manually to avoid image leakage. Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
-        if terminate:
+        # Skip cleanup ports if VPN is used, as the ports
+        # will not open if VPN is enabled.
+        if terminate and not handle.use_vpn:
             cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)
             try:

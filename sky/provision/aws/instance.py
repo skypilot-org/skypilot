@@ -613,7 +613,8 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances.terminate()
-    if provider_config.get('vpn_unique_id', None) is not None:
+    use_vpn = provider_config.get('vpn_unique_id', None) is not None
+    if use_vpn:
         auth_headers = {
             'Authorization': f'Bearer {provider_config["vpn_api_key"]}'
         }
