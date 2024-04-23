@@ -2,6 +2,8 @@
 
 # pylint: disable=import-outside-toplevel
 import functools
+import json
+import subprocess
 import threading
 
 from sky.adaptors import common
@@ -15,18 +17,31 @@ _LAZY_MODULES = (azure,)
 _session_creation_lock = threading.RLock()
 
 
-@common.load_lazy_modules(modules=_LAZY_MODULES)
+def _run_output(cmd):
+    proc = subprocess.run(cmd,
+                          shell=True,
+                          check=True,
+                          stderr=subprocess.PIPE,
+                          stdout=subprocess.PIPE)
+    return proc.stdout.decode('ascii')
+
+
+# There is no programmatic way to get current account details anymore.
+# https://github.com/Azure/azure-sdk-for-python/issues/21561
+
+
+def _get_account():
+    return json.loads(_run_output('az account show -o json'))
+
+
 def get_subscription_id() -> str:
     """Get the default subscription id."""
-    from azure.common import credentials
-    return credentials.get_cli_profile().get_subscription_id()
+    return _get_account()['id']
 
 
-@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_current_account_user() -> str:
     """Get the default account user."""
-    from azure.common import credentials
-    return credentials.get_cli_profile().get_current_account_user()
+    return _get_account()['user']['name']
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)

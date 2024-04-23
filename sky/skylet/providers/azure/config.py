@@ -6,10 +6,9 @@ from pathlib import Path
 import time
 from typing import Any, Callable
 
-from azure.common.credentials import get_cli_profile
 from azure.identity import AzureCliCredential
 from azure.mgmt.network import NetworkManagementClient
-from azure.mgmt.resource import ResourceManagementClient
+from azure.mgmt.resource import ResourceManagementClient, SubscriptionClient
 from azure.mgmt.resource.resources.models import DeploymentMode
 
 from sky.utils import common_utils
@@ -50,12 +49,15 @@ def _configure_resource_group(config):
     # TODO: look at availability sets
     # https://docs.microsoft.com/en-us/azure/virtual-machines/windows/tutorial-availability-sets
     subscription_id = config["provider"].get("subscription_id")
-    if subscription_id is None:
-        subscription_id = get_cli_profile().get_subscription_id()
     # Increase the timeout to fix the Azure get-access-token (used by ray azure
     # node_provider) timeout issue.
     # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
     credentials = AzureCliCredential(process_timeout=30)
+
+    if subscription_id is None:
+        subscription_client = SubscriptionClient(credentials)
+        subscription_id = next(subscription_client.subscriptions.list()).subscription_id
+
     resource_client = ResourceManagementClient(credentials, subscription_id)
     config["provider"]["subscription_id"] = subscription_id
     logger.info("Using subscription id: %s", subscription_id)
