@@ -268,7 +268,14 @@ class RayCodeGen:
                 \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
                 returncodes = [1] * len(futures)
                 # Wait for 1 task to be ready.
-                ready, unready = ray.wait(futures)
+                ready = []
+                # Keep invoking ray.wait if ready is empty. This is because
+                # ray.wait with timeout=None will only wait for 10**6 seconds,
+                # which will cause tasks running for more than 12 days to return
+                before becoming ready. (Such tasks are common in serving jobs.)
+                # Reference: https://github.com/ray-project/ray/blob/ray-2.9.3/python/ray/_private/worker.py#L2845-L2846
+                while not ready:
+                    ready, unready = ray.wait(futures)
                 idx = futures.index(ready[0])
                 returncodes[idx] = ray.get(ready[0])
                 while unready:
