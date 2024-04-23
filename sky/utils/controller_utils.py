@@ -336,9 +336,14 @@ def get_controller_resources(
     controller_resources_to_use: resources.Resources = list(
         controller_resources)[0]
 
-    controller_exist = (global_user_state.get_cluster_from_name(
-        controller.value.cluster_name) is not None)
-    if controller_exist or controller_resources_to_use.cloud is not None:
+    controller_record = global_user_state.get_cluster_from_name(
+        controller.value.cluster_name)
+    if controller_record is not None:
+        handle = controller_record.get('handle', None)
+        if handle is not None:
+            controller_resources_to_use = handle.launched_resources
+
+    if controller_resources_to_use.cloud is not None:
         return {controller_resources_to_use}
 
     # If the controller and replicas are from the same cloud, it should
