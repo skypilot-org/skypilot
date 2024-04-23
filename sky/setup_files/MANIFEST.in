@@ -1,5 +1,6 @@
 include sky/backends/monkey_patches/*.py
 exclude sky/clouds/service_catalog/data_fetchers/analyze.py
+include sky/provision/kubernetes/manifests/*
 include sky/setup_files/*
 include sky/skylet/*.sh
 include sky/skylet/LICENSE

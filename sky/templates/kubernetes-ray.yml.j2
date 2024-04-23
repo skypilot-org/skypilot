@@ -33,6 +33,11 @@ provider:
 
     ssh_jump_image: {{k8s_ssh_jump_image}}
 
+    # Boolean flag to indicate if the cluster requires FUSE mounting.
+    # Used to set up the necessary permissions and sidecars.
+    fuse_device_required: {{k8s_fuse_device_required}}
+    fuse_device_manager_namespace: {{k8s_fuse_device_manager_namespace}}
+
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
     # contain a user-created service account with the proper permissions.
@@ -139,6 +144,11 @@ available_node_types:
             skypilot-cluster: {{cluster_name_on_cloud}}
             # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
             skypilot-ssh-jump: {{k8s_ssh_jump_name}}
+        {% if k8s_fuse_device_required %}
+        annotations:
+            # Required for FUSE mounting to access /dev/fuse
+            container.apparmor.security.beta.kubernetes.io/ray-node: unconfined
+        {% endif %}
       spec:
         # Change this if you altered the autoscaler_service_account above
         # or want to provide your own.
@@ -186,19 +196,32 @@ available_node_types:
           - name: secret-volume
             readOnly: true
             mountPath: "/etc/secret-volume"
+          # This volume allocates shared memory for Ray to use for its plasma
+          # object store. If you do not provide this, Ray will fall back to
+          # /tmp which cause slowdowns if is not a shared memory volume.
           - mountPath: /dev/shm
             name: dshm
-          - mountPath: /dev/fuse    # Required for FUSE mounting
-            name: dev-fuse
-          securityContext:          # Required for FUSE mounting. TODO(romilb): See if we can grant a reduced set of privileges.
-            privileged: true
+          {% if k8s_fuse_device_required %}
+          securityContext:
+            capabilities:
+              add:
+                - "SYS_ADMIN"
+          {% endif %}
           resources:
             requests:
               cpu: {{cpus}}
               memory: {{memory}}G
               nvidia.com/gpu: {{accelerator_count}}
+              {% if k8s_fuse_device_required %}
+              # Kubernetes resource exposed by the fuse device manager
+              # https://gitlab.com/arm-research/smarter/smarter-device-manager
+              smarter-devices/fuse: "1"
+              {% endif %}
             limits:
               nvidia.com/gpu: {{accelerator_count}} # Limits need to be defined for GPU requests
+              {% if k8s_fuse_device_required %}
+              smarter-devices/fuse: "1"
+              {% endif %}
 
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
