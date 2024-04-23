@@ -337,7 +337,7 @@ def get_controller_resources(
         controller_resources)[0]
 
     controller_exist = (global_user_state.get_cluster_from_name(
-        controller.value.name) is not None)
+        controller.value.cluster_name) is not None)
     if controller_exist or controller_resources_to_use.cloud is not None:
         return {controller_resources_to_use}
 
