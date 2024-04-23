@@ -417,10 +417,18 @@ def _post_provision_setup(
         custom_resource: Optional[str]) -> provision_common.ClusterInfo:
     config_from_yaml = common_utils.read_yaml(cluster_yaml)
     provider_config = config_from_yaml.get('provider')
-    cluster_info = provision.get_cluster_info(cloud_name,
-                                              provision_record.region,
-                                              cluster_name.name_on_cloud,
-                                              provider_config=provider_config)
+    if (provider_config is not None and
+            provider_config.get('vpn_unique_id', None) is not None):
+        get_info_status = rich_utils.safe_status(
+            '[bold cyan]Launching - Waiting for VPN setup[/]')
+    else:
+        get_info_status = rich_utils.empty_status()
+    with get_info_status:
+        cluster_info = provision.get_cluster_info(
+            cloud_name,
+            provision_record.region,
+            cluster_name.name_on_cloud,
+            provider_config=provider_config)
 
     if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
