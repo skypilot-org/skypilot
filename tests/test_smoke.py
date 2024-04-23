@@ -1215,6 +1215,7 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
             f'sky cancel -y {name} 3',
             # Make sure the GPU is still visible to the container.
             f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
+            f'sky logs {name} 4 -- status',
             f'sky stop -y {name}',
             # Make sure the job status preserve after stop and start the
             # cluster. This is also a test for the docker container to be
