@@ -322,6 +322,9 @@ def get_controller_resources(
                     controller_type=controller_type,
                     err=common_utils.format_exception(e,
                                                       use_bracket=True))) from e
+    # TODO(tian): Support multiple resources for the controller. One blocker
+    # here is the semantic if controller resources use `ordered` and we want
+    # to override it with multiple cloud from task resources.
     if len(controller_resources) != 1:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
