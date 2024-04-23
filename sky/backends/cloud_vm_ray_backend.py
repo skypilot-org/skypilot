@@ -2148,14 +2148,21 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
         self.ssh_user: Optional[str] = None
-        self.use_vpn: bool = common_utils.read_yaml(self.cluster_yaml).get(
-            'provider', {}).get('vpn_unique_id', None) is not None
+        self.use_vpn: bool = self._get_use_vpn()
         # Deprecated. SkyPilot new provisioner API handles the TPU node
         # creation/deletion.
         # Backward compatibility for TPU nodes created before #2943.
         # TODO (zhwu): Remove this after 0.6.0.
         self.tpu_create_script = tpu_create_script
         self.tpu_delete_script = tpu_delete_script
+
+    def _get_use_vpn(self) -> bool:
+        """Returns whether to use VPN."""
+        # Directly load the VPN config flag from the cluster
+        # yaml instead of `skypilot_config` as the latter
+        # can be changed after the cluster is UP.
+        return common_utils.read_yaml(self.cluster_yaml).get(
+            'provider', {}).get('vpn_unique_id', None) is not None
 
     def __repr__(self):
         return (f'ResourceHandle('
