@@ -491,7 +491,20 @@ _VPN_CONFIG_SCHEMA = {
         'additionalProperties': False,
         'properties': {
             'tailscale': {
-                'type': 'string',
+                'type': 'object',
+                'required': ['auth_key', 'api_key', 'tailnet'],
+                'additionalProperties': False,
+                'properties': {
+                    'auth_key': {
+                        'type': 'string',
+                    },
+                    'api_key': {
+                        'type': 'string',
+                    },
+                    'tailnet': {
+                        'type': 'string',
+                    },
+                },
             },
         }
     }

@@ -11,6 +11,8 @@ import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
 
+import requests
+
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
@@ -611,9 +613,38 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances.terminate()
-    # TODO(tian): Cleanup vpn record
     if provider_config.get('vpn_unique_id', None) is not None:
-        pass
+        auth_headers = {
+            'Authorization': f'Bearer {provider_config["vpn_api_key"]}'
+        }
+
+        def _get_node_id_from_hostname(network_name: str,
+                                       hostname: str) -> Optional[str]:
+            # TODO(tian): Refactor to a dedicated file
+            url_to_query = ('https://api.tailscale.com/api/v2/'
+                            f'tailnet/{network_name}/devices')
+            resp = requests.get(url_to_query, headers=auth_headers)
+            all_devices_in_network = resp.json().get('devices', [])
+            for device_info in all_devices_in_network:
+                if device_info.get('hostname') == hostname:
+                    return device_info.get('nodeId')
+            return None
+
+        node_id_in_vpn = _get_node_id_from_hostname(
+            provider_config['vpn_network'], provider_config['vpn_unique_id'])
+        if node_id_in_vpn is None:
+            logger.warning('Cannot find node id for '
+                           f'{provider_config["vpn_unique_id"]}. '
+                           f'Skip deleting vpn record.')
+        else:
+            url_to_delete = ('https://api.tailscale.com/api/v2/'
+                             f'device/{node_id_in_vpn}')
+            resp = requests.delete(url_to_delete, headers=auth_headers)
+            if resp.status_code != 200:
+                logger.warning('Failed to delete vpn record for '
+                               f'{provider_config["vpn_unique_id"]}. '
+                               f'Status code: {resp.status_code}, '
+                               f'Response: {resp.text}')
     if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
             not managed_by_skypilot):
         # Using default AWS SG or user specified security group. We don't need

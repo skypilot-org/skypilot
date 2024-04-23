@@ -8,7 +8,6 @@ import subprocess
 import time
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
-import uuid
 
 from sky import clouds
 from sky import exceptions
@@ -425,15 +424,13 @@ class AWS(clouds.Cloud):
             **AWS._get_disk_specs(r.disk_tier)
         }
 
-        vpn_authkey = skypilot_config.get_nested(('aws', 'vpn', 'tailscale'),
-                                                 None)
-        if vpn_authkey is not None:
-            resources_vars['vpn_authkey'] = vpn_authkey
-            # TODO(tian): Currently we does not support delete record for
-            # tailscale, so we use a unique id to distinguish same cluster
-            # name after second launch. We should support delete record.
-            resources_vars['vpn_unique_id'] = (
-                f'{cluster_name_on_cloud}-{str(uuid.uuid4())[-3:]}')
+        tailscale_config = skypilot_config.get_nested(
+            ('aws', 'vpn', 'tailscale'), None)
+        if tailscale_config is not None:
+            resources_vars['vpn_unique_id'] = cluster_name_on_cloud
+            resources_vars['vpn_auth_key'] = tailscale_config['auth_key']
+            resources_vars['vpn_api_key'] = tailscale_config['api_key']
+            resources_vars['vpn_network'] = tailscale_config['tailnet']
 
         return resources_vars
 

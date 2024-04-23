@@ -42,8 +42,10 @@ provider:
   vpc_name: {{vpc_name}}
 {% endif %}
   use_internal_ips: {{use_internal_ips}}
-{% if vpn_authkey is not none %}
+{% if vpn_auth_key is not none %}
   vpn_unique_id: {{vpn_unique_id}}
+  vpn_api_key: {{vpn_api_key}}
+  vpn_network: {{vpn_network}}
 {% endif %}
   # Disable launch config check for worker nodes as it can cause resource
   # leakage.
@@ -113,11 +115,11 @@ available_node_types:
           - path: /etc/apt/apt.conf.d/10cloudinit-disable
             content: |
               APT::Periodic::Enable "0";
-        {% if vpn_authkey is not none %}
+        {% if vpn_auth_key is not none %}
         runcmd:
           - ['sh', '-c', 'curl -fsSL https://tailscale.com/install.sh | sh']
           - ['sh', '-c', "echo 'net.ipv4.ip_forward = 1' | sudo tee -a /etc/sysctl.d/99-tailscale.conf && echo 'net.ipv6.conf.all.forwarding = 1' | sudo tee -a /etc/sysctl.d/99-tailscale.conf && sudo sysctl -p /etc/sysctl.d/99-tailscale.conf" ]
-          - ['tailscale', 'up', '--authkey={{vpn_authkey}}', '--hostname={{vpn_unique_id}}' ]
+          - ['tailscale', 'up', '--authkey={{vpn_auth_key}}', '--hostname={{vpn_unique_id}}' ]
         {% endif %}
       TagSpecifications:
         - ResourceType: instance
