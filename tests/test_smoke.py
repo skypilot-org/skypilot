@@ -1229,6 +1229,7 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
             f'sky logs {name} 6 --status',
             # Make sure it is still visible after an stop & start cycle.
             f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
+            f'sky logs {name} 7 --status'
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
