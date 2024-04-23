@@ -330,7 +330,9 @@ def update_service_status() -> None:
             # fails to avoid resource leak.
             # TODO(zhwu): this may need to be think of for the fault tolerance
             # case, since we may want to make sure the replicas are still
-            # accessible even if the controller fails.
+            # accessible even if the controller fails. If this is too aggressive
+            # we can terminate the replica when the user call `sky serve down`
+            # for the service with CONTROLLER_FAILED.
             replica_infos = serve_state.get_replica_infos(service_name)
             for replica in replica_infos:
                 terminate_cluster(replica.cluster_name)
