@@ -1,13 +1,12 @@
 """User interfaces with managed jobs."""
 import collections
 import enum
-import json
 import os
 import pathlib
 import shlex
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import colorama
 import filelock
@@ -332,7 +331,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # the table before the spot state is updated by the controller. In
             # this case, we should skip the logging, and wait for the next
             # round of status check.
-            if handle is None or managed_job_status != state.ManagedJobStatus.RUNNING:
+            if (handle is None or managed_job_status != state.ManagedJobStatus.RUNNING):
                 status_str = ''
                 if (managed_job_status is not None and
                         managed_job_status != state.ManagedJobStatus.RUNNING):
