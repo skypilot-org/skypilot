@@ -65,7 +65,7 @@ def test_get_controller_resources(
 
 
 @pytest.mark.parametrize(('controller_type', 'default_controller_resources'), [
-    ('spot', spot_constants.CONTROLLER_RESOURCES),
+    ('jobs', job_constants.CONTROLLER_RESOURCES),
     ('serve', serve_constants.CONTROLLER_RESOURCES),
 ])
 def test_get_controller_resources_with_task_resources(
