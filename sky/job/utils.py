@@ -4,6 +4,7 @@ import enum
 import os
 import pathlib
 import shlex
+import shutil
 import time
 import typing
 from typing import Any, Dict, List, Optional, Union
@@ -40,6 +41,7 @@ JOB_CONTROLLER_NAME: str = (
 LEGACY_JOB_CONTROLLER_NAME: str = (
     f'sky-spot-controller-{common_utils.get_user_hash()}')
 SIGNAL_FILE_PREFIX = '/tmp/sky_job_controller_signal_{}'
+LEGACY_SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
 
@@ -238,8 +240,10 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
 
         update_managed_job_status(job_id)
 
-        # Send the signal to the spot job controller.
+        # Send the signal to the job controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
+        legacy_signal_file = pathlib.Path(
+            LEGACY_SIGNAL_FILE_PREFIX.format(job_id))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
         # TODO(mraheja): remove pylint disabling when filelock version updated
@@ -248,6 +252,9 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
             with signal_file.open('w', encoding='utf-8') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
+            # Backward compatibility for spot jobs launched before #3419. It can
+            # be removed in the future 0.7.0 release.
+            shutil.copy(str(signal_file), str(legacy_signal_file))
         cancelled_job_ids.append(job_id)
 
     if len(cancelled_job_ids) == 0:
@@ -331,7 +338,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # the table before the spot state is updated by the controller. In
             # this case, we should skip the logging, and wait for the next
             # round of status check.
-            if (handle is None or managed_job_status != state.ManagedJobStatus.RUNNING):
+            if (handle is None or
+                    managed_job_status != state.ManagedJobStatus.RUNNING):
                 status_str = ''
                 if (managed_job_status is not None and
                         managed_job_status != state.ManagedJobStatus.RUNNING):
