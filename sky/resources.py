@@ -360,6 +360,7 @@ class Resources:
             vcpus, _ = self.cloud.get_vcpus_mem_from_instance_type(
                 self._instance_type)
             return str(vcpus)
+        return None
 
     @property
     def memory(self) -> Optional[str]:

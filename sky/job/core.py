@@ -46,26 +46,30 @@ def launch(
         detach_run: Whether to detach the run.
 
     Raises:
-        ValueError: cluster does not exist.
+        ValueError: cluster does not exist. Or, the entrypoint is not a valid
+            chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
 
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    assert dag.is_chain(), ('Only single-task or chain DAG is '
-                            'allowed for job_launch.', dag)
+    if not dag.is_chain():
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Only single-task or chain DAG is '
+                             f'allowed for job_launch. Dag: {dag}')
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
     for task_ in dag.tasks:
         if task_.name in task_names:
-            raise ValueError(
-                f'Task name {task_.name!r} is duplicated in the DAG. Either '
-                'change task names to be unique, or specify the DAG name only '
-                'and comment out the task names (so that they will be auto-'
-                'generated) .')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Task name {task_.name!r} is duplicated in the DAG. '
+                    'Either change task names to be unique, or specify the DAG '
+                    'name only and comment out the task names (so that they '
+                    'will be auto-generated) .')
         task_names.add(task_.name)
 
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
@@ -75,8 +79,7 @@ def launch(
             task_, path='job')
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
-                                     mode='w',
-                                     delete=False) as f:
+                                     mode='w') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_type = controller_utils.Controllers.JOB_CONTROLLER
         controller_name = controller_type.value.cluster_name
