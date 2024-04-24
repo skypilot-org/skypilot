@@ -287,11 +287,11 @@ def terminate_cluster(cluster_name: str,
     while True:
         retry_cnt += 1
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-        if handle is not None:
-            backend = backend_utils.get_backend_from_handle(handle)
         try:
-            backend.teardown(handle, terminate=True)
-            return
+            if handle is not None:
+                backend = backend_utils.get_backend_from_handle(handle)
+                backend.teardown(handle, terminate=True)
+                return
         except ValueError:
             # The cluster is already terminated.
             logger.info(
@@ -310,9 +310,11 @@ def terminate_cluster(cluster_name: str,
             time.sleep(gap_seconds)
 
 
-def update_service_status() -> None:
+def update_service_status(service_names: Optional[List[str]] = None) -> None:
     services = serve_state.get_services()
     for record in services:
+        if service_names is not None and record['name'] not in service_names:
+            continue
         if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
             # Skip services that is shutting down.
             continue
@@ -464,6 +466,9 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
     terminated_service_names = []
     messages = []
+    # We should update the service status before terminating services to avoid
+    # service status in a staled state, and being handled incorrectly.
+    update_service_status(service_names)
     for service_name in service_names:
         service_status = _get_service_status(service_name,
                                              with_replica_info=False)
