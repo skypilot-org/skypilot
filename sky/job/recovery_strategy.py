@@ -293,7 +293,7 @@ class StrategyExecutor:
                            detach_setup=True,
                            detach_run=True,
                            _is_launched_by_job_controller=True)
-                logger.info('Spot cluster launched.')
+                logger.info('Managed job cluster launched.')
             except (exceptions.InvalidClusterNameError,
                     exceptions.NoCloudAccessError,
                     exceptions.ResourcesMismatchError) as e:
