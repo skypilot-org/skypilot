@@ -40,14 +40,12 @@ JOB_CONTROLLER_NAME: str = (
     f'sky-job-controller-{common_utils.get_user_hash()}')
 LEGACY_JOB_CONTROLLER_NAME: str = (
     f'sky-spot-controller-{common_utils.get_user_hash()}')
-SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
+SIGNAL_FILE_PREFIX = '/tmp/sky_job_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
 
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
-
-_SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
@@ -59,9 +57,9 @@ _JOB_CANCELLED_MESSAGE = (
 
 # The maximum time to wait for the spot job status to transition to terminal
 # state, after the job finished. This is a safeguard to avoid the case where
-# the spot job status fails to be updated and keep the `sky job logs` blocking
-# for a long time.
-_FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 20
+# the managed job status fails to be updated and keep the `sky job logs`
+# blocking for a long time.
+_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 20
 
 
 class UserSignal(enum.Enum):
@@ -95,7 +93,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     return status
 
 
-def update_spot_job_status(job_id: Optional[int] = None):
+def update_managed_job_status(job_id: Optional[int] = None):
     """Update spot job status if the controller job failed abnormally.
 
     Check the status of the controller job. If it is not running, it must have
@@ -113,7 +111,7 @@ def update_spot_job_status(job_id: Optional[int] = None):
         if controller_status is None or controller_status.is_terminal():
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
-            tasks = state.get_spot_jobs(job_id_)
+            tasks = state.get_managed_jobs(job_id_)
             for task in tasks:
                 task_name = task['job_name']
                 # Tear down the abnormal spot cluster to avoid resource leakage.
@@ -174,7 +172,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         cluster_name = generate_job_cluster_name(task.name,
                                                  job_id) if task.name else None
         logger.info(f'=== START: event callback for {status!r} ===')
-        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'spot_event',
+        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs_event',
                                 f'job-callback-{job_id}-{task_id}.log')
         result = run_bash_command_with_log(
             bash_command=event_callback,
@@ -238,7 +236,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
                         f'{job_status.value}. Skipped.')
             continue
 
-        update_spot_job_status(job_id)
+        update_managed_job_status(job_id)
 
         # Send the signal to the spot job controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
@@ -301,26 +299,26 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='')
         status_display.update(msg)
         prev_msg = msg
-        spot_job_status = state.get_status(job_id)
-        while spot_job_status is None:
+        managed_job_status = state.get_status(job_id)
+        while managed_job_status is None:
             time.sleep(1)
-            spot_job_status = state.get_status(job_id)
+            managed_job_status = state.get_status(job_id)
 
-        if spot_job_status.is_terminal():
+        if managed_job_status.is_terminal():
             job_msg = ''
-            if spot_job_status.is_failed():
+            if managed_job_status.is_failed():
                 job_msg = (
                     f'\nFailure reason: {state.get_failure_reason(job_id)}')
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
-                    f'{spot_job_status.value}. Logs will not be shown.'
+                    f'{managed_job_status.value}. Logs will not be shown.'
                     f'{colorama.Style.RESET_ALL}{job_msg}')
         backend = backends.CloudVmRayBackend()
-        task_id, spot_status = state.get_latest_task_id_status(job_id)
+        task_id, managed_job_status = state.get_latest_task_id_status(job_id)
 
-        # task_id and spot_status can be None if the controller process just
-        # started and the spot status has not set to PENDING yet.
-        while spot_status is None or not spot_status.is_terminal():
+        # task_id and managed_job_status can be None if the controller process
+        # just started and the spot status has not set to PENDING yet.
+        while managed_job_status is None or not managed_job_status.is_terminal():
             handle = None
             if task_id is not None:
                 task_name = state.get_task_name(job_id, task_id)
@@ -332,11 +330,11 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # the table before the spot state is updated by the controller. In
             # this case, we should skip the logging, and wait for the next
             # round of status check.
-            if handle is None or spot_status != state.ManagedJobStatus.RUNNING:
+            if handle is None or managed_job_status != state.ManagedJobStatus.RUNNING:
                 status_str = ''
-                if (spot_status is not None and
-                        spot_status != state.ManagedJobStatus.RUNNING):
-                    status_str = f' (status: {spot_status.value})'
+                if (managed_job_status is not None and
+                        managed_job_status != state.ManagedJobStatus.RUNNING):
+                    status_str = f' (status: {managed_job_status.value})'
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
@@ -345,9 +343,9 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     status_display.update(msg)
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                task_id, spot_status = (state.get_latest_task_id_status(job_id))
+                task_id, managed_job_status = (state.get_latest_task_id_status(job_id))
                 continue
-            assert spot_status is not None
+            assert managed_job_status is not None
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
             returncode = backend.tail_logs(handle,
@@ -376,7 +374,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         status_display.start()
                         original_task_id = task_id
                         while True:
-                            task_id, spot_status = (
+                            task_id, managed_job_status = (
                                 state.get_latest_task_id_status(job_id))
                             if original_task_id != task_id:
                                 break
@@ -394,9 +392,9 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'INFO: (Log streaming) Got return code {returncode}. '
                     f'Retrying in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             # Finish early if the spot status is already in terminal state.
-            spot_status = state.get_status(job_id)
-            assert spot_status is not None, job_id
-            if spot_status.is_terminal():
+            managed_job_status = state.get_status(job_id)
+            assert managed_job_status is not None, job_id
+            if managed_job_status.is_terminal():
                 break
             logger.info(f'{colorama.Fore.YELLOW}The job is preempted.'
                         f'{colorama.Style.RESET_ALL}')
@@ -410,23 +408,23 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # Wait a bit longer than the controller, so as to make sure the
             # spot state is updated.
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
-            spot_status = state.get_status(job_id)
+            managed_job_status = state.get_status(job_id)
 
     # The spot_status may not be in terminal status yet, since the controllerhas
     # not updated the spot state yet. We wait for a while, until the spot state
     # is updated.
     wait_seconds = 0
-    spot_status = state.get_status(job_id)
-    assert spot_status is not None, job_id
-    while (not spot_status.is_terminal() and follow and
-           wait_seconds < _FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS):
+    managed_job_status = state.get_status(job_id)
+    assert managed_job_status is not None, job_id
+    while (not managed_job_status.is_terminal() and follow and
+           wait_seconds < _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
         time.sleep(1)
         wait_seconds += 1
-        spot_status = state.get_status(job_id)
-        assert spot_status is not None, job_id
+        managed_job_status = state.get_status(job_id)
+        assert managed_job_status is not None, job_id
 
     logger.info(f'Logs finished for job {job_id} '
-                f'(status: {spot_status.value}).')
+                f'(status: {managed_job_status.value}).')
     return ''
 
 
@@ -444,8 +442,8 @@ def stream_logs_by_name(job_name: str, follow: bool = True) -> str:
     return ''
 
 
-def dump_spot_job_queue() -> str:
-    jobs = state.get_spot_jobs()
+def dump_managed_job_queue() -> str:
+    jobs = state.get_managed_jobs()
 
     for job in jobs:
         end_at = job['end_at']
@@ -744,25 +742,3 @@ class ManagedJobCodeGen:
         generated_code = '; '.join(code)
         return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}'
 
-
-def dump_job_table_cache(job_table: str):
-    """Dump job table cache to file."""
-    cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
-    with cache_file.open('w', encoding='utf-8') as f:
-        json.dump((time.time(), job_table), f)
-
-
-def load_job_table_cache() -> Optional[Tuple[float, str]]:
-    """Load job table cache from file.
-
-    Returns:
-        A tuple of (timestamp, job_table), where the timestamp is
-        the time when the job table is dumped and the job_table is
-        the dumped job table in string.
-        None if the cache file does not exist.
-    """
-    cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
-    if not cache_file.exists():
-        return None
-    with cache_file.open('r', encoding='utf-8') as f:
-        return json.load(f)

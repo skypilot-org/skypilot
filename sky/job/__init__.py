@@ -13,7 +13,7 @@ from sky.job.recovery_strategy import DEFAULT_RECOVERY_STRATEGY
 from sky.job.recovery_strategy import RECOVERY_STRATEGIES
 from sky.job.state import ManagedJobStatus
 from sky.job.utils import dump_job_table_cache
-from sky.job.utils import dump_spot_job_queue
+from sky.job.utils import dump_managed_job_queue
 from sky.job.utils import format_job_table
 from sky.job.utils import JOB_CONTROLLER_NAME
 from sky.job.utils import load_job_table_cache
@@ -42,6 +42,6 @@ __all__ = [
     'dump_job_table_cache',
     'load_job_table_cache',
     'format_job_table',
-    'dump_spot_job_queue',
+    'dump_managed_job_queue',
     'load_managed_job_queue',
 ]

@@ -37,7 +37,7 @@ def home():
         # Experimental: run on laptop (refresh is very slow).
         all_spot_jobs = sky.spot_queue(refresh=True, skip_finished=False)
     else:
-        job_table = job.dump_spot_job_queue()
+        job_table = job.dump_managed_job_queue()
         all_spot_jobs = job.load_managed_job_queue(job_table)
 
     timestamp = datetime.datetime.utcnow()

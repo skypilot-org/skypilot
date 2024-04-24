@@ -72,7 +72,7 @@ class SpotJobUpdateEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
-        utils.update_spot_job_status()
+        utils.update_managed_job_status()
 
 
 class ServiceUpdateEvent(SkyletEvent):

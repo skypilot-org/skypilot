@@ -564,7 +564,7 @@ def get_failure_reason(job_id: int) -> Optional[str]:
         return reason[0]
 
 
-def get_spot_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get spot clusters' status."""
     job_filter = '' if job_id is None else f'WHERE spot.spot_job_id={job_id}'
 
