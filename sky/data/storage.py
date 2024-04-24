@@ -110,15 +110,24 @@ class StoreType(enum.Enum):
     IBM = 'IBM'
 
     @classmethod
-    def from_cloud(cls, cloud: clouds.Cloud) -> 'StoreType':
-        if isinstance(cloud, clouds.AWS):
+    def from_cloud(cls, cloud: str) -> 'StoreType':
+        if cloud.lower() == str(clouds.AWS()).lower():
             return StoreType.S3
-        elif isinstance(cloud, clouds.GCP):
+        elif cloud.lower() == str(clouds.GCP()).lower():
             return StoreType.GCS
-        elif isinstance(cloud, clouds.Azure):
-            return StoreType.AZURE
-        elif isinstance(cloud, clouds.IBM):
+        elif cloud.lower() == str(clouds.IBM()).lower():
             return StoreType.IBM
+        elif cloud.lower() == cloudflare.NAME.lower():
+            return StoreType.R2
+        elif cloud.lower() == str(clouds.Azure()).lower():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Azure Blob Storage is not supported yet.')
+        elif cloud.lower() == str(clouds.Lambda()).lower():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Lambda Cloud does not provide cloud storage.')
+        elif cloud.lower() == str(clouds.SCP()).lower():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('SCP does not provide cloud storage.')
 
         raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
 
@@ -141,26 +150,6 @@ class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
 
-
-def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
-    if isinstance(cloud, clouds.AWS):
-        return StoreType.S3
-    elif isinstance(cloud, clouds.GCP):
-        return StoreType.GCS
-    elif isinstance(cloud, clouds.IBM):
-        return StoreType.IBM
-    elif isinstance(cloud, clouds.Azure):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Azure Blob Storage is not supported yet.')
-    elif isinstance(cloud, clouds.Lambda):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Lambda Cloud does not provide cloud storage.')
-    elif isinstance(cloud, clouds.SCP):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('SCP does not provide cloud storage.')
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown cloud type: {cloud}')
 
 
 def get_store_prefix(storetype: StoreType) -> str:
