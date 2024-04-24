@@ -4,6 +4,7 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 
+
 def _only_one_of_two_field_config(field1: str, field2: str):
     return {
         'oneOf': [{

@@ -3572,7 +3572,7 @@ def job_dashboard(port: Optional[int]):
             click.echo('Exiting.')
 
 
-# TODO(zhwu): Backward compatibility for the old `sky job launch` command.
+# TODO(zhwu): Backward compatibility for the old `sky spot launch` command.
 # It is now renamed to `sky job launch` and the old command is deprecated.
 @cli.group(cls=_NaturalOrderGroup)
 def spot():

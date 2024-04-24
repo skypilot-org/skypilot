@@ -2581,7 +2581,7 @@ def get_task_resources_str(task: 'task_lib.Task',
                 f'{k}:{v}' for k, v in accelerator_dict.items())
     else:
         resource_accelerators = []
-        min_cpus = 10000.
+        min_cpus = float('inf')
         spot_type: Set[str] = set()
         for resource in task.resources:
             task_cpu_demand = '1+'
