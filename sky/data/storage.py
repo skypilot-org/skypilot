@@ -151,7 +151,6 @@ class StorageMode(enum.Enum):
     COPY = 'COPY'
 
 
-
 def get_store_prefix(storetype: StoreType) -> str:
     if storetype == StoreType.S3:
         return 's3://'

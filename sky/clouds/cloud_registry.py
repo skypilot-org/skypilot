@@ -27,4 +27,5 @@ class _CloudRegistry(dict):
         self[name] = cloud_cls()
         return cloud_cls
 
+
 CLOUD_REGISTRY: _CloudRegistry = _CloudRegistry()
