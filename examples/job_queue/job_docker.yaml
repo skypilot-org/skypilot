@@ -8,6 +8,9 @@
 
 name: job_docker
 
+envs:
+  TIME_TO_SLEEP: 180
+
 resources:
   accelerators: T4:0.5
   image_id: docker:ubuntu:20.04
@@ -18,7 +21,7 @@ setup: |
 run: |
   timestamp=$(date +%s)
   conda env list
-  for i in {1..180}; do
+  for i in $(seq 1 $TIME_TO_SLEEP); do
     echo "$timestamp $i"
     sleep 1
   done

@@ -6,7 +6,7 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 import colorama
 
@@ -21,8 +21,10 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.job import utils
+from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
 from sky.skylet import constants
+from sky.job import constants as job_constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -48,6 +50,7 @@ LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 @dataclasses.dataclass
 class _ControllerSpec:
     """Spec for skypilot controllers."""
+    controller_type: str
     name: str
     # Use a list of strings to support fallback to old names.
     candidate_cluster_names: List[str]
@@ -58,6 +61,7 @@ class _ControllerSpec:
     _check_cluster_name_hint: str
     default_hint_if_non_existent: str
     connection_error_hint: str
+    default_resources_config: Dict[str, Any]
 
     @property
     def cluster_name(self) -> str:
@@ -84,6 +88,7 @@ class Controllers(enum.Enum):
     # NOTE(dev): Keep this align with
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
     JOB_CONTROLLER = _ControllerSpec(
+        controller_type='jobs',
         name='managed job controller',
         candidate_cluster_names=[
             utils.JOB_CONTROLLER_NAME, utils.LEGACY_JOB_CONTROLLER_NAME
@@ -112,8 +117,10 @@ class Controllers(enum.Enum):
                                   'managed job controller.'),
         default_hint_if_non_existent='No in-progress managed jobs.',
         connection_error_hint=(
-            'Failed to connect to job controller, please try again later.'))
+            'Failed to connect to job controller, please try again later.'),
+        default_resources_config=job_constants.CONTROLLER_RESOURCES)
     SKY_SERVE_CONTROLLER = _ControllerSpec(
+        controller_type='serve',
         name='serve controller',
         candidate_cluster_names=[serve_utils.SKY_SERVE_CONTROLLER_NAME],
         in_progress_hint=(
@@ -140,7 +147,8 @@ class Controllers(enum.Enum):
                                   'sky serve controller.'),
         default_hint_if_non_existent='No live services.',
         connection_error_hint=(
-            'Failed to connect to serve controller, please try again later.'))
+            'Failed to connect to serve controller, please try again later.'),
+        default_resources_config=serve_constants.CONTROLLER_RESOURCES)
 
     @classmethod
     def from_name(cls, name: Optional[str]) -> Optional['Controllers']:
@@ -152,6 +160,19 @@ class Controllers(enum.Enum):
         """
         for controller in cls:
             if name in controller.value.candidate_cluster_names:
+                return controller
+        return None
+
+    @classmethod
+    def from_type(cls, controller_type: str) -> Optional['Controllers']:
+        """Get the controller by controller type.
+
+        Returns:
+            The controller if the controller type is valid.
+            Otherwise, returns None.
+        """
+        for controller in cls:
+            if controller.value.controller_type == controller_type:
                 return controller
         return None
 
@@ -288,18 +309,21 @@ def shared_controller_vars_to_fill(
 
 def get_controller_resources(
     controller_type: str,
-    controller_resources_config: Dict[str, Any],
-) -> 'resources.Resources':
+    task_resources: Iterable['resources.Resources'],
+) -> Set['resources.Resources']:
     """Read the skypilot config and setup the controller resources.
 
     Returns:
-        A tuple of (vars_to_fill, controller_resources_config). `var_to_fill`
-        is a dict of variables that will be filled in the controller template.
-        The controller_resources_config is the resources config that will be
-        used to launch the controller.
+        A set of controller resources that will be used to launch the
+        controller. All fields are the same except for the cloud. If no
+        controller exists and the controller resources has no cloud
+        specified, the controller will be launched on one of the clouds
+        of the task resources for better connectivity.
     """
+    controller = Controllers.from_type(controller_type)
+    assert controller is not None, controller_type
     controller_resources_config_copied: Dict[str, Any] = copy.copy(
-        controller_resources_config)
+        controller.value.default_resources_config)
     if skypilot_config.loaded():
         # Override the controller resources with the ones specified in the
         # config.
@@ -325,6 +349,9 @@ def get_controller_resources(
                     controller_type=controller_type,
                     err=common_utils.format_exception(e,
                                                       use_bracket=True))) from e
+    # TODO(tian): Support multiple resources for the controller. One blocker
+    # here is the semantic if controller resources use `ordered` and we want
+    # to override it with multiple cloud from task resources.
     if len(controller_resources) != 1:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -333,7 +360,55 @@ def get_controller_resources(
                     err=f'Expected exactly one resource, got '
                     f'{len(controller_resources)} resources: '
                     f'{controller_resources}'))
-    return list(controller_resources)[0]
+    controller_resources_to_use: resources.Resources = list(
+        controller_resources)[0]
+
+    controller_record = global_user_state.get_cluster_from_name(
+        controller.value.cluster_name)
+    if controller_record is not None:
+        handle = controller_record.get('handle', None)
+        if handle is not None:
+            controller_resources_to_use = handle.launched_resources
+
+    if controller_resources_to_use.cloud is not None:
+        return {controller_resources_to_use}
+
+    # If the controller and replicas are from the same cloud, it should
+    # provide better connectivity. We will let the controller choose from
+    # the clouds of the resources if the controller does not exist.
+    # TODO(tian): Consider respecting the regions/zones specified for the
+    # resources as well.
+    requested_clouds: Set['clouds.Cloud'] = set()
+    for resource in task_resources:
+        # cloud is an object and will not be able to be distinguished by set.
+        # Here we manually check if the cloud is in the set.
+        if resource.cloud is not None:
+            if not clouds.cloud_in_iterable(resource.cloud, requested_clouds):
+                try:
+                    resource.cloud.check_features_are_supported(
+                        resources.Resources(),
+                        {clouds.CloudImplementationFeatures.HOST_CONTROLLERS})
+                except exceptions.NotSupportedError:
+                    # Skip the cloud if it does not support hosting controllers.
+                    continue
+                requested_clouds.add(resource.cloud)
+        else:
+            # if one of the resource.cloud is None, this could represent user
+            # does not know which cloud is best for the specified resources.
+            # For example:
+            #   resources:
+            #     - accelerators: L4     # Both available on AWS and GCP
+            #     - cloud: runpod
+            #       accelerators: A40
+            # In this case, we allow the controller to be launched on any cloud.
+            requested_clouds.clear()
+            break
+    if not requested_clouds:
+        return {controller_resources_to_use}
+    return {
+        controller_resources_to_use.copy(cloud=controller_cloud)
+        for controller_cloud in requested_clouds
+    }
 
 
 def _setup_proxy_command_on_controller(

@@ -4,99 +4,6 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 
-
-def _resources_properties_without_accelerators():
-    # To avoid circular imports, only import when needed.
-    # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
-    return {
-        'cloud': {
-            'type': 'string',
-            'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
-        },
-        'region': {
-            'type': 'string',
-        },
-        'zone': {
-            'type': 'string',
-        },
-        'cpus': {
-            'anyOf': [{
-                'type': 'string',
-            }, {
-                'type': 'number',
-            }],
-        },
-        'memory': {
-            'anyOf': [{
-                'type': 'string',
-            }, {
-                'type': 'number',
-            }],
-        },
-        'instance_type': {
-            'type': 'string',
-        },
-        'use_spot': {
-            'type': 'boolean',
-        },
-        'job_recovery': {
-            'type': 'string',
-        },
-        'spot_recovery': {
-            'type': 'string',
-            # Failed to import recovery_strategy.RECOVERY_STRATEGIES due to
-            # circular import.
-        },
-        'disk_size': {
-            'type': 'integer',
-        },
-        'disk_tier': {
-            'type': 'string',
-        },
-        'ports': {
-            'anyOf': [{
-                'type': 'string',
-            }, {
-                'type': 'integer',
-            }, {
-                'type': 'array',
-                'items': {
-                    'anyOf': [{
-                        'type': 'string',
-                    }, {
-                        'type': 'integer',
-                    }]
-                }
-            }],
-        },
-        'accelerator_args': {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'runtime_version': {
-                    'type': 'string',
-                },
-                'tpu_name': {
-                    'type': 'string',
-                },
-                'tpu_vm': {
-                    'type': 'boolean',
-                }
-            }
-        },
-        'image_id': {
-            'anyOf': [{
-                'type': 'string',
-            }, {
-                'type': 'object',
-                'required': [],
-            }]
-        }
-    }
-
-
 def _only_one_of_two_field_config(field1: str, field2: str):
     return {
         'oneOf': [{
@@ -121,7 +28,7 @@ def _only_one_of_two_field_config(field1: str, field2: str):
     }
 
 
-def get_single_resources_schema():
+def _get_single_resources_schema():
 
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -141,20 +48,101 @@ def get_single_resources_schema():
                     }
                 }]
             },
-            **_resources_properties_without_accelerators()
+            'instance_type': {
+                'type': 'string',
+            },
+            'use_spot': {
+                'type': 'boolean',
+            },
+            'spot_recovery': {
+                'type': 'string',
+            },
+            'disk_size': {
+                'type': 'integer',
+            },
+            'disk_tier': {
+                'type': 'string',
+            },
+            'ports': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'integer',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'anyOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'integer',
+                        }]
+                    }
+                }],
+            },
+            'accelerator_args': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'runtime_version': {
+                        'type': 'string',
+                    },
+                    'tpu_name': {
+                        'type': 'string',
+                    },
+                    'tpu_vm': {
+                        'type': 'boolean',
+                    }
+                }
+            },
+            'image_id': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                }]
+            },
+            # The following fields are for internal use only.
+            '_docker_login_config': {
+                'type': 'object',
+                'required': ['username', 'password', 'server'],
+                'additionalProperties': False,
+                'properties': {
+                    'username': {
+                        'type': 'string',
+                    },
+                    'password': {
+                        'type': 'string',
+                    },
+                    'server': {
+                        'type': 'string',
+                    }
+                }
+            },
+            '_is_image_managed': {
+                'type': 'boolean',
+            },
+            '_requires_fuse': {
+                'type': 'boolean',
+            },
         }
     }
 
 
 def get_resources_schema():
-    # To avoid circular imports, only import when needed.
-    # pylint: disable=import-outside-toplevel
+    """Resource schema in task config."""
+    single_resources_schema = _get_single_resources_schema()['properties']
+    single_resources_schema.pop('accelerators')
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
+            **single_resources_schema,
+            # We redefine the 'accelerators' field to allow one line list or
+            # a set of accelerators.
             'accelerators': {
                 # {'V100:1', 'A100:1'} will be
                 # read as a string and converted to dict.
@@ -177,12 +165,11 @@ def get_resources_schema():
                     }
                 }]
             },
-            **_resources_properties_without_accelerators(),
             'any_of': {
                 'type': 'array',
                 'items': {
                     k: v
-                    for k, v in get_single_resources_schema().items()
+                    for k, v in _get_single_resources_schema().items()
                     # Validation may fail if $schema is included.
                     if k != '$schema'
                 },
@@ -191,7 +178,7 @@ def get_resources_schema():
                 'type': 'array',
                 'items': {
                     k: v
-                    for k, v in get_single_resources_schema().items()
+                    for k, v in _get_single_resources_schema().items()
                     # Validation may fail if $schema is included.
                     if k != '$schema'
                 },
