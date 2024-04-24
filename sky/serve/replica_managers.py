@@ -473,6 +473,7 @@ class ReplicaInfo:
         self,
         readiness_path: str,
         post_data: Optional[Dict[str, Any]],
+        timeout: int,
     ) -> Tuple['ReplicaInfo', bool, float]:
         """Probe the readiness of the replica.
 
@@ -490,15 +491,12 @@ class ReplicaInfo:
             readiness_path = (f'http://{self.url}{readiness_path}')
             if post_data is not None:
                 msg += 'POST'
-                response = requests.post(
-                    readiness_path,
-                    json=post_data,
-                    timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
+                response = requests.post(readiness_path,
+                                         json=post_data,
+                                         timeout=timeout)
             else:
                 msg += 'GET'
-                response = requests.get(
-                    readiness_path,
-                    timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
+                response = requests.get(readiness_path, timeout=timeout)
             msg += (f' request to {replica_identity} returned status '
                     f'code {response.status_code}')
             if response.status_code == 200:
@@ -1012,8 +1010,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                 probe_futures.append(
                     pool.apply_async(
                         info.probe,
-                        (self._get_readiness_path(
-                            info.version), self._get_post_data(info.version)),
+                        (
+                            self._get_readiness_path(info.version),
+                            self._get_post_data(info.version),
+                            self._get_readiness_timeout_seconds(info.version),
+                        ),
                     ),)
             logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
 
@@ -1196,3 +1197,6 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def _get_initial_delay_seconds(self, version: int) -> int:
         return self._get_version_spec(version).initial_delay_seconds
+
+    def _get_readiness_timeout_seconds(self, version: int) -> int:
+        return self._get_version_spec(version).readiness_timeout_seconds
