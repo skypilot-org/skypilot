@@ -21,7 +21,7 @@ from sky.utils import controller_utils
 from sky.utils import db_utils
 
 
-def test_spot_nonexist_strategy():
+def test_job_nonexist_strategy():
     """Test the nonexist recovery strategy."""
     task_yaml = textwrap.dedent("""\
         resources:

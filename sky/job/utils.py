@@ -172,7 +172,8 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         cluster_name = generate_job_cluster_name(task.name,
                                                  job_id) if task.name else None
         logger.info(f'=== START: event callback for {status!r} ===')
-        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs_event',
+        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                'managed_jobs_event',
                                 f'job-callback-{job_id}-{task_id}.log')
         result = run_bash_command_with_log(
             bash_command=event_callback,
@@ -318,7 +319,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
 
         # task_id and managed_job_status can be None if the controller process
         # just started and the spot status has not set to PENDING yet.
-        while managed_job_status is None or not managed_job_status.is_terminal():
+        while managed_job_status is None or not managed_job_status.is_terminal(
+        ):
             handle = None
             if task_id is not None:
                 task_name = state.get_task_name(job_id, task_id)
@@ -343,7 +345,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     status_display.update(msg)
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                task_id, managed_job_status = (state.get_latest_task_id_status(job_id))
+                task_id, managed_job_status = (
+                    state.get_latest_task_id_status(job_id))
                 continue
             assert managed_job_status is not None
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
@@ -410,9 +413,9 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
             managed_job_status = state.get_status(job_id)
 
-    # The spot_status may not be in terminal status yet, since the controllerhas
-    # not updated the spot state yet. We wait for a while, until the spot state
-    # is updated.
+    # The managed_job_status may not be in terminal status yet, since the
+    # controller has not updated the spot state yet. We wait for a while, until
+    # the spot state is updated.
     wait_seconds = 0
     managed_job_status = state.get_status(job_id)
     assert managed_job_status is not None, job_id
@@ -550,7 +553,7 @@ def format_job_table(
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
-            spot_status = state.ManagedJobStatus.SUCCEEDED
+            managed_job_status = state.ManagedJobStatus.SUCCEEDED
             failure_reason = None
             current_task_id = len(job_tasks) - 1
             for task in job_tasks:
@@ -565,13 +568,13 @@ def format_job_table(
                 else:
                     end_at = None
                 recovery_cnt += task['recovery_count']
-                if spot_status == state.ManagedJobStatus.SUCCEEDED:
+                if managed_job_status == state.ManagedJobStatus.SUCCEEDED:
                     # Use the first non-succeeded status.
                     # TODO(zhwu): we should not blindly use the first non-
                     # succeeded as the status could be changed to SUBMITTED
                     # when going from one task to the next one, which can be
                     # confusing.
-                    spot_status = task['status']
+                    managed_job_status = task['status']
                     current_task_id = task['task_id']
 
                 if (failure_reason is None and
@@ -586,8 +589,8 @@ def format_job_table(
                                                               end_at,
                                                               absolute=True)
 
-            status_str = spot_status.colored_str()
-            if (spot_status < state.ManagedJobStatus.RUNNING and
+            status_str = managed_job_status.colored_str()
+            if (managed_job_status < state.ManagedJobStatus.RUNNING and
                     current_task_id > 0):
                 status_str += f' (task: {current_task_id})'
 
@@ -613,7 +616,7 @@ def format_job_table(
 
         for task in job_tasks:
             # The job['job_duration'] is already calculated in
-            # dump_spot_job_queue().
+            # dump_managed_job_queue().
             job_duration = log_utils.readable_time_duration(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
@@ -676,7 +679,7 @@ class ManagedJobCodeGen:
     @classmethod
     def get_job_table(cls) -> str:
         code = [
-            'job_table = utils.dump_spot_job_queue()',
+            'job_table = utils.dump_managed_job_queue()',
             'print(job_table, flush=True)',
         ]
         return cls._build(code)
@@ -719,14 +722,14 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending(cls, job_id: int, spot_dag: 'dag_lib.Dag') -> str:
-        dag_name = spot_dag.name
+    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag') -> str:
+        dag_name = managed_job_dag.name
         # Add the spot job to spot queue table.
         code = [
             f'state.set_job_name('
             f'{job_id}, {dag_name!r})',
         ]
-        for task_id, task in enumerate(spot_dag.tasks):
+        for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
             code += [
@@ -741,4 +744,3 @@ class ManagedJobCodeGen:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
         return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}'
-

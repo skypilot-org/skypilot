@@ -82,6 +82,8 @@ def _get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
+            # Deprecated: use 'job_recovery' instead. This is for backward
+            # compatibility, and can be removed in 0.7.0.
             'spot_recovery': {
                 'type': 'string',
             },

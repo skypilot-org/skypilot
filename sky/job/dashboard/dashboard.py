@@ -3,7 +3,7 @@
 TODO(zongheng): This is a basic version. In the future we can beef up the web
 frameworks used (e.g.,
 https://github.com/ray-project/ray/tree/master/dashboard/client/src) and/or get
-rid of the SSH port-forwarding business (see cli.py's spot_dashboard()
+rid of the SSH port-forwarding business (see cli.py's job_dashboard()
 comment).
 """
 import datetime
@@ -12,14 +12,13 @@ import pathlib
 import flask
 import yaml
 
-import sky
 from sky import job
 from sky.utils import common_utils
 
 app = flask.Flask(__name__)
 
 
-def _is_running_on_spot_controller() -> bool:
+def _is_running_on_job_controller() -> bool:
     """Am I running on job controller?
 
     Loads ~/.sky/sky_ray.yml and check cluster_name.
@@ -33,15 +32,17 @@ def _is_running_on_spot_controller() -> bool:
 
 @app.route('/')
 def home():
-    if not _is_running_on_spot_controller():
+    if not _is_running_on_job_controller():
         # Experimental: run on laptop (refresh is very slow).
-        all_spot_jobs = sky.spot_queue(refresh=True, skip_finished=False)
+        all_managed_jobs = job.queue(refresh=True, skip_finished=False)
     else:
         job_table = job.dump_managed_job_queue()
-        all_spot_jobs = job.load_managed_job_queue(job_table)
+        all_managed_jobs = job.load_managed_job_queue(job_table)
 
-    timestamp = datetime.datetime.utcnow()
-    rows = job.format_job_table(all_spot_jobs, show_all=True, return_rows=True)
+    timestamp = datetime.datetime.now(datetime.timezone.utc)
+    rows = job.format_job_table(all_managed_jobs,
+                                show_all=True,
+                                return_rows=True)
 
     # FIXME(zongheng): make the job table/queue funcs return structured info so
     # that we don't have to do things like row[-5] below.
