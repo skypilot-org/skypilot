@@ -85,6 +85,9 @@ def _get_single_resources_schema():
             'spot_recovery': {
                 'type': 'string',
             },
+            'job_recovery': {
+                'type': 'string',
+            },
             'disk_size': {
                 'type': 'integer',
             },
