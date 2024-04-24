@@ -27,22 +27,4 @@ class _CloudRegistry(dict):
         self[name] = cloud_cls()
         return cloud_cls
 
-class _StorageCloudRegistry(dict):
-    """Registry of storage clouds."""
-
-    def from_str(self, name: Optional[str]) -> Optional['cloud.Cloud']:
-        if name is None:
-            return None
-        if name.lower() not in self:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Cloud {name!r} is not a valid cloud among '
-                                 f'{list(self.keys())}')
-        return self.get(name.lower())
-
-    def register(self, cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
-        name = cloud_cls.__name__.lower()
-        assert name not in self, f'{name} already registered'
-        self[name] = cloud_cls()
-        return cloud_cls
-
 CLOUD_REGISTRY: _CloudRegistry = _CloudRegistry()
