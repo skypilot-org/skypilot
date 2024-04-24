@@ -30,13 +30,40 @@ def _only_one_of_two_field_config(field1: str, field2: str):
 
 
 def _get_single_resources_schema():
-
+    """Schema for a single resource in a resources list."""
+    # To avoid circular imports, only import when needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.clouds import service_catalog
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
+            'cloud': {
+                'type': 'string',
+                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
+            },
+            'region': {
+                'type': 'string',
+            },
+            'zone': {
+                'type': 'string',
+            },
+            'cpus': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
+            'memory': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
             'accelerators': {
                 'anyOf': [{
                     'type': 'string',
