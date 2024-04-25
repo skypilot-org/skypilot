@@ -368,7 +368,6 @@ class Task:
             new_envs.update(env_overrides)
             config['envs'] = new_envs
 
-
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
         if config.get('file_mounts') is not None:
