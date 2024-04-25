@@ -725,8 +725,7 @@ def get_cluster_info(
             'num-cpus': cpu_request,
         },
         provider_name='kubernetes',
-        provider_config=provider_config
-        )
+        provider_config=provider_config)
 
 
 def query_instances(
