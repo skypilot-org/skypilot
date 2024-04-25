@@ -40,7 +40,7 @@ def _get_df() -> 'pd.DataFrame':
 
         df = common.read_catalog('oci/vms.csv')
         try:
-            oci_adaptor.get_oci()
+            oci_adaptor.oci.load_module()
         except ImportError:
             _df = df
             return _df
@@ -55,8 +55,8 @@ def _get_df() -> 'pd.DataFrame':
 
             subscribed_regions = [r.region_name for r in subscriptions]
 
-        except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
-                oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
+        except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+                oci_adaptor.oci.exceptions.InvalidConfig) as e:
             # This should only happen in testing where oci config is
             # missing, because it means the 'sky check' will fail if
             # enter here (meaning OCI disabled).

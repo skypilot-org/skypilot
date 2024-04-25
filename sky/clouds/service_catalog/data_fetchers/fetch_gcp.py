@@ -17,13 +17,13 @@ import google.auth
 from googleapiclient import discovery
 import numpy as np
 
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 # Useful links:
 # GCP SKUs: https://cloud.google.com/skus

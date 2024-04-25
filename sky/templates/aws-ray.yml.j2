@@ -36,6 +36,7 @@ provider:
   security_group:
     # AWS config file must include security group name
     GroupName: {{security_group}}
+    ManagedBySkyPilot: {{security_group_managed_by_skypilot}}
 {% if vpc_name is not none %}
   # NOTE: This is a new field added by SkyPilot to force use a specific VPC.
   vpc_name: {{vpc_name}}

@@ -532,7 +532,7 @@ class SSHCommandRunner(CommandRunner):
 
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         while max_retry >= 0:
-            returncode, _, stderr = log_lib.run_with_log(
+            returncode, stdout, stderr = log_lib.run_with_log(
                 command,
                 log_path=log_path,
                 stream_logs=stream_logs,
@@ -549,5 +549,5 @@ class SSHCommandRunner(CommandRunner):
         subprocess_utils.handle_returncode(returncode,
                                            command,
                                            error_msg,
-                                           stderr=stderr,
+                                           stderr=stdout + stderr,
                                            stream_logs=stream_logs)

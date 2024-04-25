@@ -4,7 +4,7 @@ import os
 import typing
 from typing import Dict, List, Optional, Tuple
 
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.clouds.service_catalog import common
 
 if typing.TYPE_CHECKING:
@@ -12,7 +12,7 @@ if typing.TYPE_CHECKING:
 
     from sky.clouds import cloud
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 _DEFAULT_NUM_VCPUS = 2
 _DEFAULT_MEMORY_CPU_RATIO = 4

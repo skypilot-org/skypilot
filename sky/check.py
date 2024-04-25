@@ -130,7 +130,7 @@ def get_cloud_credential_file_mounts(
     file_mounts = {}
     for cloud in enabled_clouds:
         if (excluded_clouds is not None and
-                clouds.cloud_in_list(cloud, excluded_clouds)):
+                clouds.cloud_in_iterable(cloud, excluded_clouds)):
             continue
         cloud_file_mounts = cloud.get_credential_file_mounts()
         file_mounts.update(cloud_file_mounts)

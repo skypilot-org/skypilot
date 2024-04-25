@@ -11,7 +11,7 @@ import filelock
 import requests
 
 from sky import sky_logging
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.clouds import cloud_registry
 from sky.clouds.service_catalog import constants
@@ -21,7 +21,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -118,11 +118,15 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
 
 
 class LazyDataFrame:
-    """A lazy data frame that reads the catalog on demand."""
+    """A lazy data frame that reads the catalog on demand.
+
+    We don't need to load the catalog for every SkyPilot call, and this class
+    allows us to load the catalog only when needed.
+    """
 
     def __init__(self, filename: str):
         self._filename = filename
-        self._df = None
+        self._df: Optional['pd.DataFrame'] = None
 
     def _load_df(self) -> 'pd.DataFrame':
         if self._df is None:
@@ -346,6 +350,10 @@ def get_hourly_cost_impl(
         # all the zones in the same region.
         assert region is None or len(set(df[price_str])) == 1, df
 
+    if pd.isna(df[price_str]).all():
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No {price_str} found for instance type '
+                             f'{instance_type!r}.')
     cheapest_idx = df[price_str].idxmin()
     cheapest = df.loc[cheapest_idx]
     return cheapest[price_str]
@@ -519,6 +527,8 @@ def get_instance_type_for_accelerator_impl(
 
     # Current strategy: choose the cheapest instance
     price_str = 'SpotPrice' if use_spot else 'Price'
+    if pd.isna(result[price_str]).all():
+        return ([], [])
     result = result.sort_values(price_str, ascending=True)
     instance_types = list(result['InstanceType'].drop_duplicates())
     return (instance_types, [])
