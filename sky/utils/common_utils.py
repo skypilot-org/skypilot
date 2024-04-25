@@ -555,9 +555,9 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
     try:
         validator.SchemaValidator(schema).validate(obj)
     except jsonschema.ValidationError as e:
-        if e.validator == 'additionalProperties':
+        if e.validator in ['patternProperties', 'additionalProperties']:
             if tuple(e.schema_path) == ('properties', 'envs',
-                                        'additionalProperties'):
+                                        'patternProperties'):
                 # Hack. Here the error is Task.envs having some invalid keys. So
                 # we should not print "unsupported field".
                 #
@@ -579,8 +579,12 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                         else:
                             err_msg += f'\nFound unsupported field {field!r}.'
         else:
+            message = e.message
+            # Object in jsonschema is represented as dict in Python. Replace
+            # 'object' with 'dict' for better readability.
+            message = message.replace('type \'object\'', 'type \'dict\'')
             # Example e.json_path value: '$.resources'
-            err_msg = (err_msg_prefix + e.message +
+            err_msg = (err_msg_prefix + message +
                        f'. Check problematic field(s): {e.json_path}')
 
     if err_msg:
