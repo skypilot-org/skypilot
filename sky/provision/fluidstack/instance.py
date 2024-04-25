@@ -273,7 +273,7 @@ def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
-    del region, provider_config  # unused
+    del region  # unused
     running_instances = _filter_instances(cluster_name_on_cloud, ['running'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
 
@@ -296,7 +296,9 @@ def get_cluster_info(
 
     return common.ClusterInfo(instances=instances,
                               head_instance_id=head_instance_id,
-                              custom_ray_options={'use_external_ip': True})
+                              custom_ray_options={'use_external_ip': True},
+                              provider_name='fluidstack',
+                              provider_config=provider_config)
 
 
 def query_instances(
