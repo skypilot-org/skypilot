@@ -150,7 +150,6 @@ class StoreType(enum.Enum):
             return 's3://'
         elif self == StoreType.GCS:
             return 'gs://'
-        # R2 storages use 's3://' as a prefix for various aws cli commands
         elif self == StoreType.R2:
             return 'r2://'
         elif self == StoreType.IBM:
