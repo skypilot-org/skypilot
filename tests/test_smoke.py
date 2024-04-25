@@ -278,14 +278,14 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
-            f'log_path=$(sky logs {name} 1 --sync-down | grep "Job 1 logs:" | sed -E "s/^.*Job 1 logs: (.*)\\x1b\\[0m/\\1/g") && echo $log_path && test -f $log_path/run.log',
+            f'log_path=$(sky logs {name} 1 --sync-down | grep "Job 1 logs:" | sed -E "s/^.*Job 1 logs: (.*)\\x1b\\[0m/\\1/g") && echo "$log_path" && test -f $log_path/run.log',
             # Ensure the raylet process has the correct file descriptor limit.
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             # Check the cluster info
-            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cluster_name | grep {name}\'',
+            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cluster_name | grep {name}\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
-            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i {generic_cloud}\'',
+            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -1831,7 +1831,7 @@ def test_azure_start_stop():
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             'sleep 200',
-            f's=$(sky status -r {name}) && echo $s && echo $s | grep "INIT\|STOPPED"'
+            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep "INIT\|STOPPED"'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
@@ -2301,7 +2301,7 @@ def test_spot_recovery_aws(aws_config_region):
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
@@ -2337,7 +2337,7 @@ def test_spot_recovery_gcp():
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
