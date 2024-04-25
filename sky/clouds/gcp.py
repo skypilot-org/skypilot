@@ -1078,10 +1078,16 @@ class GCP(clouds.Cloud):
         key_valid = bool(key_regex.match(label_key))
         value_valid = bool(value_regex.match(label_value))
         error_msg = None
+        condition_msg = ('can include lowercase alphanumeric characters, '
+                         'dashes, and underscores, with a total length of 63 '
+                         'characters or less.')
         if not key_valid:
-            error_msg = f'Invalid label key {label_key} for GCP. Key must start with a lowercase letter and can include lowercase alphanumeric characters, dashes, and underscores, with a total length of 63 characters or less.'
+            error_msg = (f'Invalid label key {label_key} for GCP. '
+                         f'Key must start with a lowercase letter '
+                         f'and {condition_msg}')
         if not value_valid:
-            error_msg = f'Invalid label value {label_value} for GCP. Value can include lowercase alphanumeric characters, dashes, and underscores, with a total length of 63 characters or less.'
+            error_msg = (f'Invalid label value {label_value} for GCP. Value '
+                         f'{condition_msg}')
         if not key_valid or not value_valid:
             return False, error_msg
         return True, None

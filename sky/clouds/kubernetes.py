@@ -404,17 +404,22 @@ class Kubernetes(clouds.Cloud):
     def is_label_valid(cls, label_key: str,
                        label_value: str) -> Tuple[bool, Optional[str]]:
         key_regex = re.compile(
-            r'^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?\/)?[a-z0-9]([-a-z0-9_.]{0,61}[a-z0-9])?$'
-        )
+            r'^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?\/)?[a-z0-9]([-a-z0-9_.]{0,61}'
+            r'[a-z0-9])?$')
         value_regex = re.compile(
             r'^[a-zA-Z0-9]([-a-zA-Z0-9_.]{0,61}[a-zA-Z0-9])?$')
         key_valid = bool(key_regex.match(label_key))
         value_valid = bool(value_regex.match(label_value))
         error_msg = None
+        condition_msg = ('Value must consist of alphanumeric characters or '
+                         '\'-\', \'_\', \'.\', and must be no more than 63 '
+                         'characters in length.')
         if not key_valid:
-            error_msg = f'Invalid label key {label_key} for Kubernetes. Key must consist of alphanumeric characters or \'-\', \'_\', \'.\', with a total length of 63 characters or less.'
+            error_msg = (f'Invalid label key {label_key} for Kubernetes. '
+                         f'{condition_msg}')
         if not value_valid:
-            error_msg = f'Invalid label value {label_value} for Kubernetes. Value must consist of alphanumeric characters or \'-\', \'_\', \'.\', and must be no more than 63 characters in length.'
+            error_msg = (f'Invalid label value {label_value} for Kubernetes. '
+                         f'{condition_msg}')
         if not key_valid or not value_valid:
             return False, error_msg
         return True, None

@@ -972,9 +972,12 @@ class AWS(clouds.Cloud):
         value_valid = bool(value_regex.match(label_value))
         error_msg = None
         if not key_valid:
-            error_msg = f'Invalid tag key {label_key} for AWS. Key must start with any character except \'aws:\' and must be 128 characters or fewer in length.'
+            error_msg = (f'Invalid tag key {label_key} for AWS. '
+                         'Key must start with any character except \'aws:\' '
+                         'and must be 128 characters or fewer in length.')
         if not value_valid:
-            error_msg = f'Invalid tag value {label_value} for AWS. Value must be 256 characters or fewer in length.'
+            error_msg = (f'Invalid tag value {label_value} for AWS. '
+                         'Value must be 256 characters or fewer in length.')
         if not key_valid or not value_valid:
             return False, error_msg
         return True, None
