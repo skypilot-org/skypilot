@@ -1,4 +1,5 @@
 """Resources: compute requirements of Tasks."""
+import dataclasses
 import functools
 import textwrap
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -1374,6 +1375,9 @@ class Resources:
             config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
         add_if_not_none('labels', self.labels)
+        if self._docker_login_config is not None:
+            config['_docker_login_config'] = dataclasses.asdict(
+                self._docker_login_config)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         if self._requires_fuse is not None:

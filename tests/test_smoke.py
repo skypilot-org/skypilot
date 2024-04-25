@@ -1012,8 +1012,9 @@ def test_kubernetes_storage_mounts():
     [
         "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
         "docker:ubuntu:18.04",
-        # Test image with python 3.11 installed by default.
-        "docker:continuumio/miniconda3",
+        # Test latest image with python 3.11 installed by default.
+        # Does not work for python 3.12 due to ray's requirement for 3.11.
+        'docker:continuumio/miniconda3:24.1.2-0',
     ])
 def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Tests bucket mounting on docker container
@@ -1193,18 +1194,21 @@ def test_job_queue(generic_cloud: str):
     [
         "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
         "docker:ubuntu:18.04",
-        # Test image with python 3.11 installed by default.
-        "docker:continuumio/miniconda3",
+        # Test latest image with python 3.11 installed by default.
+        # Does not work for python 3.12 due to ray's requirement for 3.11.
+        'docker:continuumio/miniconda3:24.1.2-0',
     ])
 def test_job_queue_with_docker(generic_cloud: str, image_id: str):
     name = _get_cluster_name() + image_id[len('docker:'):][:4]
+    total_timeout_minutes = 40 if generic_cloud == 'azure' else 15
+    time_to_sleep = 300 if generic_cloud == 'azure' else 180
     test = Test(
         'job_queue_with_docker',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} examples/job_queue/cluster_docker.yaml',
-            f'sky exec {name} -n {name}-1 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-2 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-3 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-1 -d --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-2 -d --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-3 -d --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
@@ -1212,6 +1216,9 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
             'sleep 5',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 3',
+            # Make sure the GPU is still visible to the container.
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
+            f'sky logs {name} 4 --status',
             f'sky stop -y {name}',
             # Make sure the job status preserve after stop and start the
             # cluster. This is also a test for the docker container to be
@@ -1222,10 +1229,14 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep CANCELLED',
             f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
+            # Make sure it is still visible after an stop & start cycle.
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
+            f'sky logs {name} 7 --status'
         ],
         f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
@@ -2897,8 +2908,9 @@ def test_aws_custom_image():
     [
         "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
         "docker:ubuntu:18.04",
-        # Test image with python 3.11 installed by default.
-        "docker:continuumio/miniconda3",
+        # Test latest image with python 3.11 installed by default.
+        # Does not work for python 3.12 due to ray's requirement for 3.11.
+        'docker:continuumio/miniconda3:24.1.2-0',
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
