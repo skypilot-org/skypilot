@@ -7,6 +7,7 @@ import subprocess
 import threading
 
 from sky.adaptors import common
+from sky.utils.subprocess_utils import run
 
 azure = common.LazyImport(
     'azure',
@@ -16,22 +17,15 @@ _LAZY_MODULES = (azure,)
 
 _session_creation_lock = threading.RLock()
 
-
-def _run_output(cmd):
-    proc = subprocess.run(cmd,
-                          shell=True,
-                          check=True,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.PIPE)
-    return proc.stdout.decode('ascii')
-
-
 # There is no programmatic way to get current account details anymore.
 # https://github.com/Azure/azure-sdk-for-python/issues/21561
 
 
 def _get_account():
-    return json.loads(_run_output('az account show -o json'))
+    return json.loads(
+        run('az account show -o json',
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL).stdout.decode())
 
 
 def get_subscription_id() -> str:
