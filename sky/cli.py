@@ -1278,7 +1278,7 @@ def _get_managed_jobs(
             # Make the call silent
             jobs = managed_job.queue(refresh=refresh,
                                      skip_finished=skip_finished)
-        num_in_progress_jobs = len(jobs)
+        num_in_progress_jobs = len(set(job['job_id'] for job in jobs))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         msg = str(e)

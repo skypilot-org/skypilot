@@ -7,7 +7,7 @@ import shlex
 import shutil
 import time
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 import filelock
@@ -500,6 +500,25 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
+def _get_job_status_from_tasks(
+        job_tasks: List[Dict[str, Any]]) -> Tuple[state.ManagedJobStatus, int]:
+    """Get the current task status and the current task id for a job."""
+    managed_task_status = state.ManagedJobStatus.SUCCEEDED
+    current_task_id = 0
+    for task in job_tasks:
+        managed_task_status = task['status']
+        current_task_id = task['task_id']
+
+        # Use the first non-succeeded status.
+        if managed_task_status != state.ManagedJobStatus.SUCCEEDED:
+            # TODO(zhwu): we should not blindly use the first non-
+            # succeeded as the status could be changed to SUBMITTED
+            # when going from one task to the next one, which can be
+            # confusing.
+            break
+    return managed_task_status, current_task_id
+
+
 @typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
@@ -533,6 +552,24 @@ def format_job_table(
     Returns: A formatted string of managed jobs, if not `return_rows`; otherwise
       a list of "rows" (each of which is a list of str).
     """
+    jobs = collections.defaultdict(list)
+    for task in tasks:
+        # The tasks within the same job_id are already sorted
+        # by the task_id.
+        jobs[task['job_id']].append(task)
+    jobs = dict(jobs)
+
+    status_counts: Dict[str, int] = collections.defaultdict(int)
+    for job_tasks in jobs.values():
+        managed_job_status = _get_job_status_from_tasks(job_tasks)[0]
+        if not managed_job_status.is_terminal():
+            status_counts[managed_job_status.value] += 1
+
+    if max_jobs is not None:
+        job_ids = sorted(jobs.keys(), reverse=True)
+        job_ids = job_ids[:max_jobs]
+        jobs = {job_id: jobs[job_id] for job_id in job_ids}
+
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
@@ -563,9 +600,8 @@ def format_job_table(
             submitted_at = None
             end_at: Optional[int] = 0
             recovery_cnt = 0
-            managed_job_status = state.ManagedJobStatus.SUCCEEDED
-            failure_reason = None
-            current_task_id = len(job_tasks) - 1
+            managed_job_status, current_task_id = _get_job_status_from_tasks(
+                job_tasks)
             for task in job_tasks:
                 job_duration += task['job_duration']
                 if task['submitted_at'] is not None:
@@ -578,19 +614,8 @@ def format_job_table(
                 else:
                     end_at = None
                 recovery_cnt += task['recovery_count']
-                if managed_job_status == state.ManagedJobStatus.SUCCEEDED:
-                    # Use the first non-succeeded status.
-                    # TODO(zhwu): we should not blindly use the first non-
-                    # succeeded as the status could be changed to SUBMITTED
-                    # when going from one task to the next one, which can be
-                    # confusing.
-                    managed_job_status = task['status']
-                    current_task_id = task['task_id']
 
-                if (failure_reason is None and
-                        task['status'] > state.ManagedJobStatus.SUCCEEDED):
-                    failure_reason = task['failure_reason']
-
+            failure_reason = job_tasks[current_task_id]['failure_reason']
             job_duration = log_utils.readable_time_duration(0,
                                                             job_duration,
                                                             absolute=True)
@@ -600,8 +625,7 @@ def format_job_table(
                                                               absolute=True)
 
             status_str = managed_job_status.colored_str()
-            if (managed_job_status < state.ManagedJobStatus.RUNNING and
-                    current_task_id > 0):
+            if not managed_job_status.is_terminal():
                 status_str += f' (task: {current_task_id})'
 
             job_values = [
