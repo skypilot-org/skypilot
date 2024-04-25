@@ -56,7 +56,8 @@ def test_get_controller_resources(
 
     controller_resources = list(
         controller_utils.get_controller_resources(
-            controller_type=controller_type, task_resources=[]))[0]
+            controller=controller_utils.Controllers.from_type(controller_type),
+            task_resources=[]))[0]
     controller_resources_config = controller_resources.to_yaml_config()
     for k, v in expected.items():
         assert controller_resources_config[k] == v, (
@@ -80,7 +81,7 @@ def test_get_controller_resources_with_task_resources(
     all_clouds = {sky.AWS(), sky.GCP(), sky.Azure()}
     all_cloud_names = {str(c) for c in all_clouds}
     controller_resources = controller_utils.get_controller_resources(
-        controller_type=controller_type,
+        controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[sky.Resources(cloud=c) for c in all_clouds])
     for r in controller_resources:
         config = r.to_yaml_config()
@@ -116,7 +117,7 @@ def test_get_controller_resources_with_task_resources(
         str(c) for c in all_clouds if _could_host_controllers(c)
     }
     controller_resources = controller_utils.get_controller_resources(
-        controller_type=controller_type,
+        controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[sky.Resources(cloud=c) for c in all_clouds])
     for r in controller_resources:
         config = r.to_yaml_config()
@@ -129,7 +130,7 @@ def test_get_controller_resources_with_task_resources(
     # 3. Some resources does not have cloud specified.
     # Return the default resources.
     controller_resources = controller_utils.get_controller_resources(
-        controller_type=controller_type,
+        controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
             sky.Resources(accelerators='L4'),
             sky.Resources(cloud=sky.RunPod(), accelerators='A40'),

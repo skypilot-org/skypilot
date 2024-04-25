@@ -3450,7 +3450,7 @@ def job_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       $ sky job cancel 1 2 3
     """
     backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.JOB_CONTROLLER,
+        controller=controller_utils.Controllers.JOB_CONTROLLER,
         stopped_message='All managed jobs should have finished.',
         exit_if_not_accessible=True)
 
@@ -3534,7 +3534,7 @@ def job_dashboard(port: Optional[int]):
         'Dashboard is not available if job controller is not up. Run a managed '
         'job first.')
     backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.JOB_CONTROLLER,
+        controller=controller_utils.Controllers.JOB_CONTROLLER,
         stopped_message=hint,
         non_existent_message=hint,
         exit_if_not_accessible=True)
@@ -4087,7 +4087,7 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
             f'Provided {argument_str!r}.')
 
     backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have been terminated.',
         exit_if_not_accessible=True)
 

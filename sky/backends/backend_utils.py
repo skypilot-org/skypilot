@@ -2232,7 +2232,7 @@ def check_cluster_available(
 
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 def is_controller_accessible(
-    controller_type: controller_utils.Controllers,
+    controller: controller_utils.Controllers,
     stopped_message: str,
     non_existent_message: Optional[str] = None,
     exit_if_not_accessible: bool = False,
@@ -2267,10 +2267,9 @@ def is_controller_accessible(
           failed to be connected.
     """
     if non_existent_message is None:
-        non_existent_message = (
-            controller_type.value.default_hint_if_non_existent)
-    cluster_name = controller_type.value.cluster_name
-    controller_name = controller_type.value.name.replace(' controller', '')
+        non_existent_message = (controller.value.default_hint_if_non_existent)
+    cluster_name = controller.value.cluster_name
+    controller_name = controller.value.name.replace(' controller', '')
     need_connection_check = False
     controller_status, handle = None, None
     try:
@@ -2340,7 +2339,7 @@ def is_controller_accessible(
                                                  **ssh_credentials,
                                                  port=handle.head_ssh_port)
         if not runner.check_connection():
-            error_msg = controller_type.value.connection_error_hint
+            error_msg = controller.value.connection_error_hint
     else:
         assert controller_status == status_lib.ClusterStatus.UP, handle
 

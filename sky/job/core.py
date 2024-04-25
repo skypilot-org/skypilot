@@ -81,13 +81,13 @@ def launch(
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
-        controller_type = controller_utils.Controllers.JOB_CONTROLLER
-        controller_name = controller_type.value.cluster_name
+        controller = controller_utils.Controllers.JOB_CONTROLLER
+        controller_name = controller.value.cluster_name
         prefix = constants.JOB_TASK_YAML_PREFIX
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         controller_resources = controller_utils.get_controller_resources(
-            controller_type='managed_jobs',
+            controller=controller_utils.Controllers.JOB_CONTROLLER,
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
         vars_to_fill = {
@@ -102,7 +102,7 @@ def launch(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
-                'managed_jobs',
+                controller_utils.Controllers.JOB_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
             ),
         }
@@ -172,7 +172,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
         stopped_message = 'No in-progress managed jobs.'
     try:
         handle = backend_utils.is_controller_accessible(
-            controller_type=controller_utils.Controllers.JOB_CONTROLLER,
+            controller=controller_utils.Controllers.JOB_CONTROLLER,
             stopped_message=stopped_message)
     except exceptions.ClusterNotUpError as e:
         if not refresh:
@@ -242,7 +242,7 @@ def cancel(name: Optional[str] = None,
     """
     job_ids = [] if job_ids is None else job_ids
     handle = backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.JOB_CONTROLLER,
+        controller=controller_utils.Controllers.JOB_CONTROLLER,
         stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
@@ -296,7 +296,7 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
     """
     # TODO(zhwu): Automatically restart the job controller
     handle = backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.JOB_CONTROLLER,
+        controller=controller_utils.Controllers.JOB_CONTROLLER,
         stopped_message=('Please restart the job controller with '
                          f'`sky start {utils.JOB_CONTROLLER_NAME}`.'))
 

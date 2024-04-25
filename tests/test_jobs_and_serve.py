@@ -131,13 +131,13 @@ def _mock_serve_controller(_mock_db_conn):
 
 
 def mock_is_controller_accessible(
-    controller_type: controller_utils.Controllers,
+    controller: controller_utils.Controllers,
     stopped_message: str,
     non_existent_message: Optional[str] = None,
     exit_on_error: bool = False,
 ):
     record = global_user_state.get_cluster_from_name(
-        controller_type.value.cluster_name)
+        controller.value.cluster_name)
     return record['handle']
 
 

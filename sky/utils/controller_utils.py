@@ -35,7 +35,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Message thrown when APIs sky.spot.launch(),sky.serve.up() received an invalid
+# Message thrown when APIs sky.job.launch(),sky.serve.up() received an invalid
 # controller resources spec.
 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type} controller resources is not valid, please check '
@@ -88,7 +88,7 @@ class Controllers(enum.Enum):
     # NOTE(dev): Keep this align with
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
     JOB_CONTROLLER = _ControllerSpec(
-        controller_type='managed_jobs',
+        controller_type='jobs',
         name='managed job controller',
         candidate_cluster_names=[
             utils.JOB_CONTROLLER_NAME, utils.LEGACY_JOB_CONTROLLER_NAME
@@ -181,7 +181,8 @@ class Controllers(enum.Enum):
 # can be cleaned up by another process.
 # TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
-        controller_type: str) -> List[str]:
+        controller: Controllers) -> List[str]:
+    # TODO(zhwu): Add dependencies for the other clouds when on-demand is used.
     commands = [
         # aws
         'pip list | grep boto3 > /dev/null 2>&1 || '
@@ -201,7 +202,7 @@ def _get_cloud_dependencies_installation_commands(
     ]
     # k8s and ibm doesn't support open port and spot instance yet, so we don't
     # install them for either controller.
-    if controller_type == 'spot':
+    if controller == Controllers.JOB_CONTROLLER:
         # oci doesn't support open port yet, so we don't install oci
         # dependencies for sky serve controller.
         commands.append('pip list | grep oci > /dev/null 2>&1 || '
@@ -283,10 +284,11 @@ def download_and_stream_latest_job_log(
 
 
 def shared_controller_vars_to_fill(
-        controller_type: str, remote_user_config_path: str) -> Dict[str, str]:
+        controller: Controllers,
+        remote_user_config_path: str) -> Dict[str, str]:
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
-            _get_cloud_dependencies_installation_commands(controller_type)
+            _get_cloud_dependencies_installation_commands(controller)
     }
     env_vars: Dict[str, str] = {
         env.value: '1' for env in env_options.Options if env.get()
@@ -308,7 +310,7 @@ def shared_controller_vars_to_fill(
 
 
 def get_controller_resources(
-    controller_type: str,
+    controller: Controllers,
     task_resources: Iterable['resources.Resources'],
 ) -> Set['resources.Resources']:
     """Read the skypilot config and setup the controller resources.
@@ -320,19 +322,17 @@ def get_controller_resources(
         specified, the controller will be launched on one of the clouds
         of the task resources for better connectivity.
     """
-    controller = Controllers.from_type(controller_type)
-    assert controller is not None, controller_type
     controller_resources_config_copied: Dict[str, Any] = copy.copy(
         controller.value.default_resources_config)
     if skypilot_config.loaded():
         # Override the controller resources with the ones specified in the
         # config.
         custom_controller_resources_config = skypilot_config.get_nested(
-            (controller_type, 'controller', 'resources'), None)
+            (controller.value.controller_type, 'controller', 'resources'), None)
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
-        elif controller_type == 'managed_jobs':
+        elif controller == Controllers.JOB_CONTROLLER:
             # TODO(zhwu): Backward compatibility for the old config for managed
             # job controller.
             controller_resources_config_copied.update(
@@ -346,9 +346,9 @@ def get_controller_resources(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
-                    controller_type=controller_type,
-                    err=common_utils.format_exception(e,
-                                                      use_bracket=True))) from e
+                    controller_type=controller.value.controller_type,
+                    err=common_utils.format_exception(
+                        e, use_bracket=True)).capitalize()) from e
     # TODO(tian): Support multiple resources for the controller. One blocker
     # here is the semantic if controller resources use `ordered` and we want
     # to override it with multiple cloud from task resources.
@@ -356,10 +356,10 @@ def get_controller_resources(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
-                    controller_type=controller_type,
+                    controller_type=controller.value.controller_type,
                     err=f'Expected exactly one resource, got '
                     f'{len(controller_resources)} resources: '
-                    f'{controller_resources}'))
+                    f'{controller_resources}').capitalize())
     controller_resources_to_use: resources.Resources = list(
         controller_resources)[0]
 
