@@ -16,7 +16,7 @@ Autoscaling node groups on GKE (and other hosted k8s offerings) operate within j
 2. 💸 SkyServe can **burst to using spot instances** across regions, and across cloud providers, to ensure high availability and lowest costs.
 3. 🙂 SkyServe provides an **simple declarative spec** for specifying your service and its autoscaling policies across your k8s cluster and spot instances.
 
-## Example of mixing Kubernetes and spot instances
+## Example - running Llama3 across K8s and spot instances
 
 **In this example, we will:**
 1. Create a Kubernetes cluster (GKE) with 3 nodes, with 1x T4 GPU per node.
