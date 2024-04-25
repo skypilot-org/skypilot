@@ -555,9 +555,9 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
     try:
         validator.SchemaValidator(schema).validate(obj)
     except jsonschema.ValidationError as e:
-        if e.validator in ['patternProperties', 'additionalProperties']:
+        if e.validator == 'additionalProperties':
             if tuple(e.schema_path) == ('properties', 'envs',
-                                        'patternProperties'):
+                                        'additionalProperties'):
                 # Hack. Here the error is Task.envs having some invalid keys. So
                 # we should not print "unsupported field".
                 #
@@ -567,17 +567,17 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                            'The `envs` field contains invalid keys:\n' +
                            e.message)
             else:
-                err_msg = err_msg_prefix + 'The following fields are invalid:'
+                err_msg = err_msg_prefix
                 known_fields = set(e.schema.get('properties', {}).keys())
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(
                             field, known_fields, 1)
                         if most_similar_field:
-                            err_msg += (f'\nInstead of {field!r}, did you mean '
+                            err_msg += (f'Instead of {field!r}, did you mean '
                                         f'{most_similar_field[0]!r}?')
                         else:
-                            err_msg += f'\nFound unsupported field {field!r}.'
+                            err_msg += f'Found unsupported field {field!r}.'
         else:
             message = e.message
             # Object in jsonschema is represented as dict in Python. Replace
