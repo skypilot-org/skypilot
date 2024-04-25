@@ -107,7 +107,7 @@ def launch(
             ),
         }
 
-        yaml_path = os.path.join(constants.SPOT_CONTROLLER_YAML_PREFIX,
+        yaml_path = os.path.join(constants.JOB_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{dag_uuid}.yaml')
         common_utils.fill_template(constants.JOB_CONTROLLER_TEMPLATE,
                                    vars_to_fill,
