@@ -14,7 +14,7 @@ Autoscaling node groups on GKE (and other hosted k8s offerings) operate within j
 **How SkyServe solves these problems**
 1. 🌐 SkyServe provides a **common endpoint** to run all your queries, while managing the underlying infrastructure (K8s + Clouds) for you.
 2. 💸 SkyServe can **burst to using spot instances** across regions, and across cloud providers, to ensure high availability and lowest costs.
-3. 🙂 SkyServe provides an **simple declarative spec** for specifying your service and its autoscaling policies across your k8s cluster and spot instances.
+3. 💪🏻 SkyServe **transparently recovers** from spot instance terminations and service failures, ensuring your service is always available. 
 
 ## Example - running Llama3 across K8s and spot instances
 
