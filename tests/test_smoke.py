@@ -1754,74 +1754,91 @@ def test_paperspace_http_server_with_custom_ports():
     )
     run_one_test(test)
 
-# ---------- Labels from task on AWS (instance_tags) ----------
-@pytest.mark.aws
-def test_aws_task_labels():
-    name = _get_cluster_name()
-    # Command to get the instance ID where the 'skypilot-cluster-name' tag starts with `name`
-    get_instance_id_cmd = (
-        'aws ec2 describe-instances --query "Reservations[*].Instances[*].InstanceId" --filters Name=tag:skypilot-cluster-name,Values={name}* --output json'
-    )
-    test = Test(
-        'aws_task_labels',
-        [
-            f'sky launch -y -c {name} --cloud aws --region us-east-1 '
-            '--label mylabel=myvalue --label mylabel2=myvalue2',
-            # Verify with aws cli that the tags are set.
-
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
 
 # ---------- Labels from task on AWS (instance_tags) ----------
 @pytest.mark.aws
-def test_aws_task_labels():
+def test_task_labels_aws():
     name = _get_cluster_name()
-    test = Test(
-        'aws_task_labels',
-        [
-            f'sky launch -y -c {name} --cloud aws --region us-east-1 '
-            '--label myclilabel1=myclivalue1 --label myclilabel2=myclivalue2 '
-            'examples/task_labels.yaml',
-            # TODO: Verify with aws cli that the tags are set.
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_labels.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(cloud='aws', region='us-east-1')
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test = Test(
+            'task_labels_aws',
+            [
+                f'sky launch -y -c {name} {file_path}',
+                # Verify with aws cli that the tags are set.
+                'aws ec2 describe-instances '
+                '--query "Reservations[*].Instances[*].InstanceId" '
+                '--filters "Name=instance-state-name,Values=running" '
+                f'--filters "Name=tag:skypilot-cluster-name,Values={name}*" '
+                '--filters "Name=tag:inlinelabel1,Values=inlinevalue1" '
+                '--filters "Name=tag:inlinelabel2,Values=inlinevalue2" '
+                '--region us-east-1 --output text',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
 
 
 # ---------- Labels from task on GCP (instance_tags) ----------
 @pytest.mark.gcp
-def test_gcp_task_labels():
+def test_task_labels_gcp():
     name = _get_cluster_name()
-    test = Test(
-        'gcp_task_labels',
-        [
-            f'sky launch -y -c {name} --cloud gcp --region us-east1 '
-            '--label mylabel=myvalue --label mylabel2=myvalue2 '
-            'examples/task_labels.yaml',
-            # TODO: Verify with gcloud cli that the tags are set.
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_labels.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(cloud='gcp')
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test = Test(
+            'task_labels_gcp',
+            [
+                f'sky launch -y -c {name} {file_path}',
+                # Verify with gcloud cli that the tags are set
+                f'gcloud compute instances list --filter="name~\'^{name}\' AND '
+                'labels.inlinelabel1=\'inlinevalue1\' AND '
+                'labels.inlinelabel2=\'inlinevalue2\'" '
+                '--format="value(name)" | grep .',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
+
 
 # ---------- Labels from task on Kubernetes (labels) ----------
 @pytest.mark.kubernetes
-def test_kubernetes_task_labels():
+def test_task_labels_kubernetes():
     name = _get_cluster_name()
-    test = Test(
-        'gcp_task_labels',
-        [
-            f'sky launch -y -c {name} --cloud kubernetes '
-            '--label mylabel=myvalue --label mylabel2=myvalue2 '
-            'examples/task_labels.yaml',
-            # TODO: Verify with kubectl that the labels are set.
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_labels.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(cloud='kubernetes')
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test = Test(
+            'task_labels_kubernetes',
+            [
+                f'sky launch -y -c {name} {file_path}',
+                # Verify with kubectl that the labels are set.
+                'kubectl get pods '
+                '--selector inlinelabel1=inlinevalue1 '
+                '--selector inlinelabel2=inlinevalue2 '
+                '-o jsonpath=\'{.items[*].metadata.name}\' | '
+                f'grep \'^{name}\''
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
+
 
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus

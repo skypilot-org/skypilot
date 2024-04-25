@@ -221,6 +221,7 @@ class Resources:
         self._try_validate_image_id()
         self._try_validate_disk_tier()
         self._try_validate_ports()
+        self._try_validate_labels()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -937,6 +938,29 @@ class Resources:
                         'that does support this feature.')
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
+
+    def _try_validate_labels(self) -> None:
+        """Try to validate the labels attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
+        if self._labels is None:
+            return
+
+        if self.cloud is None:
+            # Because each cloud has its own label format, we cannot validate
+            # the labels without knowing the cloud.
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cloud must be specified when labels are provided.')
+
+        # Check if the label key value pairs are valid.
+        for key, value in self._labels.items():
+            valid, err_msg = self.cloud.is_label_valid(key, value)
+            if not valid:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid label {key}={value}. {err_msg}')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
