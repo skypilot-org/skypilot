@@ -606,11 +606,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Step 5: Add the file download into the file mounts, such as
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
     new_file_mounts = {}
+    storage = task.storage_mounts[file_mount_remote_tmp_dir]
+    store_type = list(storage.stores.keys())[0]
+    store_prefix = store_type.store_prefix()
+    bucket_url = store_prefix + file_bucket_name
     for dst, src in copy_mounts_with_file_in_src.items():
-        storage = task.storage_mounts[file_mount_remote_tmp_dir]
-        store_type = list(storage.stores.keys())[0]
-        store_prefix = storage_lib.get_store_prefix(store_type)
-        bucket_url = store_prefix + file_bucket_name
         file_id = src_to_file_id[src]
         new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
     task.update_file_mounts(new_file_mounts)
@@ -627,14 +627,6 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
             store_type = store_types[0]
-            if store_type == storage_lib.StoreType.S3:
-                storage_obj.source = f's3://{storage_obj.name}'
-            elif store_type == storage_lib.StoreType.GCS:
-                storage_obj.source = f'gs://{storage_obj.name}'
-            elif store_type == storage_lib.StoreType.R2:
-                storage_obj.source = f'r2://{storage_obj.name}'
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        f'Unsupported store type: {store_type}')
+            store_prefix = store_type.store_prefix()
+            storage_obj.source = f'{store_prefix}{storage_obj.name}'
             storage_obj.force_delete = True

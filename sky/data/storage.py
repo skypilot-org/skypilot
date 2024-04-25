@@ -145,28 +145,27 @@ class StoreType(enum.Enum):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {store}')
 
+    def store_prefix(self) -> str:
+        if self == StoreType.S3:
+            return 's3://'
+        elif self == StoreType.GCS:
+            return 'gs://'
+        # R2 storages use 's3://' as a prefix for various aws cli commands
+        elif self == StoreType.R2:
+            return 'r2://'
+        elif self == StoreType.IBM:
+            return 'cos://'
+        elif self == StoreType.AZURE:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Azure Blob Storage is not supported yet.')
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown store type: {self}')
+
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
-
-
-def get_store_prefix(storetype: StoreType) -> str:
-    if storetype == StoreType.S3:
-        return 's3://'
-    elif storetype == StoreType.GCS:
-        return 'gs://'
-    # R2 storages use 's3://' as a prefix for various aws cli commands
-    elif storetype == StoreType.R2:
-        return 's3://'
-    elif storetype == StoreType.IBM:
-        return 'cos://'
-    elif storetype == StoreType.AZURE:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Azure Blob Storage is not supported yet.')
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown store type: {storetype}')
 
 
 class AbstractStore:
@@ -341,7 +340,7 @@ class AbstractStore:
             # bucket's URL as 'source'.
             if handle is None:
                 with ux_utils.print_exception_no_traceback():
-                    store_prefix = get_store_prefix(StoreType.from_store(self))
+                    store_prefix = StoreType.from_store(self).store_prefix()
                     raise exceptions.StorageSpecError(
                         'Attempted to mount a non-sky managed bucket '
                         f'{self.name!r} without specifying the storage source.'
