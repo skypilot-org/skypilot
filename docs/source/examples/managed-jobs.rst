@@ -1,14 +1,22 @@
-.. _spot-jobs:
+.. _managed-jobs:
 
-Managed Spot Jobs
-================================================
+Managed Jobs
+============
 
 .. tip::
 
-  This feature is great for scaling out: running a single job for long durations, or running many jobs.
+  This feature is great for scaling out: running a single job for long durations, or running many job pipelines.
 
-SkyPilot supports managed spot jobs that can **automatically recover from preemptions**.
-This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances practical for long-running jobs.
+SkyPilot supports managed jobs that allows:
+
+#. :ref:`Managed Spot Jobs <spot-jobs>`: Automatically recover from preemptions/hardware failures. This can **save significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
+#. :ref:`Job Pipeline <pipeline>`: Run job pipeline that conatin multiple tasks with different resource requirements. This is useful for running a sequence of tasks that depend on each other, e.g., data processing, training a model, and then running inference on it.
+
+
+.. _spot-jobs:
+
+Managed Spot Jobs
+-----------------
 
 SkyPilot automatically finds available spot resources across regions and clouds to maximize availability.
 Here is an example of a BERT training job failing over different regions across AWS and GCP.
@@ -23,14 +31,16 @@ Here is an example of a BERT training job failing over different regions across 
 
 To use managed spot jobs, there are two requirements:
 
-#. **Task YAML**: Managed Spot requires a YAML to describe the job, tested with :code:`sky launch`.
-#. **Checkpointing** (optional): For job recovery due to preemptions, the user application code can checkpoint its progress periodically to a :ref:`mounted cloud bucket <sky-storage>`. The program can reload the latest checkpoint when restarted.
+#. :ref:`Job YAML <job-yaml>`: Managed Spot requires a YAML to describe the job, tested with :code:`sky launch`.
+#. :ref:`Checkpointing <checkpointing>` (optional): For job recovery due to preemptions, the user application code can checkpoint its progress periodically to a :ref:`mounted cloud bucket <sky-storage>`. The program can reload the latest checkpoint when restarted.
 
 
-Task YAML
----------
+.. _job-yaml:
 
-To launch a spot job, you can simply reuse your task YAML (recommended to test it with :code:`sky launch` first).
+Job YAML
+~~~~~~~~
+
+To launch a managed job, you can simply reuse your job YAML (recommended to test it with :code:`sky launch` first).
 For example, we found the BERT fine-tuning YAML works with :code:`sky launch`, and want to
 launch it with SkyPilot managed spot jobs.
 
@@ -38,7 +48,7 @@ We can launch it with the following:
 
 .. code-block:: console
 
-  $ sky spot launch -n bert-qa bert_qa.yaml
+  $ sky job launch -n bert-qa bert_qa.yaml
 
 
 .. code-block:: yaml
@@ -48,6 +58,7 @@ We can launch it with the following:
 
   resources:
     accelerators: V100:1
+    use_spot: true
 
   # Assume your working directory is under `~/transformers`.
   # To make this example work, please run the following command:
@@ -86,17 +97,19 @@ We can launch it with the following:
   :ref:`cloud bucket <sky-storage>`. The bucket will be created during the job running time, and cleaned up after the job
   finishes.
 
-SkyPilot will launch and start monitoring the spot job. When a preemption happens, SkyPilot will automatically
+SkyPilot will launch and start monitoring the job. When a preemption happens, SkyPilot will automatically
 search for resources across regions and clouds to re-launch the job.
 
 In this example, the job will be restarted from scratch after each preemption recovery.
 To resume the job from previous states, user's application needs to implement checkpointing and recovery.
 
 
-Checkpointing and recovery
---------------------------
+.. _checkpointing:
 
-To allow spot recovery, a cloud bucket is typically needed to store the job's states (e.g., model checkpoints).
+Checkpointing and Recovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To allow job recovery, a cloud bucket is typically needed to store the job's states (e.g., model checkpoints).
 Below is an example of mounting a bucket to :code:`/checkpoint`.
 
 .. code-block:: yaml
@@ -112,8 +125,8 @@ This is typically achieved by reloading the latest checkpoint at the beginning o
 
 .. _spot-jobs-end-to-end:
 
-An end-to-end example
----------------------
+An End-to-End Example
+~~~~~~~~~~~~~~~~~~~~~
 
 Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a BERT model on a question-answering task with HuggingFace.
 
@@ -139,7 +152,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
   setup: |
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
-    # to pass the key in the command line, during `sky spot launch`.
+    # to pass the key in the command line, during `sky job launch`.
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
     pip install -e .
@@ -182,12 +195,12 @@ to the same run in Weights & Biases.
   via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to
   the task whenever it is invoked.
 
-With the highlighted changes, the managed spot job can now resume training after preemption with ``sky spot launch``! We can enjoy the benefits of
+With the highlighted changes, the managed spot job can now resume training after preemption! We can enjoy the benefits of
 cost savings from spot instances without worrying about preemption or losing progress.
 
 .. code-block:: console
 
-  $ sky spot launch -n bert-qa bert_qa.yaml
+  $ sky job launch -n bert-qa bert_qa.yaml
 
 .. tip::
 
@@ -195,132 +208,70 @@ cost savings from spot instances without worrying about preemption or losing pro
 
 
 Useful CLIs
------------
+~~~~~~~~~~~
 
-Here are some commands for managed spot jobs. Check :code:`sky spot --help` for more details.
+Here are some commands for managed jobs. Check :code:`sky job --help` and :ref:`CLI reference <cli>` for more details.
 
-See all spot jobs:
-
-.. code-block:: console
-
-  $ sky spot queue
+See all managed jobs:
 
 .. code-block:: console
 
-  Fetching managed spot job statuses...
-  Managed spot jobs:
-  ID NAME     RESOURCES     SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
-  2  roberta  1x [A100:8]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
-  1  bert-qa  1x [V100:1]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
-
-Stream the logs of a running spot job:
+  $ sky job queue
 
 .. code-block:: console
 
-  $ sky spot logs -n bert-qa  # by name
-  $ sky spot logs 2           # by job ID
+  Fetching managed job statuses...
+  Managed jobs:
+  ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
+  2  roberta  1x [A100:8](spot)   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
+  1  bert-qa  1x [V100:1](spot)   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
 
-Cancel a spot job:
+Stream the logs of a running managed job:
 
 .. code-block:: console
 
-  $ sky spot cancel -n bert-qa  # by name
-  $ sky spot cancel 2           # by job ID
+  $ sky job logs -n bert-qa  # by name
+  $ sky job logs 2           # by job ID
+
+Cancel a managed job:
+
+.. code-block:: console
+
+  $ sky job cancel -n bert-qa  # by name
+  $ sky job cancel 2           # by job ID
 
 .. note::
-  If any failure happens for a spot job, you can check :code:`sky spot queue -a` for the brief reason
-  of the failure. For more details, it would be helpful to check :code:`sky spot logs --controller <job_id>`.
+  If any failure happens for a managed job, you can check :code:`sky job queue -a` for the brief reason
+  of the failure. For more details, it would be helpful to check :code:`sky job logs --controller <job_id>`.
 
-Dashboard
------------
 
-Use ``sky spot dashboard`` to open a dashboard to see all jobs:
-
-.. code-block:: console
-
-  $ sky spot dashboard
-
-This automatically opens a browser tab to show the dashboard:
-
-.. image:: ../images/spot-dashboard.png
-
-The UI shows the same information as the CLI ``sky spot queue -a``. The UI is
-especially useful when there are many in-progress jobs to monitor, which the
-terminal-based CLI may need more than one page to display.
-
-Real-world examples
--------------------------
+Real-World Examples
+~~~~~~~~~~~~~~~~~~~
 
 * `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_, `YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml>`__
 * BERT (shown above): `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`__
 * PyTorch DDP, ResNet: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/resnet.yaml>`__
 * PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`__
 
-Spot controller
--------------------------------
-
-The spot controller is a small on-demand CPU VM running in the cloud that manages all spot jobs of a user.
-It is automatically launched when the first managed spot job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all spot jobs finish and no new spot job is submitted in that duration).
-Thus, **no user action is needed** to manage its lifecycle.
-
-You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
-
-While the cost of the spot controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped),
-you can still tear it down manually with
-:code:`sky down <spot-controller-name>`, where the ``<spot-controller-name>`` can be found in the output of :code:`sky status`.
-
-.. note::
-  Tearing down the spot controller loses all logs and status information for the finished spot jobs. It is only allowed when there are no in-progress spot jobs to ensure no resource leakage.
-
-Customizing spot controller resources
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-You may want to customize the resources of the spot controller for several reasons:
-
-1. Use a lower-cost controller (if you have a low number of concurrent spot jobs).
-2. Enforcing the spot controller to run on a specific location. (Default: cheapest location)
-3. Changing the maximum number of spot jobs that can be run concurrently, which is 2x the vCPUs of the controller. (Default: 16)
-4. Changing the disk_size of the spot controller to store more logs. (Default: 50GB)
-
-To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
-
-.. code-block:: yaml
-
-  spot:
-    # NOTE: these settings only take effect for a new spot controller, not if
-    # you have an existing one.
-    controller:
-      resources:
-        # All configs below are optional.
-        # Specify the location of the spot controller.
-        cloud: gcp
-        region: us-central1
-        # Specify the maximum number of spot jobs that can be run concurrently.
-        cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
-        # Specify the disk_size in GB of the spot controller.
-        disk_size: 100
-
-The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
-
-.. note::
-  These settings will not take effect if you have an existing controller (either
-  stopped or live).  For them to take effect, tear down the existing controller
-  first, which requires all in-progress spot jobs to finish or be canceled.
 
 
-Spot Pipeline
--------------------------
 
-Spot Pipeline is a feature that allows you to submit a spot job that contains a sequence of spot tasks running one after another.
+
+.. _pipeline:
+
+Job Pipeline
+------------
+
+Job Pipeline is a feature that allows you to submit a managed job that contains a sequence of managed tasks running one after another.
 This is useful for running a sequence of jobs that depend on each other, e.g., training a model and then running inference on it.
 This allows the multiple tasks to have different resource requirements to fully utilize the resources and save cost, while keeping the burden of managing the tasks off the user. 
 
 .. note::
-  A spot job is either a single task or a pipeline of tasks. A spot job is submitted by :code:`sky spot launch`.
+  A managed job is either a single task or a pipeline of tasks. A managed job is submitted by :code:`sky job launch`.
   
-  All tasks in a pipeline will be run on spot instances.
+  Tasks in a pipeline will be run on spot or on-demand instances.
 
-To use Spot Pipeline, you can specify the sequence of jobs in a YAML file. Here is an example:
+To use Job Pipeline, you can specify the sequence of jobs in a YAML file. Here is an example:
 
 .. code-block:: yaml
 
@@ -332,6 +283,7 @@ To use Spot Pipeline, you can specify the sequence of jobs in a YAML file. Here 
 
   resources:
     accelerators: V100:8
+    use_spot: true
 
   file_mounts:
     /checkpoint:
@@ -351,6 +303,7 @@ To use Spot Pipeline, you can specify the sequence of jobs in a YAML file. Here 
 
   resources:
     accelerators: T4:1
+    use_spot: false
 
   file_mounts:
     /checkpoint:
@@ -367,7 +320,7 @@ To use Spot Pipeline, you can specify the sequence of jobs in a YAML file. Here 
 
 The above YAML file defines a pipeline with two tasks. The first :code:`name: pipeline` names the pipeline. The first task has name :code:`train` and the second task has name :code:`eval`. The tasks are separated by a line with three dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and :code:`run` sections. The :code:`setup` and :code:`run` sections are executed sequentially.
 
-To submit the pipeline, the same command :code:`sky spot launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky spot queue` or :code:`sky spot dashboard`.
+To submit the pipeline, the same command :code:`sky job launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky job queue` or :code:`sky job dashboard`.
 
 .. note::
 
@@ -377,13 +330,83 @@ To submit the pipeline, the same command :code:`sky spot launch` is used. The pi
 
 .. code-block:: console
 
-  $ sky spot launch -n pipeline pipeline.yaml
-  $ sky spot queue
-  Fetching managed spot job statuses...
-  Managed spot jobs
-  In progress tasks: 1 PENDING, 1 RECOVERING
-  ID  TASK  NAME           RESOURCES        SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS     
-  8         pipeline       -                50 mins ago  47m 45s        -             1            RECOVERING   
-   ↳  0     train          1x [V100:8]      50 mins ago  47m 45s        -             1            RECOVERING 
-   ↳  1     eval           1x [T4:1]        -            -              -             0            PENDING 
+  $ sky job launch -n pipeline pipeline.yaml
+  $ sky job queue
+  Fetching managed job statuses...
+  Managed jobs
+  In progress jobs: 1 RECOVERING
+  ID  TASK  NAME           RESOURCES              SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS     
+  8         pipeline       -                      50 mins ago  47m 45s        -             1            RECOVERING   
+   ↳  0     train          1x [V100:8](spot)      50 mins ago  47m 45s        -             1            RECOVERING 
+   ↳  1     eval           1x [T4:1]              -            -              -             0            PENDING 
+
+
+Dashboard
+---------
+
+Use ``sky job dashboard`` to open a dashboard to see all jobs:
+
+.. code-block:: console
+
+  $ sky job dashboard
+
+This automatically opens a browser tab to show the dashboard:
+
+.. image:: ../images/spot-dashboard.png
+
+The UI shows the same information as the CLI ``sky job queue -a``. The UI is
+especially useful when there are many in-progress jobs to monitor, which the
+terminal-based CLI may need more than one page to display.
+
+
+Concept: Job Controller
+-----------------------
+
+The job controller is a small on-demand CPU VM running in the cloud that manages all jobs of a user.
+It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
+Thus, **no user action is needed** to manage its lifecycle.
+
+You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
+
+While the cost of the job controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped),
+you can still tear it down manually with
+:code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status`.
+
+.. note::
+  Tearing down the job controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
+
+Customizing Job Controller Resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You may want to customize the resources of the job controller for several reasons:
+
+1. Use a lower-cost controller (if you have a low number of concurrent managed jobs).
+2. Enforcing the job controller to run on a specific location. (Default: cheapest location)
+3. Changing the maximum number of jobs that can be run concurrently, which is 2x the vCPUs of the controller. (Default: 16)
+4. Changing the disk_size of the job controller to store more logs. (Default: 50GB)
+
+To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
+
+.. code-block:: yaml
+
+  jobs:
+    # NOTE: these settings only take effect for a new job controller, not if
+    # you have an existing one.
+    controller:
+      resources:
+        # All configs below are optional.
+        # Specify the location of the job controller.
+        cloud: gcp
+        region: us-central1
+        # Specify the maximum number of job jobs that can be run concurrently.
+        cpus: 4+  # number of vCPUs, max concurrent jobs = 2 * cpus
+        # Specify the disk_size in GB of the job controller.
+        disk_size: 100
+
+The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
+
+.. note::
+  These settings will not take effect if you have an existing controller (either
+  stopped or live).  For them to take effect, tear down the existing controller
+  first, which requires all in-progress jobs to finish or be canceled.
 

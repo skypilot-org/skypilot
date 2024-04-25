@@ -119,7 +119,7 @@ Contents
    :maxdepth: 1
    :caption: Running Jobs
 
-   ../examples/spot-jobs
+   ../examples/managed-jobs
    ../reference/job-queue
    ../examples/auto-failover
    ../reference/kubernetes/index
@@ -137,7 +137,7 @@ Contents
    :maxdepth: 1
    :caption: Cutting Cloud Costs
 
-   ../examples/spot-jobs
+   ../examples/managed-jobs
    ../reference/auto-stop
    ../reference/benchmark/index
 
