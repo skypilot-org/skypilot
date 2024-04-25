@@ -107,7 +107,7 @@ class Resources:
             False.
           job_recovery: the job recovery strategy to use for the managed
             job to recover the cluster from preemption. Refer to
-            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/spot/recovery_strategy.py>`__ # pylint: disable=line-too-long
+            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/job/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
           region: the region to use.
           zone: the zone to use.

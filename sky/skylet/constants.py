@@ -188,7 +188,7 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
 # Due to the CPU/memory usage of the controller process launched with sky job (
-# use ray job under the hood), we need to reserve some CPU/memory for each spot/
+# use ray job under the hood), we need to reserve some CPU/memory for each job/
 # serve controller process.
 # Spot: A default controller with 8 vCPU and 32 GB memory can manage up to 32
 # managed jobs.

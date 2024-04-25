@@ -189,7 +189,7 @@ We also set :code:`--run_name` to :code:`$SKYPILOT_TASK_ID` so that the logs for
 to the same run in Weights & Biases.
 
 .. note::
-  The environment variable :code:`$SKYPILOT_TASK_ID` (example: "sky-managed-2022-10-06-05-17-09-750781_pipeline_eval_8-1") can be used to identify the same job, i.e., it is kept identical across all
+  The environment variable :code:`$SKYPILOT_TASK_ID` (example: "sky-managed-2022-10-06-05-17-09-750781_bert-qa_8-0") can be used to identify the same job, i.e., it is kept identical across all
   recoveries of the job.
   It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
   via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to

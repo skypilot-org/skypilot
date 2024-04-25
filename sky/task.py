@@ -1000,7 +1000,7 @@ class Task:
         return d
 
     def is_controller_task(self) -> bool:
-        """Returns whether this task is a spot/serve controller process."""
+        """Returns whether this task is a job/serve controller process."""
         return self.managed_job_dag is not None or self.service_name is not None
 
     def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:

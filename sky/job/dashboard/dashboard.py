@@ -26,7 +26,9 @@ def _is_running_on_job_controller() -> bool:
     if pathlib.Path('~/.sky/sky_ray.yml').expanduser().exists():
         config = yaml.safe_load(
             pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text())
-        return config.get('cluster_name', '').startswith('sky-spot-controller-')
+        cluster_name = config.get('cluster_name', '')
+        return (cluster_name.startswith('sky-spot-controller-') or
+                cluster_name.startswith('sky-job-controller-'))
     return False
 
 

@@ -2237,13 +2237,13 @@ def is_controller_accessible(
     non_existent_message: Optional[str] = None,
     exit_if_not_accessible: bool = False,
 ) -> 'backends.CloudVmRayResourceHandle':
-    """Check if the spot/serve controller is up.
+    """Check if the job/serve controller is up.
 
     The controller is accessible when it is in UP or INIT state, and the ssh
     connection is successful.
 
     It can be used to check if the controller is accessible (since the autostop
-    is set for the controller) before the spot/serve commands interact with the
+    is set for the controller) before the job/serve commands interact with the
     controller.
 
     ClusterNotUpError will be raised whenever the controller cannot be accessed.
