@@ -131,7 +131,13 @@ class Resources:
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
           ports: the ports to open on the instance.
-          _docker_login_config: the docker configuration to use. This include
+          labels: the labels to apply to the instance. These are useful for
+            assigning metadata that may be used by external tools.
+            Implementation depends on the chosen cloud - On AWS, labels map to
+            instance tags. On GCP, labels map to instance labels. On
+            Kubernetes, labels map to pod labels. On other clouds, labels are
+            not supported and will be ignored.
+          _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
           _requires_fuse: whether the task requires FUSE mounting support. This
