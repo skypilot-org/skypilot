@@ -162,7 +162,7 @@ def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
-    del region, provider_config
+    del region
     nodes = _filter_instances(cluster_name_on_cloud, ['runn', 'pend'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
@@ -178,10 +178,10 @@ def get_cluster_info(
         if node_info['name'].endswith('-head'):
             head_instance_id = node_id
 
-    return common.ClusterInfo(
-        instances=instances,
-        head_instance_id=head_instance_id,
-    )
+    return common.ClusterInfo(instances=instances,
+                              head_instance_id=head_instance_id,
+                              provider_name='cudo',
+                              provider_config=provider_config)
 
 
 def query_instances(

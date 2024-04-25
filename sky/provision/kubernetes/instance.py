@@ -723,7 +723,10 @@ def get_cluster_info(
         custom_ray_options={
             'object-store-memory': 500000000,
             'num-cpus': cpu_request,
-        })
+        },
+        provider_name='kubernetes',
+        provider_config=provider_config
+        )
 
 
 def query_instances(

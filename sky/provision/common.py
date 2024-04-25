@@ -104,13 +104,14 @@ class ClusterInfo:
     # The unique identifier of the head instance, i.e., the
     # `instance_info.instance_id` of the head node.
     head_instance_id: Optional[InstanceId]
+    # Provider related information.
+    provider_name: str
+    provider_config: Optional[Dict[str, Any]] = None
+
     docker_user: Optional[str] = None
     # Override the ssh_user from the cluster config.
     ssh_user: Optional[str] = None
     custom_ray_options: Optional[Dict[str, Any]] = None
-    # Provider related information.
-    provider_name: str
-    provider_config: Optional[Dict[str, Any]] = None
 
     @property
     def num_instances(self) -> int:
