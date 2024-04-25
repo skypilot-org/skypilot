@@ -1,0 +1,6 @@
+kubernetes:
+  remote_identity: SERVICE_ACCOUNT
+serve:
+  controller:
+    resources:
+      cloud: kubernetes
