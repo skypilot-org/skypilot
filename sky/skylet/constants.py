@@ -42,11 +42,11 @@ SKY_RAY_CMD = (f'$([ -s {SKY_RAY_PATH_FILE} ] && '
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
-# same spot task.
+# same managed task.
 TASK_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
 # This environment variable stores a '\n'-separated list of task IDs that
-# are within the same spot job (DAG). This can be used by the user to
-# retrieve the task IDs of any tasks that are within the same spot job.
+# are within the same managed job (DAG). This can be used by the user to
+# retrieve the task IDs of any tasks that are within the same managed job.
 # This environment variable is pre-assigned before any task starts
 # running within the same job, and will remain constant throughout the
 # lifetime of the job.

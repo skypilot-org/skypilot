@@ -42,7 +42,7 @@ def launch(
     Args:
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
           managed job.
-        name: Name of the spot job.
+        name: Name of the managed job.
         detach_run: Whether to detach the run.
 
     Raises:
@@ -87,14 +87,14 @@ def launch(
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         controller_resources = controller_utils.get_controller_resources(
-            controller_type='jobs',
+            controller_type='managed_jobs',
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
 
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
             'job_controller': controller_name,
-            # Note: actual spot cluster name will be <task.name>-<spot job ID>
+            # Note: actual cluster name will be <task.name>-<managed job ID>
             'dag_name': dag.name,
             'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
@@ -102,7 +102,7 @@ def launch(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
-                'managed_job',
+                'managed_jobs',
                 remote_user_config_path=remote_user_config_path,
             ),
         }

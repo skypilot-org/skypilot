@@ -920,7 +920,7 @@ def cli():
 @click.option('--dryrun',
               default=False,
               is_flag=True,
-              help='If True, do not actually run the managed_job.')
+              help='If True, do not actually run the job.')
 @click.option(
     '--detach-setup',
     '-s',
@@ -1257,7 +1257,7 @@ def _get_managed_jobs(
         refresh: Query the latest statuses, restarting the job controller if
             stopped.
         skip_finished: Show only in-progress jobs.
-        show_all: Show all information of each spot job (e.g., region, price).
+        show_all: Show all information of each job (e.g., region, price).
         limit_num_jobs_to_show: If True, limit the number of jobs to show to
             _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
             `sky status`.
@@ -1268,7 +1268,7 @@ def _get_managed_jobs(
         A tuple of (num_in_progress_jobs, msg). If num_in_progress_jobs is None,
         it means there is an error when querying the managed jobs. In this case,
         msg contains the error message. Otherwise, msg contains the formatted
-        spot job table.
+        managed job table.
     """
     num_in_progress_jobs = None
     try:
@@ -1484,9 +1484,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
-    # Using a pool with 2 worker to run the spot job query and sky serve service
-    # query in parallel to speed up. The pool provides a AsyncResult object that
-    # can be used as a future.
+    # Using a pool with 2 worker to run the managed job query and sky serve
+    # service query in parallel to speed up. The pool provides a AsyncResult
+    # object that can be used as a future.
     with multiprocessing.Pool(2) as pool:
         # Do not show job queue if user specifies clusters, and if user
         # specifies --ip or --endpoint(s).
@@ -1495,7 +1495,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         show_endpoints = endpoints or endpoint is not None
         show_single_endpoint = endpoint is not None
         if show_managed_jobs:
-            # Run the spot job query in parallel to speed up the status query.
+            # Run managed job query in parallel to speed up the status query.
             managed_jobs_future = pool.apply_async(
                 _get_managed_jobs,
                 kwds=dict(refresh=False,
@@ -1707,7 +1707,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     if num_in_progress_jobs > 1:
                         plural_and_verb = 's are'
                     job_info = (
-                        f'{num_in_progress_jobs} spot job{plural_and_verb} '
+                        f'{num_in_progress_jobs} managed job{plural_and_verb} '
                         'in progress')
                     if (num_in_progress_jobs >
                             _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS):
@@ -1907,7 +1907,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     '--follow/--no-follow',
     is_flag=True,
     default=True,
-    help=('Follow the logs of a managed_job. '
+    help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
 @click.argument('cluster',
@@ -1925,7 +1925,7 @@ def logs(
     follow: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Tail the log of a managed_job.
+    """Tail the log of a job.
 
     If JOB_ID is not provided, the latest job on the cluster will be used.
 
@@ -2036,7 +2036,7 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
     job_ids_to_cancel = None
     if not jobs and not all:
         click.echo(f'{colorama.Fore.YELLOW}No job IDs or --all provided; '
-                   'cancelling the latest running managed_job.'
+                   'cancelling the latest running job.'
                    f'{colorama.Style.RESET_ALL}')
         job_identity_str = 'the latest running job'
     else:
@@ -2554,7 +2554,7 @@ def _hint_or_raise_for_down_job_controller(controller_name: str):
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'job controller. Please be aware of the following:'
            f'{colorama.Style.RESET_ALL}'
-           '\n * All logs and status information of the spot '
+           '\n * All logs and status information of the managed '
            'jobs (output of `sky job queue`) will be lost.')
     click.echo(msg)
     if managed_jobs:
@@ -2691,8 +2691,8 @@ def _down_or_stop_clusters(
                     # or service and prompt the confirmation for termination,
                     # a user could still do a `sky job launch` or a
                     # `sky serve up` before typing the delete, causing a leaked
-                    # spot job or service. We should make this check atomic with
-                    # the termination.
+                    # managed job or service. We should make this check atomic
+                    # with the termination.
                     hint_or_raise(controller_name)
                 except exceptions.ClusterOwnerIdentityMismatchError as e:
                     if purge:
@@ -3208,8 +3208,8 @@ def job():
         '(Default: True; this flag is deprecated and will be removed in a '
         'future release.) Whether to retry provisioning infinitely until the '
         'cluster is up, if unavailability errors are encountered. This '  # pylint: disable=bad-docstring-quotes
-        'applies to launching the spot clusters (both the initial and any '
-        'recovery attempts), not the job controller.'))
+        'applies to launching the managed job clusters (both the initial and '
+        'any recovery attempts), not the job controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3309,7 +3309,7 @@ def job_launch(
     dag = sky.optimize(dag)
 
     if not yes:
-        prompt = f'Launching the spot job {dag.name!r}. Proceed?'
+        prompt = f'Launching the managed job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
@@ -3346,18 +3346,18 @@ def job_launch(
 def job_queue(all: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed jobs.
 
-    Each spot job can have one of the following statuses:
+    Each managed job can have one of the following statuses:
 
     - ``PENDING``: Job is waiting for a free slot on the job controller to be
       accepted.
 
     - ``SUBMITTED``: Job is submitted to and accepted by the job controller.
 
-    - ``STARTING``: Job is starting (provisioning a spot cluster).
+    - ``STARTING``: Job is starting (provisioning a cluster for the job).
 
     - ``RUNNING``: Job is running.
 
-    - ``RECOVERING``: The spot cluster is recovering from a preemption.
+    - ``RECOVERING``: The cluster of the job is recovering from a preemption.
 
     - ``SUCCEEDED``: Job succeeded.
 
@@ -3380,7 +3380,7 @@ def job_queue(all: bool, refresh: bool, skip_finished: bool):
     - ``FAILED_CONTROLLER``: Job failed due to an unexpected error in the spot
       controller.
 
-    If the job failed, either due to user code or spot unavailability, the
+    If the job failed, either due to user code or resource unavailability, the
     error log can be found with ``sky job logs --controller``, e.g.:
 
     .. code-block:: bash
@@ -3486,7 +3486,7 @@ def job_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     '--follow/--no-follow',
     is_flag=True,
     default=True,
-    help=('Follow the logs of the managed_job. [default: --follow] '
+    help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
 @click.option(
     '--controller',
@@ -3498,7 +3498,7 @@ def job_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 @usage_lib.entrypoint
 def job_logs(name: Optional[str], job_id: Optional[int], follow: bool,
              controller: bool):
-    """Tail the log of a managed managed_job."""
+    """Tail the log of a managed job."""
     try:
         if controller:
             core.tail_logs(
@@ -3531,7 +3531,7 @@ def job_dashboard(port: Optional[int]):
     # REST API calls to the controller dashboard server).
     click.secho('Checking if job controller is up...', fg='yellow')
     hint = (
-        'Dashboard is not available if job controller is not up. Run a spot '
+        'Dashboard is not available if job controller is not up. Run a managed '
         'job first.')
     backend_utils.is_controller_accessible(
         controller_type=controller_utils.Controllers.JOB_CONTROLLER,
@@ -3574,6 +3574,7 @@ def job_dashboard(port: Optional[int]):
 
 # TODO(zhwu): Backward compatibility for the old `sky spot launch` command.
 # It is now renamed to `sky job launch` and the old command is deprecated.
+# Remove in v0.8.0.
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
     """Alias for Managed Job CLI (default to spot instances)."""
@@ -4108,7 +4109,7 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
     '--follow/--no-follow',
     is_flag=True,
     default=True,
-    help=('Follow the logs of the managed_job. [default: --follow] '
+    help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
 @click.option('--controller',
               is_flag=True,

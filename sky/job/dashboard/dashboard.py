@@ -53,7 +53,7 @@ def home():
     ]
     if rows and len(rows[0]) != len(columns):
         raise RuntimeError(
-            'Dashboard code and spot queue code are out of sync.')
+            'Dashboard code and managed job queue code are out of sync.')
 
     # Fix STATUS color codes: '\x1b[33mCANCELLED\x1b[0m' -> 'CANCELLED'.
     for row in rows:

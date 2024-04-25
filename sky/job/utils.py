@@ -56,7 +56,7 @@ _JOB_CANCELLED_MESSAGE = (
     '[bold cyan]Waiting for the task status to be updated.'
     '[/] It may take a minute.')
 
-# The maximum time to wait for the spot job status to transition to terminal
+# The maximum time to wait for the managed job status to transition to terminal
 # state, after the job finished. This is a safeguard to avoid the case where
 # the managed job status fails to be updated and keep the `sky job logs`
 # blocking for a long time.
@@ -73,7 +73,7 @@ class UserSignal(enum.Enum):
 # ====== internal functions ======
 def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
-    """Check the status of the job running on the spot cluster.
+    """Check the status of the job running on the cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
     """
@@ -95,7 +95,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
 
 
 def update_managed_job_status(job_id: Optional[int] = None):
-    """Update spot job status if the controller job failed abnormally.
+    """Update managed job status if the controller job failed abnormally.
 
     Check the status of the controller job. If it is not running, it must have
     exited abnormally, and we should set the job status to FAILED_CONTROLLER.
@@ -115,8 +115,9 @@ def update_managed_job_status(job_id: Optional[int] = None):
             tasks = state.get_managed_jobs(job_id_)
             for task in tasks:
                 task_name = task['job_name']
-                # Tear down the abnormal spot cluster to avoid resource leakage.
-                cluster_name = generate_job_cluster_name(task_name, job_id_)
+                # Tear down the abnormal cluster to avoid resource leakage.
+                cluster_name = generate_managed_job_cluster_name(
+                    task_name, job_id_)
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
                 if handle is not None:
@@ -127,11 +128,11 @@ def update_managed_job_status(job_id: Optional[int] = None):
                             backend.teardown(handle, terminate=True)
                             break
                         except RuntimeError:
-                            logger.error('Failed to tear down the spot cluster '
+                            logger.error('Failed to tear down the cluster '
                                          f'{cluster_name!r}. Retrying '
                                          f'[{retry_cnt}/{max_retry}].')
 
-            # The controller job for this spot job is not running: it must
+            # The controller job for this managed job is not running: it must
             # have exited abnormally, and we should set the job status to
             # FAILED_CONTROLLER.
             # The `set_failed` will only update the task's status if the
@@ -170,8 +171,8 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         if event_callback is None or task is None:
             return
         event_callback = event_callback.strip()
-        cluster_name = generate_job_cluster_name(task.name,
-                                                 job_id) if task.name else None
+        cluster_name = generate_managed_job_cluster_name(
+            task.name, job_id) if task.name else None
         logger.info(f'=== START: event callback for {status!r} ===')
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                 'managed_jobs_event',
@@ -201,8 +202,8 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
 # ======== user functions ========
 
 
-def generate_job_cluster_name(task_name: str, job_id: int) -> str:
-    """Generate spot cluster name."""
+def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
+    """Generate managed job cluster name."""
     # Truncate the task name to 30 chars to avoid the cluster name being too
     # long after appending the job id, which will cause another truncation in
     # the underlying sky.launch, hiding the `job_id` in the cluster name.
@@ -252,8 +253,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
             with signal_file.open('w', encoding='utf-8') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
-            # Backward compatibility for spot jobs launched before #3419. It can
-            # be removed in the future 0.7.0 release.
+            # Backward compatibility for managed jobs launched before #3419. It
+            # can be removed in the future 0.7.0 release.
             shutil.copy(str(signal_file), str(legacy_signal_file))
         cancelled_job_ids.append(job_id)
 
@@ -324,20 +325,21 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         task_id, managed_job_status = state.get_latest_task_id_status(job_id)
 
         # task_id and managed_job_status can be None if the controller process
-        # just started and the spot status has not set to PENDING yet.
+        # just started and the managed job status has not set to PENDING yet.
         while managed_job_status is None or not managed_job_status.is_terminal(
         ):
             handle = None
             if task_id is not None:
                 task_name = state.get_task_name(job_id, task_id)
-                cluster_name = generate_job_cluster_name(task_name, job_id)
+                cluster_name = generate_managed_job_cluster_name(
+                    task_name, job_id)
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
 
             # Check the handle: The cluster can be preempted and removed from
-            # the table before the spot state is updated by the controller. In
-            # this case, we should skip the logging, and wait for the next
-            # round of status check.
+            # the table before the managed job state is updated by the
+            # controller. In this case, we should skip the logging, and wait for
+            # the next round of status check.
             if (handle is None or
                     managed_job_status != state.ManagedJobStatus.RUNNING):
                 status_str = ''
@@ -401,7 +403,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 logger.debug(
                     f'INFO: (Log streaming) Got return code {returncode}. '
                     f'Retrying in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-            # Finish early if the spot status is already in terminal state.
+            # Finish early if the managed job status is already in terminal
+            # state.
             managed_job_status = state.get_status(job_id)
             assert managed_job_status is not None, job_id
             if managed_job_status.is_terminal():
@@ -413,16 +416,16 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             prev_msg = msg
             status_display.start()
             # If the tailing fails, it is likely that the cluster fails, so we
-            # wait a while to make sure the spot state is updated by the
-            # controller, and check the spot queue again.
+            # wait a while to make sure the managed job state is updated by the
+            # controller, and check the managed job queue again.
             # Wait a bit longer than the controller, so as to make sure the
-            # spot state is updated.
+            # managed job state is updated.
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
             managed_job_status = state.get_status(job_id)
 
     # The managed_job_status may not be in terminal status yet, since the
-    # controller has not updated the spot state yet. We wait for a while, until
-    # the spot state is updated.
+    # controller has not updated the managed job state yet. We wait for a while,
+    # until the managed job state is updated.
     wait_seconds = 0
     managed_job_status = state.get_status(job_id)
     assert managed_job_status is not None, job_id
@@ -473,8 +476,8 @@ def dump_managed_job_queue() -> str:
         job['job_duration'] = job_duration
         job['status'] = job['status'].value
 
-        cluster_name = generate_job_cluster_name(job['task_name'],
-                                                 job['job_id'])
+        cluster_name = generate_managed_job_cluster_name(
+            job['task_name'], job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -731,7 +734,7 @@ class ManagedJobCodeGen:
     @classmethod
     def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag') -> str:
         dag_name = managed_job_dag.name
-        # Add the spot job to spot queue table.
+        # Add the managed job to queue table.
         code = [
             f'state.set_job_name('
             f'{job_id}, {dag_name!r})',

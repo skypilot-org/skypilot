@@ -62,7 +62,7 @@ _CONN.commit()
 
 db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'failure_reason', 'TEXT')
 # Create a new column `spot_job_id`, which is the same for tasks of the
-# same spot job.
+# same managed job.
 # The original `job_id` no longer has an actual meaning, but only a legacy
 # identifier for all tasks in database.
 db_utils.add_column_to_table(_CURSOR,
@@ -130,15 +130,15 @@ class ManagedJobStatus(enum.Enum):
     """Spot job status, designed to be in serverless style.
 
     The ManagedJobStatus is a higher level status than the JobStatus.
-    Each spot job submitted to the spot cluster, will have a JobStatus
-    on that spot cluster:
+    Each managed job submitted to a cluster, will have a JobStatus
+    on that cluster:
         JobStatus = [INIT, SETTING_UP, PENDING, RUNNING, ...]
-    Whenever the spot cluster is preempted and recovered, the JobStatus
+    Whenever the cluster is preempted and recovered, the JobStatus
     will go through the statuses above again.
-    That means during the lifetime of a spot job, its JobsStatus could be
+    That means during the lifetime of a managed job, its JobsStatus could be
     reset to INIT or SETTING_UP multiple times (depending on the preemptions).
 
-    However, a spot job only has one ManagedJobStatus on the job controller.
+    However, a managed job only has one ManagedJobStatus on the job controller.
         ManagedJobStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
     Mapping from JobStatus to ManagedJobStatus:
         INIT            ->  STARTING/RECOVERING
@@ -149,37 +149,37 @@ class ManagedJobStatus(enum.Enum):
         FAILED          ->  FAILED
         FAILED_SETUP    ->  FAILED_SETUP
     Note that the JobStatus will not be stuck in PENDING, because each spot
-    cluster is dedicated to a spot job, i.e. there should always be enough
+    cluster is dedicated to a managed job, i.e. there should always be enough
     resource to run the job and the job will be immediately transitioned to
     RUNNING.
     """
     # PENDING: Waiting for the job controller to have a slot to run the
     # controller process.
-    # The submitted_at timestamp of the spot job in the 'spot' table will be
+    # The submitted_at timestamp of the managed job in the 'spot' table will be
     # set to the time when the job is firstly submitted by the user (set to
     # PENDING).
     PENDING = 'PENDING'
     # SUBMITTED: The job controller starts the controller process.
     SUBMITTED = 'SUBMITTED'
-    # STARTING: The controller process is launching the spot cluster for
-    # the spot job.
+    # STARTING: The controller process is launching the cluster for the managed
+    # job.
     STARTING = 'STARTING'
-    # RUNNING: The job is submitted to the spot cluster, and is setting up
-    # or running.
-    # The start_at timestamp of the spot job in the 'spot' table will be set
+    # RUNNING: The job is submitted to the cluster, and is setting up or
+    # running.
+    # The start_at timestamp of the managed job in the 'spot' table will be set
     # to the time when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
-    # RECOVERING: The spot cluster is preempted, and the controller process
-    # is recovering the spot cluster (relaunching/failover).
+    # RECOVERING: The cluster is preempted, and the controller process is
+    # recovering the cluster (relaunching/failover).
     RECOVERING = 'RECOVERING'
     # Terminal statuses
     # SUCCEEDED: The job is finished successfully.
     SUCCEEDED = 'SUCCEEDED'
     # CANCELLING: The job is requested to be cancelled by the user, and the
-    # controller is cleaning up the spot cluster.
+    # controller is cleaning up the cluster.
     CANCELLING = 'CANCELLING'
-    # CANCELLED: The job is cancelled by the user. When the spot job is in
-    # CANCELLED status, the spot cluster has been cleaned up.
+    # CANCELLED: The job is cancelled by the user. When the managed job is in
+    # CANCELLED status, the cluster has been cleaned up.
     CANCELLED = 'CANCELLED'
     # FAILED: The job is finished with failure from the user's program.
     FAILED = 'FAILED'
@@ -194,7 +194,7 @@ class ManagedJobStatus(enum.Enum):
     #    identity, or unsupported feature.
     FAILED_PRECHECKS = 'FAILED_PRECHECKS'
     # FAILED_NO_RESOURCE: The job is finished with failure because there is no
-    # resource available in the cloud provider(s) to launch the spot cluster.
+    # resource available in the cloud provider(s) to launch the cluster.
     FAILED_NO_RESOURCE = 'FAILED_NO_RESOURCE'
     # FAILED_CONTROLLER: The job is finished with failure because of unexpected
     # error in the controller process.
@@ -280,18 +280,18 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
     """Set the task to submitted.
 
     Args:
-        job_id: The spot job ID.
+        job_id: The managed job ID.
         task_id: The task ID.
         run_timestamp: The run_timestamp of the run. This will be used to
-            determine the log directory of the spot task.
-        submit_time: The time when the spot task is submitted.
-        resources_str: The resources string of the spot task.
+            determine the log directory of the managed task.
+        submit_time: The time when the managed task is submitted.
+        resources_str: The resources string of the managed task.
     """
     # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make
     # the log directory and submission time align with each other, so as to
     # make it easier to find them based on one of the values.
     # Also, using the earlier timestamp should be closer to the term
-    # `submit_at`, which represents the time the spot task is submitted.
+    # `submit_at`, which represents the time the managed task is submitted.
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
@@ -525,10 +525,10 @@ def get_latest_task_id_status(
         job_id: int) -> Union[Tuple[int, ManagedJobStatus], Tuple[None, None]]:
     """Returns the (task id, status) of the latest task of a job.
 
-    The latest means the task that is currently being executed or to be
-    started by the controller process. For example, in a spot job with
-    3 tasks, the first task is succeeded, and the second task is being
-    executed. This will return (1, ManagedJobStatus.RUNNING).
+    The latest means the task that is currently being executed or to be started
+    by the controller process. For example, in a managed job with 3 tasks, the
+    first task is succeeded, and the second task is being executed. This will
+    return (1, ManagedJobStatus.RUNNING).
 
     If the job_id does not exist, (None, None) will be returned.
     """
@@ -565,10 +565,10 @@ def get_failure_reason(job_id: int) -> Optional[str]:
 
 
 def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Get spot clusters' status."""
+    """Get managed jobs from the database."""
     job_filter = '' if job_id is None else f'WHERE spot.spot_job_id={job_id}'
 
-    # Join the spot and job_info tables to get the job name for each task.
+    # Join spot and job_info tables to get the job name for each task.
     # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
     # existing controller before #1982, the job_info table may not exist,
     # and all the managed jobs created before will not present in the

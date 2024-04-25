@@ -2142,7 +2142,7 @@ def test_stop_gcp_spot():
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Papperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
     name = _get_cluster_name()
@@ -2178,7 +2178,7 @@ def test_spot(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_job_pipeline(generic_cloud: str):
     """Test a job pipeline."""
     name = _get_cluster_name()
@@ -2220,7 +2220,7 @@ def test_job_pipeline(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_failed_setup(generic_cloud: str):
     """Test managed job with failed setup."""
     name = _get_cluster_name()
@@ -2246,7 +2246,7 @@ def test_spot_failed_setup(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_pipeline_failed_setup(generic_cloud: str):
     """Test managed job with failed setup for a pipeline."""
     name = _get_cluster_name()
@@ -2277,7 +2277,7 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
 
 
 @pytest.mark.aws
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_recovery_aws(aws_config_region):
     """Test managed job recovery."""
     name = _get_cluster_name()
@@ -2310,7 +2310,7 @@ def test_spot_recovery_aws(aws_config_region):
 
 
 @pytest.mark.gcp
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_recovery_gcp():
     """Test managed job recovery."""
     name = _get_cluster_name()
@@ -2346,7 +2346,7 @@ def test_spot_recovery_gcp():
 
 
 @pytest.mark.aws
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_pipeline_recovery_aws(aws_config_region):
     """Test managed job recovery for a pipeline."""
     name = _get_cluster_name()
@@ -2393,7 +2393,7 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
 
 
 @pytest.mark.gcp
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_pipeline_recovery_gcp():
     """Test managed job recovery for a pipeline."""
     name = _get_cluster_name()
@@ -2441,7 +2441,7 @@ def test_spot_pipeline_recovery_gcp():
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed job recovery for default resources."""
     name = _get_cluster_name()
@@ -2459,7 +2459,7 @@ def test_spot_recovery_default_resources(generic_cloud: str):
 
 
 @pytest.mark.aws
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_recovery_multi_node_aws(aws_config_region):
     """Test managed job recovery."""
     name = _get_cluster_name()
@@ -2493,7 +2493,7 @@ def test_spot_recovery_multi_node_aws(aws_config_region):
 
 
 @pytest.mark.gcp
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_recovery_multi_node_gcp():
     """Test managed job recovery."""
     name = _get_cluster_name()
@@ -2529,7 +2529,7 @@ def test_spot_recovery_multi_node_gcp():
 
 
 @pytest.mark.aws
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_cancellation_aws(aws_config_region):
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
@@ -2599,7 +2599,7 @@ def test_spot_cancellation_aws(aws_config_region):
 
 
 @pytest.mark.gcp
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_cancellation_gcp():
     name = _get_cluster_name()
     name_3 = f'{name}-3'
@@ -2665,7 +2665,7 @@ def test_spot_cancellation_gcp():
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed job"""
     name = _get_cluster_name()
@@ -2716,7 +2716,7 @@ def test_spot_storage(generic_cloud: str):
 
 # ---------- Testing spot TPU ----------
 @pytest.mark.gcp
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 @pytest.mark.tpu
 def test_spot_tpu():
     """Test managed job on TPU."""
@@ -2745,7 +2745,7 @@ def test_spot_tpu():
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
-@pytest.mark.managed_job
+@pytest.mark.managed_jobs
 def test_spot_inline_env(generic_cloud: str):
     """Test spot env"""
     name = _get_cluster_name()

@@ -105,8 +105,8 @@ class Resources:
             ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
           use_spot: whether to use spot instances. If None, defaults to
             False.
-          job_recovery: the spot recovery strategy to use for the managed
-            spot to recover the cluster from preemption. Refer to
+          job_recovery: the job recovery strategy to use for the managed
+            job to recover the cluster from preemption. Refer to
             `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/spot/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
           region: the region to use.
@@ -215,7 +215,7 @@ class Resources:
 
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
-        self._try_validate_spot()
+        self._try_validate_job()
         self._try_validate_image_id()
         self._try_validate_disk_tier()
         self._try_validate_ports()
@@ -777,8 +777,8 @@ class Resources:
                             f'memory. {self.instance_type} has {mem} GB '
                             f'memory, but {self.memory} is requested.')
 
-    def _try_validate_spot(self) -> None:
-        """Try to validate the spot related attributes.
+    def _try_validate_job(self) -> None:
+        """Try to validate the job related attributes.
 
         Raises:
             ValueError: if the attributes are invalid.

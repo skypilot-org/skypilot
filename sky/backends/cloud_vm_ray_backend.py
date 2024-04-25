@@ -28,7 +28,7 @@ from sky import cloud_stores
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
-from sky import job as managed_job
+from sky import job
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
@@ -3146,19 +3146,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
         if managed_job_dag is not None:
-            # Add the spot job to spot queue table.
-            managed_job_codegen = managed_job.ManagedJobCodeGen()
+            # Add the managed job to job queue database.
+            managed_job_codegen = job.ManagedJobCodeGen()
             managed_job_code = managed_job_codegen.set_pending(
                 job_id, managed_job_dag)
-            # Set the spot job to PENDING state to make sure that this spot
-            # job appears in the `sky job queue`, when there are already 16
-            # controller process jobs running on the controller VM with 8
+            # Set the managed job to PENDING state to make sure that this
+            # managed job appears in the `sky job queue`, when there are already
+            # 16 controller process jobs running on the controller VM with 8
             # CPU cores.
-            # The spot job should be set to PENDING state *after* the
+            # The managed job should be set to PENDING state *after* the
             # controller process job has been queued, as our skylet on spot
-            # controller will set the spot job in FAILED state if the
+            # controller will set the managed job in FAILED state if the
             # controller process job does not exist.
-            # We cannot set the spot job to PENDING state in the codegen for
+            # We cannot set the managed job to PENDING state in the codegen for
             # the controller process job, as it will stay in the job pending
             # table and not be executed until there is an empty slot.
             job_submit_cmd = job_submit_cmd + ' && ' + managed_job_code
@@ -3208,7 +3208,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo view all managed jobs:\t'
                     f'{backend_utils.BOLD}sky job queue'
                     f'{backend_utils.RESET_BOLD}'
-                    '\nTo view the spot job dashboard:\t'
+                    '\nTo view the managed job dashboard:\t'
                     f'{backend_utils.BOLD}sky job dashboard'
                     f'{backend_utils.RESET_BOLD}')
             elif controller is None:
@@ -3579,11 +3579,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         if job_name is not None:
-            code = managed_job.ManagedJobCodeGen.stream_logs_by_name(
-                job_name, follow)
+            code = job.ManagedJobCodeGen.stream_logs_by_name(job_name, follow)
         else:
-            code = managed_job.ManagedJobCodeGen.stream_logs_by_id(
-                job_id, follow)
+            code = job.ManagedJobCodeGen.stream_logs_by_id(job_id, follow)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -4569,8 +4567,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            handle: CloudVmRayResourceHandle) -> Dict[str, str]:
         """Returns the environment variables for the task."""
         env_vars = task.envs.copy()
-        # If it is a managed spot job, the TASK_ID_ENV_VAR will have been
-        # already set by the controller.
+        # If it is a managed job, the TASK_ID_ENV_VAR will have been already set
+        # by the controller.
         if constants.TASK_ID_ENV_VAR not in env_vars:
             env_vars[
                 constants.TASK_ID_ENV_VAR] = common_utils.get_global_job_id(

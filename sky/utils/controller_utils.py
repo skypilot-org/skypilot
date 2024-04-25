@@ -88,7 +88,7 @@ class Controllers(enum.Enum):
     # NOTE(dev): Keep this align with
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
     JOB_CONTROLLER = _ControllerSpec(
-        controller_type='jobs',
+        controller_type='managed_jobs',
         name='managed job controller',
         candidate_cluster_names=[
             utils.JOB_CONTROLLER_NAME, utils.LEGACY_JOB_CONTROLLER_NAME
@@ -98,8 +98,8 @@ class Controllers(enum.Enum):
             f'{colorama.Style.BRIGHT}sky job queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the job controller\'s jobs is not allowed.\nTo cancel '
-            f'managed jobs, use: {colorama.Style.BRIGHT}sky job cancel <spot '
-            f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
+            f'managed jobs, use: {colorama.Style.BRIGHT}sky job cancel <managed'
+            f' job IDs> [--all]{colorama.Style.RESET_ALL}'),
         _decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the job controller while '
             'it is in INIT state is not supported (this means a job launch '
@@ -255,11 +255,11 @@ def download_and_stream_latest_job_log(
         log_dirs = backend.sync_down_logs(
             handle,
             # Download the log of the latest job.
-            # The job_id for the spot job running on the spot cluster is not
+            # The job_id for the managed job running on the cluster is not
             # necessarily 1, as it is possible that the worker node in a
-            # multi-node cluster is preempted, and we recover the spot job
+            # multi-node cluster is preempted, and we recover the managed job
             # on the existing cluster, which leads to a larger job_id. Those
-            # job_ids all represent the same logical spot job.
+            # job_ids all represent the same logical managed job.
             job_ids=None,
             local_dir=local_dir)
     except exceptions.CommandError as e:
@@ -332,9 +332,9 @@ def get_controller_resources(
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
-        elif controller_type == 'managed_job':
+        elif controller_type == 'managed_jobs':
             # TODO(zhwu): Backward compatibility for the old config for managed
-            # spot controller.
+            # job controller.
             controller_resources_config_copied.update(
                 skypilot_config.get_nested(('spot', 'controller', 'resources'),
                                            {}))
@@ -431,7 +431,7 @@ def _setup_proxy_command_on_controller(
     # to this scenario.)
     #
     # This file will be uploaded to the controller node and will be
-    # used throughout the spot job's / service's recovery attempts
+    # used throughout the managed job's / service's recovery attempts
     # (i.e., if it relaunches due to preemption, we make sure the
     # same config is used).
     #
@@ -442,7 +442,7 @@ def _setup_proxy_command_on_controller(
     # have peering set up. Like other places in the code, we assume
     # properly setting up networking is user's responsibilities.
     # TODO(zongheng): consider adding a basic check that checks
-    # controller VPC (or name) == the spot job's / service's VPC
+    # controller VPC (or name) == the managed job's / service's VPC
     # (or name). It may not be a sufficient check (as it's always
     # possible that peering is not set up), but it may catch some
     # obvious errors.

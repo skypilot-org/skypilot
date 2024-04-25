@@ -158,8 +158,8 @@ sky logs ${CLUSTER_NAME}-6 2 --status
 sky logs ${CLUSTER_NAME}-6 2
 fi
 
-# Test spot jobs to make sure existing jobs and new job can run correctly, after
-# the spot controller is updated.
+# Test managed jobs to make sure existing jobs and new job can run correctly, after
+# the job controller is updated.
 # Get a new uuid to avoid conflict with previous back-compat tests.
 uuid=$(uuidgen)
 MANAGED_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}
@@ -168,8 +168,8 @@ MANAGED_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}
 if [ "$start_from" -le 7 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
-sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 300"
+sky job launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
+sky job launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 300"
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 s=$(sky job logs --no-follow -n ${CLUSTER_NAME}-7-1)

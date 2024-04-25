@@ -44,7 +44,7 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
 
 
 class JobController:
-    """Each job controller manages the life cycle of one spot job."""
+    """Each job controller manages the life cycle of one managed job."""
 
     def __init__(self, job_id: int, dag_yaml: str,
                  retry_until_up: bool) -> None:
@@ -88,9 +88,9 @@ class JobController:
     def _download_log_and_stream(
             self,
             handle: cloud_vm_ray_backend.CloudVmRayResourceHandle) -> None:
-        """Downloads and streams the logs of the latest job of a spot cluster.
+        """Downloads and streams the logs of the latest job.
 
-        We do not stream the logs from the spot cluster directly, as the
+        We do not stream the logs from the cluster directly, as the
         donwload and stream should be faster, and more robust against
         preemptions or ssh disconnection during the streaming.
         """
@@ -101,10 +101,10 @@ class JobController:
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
-        """Busy loop monitoring spot cluster status and handling recovery.
+        """Busy loop monitoring cluster status and handling recovery.
 
         When the task is successfully completed, this function returns True,
-        and will terminate the spot cluster before returning.
+        and will terminate the cluster before returning.
 
         If the user program fails, i.e. the task is set to FAILED or
         FAILED_SETUP, this function will return False.
@@ -168,10 +168,10 @@ class JobController:
                 task, is_managed_job=True),
             callback_func=callback_func)
         logger.info(
-            f'Submitted spot job {self._job_id} (task: {task_id}, name: '
+            f'Submitted managed job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
         assert task.name is not None, task
-        cluster_name = job_utils.generate_job_cluster_name(
+        cluster_name = job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._retry_until_up)
@@ -215,9 +215,9 @@ class JobController:
                                         callback_func=callback_func)
                 logger.info(
                     f'Spot job {self._job_id} (task: {task_id}) SUCCEEDED. '
-                    f'Cleaning up the spot cluster {cluster_name}.')
-                # Only clean up the spot cluster, not the storages, because
-                # tasks may share storages.
+                    f'Cleaning up the cluster {cluster_name}.')
+                # Only clean up the cluster, not the storages, because tasks may
+                # share storages.
                 recovery_strategy.terminate_cluster(cluster_name=cluster_name)
                 return True
 
@@ -294,7 +294,8 @@ class JobController:
             if handle is not None:
                 resources = handle.launched_resources
                 assert resources is not None, handle
-                if resources.need_cleanup_after_preemption():
+                if (resources.use_spot and
+                        resources.need_cleanup_after_preemption()):
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption.
                     logger.info('Cleaning up the preempted spot cluster...')
@@ -337,12 +338,12 @@ class JobController:
                     job_id=self._job_id,
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
-        except exceptions.SpotJobReachedMaxRetriesError as e:
+        except exceptions.ManagedJobReachedMaxRetriesError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
             logger.error(common_utils.format_exception(e))
-            # The spot job should be marked as FAILED_NO_RESOURCE, as the
-            # spot job may be able to launch next time.
+            # The managed job should be marked as FAILED_NO_RESOURCE, as the
+            # managed job may be able to launch next time.
             job_state.set_failed(
                 self._job_id,
                 task_id=task_id,
@@ -413,26 +414,27 @@ def _handle_signal(job_id):
         return
     assert user_signal == job_utils.UserSignal.CANCEL, (
         f'Only cancel signal is supported, but {user_signal} got.')
-    raise exceptions.SpotUserCancelledError(
+    raise exceptions.ManagedJobUserCancelledError(
         f'User sent {user_signal.value} signal.')
 
 
 def _cleanup(job_id: int, dag_yaml: str):
-    """Clean up the spot cluster(s) and storages.
+    """Clean up the cluster(s) and storages.
 
     (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
         to be cleaned up after the whole job is finished, as the tasks
         may share the same storage.
-    (2) Clean up the spot cluster(s) that are not cleaned up yet, which
-        can happen when the spot task failed or cancelled. At most one
-        spot cluster should be left when reaching here, as we currently
-        only support chain DAGs, and only spot task is executed at a time.
+    (2) Clean up the cluster(s) that are not cleaned up yet, which can happen
+        when the task failed or cancelled. At most one cluster should be left
+        when reaching here, as we currently only support chain DAGs, and only
+        task is executed at a time.
     """
     # NOTE: The code to get cluster name is same as what we did in the spot
     # controller, we should keep it in sync with SpotController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
-        cluster_name = job_utils.generate_job_cluster_name(task.name, job_id)
+        cluster_name = job_utils.generate_managed_job_cluster_name(
+            task.name, job_id)
         recovery_strategy.terminate_cluster(cluster_name)
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
@@ -459,11 +461,11 @@ def start(job_id, dag_yaml, retry_until_up):
         while controller_process.is_alive():
             _handle_signal(job_id)
             time.sleep(1)
-    except exceptions.SpotUserCancelledError:
+    except exceptions.ManagedJobUserCancelledError:
         dag, _ = _get_dag_and_name(dag_yaml)
         task_id, _ = (job_state.get_latest_task_id_status(job_id))
         logger.info(
-            f'Cancelling spot job, job_id: {job_id}, task_id: {task_id}')
+            f'Cancelling managed job, job_id: {job_id}, task_id: {task_id}')
         job_state.set_cancelling(job_id=job_id,
                                  callback_func=job_utils.event_callback_func(
                                      job_id=job_id,
@@ -482,7 +484,7 @@ def start(job_id, dag_yaml, retry_until_up):
             controller_process.join()
             logger.info(f'Controller process {controller_process.pid} killed.')
 
-        logger.info(f'Cleaning up any spot cluster for job {job_id}.')
+        logger.info(f'Cleaning up any cluster for job {job_id}.')
         # NOTE: Originally, we send an interruption signal to the controller
         # process and the controller process handles cleanup. However, we
         # figure out the behavior differs from cloud to cloud
@@ -507,7 +509,7 @@ def start(job_id, dag_yaml, retry_until_up):
         # The job can be non-terminal if the controller exited abnormally,
         # e.g. failed to launch cluster after reaching the MAX_RETRY.
         if not job_status.is_terminal():
-            logger.info(f'Previous spot job status: {job_status.value}')
+            logger.info(f'Previous job status: {job_status.value}')
             job_state.set_failed(
                 job_id,
                 task_id=None,
@@ -524,10 +526,10 @@ if __name__ == '__main__':
                         help='Job id for the controller job.')
     parser.add_argument('--retry-until-up',
                         action='store_true',
-                        help='Retry until the spot cluster is up.')
+                        help='Retry until the cluster is up.')
     parser.add_argument('dag_yaml',
                         type=str,
-                        help='The path to the user spot task yaml file.')
+                        help='The path to the user job yaml file.')
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.

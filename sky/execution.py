@@ -236,7 +236,7 @@ def _execute(
             logger.info(
                 f'{yellow}Launching an unmanaged spot task, which does not '
                 f'automatically recover from preemptions.{reset}\n{yellow}To '
-                'get automatic recovery, use managed spot instead: '
+                'get automatic recovery, use managed job instead: '
                 f'{reset}{bold}sky job launch{reset} {yellow}or{reset} '
                 f'{bold}sky.job.launch(){reset}.')
 

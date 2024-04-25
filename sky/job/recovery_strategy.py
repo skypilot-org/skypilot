@@ -1,4 +1,4 @@
-"""The strategy to handle launching/recovery/termination of spot clusters.
+"""The strategy to handle launching/recovery/termination of clusters.
 
 In the YAML file, the user can specify the strategy to use for managed jobs.
 
@@ -37,7 +37,7 @@ MAX_JOB_CHECKING_RETRY = 10
 
 
 def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
-    """Terminate the spot cluster."""
+    """Terminate the cluster."""
     retry_cnt = 0
     while True:
         try:
@@ -50,17 +50,17 @@ def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
         except Exception as e:  # pylint: disable=broad-except
             retry_cnt += 1
             if retry_cnt >= max_retry:
-                raise RuntimeError('Failed to terminate the spot cluster '
-                                   f'{cluster_name}.') from e
-            logger.error('Failed to terminate the spot cluster '
-                         f'{cluster_name}. Retrying.'
-                         f'Details: {common_utils.format_exception(e)}')
+                raise RuntimeError(
+                    f'Failed to terminate the cluster {cluster_name}.') from e
+            logger.error(
+                f'Failed to terminate the cluster {cluster_name}. Retrying.'
+                f'Details: {common_utils.format_exception(e)}')
             with ux_utils.enable_traceback():
                 logger.error(f'  Traceback: {traceback.format_exc()}')
 
 
 class StrategyExecutor:
-    """Handle each launching, recovery and termination of the spot clusters."""
+    """Handle each launching, recovery and termination of the clusters."""
 
     RETRY_INIT_GAP_SECONDS = 60
 
@@ -100,7 +100,7 @@ class StrategyExecutor:
         for resource in resource_list:
             if resource.job_recovery != job_recovery:
                 raise ValueError(
-                    'The spot recovery strategy should be the same for all '
+                    'The job recovery strategy should be the same for all '
                     'resources.')
         # Remove the job_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
@@ -112,7 +112,7 @@ class StrategyExecutor:
                                                  retry_until_up)
 
     def launch(self) -> float:
-        """Launch the spot cluster for the first time.
+        """Launch the cluster for the first time.
 
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
@@ -131,7 +131,7 @@ class StrategyExecutor:
         return job_submit_at
 
     def recover(self) -> float:
-        """Relaunch the spot cluster after failure and wait until job starts.
+        """Relaunch the cluster after failure and wait until job starts.
 
         When recover() is called the cluster should be in STOPPED status (i.e.
         partially down).
@@ -329,12 +329,12 @@ class StrategyExecutor:
                         raise exceptions.ProvisionPrechecksError(
                             reasons=reasons)
                     return None
-                logger.info('Failed to launch the spot cluster with error: '
+                logger.info('Failed to launch the cluster with error: '
                             f'{common_utils.format_exception(e)})')
             except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
-                logger.info('Failed to launch the spot cluster with error: '
+                logger.info('Failed to launch the cluster with error: '
                             f'{common_utils.format_exception(e)})')
                 with ux_utils.enable_traceback():
                     logger.info(f'  Traceback: {traceback.format_exc()}')
@@ -344,7 +344,7 @@ class StrategyExecutor:
                 job_submitted_at = self._wait_until_job_starts_on_cluster()
                 if job_submitted_at is not None:
                     return job_submitted_at
-                # The job fails to start on the spot cluster, retry the launch.
+                # The job fails to start on the cluster, retry the launch.
                 # TODO(zhwu): log the unexpected error to usage collection
                 # for future debugging.
                 logger.info(
@@ -357,13 +357,13 @@ class StrategyExecutor:
                 # Retry forever if max_retry is None.
                 if raise_on_failure:
                     with ux_utils.print_exception_no_traceback():
-                        raise exceptions.SpotJobReachedMaxRetriesError(
-                            'Resources unavailable: failed to launch the spot '
+                        raise exceptions.ManagedJobReachedMaxRetriesError(
+                            'Resources unavailable: failed to launch the '
                             f'cluster after {max_retry} retries.')
                 else:
                     return None
             gap_seconds = backoff.current_backoff()
-            logger.info('Retrying to launch the spot cluster in '
+            logger.info('Retrying to launch the cluster in '
                         f'{gap_seconds:.1f} seconds.')
             time.sleep(gap_seconds)
 
@@ -428,8 +428,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                     return job_submitted_at
 
             # Step 2
-            logger.debug('Terminating unhealthy spot cluster and '
-                         'reset cloud region.')
+            logger.debug('Terminating unhealthy cluster and reset cloud '
+                         'region.')
             terminate_cluster(self.cluster_name)
 
             # Step 3
@@ -442,13 +442,13 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                 # Failed to launch the cluster.
                 if self.retry_until_up:
                     gap_seconds = self.RETRY_INIT_GAP_SECONDS
-                    logger.info('Retrying to recover the spot cluster in '
+                    logger.info('Retrying to recover the cluster in '
                                 f'{gap_seconds:.1f} seconds.')
                     time.sleep(gap_seconds)
                     continue
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(
-                        f'Failed to recover the spot cluster after retrying '
+                        f'Failed to recover the cluster after retrying '
                         f'{self._MAX_RETRY_CNT} times.')
 
             return job_submitted_at
@@ -492,8 +492,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
         # task.resources.
 
         # Step 1
-        logger.debug('Terminating unhealthy spot cluster and '
-                     'reset cloud region.')
+        logger.debug('Terminating unhealthy cluster and reset cloud region.')
         terminate_cluster(self.cluster_name)
 
         # Step 2
@@ -531,13 +530,13 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                 # Failed to launch the cluster.
                 if self.retry_until_up:
                     gap_seconds = self.RETRY_INIT_GAP_SECONDS
-                    logger.info('Retrying to recover the spot cluster in '
+                    logger.info('Retrying to recover the cluster in '
                                 f'{gap_seconds:.1f} seconds.')
                     time.sleep(gap_seconds)
                     continue
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(
-                        f'Failed to recover the spot cluster after retrying '
+                        f'Failed to recover the cluster after retrying '
                         f'{self._MAX_RETRY_CNT} times.')
 
             return job_submitted_at

@@ -67,8 +67,8 @@ class JobSchedulerEvent(SkyletEvent):
         job_lib.scheduler.schedule_step()
 
 
-class SpotJobUpdateEvent(SkyletEvent):
-    """Skylet event for updating spot job status."""
+class ManagedJobUpdateEvent(SkyletEvent):
+    """Skylet event for updating managed job status."""
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):

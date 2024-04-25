@@ -398,7 +398,7 @@ def tail_logs(job_id: Optional[int],
         return
     job_str = f'job {job_id}'
     if managed_job_id is not None:
-        job_str = f'spot job {managed_job_id}'
+        job_str = f'managed job {managed_job_id}'
     if log_dir is None:
         print(f'{job_str.capitalize()} not found (see `sky queue`).',
               file=sys.stderr)

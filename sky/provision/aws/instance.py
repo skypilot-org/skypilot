@@ -66,7 +66,7 @@ def _default_ec2_resource(region: str) -> Any:
         # `sky job launch`.
         #
         # Detailed explanation follows. Assume we're in this situation: an old
-        # job controller running a spot job and then the code gets updated on
+        # job controller running a managed job and then the code gets updated on
         # the controller due to a new `sky job launch or `sky start`.
         #
         # First, controller consists of an outer process (sky.job.controller's
@@ -79,8 +79,8 @@ def _default_ec2_resource(region: str) -> Any:
         # {old sky.provision.aws, old sky.adaptors.aws}, and outer process has
         # loaded {old sky.adaptors.aws}.
         #
-        # In controller.py's start(), the inner process may exit due to spot job
-        # exits or `sky job cancel`, entering outer process'
+        # In controller.py's start(), the inner process may exit due to managed
+        # job exits or `sky job cancel`, entering outer process'
         # `finally: ... _cleanup()` path. Inside _cleanup(), we eventually call
         # into `sky.provision.aws` which loads this module for the first time
         # for the outer process. At this point, outer process has loaded
