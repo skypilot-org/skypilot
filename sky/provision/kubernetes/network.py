@@ -264,7 +264,7 @@ def _query_ports_for_podip(
     ports: List[int],
 ) -> Dict[int, List[common.Endpoint]]:
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-    pod_name = kubernetes_utils.get_pod_name(cluster_name_on_cloud)
+    pod_name = kubernetes_utils.get_head_pod_name(cluster_name_on_cloud)
     pod_ip = network_utils.get_pod_ip(namespace, pod_name)
 
     result: Dict[int, List[common.Endpoint]] = {}

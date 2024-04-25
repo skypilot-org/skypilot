@@ -1276,7 +1276,7 @@ def check_secret_exists(secret_name: str, namespace: str) -> bool:
         return True
 
 
-def get_pod_name(cluster_name_on_cloud: str):
+def get_head_pod_name(cluster_name_on_cloud: str):
     """Returns the pod name of the head pod for the given cluster name on cloud
 
     Args:
