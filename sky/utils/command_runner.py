@@ -420,7 +420,7 @@ class SSHCommandRunner(CommandRunner):
             # A hack to remove the following bash warnings (twice):
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
-            skip_lines=4 if source_bashrc else 0,
+            skip_lines=5 if source_bashrc else 0,
             source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 

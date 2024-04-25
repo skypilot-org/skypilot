@@ -2464,6 +2464,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     @property
     def ssh_user(self):
         if self.cached_cluster_info is not None:
+            # Overload ssh_user with the user stored in cluster_info, which is
+            # useful for kubernetes case, where the ssh_user can depend on the
+            # container image used. For those clusters launched with ray
+            # autoscaler, we directly use the ssh_user in yaml config.
             return self.cached_cluster_info.ssh_user
         return None
 
