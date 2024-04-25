@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 import sky
 from sky import clouds
 from sky import global_user_state
+from sky import optimizer
 from sky import sky_logging
 from sky.utils import common_utils
 
@@ -136,6 +137,35 @@ class SpotPlacer:
 class DynamicFailoverSpotPlacer(SpotPlacer):
     """Dynamic failover to an active location when preempted."""
 
+    def _get_location_cost(self, location: Location) -> float:
+
+        estimated_runtime = 1 * 3600
+        config = common_utils.read_yaml(os.path.expanduser(self.task_yaml_path))
+        task = sky.Task.from_yaml_config(config)
+
+        overrided_resources = [
+            r.copy(**{
+                'use_spot': True,
+                **(location.to_dict())
+            }) for r in task.resources
+        ]
+        task.set_resources(type(task.resources)(overrided_resources))
+
+        launchable_resources, _, _ = (optimizer.fill_in_launchable_resources(
+            task=task,
+            blocked_resources=None,
+            try_fix_with_sky_check=False,
+            quiet=True))
+
+        min_cost = float('inf')
+        for _, launchable_list in launchable_resources.items():
+            for resources in launchable_list:
+                cost = resources.get_cost(estimated_runtime)
+                min_cost = min(min_cost, cost)
+
+        logger.info(f'Cost of {location} is {min_cost}')
+        return min_cost
+
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
                num_replicas: int) -> List[Location]:
         # Prevent the case with only one active location.
@@ -152,10 +182,11 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
         selected_locations = []
         for _ in range(num_replicas):
             # Select the location with the least number of replicas.
-            # TODO(MaoZiming): use cost to tie break.
-            selected_location = min(
-                self.active_locations(),
-                key=lambda location: existing_locations_to_count[location])
+            # Tie break with the cost. 
+            selected_location = min(self.active_locations(),
+                                    key=lambda location:
+                                    (existing_locations_to_count[location],
+                                     self._get_location_cost(location)))
             selected_locations.append(selected_location)
             existing_locations_to_count[selected_location] += 1
         return selected_locations

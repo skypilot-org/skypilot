@@ -265,7 +265,7 @@ class Optimizer:
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources, cloud_candidates, fuzzy_candidates = (
-                    _fill_in_launchable_resources(
+                    fill_in_launchable_resources(
                         task=node,
                         blocked_resources=blocked_resources,
                         try_fix_with_sky_check=True,
@@ -992,7 +992,7 @@ class Optimizer:
                     # Check if there exists launchable resources
                     local_task.set_resources(resources)
                     launchable_resources_map, _ , _ = \
-                        _fill_in_launchable_resources(
+                        fill_in_launchable_resources(
                             task = local_task,
                             blocked_resources = blocked_resources,
                             try_fix_with_sky_check = True,
@@ -1141,7 +1141,7 @@ def _filter_out_blocked_launchable_resources(
     return available_resources
 
 
-def _fill_in_launchable_resources(
+def fill_in_launchable_resources(
     task: task_lib.Task,
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     try_fix_with_sky_check: bool = True,
@@ -1171,8 +1171,8 @@ def _fill_in_launchable_resources(
             if try_fix_with_sky_check:
                 # Explicitly check again to update the enabled cloud list.
                 check.check(quiet=True)
-                return _fill_in_launchable_resources(task, blocked_resources,
-                                                     False)
+                return fill_in_launchable_resources(task, blocked_resources,
+                                                    False)
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     f'Task requires {resources.cloud} which is '
