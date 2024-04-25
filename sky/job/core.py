@@ -107,23 +107,16 @@ def launch(
             ),
         }
 
-        yaml_path = os.path.join(constants.JOB_CONTROLLER_YAML_PREFIX,
+        yaml_path = os.path.join(constants.SPOT_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{dag_uuid}.yaml')
         common_utils.fill_template(constants.JOB_CONTROLLER_TEMPLATE,
                                    vars_to_fill,
                                    output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
-        assert len(controller_task.resources) == 1, controller_task
-        # Backward compatibility: if the user changed the
-        # job-controller.yaml.j2 to customize the controller resources,
-        # we should use it.
-        controller_task_resources = list(controller_task.resources)[0]
-        if not controller_task_resources.is_empty():
-            controller_resources = controller_task_resources
         controller_task.set_resources(controller_resources)
 
         controller_task.managed_job_dag = dag
-        assert len(controller_task.resources) == 1
+        assert len(controller_task.resources) == 1, controller_task
 
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
