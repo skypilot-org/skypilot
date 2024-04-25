@@ -1784,7 +1784,16 @@ def test_aws_task_labels():
             f'sky launch -y -c {name} --cloud aws --region us-east-1 '
             '--label myclilabel1=myclivalue1 --label myclilabel2=myclivalue2 '
             'examples/task_labels.yaml',
-            # TODO: Verify with aws cli that the tags are set.
+            # Verify with aws cli that the tags are set.
+            'aws ec2 describe-instances '
+            '--query "Reservations[*].Instances[*].InstanceId" '
+            '--filters "Name=instance-state-name,Values=running" '
+            f'--filters "Name=tag:skypilot-cluster-name,Values={name}*" '
+            '--filters "Name=tag:mylabel,Values=myvalue" '
+            '--filters "Name=tag:mylabel2,Values=myvalue2" '
+            '--filters "Name=tag:inlinelabel1,Values=inlinevalue1" '
+            '--filters "Name=tag:inlinelabel2,Values=inlinevalue2" '
+            '--region us-east-1 --output text',
         ],
         f'sky down -y {name}',
     )
@@ -1800,12 +1809,19 @@ def test_gcp_task_labels():
         [
             f'sky launch -y -c {name} --cloud gcp --region us-east1 '
             '--label mylabel=myvalue --label mylabel2=myvalue2 '
-            'examples/task_labels.yaml',
-            # TODO: Verify with gcloud cli that the tags are set.
+            'tests/test_yamls/test_labels.yaml',
+            # Verify with gcloud cli that the tags are set
+            f'gcloud compute instances list --filter="name~\'^{name}\' AND '
+            'labels.mylabel=\'myvalue\' AND '
+            'labels.mylabel2=\'myvalue2\' AND '
+            'labels.inlinelabel1=\'inlinevalue1\' AND '
+            'labels.inlinelabel2=\'inlinevalue2\'" '
+            '--format="value(name)" | grep .',
         ],
         f'sky down -y {name}',
     )
     run_one_test(test)
+
 
 # ---------- Labels from task on Kubernetes (labels) ----------
 @pytest.mark.kubernetes
@@ -1818,6 +1834,13 @@ def test_kubernetes_task_labels():
             '--label mylabel=myvalue --label mylabel2=myvalue2 '
             'examples/task_labels.yaml',
             # TODO: Verify with kubectl that the labels are set.
+            'kubectl get pods '
+            '--selector mylabel=myvalue '
+            '--selector mylabel2=myvalue2 '
+            '--selector inlinelabel1=inlinevalue1 '
+            '--selector inlinelabel2=inlinevalue2 '
+            '-o jsonpath=\'{.items[*].metadata.name}\' | '
+            f'grep \'^{name}\''
         ],
         f'sky down -y {name}',
     )

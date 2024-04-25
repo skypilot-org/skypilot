@@ -736,7 +736,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
     ports: Optional[Tuple[str]] = None,
-    labels: Optional[Dict[str, str]] = None,
+    labels: Optional[List[Tuple[str, str]]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # spot launch specific
@@ -778,8 +778,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
-                                             ports=ports,
-                                             labels=labels)
+                                             ports=ports)
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
                                                   field_to_ignore)

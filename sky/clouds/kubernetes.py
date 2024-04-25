@@ -1,6 +1,7 @@
 """Kubernetes."""
 import json
 import os
+import re
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -398,3 +399,20 @@ class Kubernetes(clouds.Cloud):
             return [f'{cluster}_{user}_{namespace}']
         except k8s.config.config_exception.ConfigException:
             return None
+
+    @classmethod
+    def is_label_valid(cls, label_key: str, label_value: str) -> Tuple[bool, Optional[str]]:
+        key_regex = re.compile(
+            r'^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?\/)?[a-z0-9]([-a-z0-9_.]{0,61}[a-z0-9])?$')
+        value_regex = re.compile(
+            r'^[a-zA-Z0-9]([-a-zA-Z0-9_.]{0,61}[a-zA-Z0-9])?$')
+        key_valid = bool(key_regex.match(label_key))
+        value_valid = bool(value_regex.match(label_value))
+        error_msg = None
+        if not key_valid:
+            error_msg = f'Invalid label key {label_key} for Kubernetes. Key must consist of alphanumeric characters or \'-\', \'_\', \'.\', with a total length of 63 characters or less.'
+        if not value_valid:
+            error_msg = f'Invalid label value {label_value} for Kubernetes. Value must consist of alphanumeric characters or \'-\', \'_\', \'.\', and must be no more than 63 characters in length.'
+        if not key_valid or not value_valid:
+            return False, error_msg
+        return True, None
