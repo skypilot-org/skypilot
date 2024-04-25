@@ -613,9 +613,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         store_type = list(storage.stores.keys())[0]
         store_prefix = store_type.store_prefix()
         bucket_url = store_prefix + file_bucket_name
-    for dst, src in copy_mounts_with_file_in_src.items():
-        file_id = src_to_file_id[src]
-        new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
+        for dst, src in copy_mounts_with_file_in_src.items():
+            file_id = src_to_file_id[src]
+            new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
     task.update_file_mounts(new_file_mounts)
 
     # Step 6: Replace the source field that is local path in all storage_mounts
