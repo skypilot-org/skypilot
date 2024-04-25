@@ -1,0 +1,46 @@
+# Starts a GUI server that connects to the Llama-3 OpenAI API server.
+#
+# This works with the endpoint.yaml, please refer to llm/llama-3/README.md
+# for more details.
+#
+# Usage:
+#
+#  1. If you have a endpoint started on a cluster (sky launch):
+#     `sky launch -c llama3-gui ./gui.yaml --env ENDPOINT=$(sky status --endpoint 8081 llama3)`
+#  2. If you have a SkyPilot Service started (sky serve up) called llama3:
+#     `sky launch -c llama3-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint llama3)`
+#
+# After the GUI server is started, you will see a gradio link in the output and
+# you can click on it to open the GUI.
+
+envs:
+  MODEL_NAME: meta-llama/Meta-Llama-3-70B-Instruct
+  ENDPOINT: x.x.x.x:3031 # Address of the API server running llama3. 
+
+resources:
+  cpus: 2
+
+setup: |
+  conda activate llama3
+  if [ $? -ne 0 ]; then
+    conda create -n llama3 python=3.10 -y
+    conda activate llama3
+  fi
+
+  # Install Gradio for web UI.
+  pip install gradio openai
+
+run: |
+  conda activate llama3
+  export PATH=$PATH:/sbin
+  WORKER_IP=$(hostname -I | cut -d' ' -f1)
+  CONTROLLER_PORT=21001
+  WORKER_PORT=21002
+
+  echo 'Starting gradio server...'
+  git clone https://github.com/vllm-project/vllm.git || true
+  python vllm/examples/gradio_openai_chatbot_webserver.py \
+    -m $MODEL_NAME \
+    --port 8811 \
+    --model-url http://$ENDPOINT/v1 \
+    --stop-token-ids 128009,128001 | tee ~/gradio.log
