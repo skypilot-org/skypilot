@@ -1,8 +1,9 @@
 # Serving Qwen1.5 on Your Own Cloud
 
 [Qwen1.5](https://github.com/QwenLM/Qwen1.5) is one of the top open LLMs.
-As of Feb 2024, Qwen1.5-72B-Chat is ranked higher than Mixtral-8x7b-Instruct-v0.1 on the LMSYS Chatbot Arena Leaderboard.
+As of April 2024, Qwen1.5-72B-Chat is ranked higher than Mixtral-8x7b-Instruct-v0.1 on the LMSYS Chatbot Arena Leaderboard.
 
+📰 **Update (26 April 2024) -** SkyPilot now also supports the [**Qwen1.5-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) model! It performs competitively with Llama-3-70B across a [series of evaluations](https://qwenlm.github.io/blog/qwen1.5-110b/#model-quality). Use [serve-110b.yaml](serve-110b.yaml) to serve the 110B model.
 
 ## References
 * [Qwen docs](https://qwen.readthedocs.io/en/latest/)
@@ -20,10 +21,10 @@ As of Feb 2024, Qwen1.5-72B-Chat is ranked higher than Mixtral-8x7b-Instruct-v0.
 
 After [installing SkyPilot](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html), run your own Qwen model on vLLM with SkyPilot in 1-click:
 
-1. Start serving Qwen 72B on a single instance with any available GPU in the list specified in [serve-72b.yaml](serve-72b.yaml) with a vLLM powered OpenAI-compatible endpoint (You can also switch to [serve-7b.yaml](serve-7b.yaml) for a smaller model):
+1. Start serving Qwen 110B on a single instance with any available GPU in the list specified in [serve-110b.yaml](serve-110b.yaml) with a vLLM powered OpenAI-compatible endpoint (You can also switch to [serve-72b.yaml](serve-72b.yaml) or [serve-7b.yaml](serve-7b.yaml) for a smaller model):
 
 ```console
-sky launch -c qwen serve-72b.yaml
+sky launch -c qwen serve-110b.yaml
 ```
 2. Send a request to the endpoint for completion:
 ```bash
@@ -32,7 +33,7 @@ IP=$(sky status --ip qwen)
 curl -L http://$IP:8000/v1/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "Qwen/Qwen1.5-72B-Chat",
+      "model": "Qwen/Qwen1.5-110B-Chat",
       "prompt": "My favorite food is",
       "max_tokens": 512
   }' | jq -r '.choices[0].text'
@@ -43,7 +44,7 @@ curl -L http://$IP:8000/v1/completions \
 curl -L http://$IP:8000/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "Qwen/Qwen1.5-72B-Chat",
+      "model": "Qwen/Qwen1.5-110B-Chat",
       "messages": [
         {
           "role": "system",
