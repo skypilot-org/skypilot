@@ -139,7 +139,7 @@ class CommandRunner:
     """Runner for commands to be executed on the cluster."""
 
     def __init__(self, node: Tuple[Any, Any], **kwargs):
-        del kwargs # Unused.
+        del kwargs  # Unused.
         self.node = node
 
     @property
