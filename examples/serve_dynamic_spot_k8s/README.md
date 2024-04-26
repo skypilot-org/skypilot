@@ -232,7 +232,7 @@ llama3        4   1        http://34.48.95.97:8888     7 min ago    1x GCP([Spot
 In this example, we demonstrated how to deploy a Llama3 inference endpoint on a fixed set of Kubernetes nodes, and autoscale to cloud spot instances across regions when the query rate increases. This allows you to serve a baseline query rate with a fixed set of resources, and burst to using spot instances across regions when more replicas are required.
 
 Using this approach you got:
-1. **💸 ~32%+ cost savings**: Instead of running 4 on-demand instances on GCP, you are running 2 on-demand instances and 2 spot instances. On L4 GPUs on GCP, this translates to 32% cost savings. These savings will increase if you use more spot instances.
+1. **💸 32%+ cost savings**: Instead of running 4 on-demand instances on GCP, you are running 2 on-demand instances and 2 spot instances. On L4 GPUs on GCP, this translates to 32% cost savings, while for T4 GPUs you save 17.1%. These savings will increase if you use more spot instances.
 2. **⚙️ High availability**: By bursting to spot instances across regions, you are reducing the risk of correlated failures and ensuring high availability of your service. If service failures occur, SkyPilot will transparently recover from them.
    1. Meanwhile, SkyPilot's intelligent mix of on-demand and spot autoscaling will ensure that your **service is always available with reliable on-demand instances** from your Kubernetes cluster.
 3. **⚖️ Transparent autoscaling**: SkyServe transparently autoscales your service to more replicas when the query rate increases, and scales down when the query rate decreases.
