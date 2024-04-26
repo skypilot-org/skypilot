@@ -29,7 +29,7 @@ Autoscaling node groups on GKE (and other hosted k8s offerings) operate within j
 3. All incoming queries will be transparently load-balanced across the 4 replicas
 
 <!-- Source: https://docs.google.com/drawings/d/146hDLsAcKbCL-0ZhW6-Co2rkpK9028Wzwm1m7kEIrWg/edit?usp=sharing -->
-![SkyServe on K8s + burst to cloud spot instances](https://i.imgur.com/otCmPrc.jpeg)
+![SkyServe on K8s + burst to cloud spot instances](https://i.imgur.com/xDoA94y.jpeg)
 
 **Outcome - you get one common endpoint to run all your queries, while SkyServe manages autoscaling underlying infrastructure (K8s + Spot) for you:**
 ```console
@@ -56,8 +56,7 @@ llama3        4   1        http://34.48.95.97:8888     7 min ago    1x GCP([Spot
 * 1 cluster has auto{stop,down} scheduled. Refresh statuses with: sky status --refresh
 ```
 
-<details>
-<summary>Click to see example running curl on the common endpoint</summary>
+Here is an example curl command to send a query to the service using the common endpoint:
 
 ```console
 curl -L http://35.225.61.44:30001/v1/chat/completions \
@@ -78,11 +77,18 @@ curl -L http://35.225.61.44:30001/v1/chat/completions \
      
 {"id":"chatcmpl-915","object":"chat.completion","created":1713055919,"model":"llama3","system_fingerprint":"fp_ollama","choices":[{"index":0,"message":{"role":"assistant","content":"Hello there! *adjusts glasses* I'm just an AI, here to help you with any questions or tasks you may have. My name is Assistant, but you can call me Assit for short. I'm a friendly and efficient assistant, always ready to lend a helping hand. How may I assist you today?"},"finish_reason":"stop"}],"usage":{"prompt_tokens":22,"completion_tokens":73,"total_tokens":95}}
 ```
-</details>
 
 ## How to run the example
 
-Create the Kubernetes cluster. This cluster has the following configuration:
+Check out this branch and install SkyPilot from source:
+```console
+git clone https://github.com/skypilot-org/skypilot.git
+cd skypilot
+git checkout k8s_serve_spot_example
+pip install -e ".[kubernetes,gcp]"
+```
+
+Create the Kubernetes cluster on GKE. This cluster has the following configuration:
 - Has 3 nodes
 - 1x T4 GPU and 16 vCPUs per node
 
@@ -166,7 +172,7 @@ Sending a query to 35.194.42.249:30001
 
 ### Forcing autoscaling by increasing the query rate
 
-You can increase the query rate to force autoscaling. In this example, we will increase the query rate to 0.5 QPS:
+You can increase the query rate to force autoscaling. In this example, we will increase the query rate to 4 QPS:
 ```console
 $ ./query_generator.sh 35.194.42.249:30001 4
 ```
@@ -221,3 +227,12 @@ llama3        4   1        http://34.48.95.97:8888     7 min ago    1x GCP([Spot
 * To see detailed service status: sky serve status -a
 * 1 cluster has auto{stop,down} scheduled. Refresh statuses with: sky status --refresh
 ```
+
+## Summary
+In this example, we demonstrated how to deploy a Llama3 inference endpoint on a fixed set of Kubernetes nodes, and autoscale to cloud spot instances across regions when the query rate increases. This allows you to serve a baseline query rate with a fixed set of resources, and burst to using spot instances across regions when more replicas are required.
+
+Using this approach you got:
+1. **💸 ~35% cost savings**: Instead of running 4 on-demand T4 instances on GCP, which would have cost $2.34/hr, you are running 2 on-demand instances and 2 spot instances, which cost $1.54/hr.
+2. **⚙️ High availability**: By bursting to spot instances across regions, you are reducing the risk of correlated failures and ensuring high availability of your service. If service failures occur, SkyPilot will transparently recover from them.
+3. **⚖️ Transparent autoscaling**: SkyServe transparently autoscales your service to more replicas when the query rate increases, and scales down when the query rate decreases.
+4. **🌎 Common endpoint**: You get one common endpoint to run all your queries, while SkyServe manages autoscaling underlying infrastructure (K8s + Spot) for you.
