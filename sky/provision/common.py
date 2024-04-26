@@ -154,6 +154,19 @@ class ClusterInfo:
             pair = (instance.internal_ip, instance.external_ip)
             other_ips.append(pair)
         return head_instance_ip + other_ips
+    
+    def instance_ids(self) -> List[str]:
+        """Return the instance ids in the same order of ip_tuples."""
+        id_list = []
+        if self.head_instance_id is not None:
+            id_list.append(self.head_instance_id + '-0')
+        for inst_id, instances in self.instances.items():
+            start_idx = 0
+            if inst_id == self.head_instance_id:
+                start_idx = 1
+            id_list.extend([f'{inst_id}-{i}' for i in range(start_idx, len(instances))])
+        return id_list
+
 
     def has_external_ips(self) -> bool:
         """True if the cluster has external IP."""

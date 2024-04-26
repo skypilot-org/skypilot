@@ -1314,7 +1314,7 @@ def _query_head_ip_with_retries(cluster_yaml: str,
     """Returns the IP of the head node by querying the cloud.
 
     Raises:
-      exceptions.FetchIPError: if we failed to get the head IP.
+      exceptions.FetchClusterInfoError: if we failed to get the head IP.
     """
     backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
@@ -1369,7 +1369,7 @@ def get_node_ips(cluster_yaml: str,
             IPs.
 
     Raises:
-        exceptions.FetchIPError: if we failed to get the IPs. e.reason is
+        exceptions.FetchClusterInfoError: if we failed to get the IPs. e.reason is
             HEAD or WORKER.
     """
     ray_config = common_utils.read_yaml(cluster_yaml)

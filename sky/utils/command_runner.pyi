@@ -44,7 +44,6 @@ class CommandRunner:
 
     def __init__(
         self,
-        node_id: str,
         node: Tuple[Any, ...],
         **kwargs,
     ) -> None:

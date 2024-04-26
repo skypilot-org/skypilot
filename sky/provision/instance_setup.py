@@ -126,8 +126,10 @@ def _parallel_ssh_with_cache(func,
         results = []
         runners = provision.get_command_runners(cluster_info.provider_name,
                                                 cluster_info, **ssh_credentials)
+        # instance_ids is guaranteed to be in the same order as runners.
+        instance_ids = cluster_info.instance_ids()
         for i, runner in enumerate(runners):
-            cache_id = str(i)
+            cache_id = instance_ids[i]
             wrapper = metadata_utils.cache_func(cluster_name, cache_id,
                                                 stage_name, digest)
             if i == 0:

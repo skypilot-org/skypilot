@@ -138,9 +138,12 @@ class SshMode(enum.Enum):
 class CommandRunner:
     """Runner for commands to be executed on the cluster."""
 
-    def __init__(self, node_id: str, node: Any, **kwargs):
-        del node, kwargs
-        self.node_id = node_id
+    def __init__(self, node: Tuple[Any, Any], **kwargs):
+        self.node = node
+
+    @property
+    def node_id(self) -> str:
+        return '-'.join(str(x) for x in self.node)
 
     def _get_command_to_run(
         self,

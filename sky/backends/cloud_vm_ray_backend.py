@@ -2226,6 +2226,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             (self.num_ips_per_node * self.launched_nodes - 1))
 
     def _update_cluster_info(self):
+        # When a cluster is on a cloud that does not support the new
+        # provisioner, we should skip updating cluster_info.
         if (self.launched_resources.cloud.PROVISIONER_VERSION >=
                 clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
@@ -2286,13 +2288,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 external IPs from the cloud provider.
 
         Raises:
-            exceptions.FetchIPError: if we failed to get the IPs. e.reason is
-                HEAD or WORKER.
+            exceptions.FetchClusterInfoError: if we failed to get the IPs.
+                e.reason is HEAD or WORKER.
         """
-        self.cached_cluster_info = cluster_info
-        if self.cached_cluster_info is None:
-            self._update_cluster_info()
-        if self.cached_cluster_info is not None:
+        if cluster_info is not None:
+            self.cached_cluster_info = cluster_info
             use_internal_ips = self._use_internal_ips()
             cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips(
                 use_internal_ips)
@@ -4162,7 +4162,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             A tuple of (returncode, stdout, stderr).
 
         Raises:
-            exceptions.FetchIPError: If the head node IP cannot be fetched.
+            exceptions.FetchClusterInfoError: If the head node IP cannot be
+                fetched.
         """
         # This will try to fetch the head node IP if it is not cached.
 
