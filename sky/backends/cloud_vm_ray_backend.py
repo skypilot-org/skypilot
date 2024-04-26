@@ -2245,14 +2245,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 raise exceptions.FetchClusterInfoError(
                     exceptions.FetchClusterInfoError.Reason.HEAD) from e
             if cluster_info.num_instances != self.launched_nodes:
-                logger.debug(f'Available nodes in the cluster {self.cluster_name} '
-                            'do not match the number of nodes requested ('
-                            f'{cluster_info.num_instances} != '
-                            f'{self.launched_nodes}).')
+                logger.debug(
+                    f'Available nodes in the cluster {self.cluster_name} '
+                    'do not match the number of nodes requested ('
+                    f'{cluster_info.num_instances} != '
+                    f'{self.launched_nodes}).')
                 raise exceptions.FetchClusterInfoError(
                     exceptions.FetchClusterInfoError.Reason.HEAD)
             self.cached_cluster_info = cluster_info
-            
 
     def update_cluster_ips(
             self,
@@ -2392,17 +2392,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             runners = command_runner.SSHCommandRunner.make_runner_list(
                 zip(ip_list, port_list), **ssh_credentials)
             return runners
-        provider_name = str(self.launched_resources.cloud).lower()
-        config = common_utils.read_yaml(self.cluster_yaml)
         if self.cached_cluster_info is None:
-            self.cached_cluster_info = provision_lib.get_cluster_info(
-                provider_name,
-                region=self.launched_resources.region,
-                cluster_name_on_cloud=self.cluster_name_on_cloud,
-                provider_config=config.get('provider', None))
-        runners = provision_lib.get_command_runners(provider_name,
-                                                    self.cached_cluster_info,
-                                                    **ssh_credentials)
+            self._update_cluster_info()
+        runners = provision_lib.get_command_runners(
+            self.cached_cluster_info.provider_name, self.cached_cluster_info,
+            **ssh_credentials)
         return runners
 
     @property
@@ -2552,8 +2546,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
-
-
 
 
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
