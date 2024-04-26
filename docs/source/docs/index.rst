@@ -68,7 +68,8 @@ Runnable examples:
 .. Keep this section in sync with README.md in SkyPilot repo
 
 * **LLMs on SkyPilot**
-  * `Llama 3 <https://github.com/skypilot-org/skypilot/tree/master/llm/llama3>`_
+
+  * `Llama 3 <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3>`_
   * `Qwen <https://github.com/skypilot-org/skypilot/tree/master/llm/qwen>`_
   * `Databricks DBRX <https://github.com/skypilot-org/skypilot/tree/master/llm/dbrx>`_
   * `Gemma <https://github.com/skypilot-org/skypilot/tree/master/llm/gemma>`_
