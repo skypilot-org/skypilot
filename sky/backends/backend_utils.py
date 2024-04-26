@@ -1243,10 +1243,14 @@ def parallel_data_transfer_to_nodes(
 
     def _sync_node(runner: 'command_runner.CommandRunner') -> None:
         if cmd is not None:
-            rc, stdout, stderr = runner.run(cmd,
-                                            log_path=log_path,
-                                            stream_logs=stream_logs,
-                                            require_outputs=True)
+            rc, stdout, stderr = runner.run(
+                cmd,
+                log_path=log_path,
+                stream_logs=stream_logs,
+                require_outputs=True,
+                # Mounting storage requires bashrc to be sourced, so that `sudo`
+                # alias is loaded for root users especially in docker container.
+                source_bashrc=True)
             err_msg = ('Failed to run command before rsync '
                        f'{origin_source} -> {target}. '
                        'Ensure that the network is stable, then retry.')
