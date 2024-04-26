@@ -2518,6 +2518,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 8:
             self.cached_cluster_info = None
+            self._update_cluster_info()
 
         self.__dict__.update(state)
 
