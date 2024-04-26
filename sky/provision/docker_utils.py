@@ -166,8 +166,7 @@ class DockerInitializer:
             rc,
             cmd,
             error_msg='Failed to run docker setup commands',
-            stderr=stdout + stderr,
-            stream_logs=False)
+            stderr=stdout + stderr)
         return stdout.strip()
 
     def initialize(self) -> str:
@@ -231,6 +230,8 @@ class DockerInitializer:
             # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             self._run(
+                '[ -f /etc/docker/daemon.json ] || '
+                'echo "{}" | sudo tee /etc/docker/daemon.json;'
                 'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
                 '/etc/docker/daemon.json > /tmp/daemon.json;'
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
