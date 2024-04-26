@@ -58,6 +58,7 @@ We can launch it with the following:
 
   resources:
     accelerators: V100:1
+    # Use spot instances to save cost.
     use_spot: true
 
   # Assume your working directory is under `~/transformers`.
@@ -255,7 +256,22 @@ Real-World Examples
 
 
 
+Using Both Spot and On-Demand Instances
+----------------------------------------
 
+Despite spot instances, you can use both spot and on-demand instances as candidate resources for a job. You can specify the resources as below:
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    any_of:
+      - use_spot: true
+      - use_spot: false
+
+In this example, the job will try to use spot instances first. If spot instances are not available, it will fall back to on-demand instances.
+Details of resource specification can be found in the `YAML spec <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
+More advanced policies for resource selection, such as `Can't Be Late <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>` (NSDI'24) paper, will be supported in the future.
 
 .. _pipeline:
 
@@ -283,7 +299,9 @@ To use Job Pipeline, you can specify the sequence of jobs in a YAML file. Here i
 
   resources:
     accelerators: V100:8
-    use_spot: true
+    any_of:
+      - use_spot: true
+      - use_spot: false
 
   file_mounts:
     /checkpoint:
@@ -335,10 +353,10 @@ To submit the pipeline, the same command :code:`sky job launch` is used. The pip
   Fetching managed job statuses...
   Managed jobs
   In progress jobs: 1 RECOVERING
-  ID  TASK  NAME           RESOURCES              SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS     
-  8         pipeline       -                      50 mins ago  47m 45s        -             1            RECOVERING   
-   ↳  0     train          1x [V100:8](spot)      50 mins ago  47m 45s        -             1            RECOVERING 
-   ↳  1     eval           1x [T4:1]              -            -              -             0            PENDING 
+  ID  TASK  NAME      RESOURCES                    SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS     
+  8         pipeline  -                            50 mins ago  47m 45s        -             1            RECOVERING   
+   ↳  0     train     1x [V100:8](spot|on-demand)  50 mins ago  47m 45s        -             1            RECOVERING 
+   ↳  1     eval      1x [T4:1]                    -            -              -             0            PENDING 
 
 
 Dashboard
