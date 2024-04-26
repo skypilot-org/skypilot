@@ -27,7 +27,7 @@ setup: |
   fi
 
   pip install "fschat[model_worker,webui]"
-  pip install "openai<1"
+  pip install openai==1.23.6
 
 run: |
   conda activate qwen
@@ -43,7 +43,8 @@ run: |
       "api_base": "http://${ENDPOINT}/v1",
       "api_key": "empty",
       "model_path": "${MODEL_NAME}",
-      "anony_only": false
+      "anony_only": false,
+      "api_type": "openai"
     }
   }
   EOF
