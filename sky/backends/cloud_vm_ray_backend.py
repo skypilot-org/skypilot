@@ -2546,7 +2546,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self._update_cluster_region()
 
         if version < 8:
-            self._update_cluster_info()
+            try:
+                self._update_cluster_info()
+            except exceptions.FetchClusterInfoError:
+                # This occurs when an old cluster from was autostopped,
+                # so the head IP in the database is not updated.
+                pass
 
 
 
