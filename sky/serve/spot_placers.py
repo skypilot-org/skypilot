@@ -11,6 +11,7 @@ from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky.serve.service_spec import SkyServiceSpec
 from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
@@ -137,7 +138,13 @@ class SpotPlacer:
 class DynamicFailoverSpotPlacer(SpotPlacer):
     """Dynamic failover to an active location when preempted."""
 
+    def __init__(self, spec: SkyServiceSpec, task_yaml_path: str) -> None:
+        super().__init__(spec, task_yaml_path)
+        self.location2cost: Dict[Location, float] = {}
+
     def _get_location_cost(self, location: Location) -> float:
+        if location in self.location2cost:
+            return self.location2cost[location]
 
         estimated_runtime = 1 * 3600
         config = common_utils.read_yaml(os.path.expanduser(self.task_yaml_path))
@@ -164,6 +171,7 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
                 min_cost = min(min_cost, cost)
 
         logger.info(f'Cost of {location} is {min_cost}')
+        self.location2cost[location] = min_cost
         return min_cost
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
@@ -182,7 +190,7 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
         selected_locations = []
         for _ in range(num_replicas):
             # Select the location with the least number of replicas.
-            # Tie break with the cost. 
+            # Tie break with the cost.
             selected_location = min(self.active_locations(),
                                     key=lambda location:
                                     (existing_locations_to_count[location],
