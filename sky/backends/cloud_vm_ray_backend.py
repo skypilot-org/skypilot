@@ -2231,7 +2231,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             provider_name = str(self.launched_resources.cloud).lower()
             config = common_utils.read_yaml(self.cluster_yaml)
             try:
-                self.cached_cluster_info = provision_lib.get_cluster_info(
+                cluster_info = provision_lib.get_cluster_info(
                     provider_name,
                     region=self.launched_resources.region,
                     cluster_name_on_cloud=self.cluster_name_on_cloud,
@@ -2244,6 +2244,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                              f'with {common_utils.format_exception(e)}.')
                 raise exceptions.FetchClusterInfoError(
                     exceptions.FetchClusterInfoError.Reason.HEAD) from e
+            if cluster_info.num_instances != self.launched_nodes:
+                logger.debug(f'Available nodes in the cluster {self.cluster_name} '
+                            'do not match the number of nodes requested ('
+                            f'{cluster_info.num_instances} != '
+                            f'{self.launched_nodes}).')
+                raise exceptions.FetchClusterInfoError(
+                    exceptions.FetchClusterInfoError.Reason.HEAD)
+            self.cached_cluster_info = cluster_info
+            
 
     def update_cluster_ips(
             self,
@@ -2536,9 +2545,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         self._update_cluster_region()
 
-        # Should call update after the handle is initialized by __dict__.update
         if version < 8:
             self._update_cluster_info()
+
 
 
 
