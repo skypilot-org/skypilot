@@ -17,7 +17,7 @@ service:
   
 
 resources:
-  accelerators: {A100-80GB:4, A100-80GB:8}
+  accelerators: {A100:8, A100-80GB:4, A100-80GB:8}
   disk_size: 1024
   disk_tier: best
   memory: 32+
@@ -29,7 +29,7 @@ setup: |
     conda create -n qwen python=3.10 -y
     conda activate qwen
   fi
-  pip install -U vllm==0.3.2
+  pip install -U vllm==0.4.1
   pip install -U transformers==4.38.0
 
 run: |
