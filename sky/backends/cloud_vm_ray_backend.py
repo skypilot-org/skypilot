@@ -2394,6 +2394,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return runners
         if self.cached_cluster_info is None:
             self._update_cluster_info()
+        assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
             self.cached_cluster_info.provider_name, self.cached_cluster_info,
             **ssh_credentials)
