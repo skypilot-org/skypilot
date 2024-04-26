@@ -1831,8 +1831,8 @@ def test_azure_start_stop():
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
-            'sleep 200',
-            f's=$(sky status -r {name}) && echo $s && echo $s | grep "INIT\|STOPPED"'
+            'sleep 250',
+            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep "INIT\|STOPPED"'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
