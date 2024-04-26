@@ -15,5 +15,5 @@ A job of n tasks (experimental; we support a pipeline of such tasks only): the j
 ## Architecture
 
 ![Architecture](../../docs/source/images/managed-jobs-arch.png)
-
+<!-- Raw file: https://docs.google.com/presentation/d/1AoFewsxm7jEsnFYyovyuTqKZs8W59qD9sNcM7Wcic4I/edit#slide=id.p -->
 
