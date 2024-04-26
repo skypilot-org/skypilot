@@ -2620,7 +2620,7 @@ def _down_or_stop_clusters(
 
     Controllers (job controller and sky serve controller) can only be
     terminated if the cluster name is explicitly and uniquely specified (not
-    via glob) and purge is set to True.
+    via glob).
     """
     if down:
         command = 'down'

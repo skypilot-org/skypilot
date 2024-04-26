@@ -1,4 +1,4 @@
-"""Controller: handles the life cycle of a managed job cluster (job)."""
+"""Controller: handles the life cycle of a managed job."""
 import argparse
 import multiprocessing
 import os
@@ -250,7 +250,8 @@ class JobController:
                 cluster_status_str = ('' if cluster_status is None else
                                       f' (status: {cluster_status.value})')
                 logger.info(
-                    f'Cluster is preempted{cluster_status_str}. Recovering...')
+                    f'Cluster is preempted or failed{cluster_status_str}. '
+                    'Recovering...')
             else:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
@@ -297,7 +298,8 @@ class JobController:
                 if (resources.use_spot and
                         resources.need_cleanup_after_preemption()):
                     # Some spot resource (e.g., Spot TPU VM) may need to be
-                    # cleaned up after preemption.
+                    # cleaned up after preemption, as running launch again on
+                    # those clusters again may fail.
                     logger.info('Cleaning up the preempted spot cluster...')
                     recovery_strategy.terminate_cluster(cluster_name)
 
@@ -430,7 +432,7 @@ def _cleanup(job_id: int, dag_yaml: str):
         task is executed at a time.
     """
     # NOTE: The code to get cluster name is same as what we did in the spot
-    # controller, we should keep it in sync with SpotController.__init__()
+    # controller, we should keep it in sync with JobController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         cluster_name = job_utils.generate_managed_job_cluster_name(
@@ -463,7 +465,7 @@ def start(job_id, dag_yaml, retry_until_up):
             time.sleep(1)
     except exceptions.ManagedJobUserCancelledError:
         dag, _ = _get_dag_and_name(dag_yaml)
-        task_id, _ = (job_state.get_latest_task_id_status(job_id))
+        task_id, _ = job_state.get_latest_task_id_status(job_id)
         logger.info(
             f'Cancelling managed job, job_id: {job_id}, task_id: {task_id}')
         job_state.set_cancelling(job_id=job_id,
@@ -493,7 +495,7 @@ def start(job_id, dag_yaml, retry_until_up):
         # But anyway, a clean solution is killing the controller process
         # directly, and then cleanup the cluster job_state.
         _cleanup(job_id, dag_yaml=dag_yaml)
-        logger.info(f'Spot cluster of job {job_id} has been cleaned up.')
+        logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
         if cancelling:
             job_state.set_cancelled(job_id=job_id,

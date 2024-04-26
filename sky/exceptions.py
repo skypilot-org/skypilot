@@ -72,7 +72,7 @@ class ManagedJobReachedMaxRetriesError(Exception):
     """Raised when a managed job fails to be launched after maximum retries.
 
     Developer note: For now this should only be used by managed job code
-    path. Please refer to the docstring of `spot.recovery_strategy._launch`
+    path. Please refer to the docstring of `job.recovery_strategy._launch`
     for more details about when the error will be raised.
     """
     pass
@@ -212,7 +212,7 @@ class ClusterStatusFetchingError(Exception):
 
 
 class ManagedJobUserCancelledError(Exception):
-    """Raised when a spot user cancels the job."""
+    """Raised when a user cancels a managed job."""
     pass
 
 

@@ -98,7 +98,7 @@ We can launch it with the following:
   :ref:`cloud bucket <sky-storage>`. The bucket will be created during the job running time, and cleaned up after the job
   finishes.
 
-SkyPilot will launch and start monitoring the job. When a preemption happens, SkyPilot will automatically
+SkyPilot will launch and start monitoring the job. When a spot preemption or any machine failure happens, SkyPilot will automatically
 search for resources across regions and clouds to re-launch the job.
 
 In this example, the job will be restarted from scratch after each preemption recovery.
@@ -132,13 +132,14 @@ An End-to-End Example
 Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a BERT model on a question-answering task with HuggingFace.
 
 .. code-block:: yaml
-  :emphasize-lines: 12-15,41-44
+  :emphasize-lines: 13-16,42-45
 
   # bert_qa.yaml
   name: bert-qa
 
   resources:
     accelerators: V100:1
+    use_spot: true
 
   # Assume your working directory is under `~/transformers`.
   # To make this example work, please run the following command:
@@ -370,7 +371,7 @@ Use ``sky job dashboard`` to open a dashboard to see all jobs:
 
 This automatically opens a browser tab to show the dashboard:
 
-.. image:: ../images/spot-dashboard.png
+.. image:: ../images/job-dashboard.png
 
 The UI shows the same information as the CLI ``sky job queue -a``. The UI is
 especially useful when there are many in-progress jobs to monitor, which the
@@ -416,7 +417,7 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
         # Specify the location of the job controller.
         cloud: gcp
         region: us-central1
-        # Specify the maximum number of job jobs that can be run concurrently.
+        # Specify the maximum number of managed jobs that can be run concurrently.
         cpus: 4+  # number of vCPUs, max concurrent jobs = 2 * cpus
         # Specify the disk_size in GB of the job controller.
         disk_size: 100

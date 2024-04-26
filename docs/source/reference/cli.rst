@@ -82,27 +82,27 @@ Sky Serve CLI
    :prog: sky serve update
    :nested: full
 
-Managed Spot Jobs CLI
+Managed Jobs CLI
 ---------------------------
 
 .. _sky-job-launch:
 .. click:: sky.cli:job_launch
-   :prog: sky spot launch
+   :prog: sky job launch
    :nested: full
 
 .. _sky-job-queue:
 .. click:: sky.cli:job_queue
-   :prog: sky spot queue
+   :prog: sky job queue
    :nested: full
 
 .. _sky-job-cancel:
 .. click:: sky.cli:job_cancel
-   :prog: sky spot cancel
+   :prog: sky job cancel
    :nested: full
 
 .. _sky-job-logs:
 .. click:: sky.cli:job_logs
-   :prog: sky spot logs
+   :prog: sky job logs
    :nested: full
 
 Storage CLI

@@ -2267,9 +2267,8 @@ def is_controller_accessible(
           failed to be connected.
     """
     if non_existent_message is None:
-        non_existent_message = (controller.value.default_hint_if_non_existent)
+        non_existent_message = controller.value.default_hint_if_non_existent
     cluster_name = controller.value.cluster_name
-    controller_name = controller.value.name.replace(' controller', '')
     need_connection_check = False
     controller_status, handle = None, None
     try:
@@ -2303,6 +2302,7 @@ def is_controller_accessible(
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
         # `backend_utils.check_cluster_available`.
+        controller_name = controller.value.name.replace(' controller', '')
         logger.warning(
             'Failed to get the status of the controller. It is not '
             f'fatal, but {controller_name} commands/calls may hang or return '
@@ -2571,7 +2571,7 @@ def get_task_resources_str(task: 'task_lib.Task',
         accelerator_dict = task.best_resources.accelerators
         if is_managed_job:
             if task.best_resources.use_spot:
-                spot_str = '(spot)'
+                spot_str = '(Spot)'
             task_cpu_demand = task.best_resources.cpus
         if accelerator_dict is None:
             resources_str = f'CPU:{task_cpu_demand}'
@@ -2588,9 +2588,9 @@ def get_task_resources_str(task: 'task_lib.Task',
                 task_cpu_demand = resource.cpus
             min_cpus = min(min_cpus, float(task_cpu_demand.strip('+ ')))
             if resource.use_spot:
-                spot_type.add('spot')
+                spot_type.add('Spot')
             else:
-                spot_type.add('on-demand')
+                spot_type.add('On-demand')
 
             if resource.accelerators is None:
                 continue
