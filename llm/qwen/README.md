@@ -115,9 +115,9 @@ curl -L http://$ENDPOINT/v1/chat/completions \
 
 It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat).
 
-1. Start the chat web UI:
+1. Start the chat web UI (change the `--env` flag to the model you are running):
 ```bash
-sky launch -c qwen-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint qwen)
+sky launch -c qwen-gui ./gui.yaml --env MODEL_NAME='Qwen/Qwen1.5-72B-Chat' --env ENDPOINT=$(sky serve status --endpoint qwen)
 ```
 
 2. Then, we can access the GUI at the returned gradio link:

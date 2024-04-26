@@ -13,7 +13,8 @@
 # you can click on it to open the GUI.
 
 envs:
-  ENDPOINT: x.x.x.x:3031 # Address of the API server running qwen. 
+  ENDPOINT: x.x.x.x:3031 # Address of the API server running qwen.
+  MODEL_NAME: Qwen/Qwen1.5-110B-Chat
 
 resources:
   cpus: 2
@@ -37,11 +38,12 @@ run: |
 
   cat <<EOF > ~/model_info.json
   {
-    "Qwen/Qwen1.5-72B-Chat": {
-      "model_name": "Qwen/Qwen1.5-72B-Chat",
+    "${MODEL_NAME}": {
+      "model_name": "${MODEL_NAME}",
       "api_base": "http://${ENDPOINT}/v1",
       "api_key": "empty",
-      "model_path": "Qwen/Qwen1.5-72B-Chat"
+      "model_path": "${MODEL_NAME}",
+      "anony_only": false
     }
   }
   EOF
