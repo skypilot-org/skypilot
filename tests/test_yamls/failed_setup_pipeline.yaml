@@ -5,6 +5,13 @@ name: a
 
 num_nodes: 2
 
+resources:
+  cpus: 2
+  any_of:
+    - cloud: aws
+    - cloud: gcp
+    
+
 setup: |
   echo setup for train
 
@@ -14,6 +21,13 @@ run: |
 
 ---
 name: b
+
+resources:
+  cpus: 2
+  any_of:
+    - cloud: aws
+    - cloud: gcp
+    
 
 setup: |
   exit 1
