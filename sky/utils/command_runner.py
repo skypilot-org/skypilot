@@ -42,6 +42,12 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
+# Disable sudo for root user. This is useful when the command is running in a
+# docker container, i.e. image_id is a docker image.
+HANDLE_SUDO_FOR_ROOT_CMD = (
+    '[ "$(whoami)" == "root" ] && function sudo() { "$@"; }')
+
+
 def ssh_options_list(
     ssh_private_key: Optional[str],
     ssh_control_name: Optional[str],
