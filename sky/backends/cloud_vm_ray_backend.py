@@ -2518,7 +2518,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 8:
             self.cached_cluster_info = None
-            self._update_cluster_info()
 
         self.__dict__.update(state)
 
@@ -2536,6 +2535,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.update_ssh_ports()
 
         self._update_cluster_region()
+
+        # Should call update after the handle is initialized by __dict__.update
+        if version < 8:
+            self._update_cluster_info()
+
 
 
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
