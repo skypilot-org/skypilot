@@ -27,6 +27,8 @@
 
 ----
 :fire: *News* :fire:
+- [Apr, 2024] Serve [**Qwen-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) on your infra: [**example**](./llm/qwen/)
+- [Apr, 2024] Serve [**Llama 3**](https://llama.meta.com/llama3/) on your cloud or Kubernetes: [**example**](./llm/llama-3/)
 - [Apr, 2024] Using [**Ollama**](https://github.com/ollama/ollama) to deploy quantized LLMs on CPUs and GPUs: [**example**](./llm/ollama/)
 - [Mar, 2024] Serve and deploy [**Databricks DBRX**](https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm) on your infra: [**example**](./llm/dbrx/)
 - [Feb, 2024] Deploying and scaling [**Gemma**](https://blog.google/technology/developers/gemma-open-models/) with SkyServe: [**example**](./llm/gemma/)
@@ -150,7 +152,9 @@ To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest
 
 <!-- Keep this section in sync with index.rst in SkyPilot Docs -->
 Runnable examples:
-- LLMs on SkyPilot
+- LLMs on SkyPilot'
+  - [Llama 3](./llm/llama-3/)
+  - [Qwen](./llm/qwen/) 
   - [Databricks DBRX](./llm/dbrx/)
   - [Gemma](./llm/gemma/)
   - [Mixtral 8x7B](./llm/mixtral/); [Mistral 7B](https://docs.mistral.ai/self-deployment/skypilot/) (from official Mistral team)
