@@ -127,7 +127,7 @@ columns = [
 
 
 class ManagedJobStatus(enum.Enum):
-    """Spot job status, designed to be in serverless style.
+    """Managed job status, designed to be in serverless style.
 
     The ManagedJobStatus is a higher level status than the JobStatus.
     Each managed job submitted to a cluster, will have a JobStatus
@@ -148,10 +148,9 @@ class ManagedJobStatus(enum.Enum):
         SUCCEEDED       ->  SUCCEEDED
         FAILED          ->  FAILED
         FAILED_SETUP    ->  FAILED_SETUP
-    Note that the JobStatus will not be stuck in PENDING, because each spot
-    cluster is dedicated to a managed job, i.e. there should always be enough
-    resource to run the job and the job will be immediately transitioned to
-    RUNNING.
+    Note that the JobStatus will not be stuck in PENDING, because each cluster
+    is dedicated to a managed job, i.e. there should always be enough resource
+    to run the job and the job will be immediately transitioned to RUNNING.
     """
     # PENDING: Waiting for the job controller to have a slot to run the
     # controller process.

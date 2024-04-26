@@ -28,11 +28,15 @@ def _is_running_on_job_controller() -> bool:
         config = yaml.safe_load(
             pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text())
         cluster_name = config.get('cluster_name', '')
-        candidate_controller_names = (controller_utils.Controllers.JOB_CONTROLLER.value.candidate_cluster_names)
+        candidate_controller_names = (
+            controller_utils.Controllers.JOB_CONTROLLER.value.
+            candidate_cluster_names)
         # We use startswith instead of exact match because the cluster name in
         # the yaml file is cluster_name_on_cloud which may have additional
         # suffices.
-        return any(cluster_name.startswith(name) for name in candidate_controller_names)
+        return any(
+            cluster_name.startswith(name)
+            for name in candidate_controller_names)
     return False
 
 

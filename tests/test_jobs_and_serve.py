@@ -242,7 +242,7 @@ class TestSpotOperations:
                 f'\'{job.JOB_CONTROLLER_NAME}\' is currently not supported'
                 in result.output)
 
-        result = cli_runner.invoke(cli.autostop, ['sky-spot-con*'])
+        result = cli_runner.invoke(cli.autostop, ['sky-job-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 

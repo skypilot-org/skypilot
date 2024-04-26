@@ -21,7 +21,7 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.job import constants as job_constants
-from sky.job import utils
+from sky.job import utils as job_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
 from sky.skylet import constants
@@ -91,7 +91,7 @@ class Controllers(enum.Enum):
         controller_type='jobs',
         name='managed job controller',
         candidate_cluster_names=[
-            utils.JOB_CONTROLLER_NAME, utils.LEGACY_JOB_CONTROLLER_NAME
+            job_utils.JOB_CONTROLLER_NAME, job_utils.LEGACY_JOB_CONTROLLER_NAME
         ],
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '

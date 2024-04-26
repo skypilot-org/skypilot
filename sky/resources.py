@@ -1292,7 +1292,14 @@ class Resources:
         resources_fields['accelerator_args'] = config.pop(
             'accelerator_args', None)
         resources_fields['use_spot'] = config.pop('use_spot', None)
-        resources_fields['job_recovery'] = config.pop('job_recovery', None)
+        if config.get('spot_recovery') is not None:
+            logger.warning('spot_recovery is deprecated. Use job_recovery '
+                           'instead.')
+            resources_fields['job_recovery'] = config.pop('spot_recovery', None)
+        else:
+            # spot_recovery and job_recovery are guaranteed to be mutually
+            # exclusive by the schema validation.
+            resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
         resources_fields['region'] = config.pop('region', None)
         resources_fields['zone'] = config.pop('zone', None)
