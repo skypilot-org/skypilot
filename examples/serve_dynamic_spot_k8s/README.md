@@ -8,7 +8,7 @@ This example demonstrates how to deploy a Llama 3 inference endpoint on a Kubern
 
 Autoscaling node groups on GKE (and other hosted k8s offerings) operate within just one region. This can be limiting because:
 1. 📉 **Capacity** - using a single region limits the number of replicas you can deploy because of capacity constraints from the cloud provider. 
-2. ❌ **Correlated failures** - spot instances in a single region are affected by correlated failures. I.e., if a spot instance is terminated in one region, it is likely that other spot instances in the same region will also be terminated. Spreading across regions mitigates this risk. 
+2. ❌ **Correlated failures** - spot instances in a single region are affected by correlated failures. I.e., if a spot instance is terminated in one region, it is likely that other spot instances in the same region will also be terminated. **Spreading across regions mitigates this risk** and having always available **on-demand replicas from the Kubernetes cluster ensures high availability**. 
 3. 🔐 **Lock-in** - you are locked into a single cloud provider and region, reducing your ability to optimize costs and improve availability.
 
 **How SkyServe solves these problems**
@@ -232,7 +232,8 @@ llama3        4   1        http://34.48.95.97:8888     7 min ago    1x GCP([Spot
 In this example, we demonstrated how to deploy a Llama3 inference endpoint on a fixed set of Kubernetes nodes, and autoscale to cloud spot instances across regions when the query rate increases. This allows you to serve a baseline query rate with a fixed set of resources, and burst to using spot instances across regions when more replicas are required.
 
 Using this approach you got:
-1. **💸 ~35% cost savings**: Instead of running 4 on-demand T4 instances on GCP, which would have cost $2.34/hr, you are running 2 on-demand instances and 2 spot instances, which cost $1.54/hr.
+1. **💸 ~32%+ cost savings**: Instead of running 4 on-demand instances on GCP, you are running 2 on-demand instances and 2 spot instances. On L4 GPUs on GCP, this translates to 32% cost savings. These savings will increase if you use more spot instances.
 2. **⚙️ High availability**: By bursting to spot instances across regions, you are reducing the risk of correlated failures and ensuring high availability of your service. If service failures occur, SkyPilot will transparently recover from them.
+   1. Meanwhile, SkyPilot's intelligent mix of on-demand and spot autoscaling will ensure that your **service is always available with reliable on-demand instances** from your Kubernetes cluster.
 3. **⚖️ Transparent autoscaling**: SkyServe transparently autoscales your service to more replicas when the query rate increases, and scales down when the query rate decreases.
 4. **🌎 Common endpoint**: You get one common endpoint to run all your queries, while SkyServe manages autoscaling underlying infrastructure (K8s + Spot) for you.
