@@ -139,6 +139,7 @@ class CommandRunner:
     """Runner for commands to be executed on the cluster."""
 
     def __init__(self, node: Tuple[Any, Any], **kwargs):
+        del kwargs # Unused.
         self.node = node
 
     @property
@@ -306,8 +307,8 @@ class SSHCommandRunner(CommandRunner):
                 command will utilize ControlMaster. We currently disable
                 it for k8s instance.
         """
+        super().__init__(node)
         ip, port = node
-        super().__init__(ip, node)
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
