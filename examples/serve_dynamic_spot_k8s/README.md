@@ -112,8 +112,8 @@ Service from YAML spec: llama3.yaml
 Service Spec:
 Readiness probe method:           POST /v1/chat/completions {"model": "llama3", "messages": [{"role": "user", "content": "Hello! What is your name?"}], "max_tokens": 1}
 Readiness initial delay seconds:  1800
-Replica autoscaling policy:       Fixed 3 replicas
-Spot Policy:                      No spot policy
+Replica autoscaling policy:       Autoscaling from 2 to 4 replicas (target QPS per replica: 1)
+Spot Policy:                      Static spot mixture with 2 base on-demand replicas
 
 Each replica will use the following resources (estimated):
 == Optimizer ==
