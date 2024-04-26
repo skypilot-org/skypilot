@@ -1,6 +1,6 @@
-# SkyPilot Managed Spot
+# SkyPilot Managed Jobs
 
-This module is used for running user jobs on spot clusters, which automatically recovers the job from preemptions.
+This module is used for running and managing user jobs, which automatically recovers the job from spot preemptions and machine failures.
 
 ## Concepts
 
@@ -14,6 +14,6 @@ A job of n tasks (experimental; we support a pipeline of such tasks only): the j
 
 ## Architecture
 
-![Architecture](../../docs/source/images/spot-controller.png)
+![Architecture](../../docs/source/images/managed-jobs-arch.png)
 
 
