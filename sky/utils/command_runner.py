@@ -139,7 +139,7 @@ class CommandRunner:
     """Runner for commands to be executed on the cluster."""
 
     def __init__(self, node: Tuple[Any, Any], **kwargs):
-        del kwargs  # Unused.
+        del kwargs # Unused.
         self.node = node
 
     @property
@@ -168,13 +168,15 @@ class CommandRunner:
             command += [
                 # Need this `-i` option to make sure `source ~/.bashrc` work.
                 '-i',
-                shlex.quote(cmd),
+                shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                            f'PYTHONWARNINGS=ignore && ({cmd})'),
             ]
         else:
             # Optimization: this reduces the time for connecting to the remote
             # cluster by 1 second.
             # sourcing ~/.bashrc is not required for internal executions
-            command += [shlex.quote(cmd)]
+            command += ['true && export OMP_NUM_THREADS=1 PYTHONWARNINGS=ignore'
+                       f' && ({cmd})']
         if not separate_stderr:
             command.append('2>&1')
         if not process_stream and skip_lines:
