@@ -4319,7 +4319,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
         if file_mounts is None or not file_mounts:
             return
-        symlink_commands = [command_runner.HANDLE_SUDO_FOR_ROOT_CMD]
+        symlink_commands = []
         fore = colorama.Fore
         style = colorama.Style
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
@@ -4424,6 +4424,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # (2) Run the commands to create symlinks on all the nodes.
         symlink_command = ' && '.join(symlink_commands)
         if symlink_command:
+            symlink_command = (
+                f'true && {command_runner.HANDLE_SUDO_FOR_ROOT_CMD} && '
+                f'{symlink_command}')
 
             def _symlink_node(runner: command_runner.CommandRunner):
                 returncode = runner.run(symlink_command, log_path=log_path)
