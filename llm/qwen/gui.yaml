@@ -14,7 +14,7 @@
 
 envs:
   ENDPOINT: x.x.x.x:3031 # Address of the API server running qwen.
-  MODEL_NAME: Qwen/Qwen1.5-110B-Chat
+  MODEL_NAME: Qwen/Qwen1.5-72B-Chat
 
 resources:
   cpus: 2
