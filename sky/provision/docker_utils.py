@@ -166,8 +166,7 @@ class DockerInitializer:
             rc,
             cmd,
             error_msg='Failed to run docker setup commands',
-            stderr=stdout + stderr,
-            stream_logs=False)
+            stderr=stdout + stderr)
         return stdout.strip()
 
     def initialize(self) -> str:
@@ -218,14 +217,25 @@ class DockerInitializer:
                     f'{specific_image}')
         container_running = self._check_container_status()
         if container_running:
-            running_image = (self._run(
-                check_docker_image(self.container_name, self.docker_cmd)))
+            running_image = self._run(
+                check_docker_image(self.container_name, self.docker_cmd))
             if running_image != specific_image:
                 logger.error(
                     f'A container with name {self.container_name} is running '
                     f'image {running_image} instead of {specific_image} (which '
                     'was provided in the YAML)')
         else:
+            # Edit docker config first to avoid disconnecting the container
+            # from GPUs when a systemctl command is called. This is a known
+            # issue with nvidia container toolkit:
+            # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
+            self._run(
+                '[ -f /etc/docker/daemon.json ] || '
+                'echo "{}" | sudo tee /etc/docker/daemon.json;'
+                'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
+                '/etc/docker/daemon.json > /tmp/daemon.json;'
+                'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
+                'sudo systemctl restart docker')
             user_docker_run_options = self.docker_config.get('run_options', [])
             start_command = docker_start_cmds(
                 specific_image,

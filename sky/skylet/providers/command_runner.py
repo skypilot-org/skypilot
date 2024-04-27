@@ -229,6 +229,19 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                     f'The `image_env` is:\n{image_env}')
                 raise e
 
+            # Edit docker config first to avoid disconnecting the container
+            # from GPUs when a systemctl command is called. This is a known
+            # issue with nvidia container toolkit:
+            # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
+            self.run(
+                '[ -f /etc/docker/daemon.json ] || '
+                'echo "{}" | sudo tee /etc/docker/daemon.json;'
+                'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
+                '/etc/docker/daemon.json > /tmp/daemon.json;'
+                'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
+                'sudo systemctl restart docker',
+                run_env='host')
+
             user_docker_run_options = self.docker_config.get(
                 'run_options', []) + self.docker_config.get(
                     f'{"head" if as_head else "worker"}_run_options', [])
