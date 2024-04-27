@@ -232,7 +232,7 @@ class AutostopEvent(SkyletEvent):
         # Stop the ray autoscaler to avoid scaling up, during
         # stopping/terminating of the cluster.
         logger.info('Stopping the ray cluster.')
-        subprocess.run('ray stop', shell=True, check=True)
+        subprocess.run(f'{constants.SKY_RAY_CMD} stop', shell=True, check=True)
 
         operation_fn = provision_lib.stop_instances
         if autostop_config.down:

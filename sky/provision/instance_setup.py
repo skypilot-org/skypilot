@@ -367,7 +367,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                f'grep "gcs-address={head_ip}:${{RAY_PORT}}" || '
                f'{{ {cmd} }}')
     else:
-        cmd = 'ray stop; ' + cmd
+        cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
 
     logger.info(f'Running command on worker nodes: {cmd}')
 
