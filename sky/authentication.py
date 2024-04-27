@@ -67,6 +67,7 @@ _SSH_KEY_GENERATION_LOCK = f'{SKY_HOME}/generated/ssh/.__internal-sky-key.lock'
 SSH_DIR = os.environ.get('SKY_HOME', '~/.ssh')
 PRIVATE_SSH_KEY_PATH = f'{SSH_DIR}/sky-key'
 PUBLIC_SSH_KEY_PATH = f'{SSH_DIR}/sky-key.pub'
+REMOTE_PUBLIC_SSH_KEY_PATH = '~/.ssh/sky-key.pub'
 
 
 def _generate_rsa_key_pair() -> Tuple[str, str]:
@@ -326,7 +327,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # controller, i.e., the public and private key on the node may
     # not match.
     file_mounts = config['file_mounts']
-    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    file_mounts[PUBLIC_SSH_KEY_PATH] = REMOTE_PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts
 
     return config
@@ -384,7 +385,7 @@ def setup_ibm_authentication(config):
 
     # Add public key path to file mounts
     file_mounts = config['file_mounts']
-    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    file_mounts[PUBLIC_SSH_KEY_PATH] = REMOTE_PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts
 
     return config
