@@ -8,10 +8,8 @@ from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import command_runner
 from sky.utils import subprocess_utils
-
-if typing.TYPE_CHECKING:
-    from sky.utils import command_runner
 
 logger = sky_logging.init_logger(__name__)
 
