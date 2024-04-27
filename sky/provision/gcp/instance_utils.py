@@ -1368,128 +1368,84 @@ class GCPTPUVMInstance(GCPInstance):
         cls.wait_for_operation(operation, project_id, zone)
 
     @classmethod
-    def resize_disk(cls, project_id: str, availability_zone: str,
-                    node_config: dict, instance_name: str) -> None:
-        """Resize the disk a machine image with a different size is used.
+    def resize_disk(cls, project_id: str, availability_zone: str, node_config: dict,
+                    instance_name: str) -> None:
+        """Resizes disk for TPU VMs by adding a persistent disk when needed."""
+        import time
+        from googleapiclient.errors import HttpError
+        resource = cls.load_resource()
 
-        TODO: Implement the feature to attach persistent disks for TPU VMs.
-        The boot disk of TPU VMs is not resizable, and users need to add a
-        persistent disk to expand disk capacity. Related issue: #2387
-        """
-        from sky.skylet import log_lib
-        import os
-        from googleapiclient import discovery
+        # Determine the required disk size from configuration
+        default_disk_size = 100  # Default boot disk size for TPUVMs
+        requested_size = int(node_config['metadata'].get(
+            'diskSize', default_disk_size))
 
-        resource = discovery.build("compute", "v1")
+        # Calculate additional disk size needed
+        additional_size = requested_size - default_disk_size
+        if additional_size <= 0:
+            return  # No additional disk needed
 
-        # TODO: Update the CLI to prompt the for disk mode and size
-        # Extract the specified disk size from the configuration
-        disk_size_gb = 100
-        if 'diskSize' in node_config['metadata']:
-            disk_size_gb = int(node_config['metadata']['diskSize'])
-        # By default, each Cloud TPU VM has a 100GB single boot persistent disk that contains the operating system.
-        if disk_size_gb <= 100:
-            return None
-        disk_size_gb -= 100
-        logger.info(f"Request persistent disk for size: {disk_size_gb}")
-        disk_mode = "read-write"
+        # Log the disk size request
+        logger.info(
+            f"Requesting additional persistent disk of size: {additional_size}GB")
+
+        # Set disk specifications
         tpu_name = instance_name.split("/")[-1]
+        disk_name = f"{tpu_name}-extra-disk"
+        disk_type = f"zones/{availability_zone}/diskTypes/pd-standard"
 
-        # Create a new disk
+        # Prepare the disk creation body
         disk_body = {
-            "name": f"{tpu_name}-extra-disk",
-            "sizeGb": str(disk_size_gb),
-            "type": f"zones/{availability_zone}/diskTypes/pd-standard",  # or pd-ssd
+            "name": disk_name,
+            "sizeGb": str(additional_size),
+            "type": disk_type,
         }
 
+        # Create the disk
         try:
-            create_operation = (
-                resource.disks()
-                .insert(
-                    project=project_id, zone=availability_zone, body=disk_body
-                )
-                .execute()
-            )
-            time.sleep(3)
-
+            resource.disks().insert(project=project_id, zone=availability_zone,
+                                    body=disk_body).execute()
+            time.sleep(3)  # Short pause after disk creation
         except HttpError as e:
-            # Catch HttpError for issues during disk creation or attachment
-            logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
+            logger.warning(f"Disk creation failed: {e.reason}")
+            return
 
-        # Attach the disk to TPUVMs with gcloud alpha
-        attach_to_tpus = (
+        # Attach the newly created disk
+        attach_command = (
             f"gcloud alpha compute tpus tpu-vm attach-disk {tpu_name} "
-            f"--zone {availability_zone} --disk {disk_body['name']} "
-            f"--mode {disk_mode}"
+            f"--zone {availability_zone} --disk {disk_name} --mode read-write"
         )
+        if cls.execute_command_with_log(attach_command) != 0:
+            logger.warning("Failed to attach disk to TPU VMs.")
 
-        rcode, stdout, stderr = log_lib.run_with_log(
-            attach_to_tpus,
-            os.devnull,
-            shell=True,
-            stream_logs=False,
-            require_outputs=True,
-        )
-
-        if rcode != 0:
-            failure_massage = (
-                "Failed to attach disk to TPU VMs.\n"
-                "**** STDOUT ****\n"
-                "{stdout}\n"
-                "**** STDERR ****\n"
-                "{stderr}"
-            )
-            logger.warning(failure_massage)
-
-        # # Set auto-delete state of the Persistent Disk
-        # auto_delete_disk = (
-        #     f"gcloud compute instances set-disk-auto-delete {instance_name} "
-        #     f"--zone={availability_zone} "
-        #     f"--auto-delete "
-        #     f"--disk={disk_body['name']}"
-        # )
-        #
-        # rcode, stdout, stderr = log_lib.run_with_log(
-        #     auto_delete_disk,
-        #     os.devnull,
-        #     shell=True,
-        #     stream_logs=False,
-        #     require_outputs=True,
-        # )
-        #
-        # if rcode != 0:
-        #     failure_massage = (
-        #         "Failed to set auto-delete state of the Persistent Disk. Please delete the disk manually.\n"
-        #         "**** STDOUT ****\n"
-        #         "{stdout}\n"
-        #         "**** STDERR ****\n"
-        #         "{stderr}"
-        #     )
-        #     logger.warning(failure_massage)
-
-        # Format the persistent disk, create directory and mount the persistent disk
-        format_mount_disk = (
+        # Format and mount the disk
+        mount_command = (
             f"gcloud compute tpus tpu-vm ssh {tpu_name} --zone={availability_zone} "
-            f"--command='sudo mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard /dev/sdb ; sudo mkdir -p /mnt/disks/persist ; sudo mount -o discard,defaults /dev/sdb /mnt/disks/persist'"
+            f"--command='sudo mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,"
+            f"discard /dev/sdb ; sudo mkdir -p /mnt/disks/persist ; sudo mount -o "
+            f"discard,defaults /dev/sdb /mnt/disks/persist'"
         )
+        if cls.execute_command_with_log(mount_command) != 0:
+            logger.warning("Failed to format and mount persistent disk.")
+
+    @classmethod
+    def execute_command_with_log(cls, command: str) -> int:
+        """Executes a shell command and logs the output, returning the return code."""
+        from sky.skylet import log_lib
+        import os
+
         rcode, stdout, stderr = log_lib.run_with_log(
-            format_mount_disk,
+            command,
             os.devnull,
             shell=True,
             stream_logs=False,
             require_outputs=True,
         )
         if rcode != 0:
-            failure_massage = (
-                "Failed to format and mount persistent disk\n"
-                "**** STDOUT ****\n"
-                "{stdout}\n"
-                "**** STDERR ****\n"
-                "{stderr}"
-            )
-            logger.warning(failure_massage)
+            logger.warning(f"Command failed.\n**** STDOUT ****\n{stdout}\n**** STDERR ****"
+                           f"\n{stderr}")
+        return rcode
 
-        return None
 
     @classmethod
     def get_instance_info(cls, project_id: str, availability_zone: str,
