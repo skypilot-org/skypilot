@@ -95,6 +95,28 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
 
+def get_gfd_accelerator_from_value(value: str) -> str:
+    """Returns the accelerator name for GPU feature discovery (GFD) labeled nodes.
+    
+    Searches against a canonical list of NVIDIA GPUs and pattern
+    matches the canonical GPU name against the GFD label. Taken from
+    sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
+    """
+    canonical_gpu_names = [
+        'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4', 'V100', 
+        'A10', 'P100', 'P40', 'P4', 'L4'
+    ]
+
+    for canonical_name in canonical_gpu_names:
+        if canonical_name.lower() in value.lower():
+            return canonical_name
+    
+    # If we didn't find a canonical name:
+    # 1. remove 'NVIDIA ' if present (e.g., 'NVIDIA RTX A6000' -> 'RTX A6000')
+    # 2. remove 'GeForce ' if present (e.g., 'NVIDIA GeForce RTX 3070' -> 'RTX 3070')
+    # 3. replace 'RTX ' with 'RTX' (without spaces) (e.g., 'RTX 6000' -> 'RTX6000')
+    return gpu_name.lower().replace('nvidia ', '').replace('geforce ', '').replace('rtx ', 'rtx').replace(' ', '-')
+
 
 class SkyPilotLabelFormatter(GPULabelFormatter):
     """Custom label formatter for SkyPilot
@@ -178,11 +200,34 @@ class GKELabelFormatter(GPULabelFormatter):
                 f'Invalid accelerator name in GKE cluster: {value}')
 
 
+class GFDLabelFormatter(GPULabelFormatter):
+    """GPU Feature Discovery label formatter
+
+    NVIDIA GPUs nodes are labeled by GPU feature discovery
+    e.g. nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+    https://github.com/NVIDIA/gpu-feature-discovery
+
+    GPU feature discovery is included as part of the
+    NVIDIA GPU Operator:
+    https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html
+    """
+
+    LABEL_KEY = 'nvidia.com/gpu.product'
+
+    @classmethod
+    def get_label_key(cls) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return get_gfd_accelerator_from_value(value)
+
+
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats.
 LABEL_FORMATTER_REGISTRY = [
-    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter
+    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter, GFDLabelFormatter
 ]
 
 
