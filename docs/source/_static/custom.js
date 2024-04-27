@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'DBRX (Databricks)' },
         { selector: '.toctree-l1 > a', text: 'Ollama' },
         { selector: '.toctree-l1 > a', text: 'Llama-3 (Meta)' },
+        { selector: '.toctree-l1 > a', text: 'Qwen (Alibaba)' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
