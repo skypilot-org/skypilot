@@ -4420,6 +4420,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 action_message='Syncing',
                 log_path=log_path,
                 stream_logs=False,
+                source_bashrc=True,
             )
         # (2) Run the commands to create symlinks on all the nodes.
         symlink_command = ' && '.join(symlink_commands)
@@ -4499,6 +4500,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     run_rsync=False,
                     action_message='Mounting',
                     log_path=log_path,
+                    source_bashrc=True,
                 )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:

@@ -1224,6 +1224,7 @@ def parallel_data_transfer_to_nodes(
     # Advanced options.
     log_path: str = os.devnull,
     stream_logs: bool = False,
+    source_bashrc: bool = False,
 ):
     """Runs a command on all nodes and optionally runs rsync from src->dst.
 
@@ -1235,6 +1236,7 @@ def parallel_data_transfer_to_nodes(
         action_message: str; Message to be printed while the command runs
         log_path: str; Path to the log file
         stream_logs: bool; Whether to stream logs to stdout
+        source_bashrc: bool; Source bashrc before running the command.
     """
     fore = colorama.Fore
     style = colorama.Style
@@ -1246,7 +1248,8 @@ def parallel_data_transfer_to_nodes(
             rc, stdout, stderr = runner.run(cmd,
                                             log_path=log_path,
                                             stream_logs=stream_logs,
-                                            require_outputs=True)
+                                            require_outputs=True,
+                                            source_bashrc=source_bashrc)
             err_msg = ('Failed to run command before rsync '
                        f'{origin_source} -> {target}. '
                        'Ensure that the network is stable, then retry. '
