@@ -203,8 +203,10 @@ class ClusterInfo:
     def get_ssh_ports(self) -> List[int]:
         """Get the SSH port of all the instances."""
         head_instance = self.get_head_instance()
-        assert head_instance is not None, self
-        head_instance_port = [head_instance.ssh_port]
+
+        head_instance_port = []
+        if head_instance is not None:
+            head_instance_port = [head_instance.ssh_port]
 
         worker_instances = self.get_worker_instances()
         worker_instance_ports = [

@@ -3,7 +3,6 @@
 import dataclasses
 import shlex
 import time
-import typing
 from typing import Any, Dict, List
 
 from sky import sky_logging
