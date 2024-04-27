@@ -320,7 +320,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.
-    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
+    config['auth']['ssh_public_key'] = REMOTE_PUBLIC_SSH_KEY_PATH
 
     # TODO(zhwu): we need to avoid uploading the public ssh key to the
     # nodes, as that will cause problem when the node is used as spot
