@@ -108,13 +108,14 @@ def get_gfd_accelerator_from_value(value: str) -> str:
     ]
 
     for canonical_name in canonical_gpu_names:
-        if canonical_name.lower() in value.lower():
+        if canonical_name in value:
             return canonical_name
     
     # If we didn't find a canonical name:
     # 1. remove 'NVIDIA ' if present (e.g., 'NVIDIA RTX A6000' -> 'RTX A6000')
     # 2. remove 'GeForce ' if present (e.g., 'NVIDIA GeForce RTX 3070' -> 'RTX 3070')
     # 3. replace 'RTX ' with 'RTX' (without spaces) (e.g., 'RTX 6000' -> 'RTX6000')
+    # 4. replace any other spaces with dashes (e.g. 'RTX 2080 Ti' -> 'RTX2080-Ti')
     return gpu_name.lower().replace('nvidia ', '').replace('geforce ', '').replace('rtx ', 'rtx').replace(' ', '-')
 
 
