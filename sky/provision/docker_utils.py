@@ -255,7 +255,7 @@ class DockerInitializer:
         # Disable apt-get from asking user input during installation.
         # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # pylint: disable=line-too-long
         self._run(
-            'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
+            f'echo \'{command_runner.HANDLE_SUDO_FOR_ROOT_CMD}\' >> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
             run_env='docker')
         # Install dependencies.
