@@ -2984,7 +2984,7 @@ def show_gpus(
                                                    case_sensitive=False,
                                                    all_regions=all_regions)
         # Import here to save module load speed.
-        from sky.clouds.service_catalog import common  # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import (common)  # pylint: disable=import-outside-toplevel
         # For each gpu name (count not included):
         #   - Group by cloud
         #   - Sort within each group by prices
@@ -3042,13 +3042,14 @@ def show_gpus(
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(attachable)'
                 cpu_count = item.cpu_count
-                if pd.isna(cpu_count):
-                    cpu_str = '-'
-                elif isinstance(cpu_count, (float, int)):
+                if not pd.isna(cpu_count) and isinstance(
+                        cpu_count, (float, int)):
                     if int(cpu_count) == cpu_count:
                         cpu_str = str(int(cpu_count))
                     else:
                         cpu_str = f'{cpu_count:.1f}'
+                else:
+                    cpu_str = '-'
                 device_memory_str = (f'{item.device_memory:.0f}GB' if
                                      not pd.isna(item.device_memory) else '-')
                 host_memory_str = f'{item.memory:.0f}GB' if not pd.isna(

@@ -48,10 +48,9 @@ def test_accelerator_mismatch(enable_all_clouds):
 
 
 def test_show_gpus():
-    """
-    This is a test suite for `sky show-gpus` to check functionality (but not correctness).
-    The tests below correspond to the following terminal commands,
-    in order:
+    """Tests `sky show-gpus` can be invoked (but not correctness).
+
+    Tests below correspond to the following terminal commands, in order:
 
     -> sky show-gpus
     -> sky show-gpus --all
