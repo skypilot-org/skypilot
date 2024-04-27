@@ -2983,6 +2983,32 @@ def show_gpus(
                                                    clouds=cloud,
                                                    case_sensitive=False,
                                                    all_regions=all_regions)
+        # Import here to save module load speed.
+        from sky.clouds.service_catalog import common  # pylint: disable=import-outside-toplevel
+        # For each gpu name (count not included):
+        #   - Group by cloud
+        #   - Sort within each group by prices
+        #   - Sort groups by each cloud's (min price, min spot price)
+        new_result = {}
+        for i, (gpu, items) in enumerate(result.items()):
+            df = pd.DataFrame([t._asdict() for t in items])
+            # Determine the minimum prices for each cloud.
+            min_price_df = df.groupby('cloud').agg(min_price=('price', 'min'),
+                                                   min_spot_price=('spot_price',
+                                                                   'min'))
+            df = df.merge(min_price_df, on='cloud')
+            # Sort within each cloud by price.
+            df = df.groupby('cloud', group_keys=False).apply(
+                lambda x: x.sort_values(by=['price', 'spot_price']))
+            # Sort across groups (clouds).
+            df = df.sort_values(by=['min_price', 'min_spot_price'])
+            df = df.drop(columns=['min_price', 'min_spot_price'])
+            sorted_dataclasses = [
+                common.InstanceTypeInfo(*row)
+                for row in df.to_records(index=False)
+            ]
+            new_result[gpu] = sorted_dataclasses
+        result = new_result
 
         if len(result) == 0:
             if cloud == 'kubernetes':
