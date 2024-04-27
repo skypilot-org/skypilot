@@ -4426,7 +4426,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         symlink_command = ' && '.join(symlink_commands)
         if symlink_command:
             symlink_command = (
-                f'true && {command_runner.HANDLE_SUDO_FOR_ROOT_CMD} && '
+                f'{command_runner.HANDLE_SUDO_FOR_ROOT_CMD} && '
                 f'{symlink_command}')
 
             def _symlink_node(runner: command_runner.CommandRunner):
