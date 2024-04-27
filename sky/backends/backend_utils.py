@@ -932,6 +932,9 @@ def write_cluster_config(
         config_dict['ray'] = tmp_yaml_path
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
+    # _DEFAULT_DISK_SIZE_GB = 256
+    if to_provision.disk_size != 256:
+        _add_disk_size_to_cluster_config(to_provision.disk_size, tmp_yaml_path)
 
     # Add kubernetes config fields from ~/.sky/config
     if isinstance(cloud, clouds.Kubernetes):
@@ -995,6 +998,12 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_fluidstack_authentication(config)
     else:
         assert False, cloud
+    common_utils.dump_yaml(cluster_config_file, config)
+
+def _add_disk_size_to_cluster_config(disk_size: int, cluster_config_file: str):
+    """Add disk size to the cluster config."""
+    config = common_utils.read_yaml(cluster_config_file)
+    config['initDiskSize'] = str(disk_size)
     common_utils.dump_yaml(cluster_config_file, config)
 
 

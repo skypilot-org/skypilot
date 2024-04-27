@@ -4223,6 +4223,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             to_provision = handle_before_refresh.launched_resources
             self.check_resources_fit_cluster(handle_before_refresh, task)
 
+
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: {cluster_name!r} '
             f'[{task.num_nodes}x {to_provision}].'

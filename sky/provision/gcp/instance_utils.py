@@ -1383,7 +1383,15 @@ class GCPTPUVMInstance(GCPInstance):
         resource = discovery.build("compute", "v1")
 
         # TODO: Update the CLI to prompt the for disk mode and size
-        disk_size_gb = 200
+        # Extract the specified disk size from the configuration
+        disk_size_gb = 100
+        if 'diskSize' in node_config['metadata']:
+            disk_size_gb = int(node_config['metadata']['diskSize'])
+        # By default, each Cloud TPU VM has a 100GB single boot persistent disk that contains the operating system.
+        if disk_size_gb <= 100:
+            return None
+        disk_size_gb -= 100
+        logger.info(f"Request persistent disk for size: {disk_size_gb}")
         disk_mode = "read-write"
         tpu_name = instance_name.split("/")[-1]
 
@@ -1426,6 +1434,54 @@ class GCPTPUVMInstance(GCPInstance):
         if rcode != 0:
             failure_massage = (
                 "Failed to attach disk to TPU VMs.\n"
+                "**** STDOUT ****\n"
+                "{stdout}\n"
+                "**** STDERR ****\n"
+                "{stderr}"
+            )
+            logger.warning(failure_massage)
+
+        # # Set auto-delete state of the Persistent Disk
+        # auto_delete_disk = (
+        #     f"gcloud compute instances set-disk-auto-delete {instance_name} "
+        #     f"--zone={availability_zone} "
+        #     f"--auto-delete "
+        #     f"--disk={disk_body['name']}"
+        # )
+        #
+        # rcode, stdout, stderr = log_lib.run_with_log(
+        #     auto_delete_disk,
+        #     os.devnull,
+        #     shell=True,
+        #     stream_logs=False,
+        #     require_outputs=True,
+        # )
+        #
+        # if rcode != 0:
+        #     failure_massage = (
+        #         "Failed to set auto-delete state of the Persistent Disk. Please delete the disk manually.\n"
+        #         "**** STDOUT ****\n"
+        #         "{stdout}\n"
+        #         "**** STDERR ****\n"
+        #         "{stderr}"
+        #     )
+        #     logger.warning(failure_massage)
+
+        # Format the persistent disk, create directory and mount the persistent disk
+        format_mount_disk = (
+            f"gcloud compute tpus tpu-vm ssh {tpu_name} --zone={availability_zone} "
+            f"--command='sudo mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard /dev/sdb ; sudo mkdir -p /mnt/disks/persist ; sudo mount -o discard,defaults /dev/sdb /mnt/disks/persist'"
+        )
+        rcode, stdout, stderr = log_lib.run_with_log(
+            format_mount_disk,
+            os.devnull,
+            shell=True,
+            stream_logs=False,
+            require_outputs=True,
+        )
+        if rcode != 0:
+            failure_massage = (
+                "Failed to format and mount persistent disk\n"
                 "**** STDOUT ****\n"
                 "{stdout}\n"
                 "**** STDERR ****\n"
