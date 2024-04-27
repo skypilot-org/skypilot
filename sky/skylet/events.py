@@ -21,6 +21,7 @@ from sky.spot import spot_utils
 from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
+from sky.skylet import constants
 
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
@@ -197,16 +198,19 @@ class AutostopEvent(SkyletEvent):
                 logger.info('Running ray down.')
                 # Stop the workers first to avoid orphan workers.
                 subprocess.run(
-                    ['ray', 'down', '-y', '--workers-only', config_path],
+                    f'{constants.SKY_RAY_CMD} down -y --workers-only '
+                    f'{config_path}',
                     check=True,
+                    shell=True,
                     # We pass env inherited from os.environ due to calling `ray
                     # <cmd>`.
                     env=env)
 
             logger.info('Running final ray down.')
             subprocess.run(
-                ['ray', 'down', '-y', config_path],
+                f'{constants.SKY_RAY_CMD} down -y {config_path}',
                 check=True,
+                shell=True,
                 # We pass env inherited from os.environ due to calling `ray
                 # <cmd>`.
                 env=env)
