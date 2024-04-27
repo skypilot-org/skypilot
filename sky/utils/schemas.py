@@ -140,10 +140,23 @@ def _get_single_resources_schema():
     }
 
 
+def _get_multi_resources_schema():
+    multi_resources_schema = {
+        k: v
+        for k, v in _get_single_resources_schema().items()
+        # Validation may fail if $schema is included.
+        if k != '$schema'
+    }
+    # 'labels' is not allowed in any_of and ordered (global only field).
+    multi_resources_schema['properties'].pop('labels')
+    return multi_resources_schema
+
+
 def get_resources_schema():
     """Resource schema in task config."""
     single_resources_schema = _get_single_resources_schema()['properties']
     single_resources_schema.pop('accelerators')
+    multi_resources_schema = _get_multi_resources_schema()
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
@@ -177,21 +190,11 @@ def get_resources_schema():
             },
             'any_of': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in _get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             },
             'ordered': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in _get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             }
         }
     }
