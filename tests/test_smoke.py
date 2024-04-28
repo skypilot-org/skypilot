@@ -2848,6 +2848,7 @@ def test_kubernetes_custom_image(image_id):
     run_one_test(test)
 
 
+@pytest.mark.slow
 def test_azure_start_stop_two_nodes():
     name = _get_cluster_name()
     test = Test(
