@@ -399,10 +399,10 @@ Customizing Job Controller Resources
 
 You may want to customize the resources of the job controller for several reasons:
 
-1. Use a lower-cost controller (if you have a low number of concurrent managed jobs).
-2. Enforcing the job controller to run on a specific location. (Default: cheapest location)
-3. Changing the maximum number of jobs that can be run concurrently, which is 2x the vCPUs of the controller. (Default: 16)
-4. Changing the disk_size of the job controller to store more logs. (Default: 50GB)
+#. Changing the maximum number of jobs that can be run concurrently, which is 2x the vCPUs of the controller. (Default: 16)
+#. Use a lower-cost controller (if you have a low number of concurrent managed jobs).
+#. Enforcing the job controller to run on a specific location. (Default: cheapest location)
+#. Changing the disk_size of the job controller to store more logs. (Default: 50GB)
 
 To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
 
