@@ -168,8 +168,8 @@ MANAGED_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}
 if [ "$start_from" -le 7 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky job launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
-sky job launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 300"
+sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
+sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 300"
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 s=$(sky job logs --no-follow -n ${CLUSTER_NAME}-7-1)
