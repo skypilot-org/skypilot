@@ -14,7 +14,7 @@
 # > pytest tests/test_smoke.py::test_minimal
 #
 # Only run managed jobtests
-# > pytest tests/test_smoke.py --managed-spot
+# > pytest tests/test_smoke.py --managed-jobs
 #
 # Only run sky serve tests
 # > pytest tests/test_smoke.py --sky-serve
