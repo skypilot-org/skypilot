@@ -2922,8 +2922,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.debug('Checking if skylet is running on the head node.')
             with rich_utils.safe_status(
                     '[bold cyan]Preparing SkyPilot runtime'):
+                # We need to source bashrc for skylet to make sure the autostop
+                # event can access the path to the cloud CLIs.
                 self.run_on_head(handle,
-                                 instance_setup.MAYBE_SKYLET_RESTART_CMD)
+                                 instance_setup.MAYBE_SKYLET_RESTART_CMD,
+                                 source_bashrc=True)
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
@@ -3126,6 +3129,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 setup_cmd,
                 log_path=setup_log_path,
                 process_stream=False,
+                source_bashrc=True,
             )
 
             def error_message() -> str:
@@ -4130,6 +4134,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         require_outputs: bool = False,
         separate_stderr: bool = False,
         process_stream: bool = True,
+        source_bashrc: bool = False,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node.
@@ -4181,6 +4186,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ssh_mode=ssh_mode,
             require_outputs=require_outputs,
             separate_stderr=separate_stderr,
+            source_bashrc=source_bashrc,
             **kwargs,
         )
 
