@@ -41,8 +41,12 @@ def _route_to_cloud_impl(func):
         module = globals().get(module_name)
         assert module is not None, f'Unknown provider: {module_name}'
 
-        impl = getattr(module, func.__name__)
-        return impl(*args, **kwargs)
+        impl = getattr(module, func.__name__, None)
+        if impl:
+            return impl(*args, **kwargs)
+
+        # If implementation does not exist, fall back to default implementation
+        return func(provider_name, *args, **kwargs)
 
     return _wrapper
 
@@ -152,7 +156,8 @@ def query_ports(
 
     Returns a dict with port as the key and a list of common.Endpoint.
     """
-    raise NotImplementedError
+    del provider_name, provider_config, cluster_name_on_cloud  # unused
+    return common.query_ports_passthrough(ports, head_ip)
 
 
 @_route_to_cloud_impl
