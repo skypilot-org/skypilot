@@ -2727,9 +2727,9 @@ def test_spot_tpu():
         [
             f'sky job launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep STARTING',
-            'sleep 840',  # TPU takes a while to launch
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep STARTING',
+            'sleep 900',  # TPU takes a while to launch
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
         # Increase timeout since sky job queue -r can be blocked by other spot tests.
