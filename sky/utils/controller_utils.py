@@ -166,26 +166,26 @@ def _get_cloud_dependencies_installation_commands(
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
     # AWS
-    if clouds.cloud_in_list(clouds.AWS(), enabled_clouds):
+    if clouds.cloud_in_iterable(clouds.AWS(), enabled_clouds):
         commands.append(
             'pip list | grep boto3 > /dev/null 2>&1 || '
             'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
             'boto3>=1.26.1 > /dev/null 2>&1')
     # GCP
-    if clouds.cloud_in_list(clouds.GCP(), enabled_clouds):
+    if clouds.cloud_in_iterable(clouds.GCP(), enabled_clouds):
         commands.extend([
             'pip list | grep google-api-python-client > /dev/null 2>&1 || '
             'pip install google-api-python-client>=2.69.0 google-cloud-storage '
             '> /dev/null 2>&1', f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}'
         ])
     # Azure
-    if clouds.cloud_in_list(clouds.Azure(), enabled_clouds):
+    if clouds.cloud_in_iterable(clouds.Azure(), enabled_clouds):
         commands.append(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
             'azure-mgmt-network > /dev/null 2>&1')
     # Kubernetes
-    if clouds.cloud_in_list(clouds.Kubernetes(), enabled_clouds):
+    if clouds.cloud_in_iterable(clouds.Kubernetes(), enabled_clouds):
         commands.append(
             # Install k8s + skypilot dependencies
             'sudo bash -c "if '
