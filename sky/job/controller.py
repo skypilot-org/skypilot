@@ -16,8 +16,8 @@ from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.job import recovery_strategy
-from sky.job import state as job_state
-from sky.job import utils as job_utils
+from sky.job import state as managed_job_state
+from sky.job import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -135,23 +135,22 @@ class JobController:
         Other exceptions may be raised depending on the backend.
         """
 
-        callback_func = job_utils.event_callback_func(job_id=self._job_id,
-                                                      task_id=task_id,
-                                                      task=task)
+        callback_func = managed_job_utils.event_callback_func(
+            job_id=self._job_id, task_id=task_id, task=task)
         if task.run is None:
             logger.info(f'Skip running task {task_id} ({task.name}) due to its '
                         'run commands being empty.')
             # Call set_started first to initialize columns in the state table,
             # including start_at and last_recovery_at to avoid issues for
             # uninitialized columns.
-            job_state.set_started(job_id=self._job_id,
-                                  task_id=task_id,
-                                  start_time=time.time(),
-                                  callback_func=callback_func)
-            job_state.set_succeeded(job_id=self._job_id,
-                                    task_id=task_id,
-                                    end_time=time.time(),
-                                    callback_func=callback_func)
+            managed_job_state.set_started(job_id=self._job_id,
+                                          task_id=task_id,
+                                          start_time=time.time(),
+                                          callback_func=callback_func)
+            managed_job_state.set_succeeded(job_id=self._job_id,
+                                            task_id=task_id,
+                                            end_time=time.time(),
+                                            callback_func=callback_func)
             return True
         usage_lib.messages.usage.update_task_id(task_id)
         task_id_env_var = task.envs[constants.TASK_ID_ENV_VAR]
@@ -159,7 +158,7 @@ class JobController:
         if task_id == 0:
             submitted_at = backend_utils.get_timestamp_from_run_timestamp(
                 self._backend.run_timestamp)
-        job_state.set_submitted(
+        managed_job_state.set_submitted(
             self._job_id,
             task_id,
             self._backend.run_timestamp,
@@ -171,24 +170,24 @@ class JobController:
             f'Submitted managed job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
         assert task.name is not None, task
-        cluster_name = job_utils.generate_managed_job_cluster_name(
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._retry_until_up)
 
         logger.info('Started monitoring.')
-        job_state.set_starting(job_id=self._job_id,
-                               task_id=task_id,
-                               callback_func=callback_func)
+        managed_job_state.set_starting(job_id=self._job_id,
+                                       task_id=task_id,
+                                       callback_func=callback_func)
         remote_job_submitted_at = self._strategy_executor.launch()
         assert remote_job_submitted_at is not None, remote_job_submitted_at
 
-        job_state.set_started(job_id=self._job_id,
-                              task_id=task_id,
-                              start_time=remote_job_submitted_at,
-                              callback_func=callback_func)
+        managed_job_state.set_started(job_id=self._job_id,
+                                      task_id=task_id,
+                                      start_time=remote_job_submitted_at,
+                                      callback_func=callback_func)
         while True:
-            time.sleep(job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+            time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
             # Check the network connection to avoid false alarm for job failure.
             # Network glitch was observed even in the VM.
@@ -196,23 +195,23 @@ class JobController:
                 backend_utils.check_network_connection()
             except exceptions.NetworkError:
                 logger.info('Network is not available. Retrying again in '
-                            f'{job_utils.JOB_STATUS_CHECK_GAP_SECONDS} '
+                            f'{managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS} '
                             'seconds.')
                 continue
 
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
-            job_status = job_utils.get_job_status(self._backend, cluster_name)
+            job_status = managed_job_utils.get_job_status(
+                self._backend, cluster_name)
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                end_time = job_utils.get_job_timestamp(self._backend,
-                                                       cluster_name,
-                                                       get_end_time=True)
+                end_time = managed_job_utils.get_job_timestamp(
+                    self._backend, cluster_name, get_end_time=True)
                 # The job is done.
-                job_state.set_succeeded(self._job_id,
-                                        task_id,
-                                        end_time=end_time,
-                                        callback_func=callback_func)
+                managed_job_state.set_succeeded(self._job_id,
+                                                task_id,
+                                                end_time=end_time,
+                                                callback_func=callback_func)
                 logger.info(
                     f'Spot job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
@@ -260,28 +259,29 @@ class JobController:
                         job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
                 ]:
                     # The user code has probably crashed, fail immediately.
-                    end_time = job_utils.get_job_timestamp(self._backend,
-                                                           cluster_name,
-                                                           get_end_time=True)
+                    end_time = managed_job_utils.get_job_timestamp(
+                        self._backend, cluster_name, get_end_time=True)
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
                     self._download_log_and_stream(handle)
-                    managed_job_status = job_state.ManagedJobStatus.FAILED
+                    managed_job_status = (
+                        managed_job_state.ManagedJobStatus.FAILED)
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         managed_job_status = (
-                            job_state.ManagedJobStatus.FAILED_SETUP)
+                            managed_job_state.ManagedJobStatus.FAILED_SETUP)
                     failure_reason = (
                         'To see the details, run: '
                         f'sky job logs --controller {self._job_id}')
 
-                    job_state.set_failed(self._job_id,
-                                         task_id,
-                                         failure_type=managed_job_status,
-                                         failure_reason=failure_reason,
-                                         end_time=end_time,
-                                         callback_func=callback_func)
+                    managed_job_state.set_failed(
+                        self._job_id,
+                        task_id,
+                        failure_type=managed_job_status,
+                        failure_reason=failure_reason,
+                        end_time=end_time,
+                        callback_func=callback_func)
                     return False
                 # Although the cluster is healthy, we fail to access the
                 # job status. Try to recover the job (will not restart the
@@ -305,14 +305,14 @@ class JobController:
 
             # Try to recover the managed jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
-            job_state.set_recovering(job_id=self._job_id,
-                                     task_id=task_id,
-                                     callback_func=callback_func)
+            managed_job_state.set_recovering(job_id=self._job_id,
+                                             task_id=task_id,
+                                             callback_func=callback_func)
             recovered_time = self._strategy_executor.recover()
-            job_state.set_recovered(self._job_id,
-                                    task_id,
-                                    recovered_time=recovered_time,
-                                    callback_func=callback_func)
+            managed_job_state.set_recovered(self._job_id,
+                                            task_id,
+                                            recovered_time=recovered_time,
+                                            callback_func=callback_func)
 
     def run(self):
         """Run controller logic and handle exceptions."""
@@ -331,12 +331,13 @@ class JobController:
                 common_utils.format_exception(reason, use_bracket=True)
                 for reason in e.reasons))
             logger.error(failure_reason)
-            job_state.set_failed(
+            managed_job_state.set_failed(
                 self._job_id,
                 task_id=task_id,
-                failure_type=job_state.ManagedJobStatus.FAILED_PRECHECKS,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_PRECHECKS,
                 failure_reason=failure_reason,
-                callback_func=job_utils.event_callback_func(
+                callback_func=managed_job_utils.event_callback_func(
                     job_id=self._job_id,
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
@@ -346,12 +347,13 @@ class JobController:
             logger.error(common_utils.format_exception(e))
             # The managed job should be marked as FAILED_NO_RESOURCE, as the
             # managed job may be able to launch next time.
-            job_state.set_failed(
+            managed_job_state.set_failed(
                 self._job_id,
                 task_id=task_id,
-                failure_type=job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_NO_RESOURCE,
                 failure_reason=common_utils.format_exception(e),
-                callback_func=job_utils.event_callback_func(
+                callback_func=managed_job_utils.event_callback_func(
                     job_id=self._job_id,
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
@@ -361,12 +363,13 @@ class JobController:
             msg = ('Unexpected error occurred: '
                    f'{common_utils.format_exception(e, use_bracket=True)}')
             logger.error(msg)
-            job_state.set_failed(
+            managed_job_state.set_failed(
                 self._job_id,
                 task_id=task_id,
-                failure_type=job_state.ManagedJobStatus.FAILED_CONTROLLER,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_CONTROLLER,
                 failure_reason=msg,
-                callback_func=job_utils.event_callback_func(
+                callback_func=managed_job_utils.event_callback_func(
                     job_id=self._job_id,
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
@@ -375,14 +378,14 @@ class JobController:
             # affect the jobs in terminal states.
             # We need to call set_cancelling before set_cancelled to make sure
             # the table entries are correctly set.
-            callback_func = job_utils.event_callback_func(
+            callback_func = managed_job_utils.event_callback_func(
                 job_id=self._job_id,
                 task_id=task_id,
                 task=self._dag.tasks[task_id])
-            job_state.set_cancelling(job_id=self._job_id,
-                                     callback_func=callback_func)
-            job_state.set_cancelled(job_id=self._job_id,
-                                    callback_func=callback_func)
+            managed_job_state.set_cancelling(job_id=self._job_id,
+                                             callback_func=callback_func)
+            managed_job_state.set_cancelled(job_id=self._job_id,
+                                            callback_func=callback_func)
 
 
 def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
@@ -395,7 +398,8 @@ def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
 
 def _handle_signal(job_id):
     """Handle the signal if the user sent it."""
-    signal_file = pathlib.Path(job_utils.SIGNAL_FILE_PREFIX.format(job_id))
+    signal_file = pathlib.Path(
+        managed_job_utils.SIGNAL_FILE_PREFIX.format(job_id))
     user_signal = None
     if signal_file.exists():
         # Filelock is needed to prevent race condition with concurrent
@@ -404,7 +408,7 @@ def _handle_signal(job_id):
             with signal_file.open(mode='r', encoding='utf-8') as f:
                 user_signal = f.read().strip()
                 try:
-                    user_signal = job_utils.UserSignal(user_signal)
+                    user_signal = managed_job_utils.UserSignal(user_signal)
                 except ValueError:
                     logger.warning(
                         f'Unknown signal received: {user_signal}. Ignoring.')
@@ -414,7 +418,7 @@ def _handle_signal(job_id):
     if user_signal is None:
         # None or empty string.
         return
-    assert user_signal == job_utils.UserSignal.CANCEL, (
+    assert user_signal == managed_job_utils.UserSignal.CANCEL, (
         f'Only cancel signal is supported, but {user_signal} got.')
     raise exceptions.ManagedJobUserCancelledError(
         f'User sent {user_signal.value} signal.')
@@ -435,7 +439,7 @@ def _cleanup(job_id: int, dag_yaml: str):
     # controller, we should keep it in sync with JobController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
-        cluster_name = job_utils.generate_managed_job_cluster_name(
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, job_id)
         recovery_strategy.terminate_cluster(cluster_name)
         # Clean up Storages with persistent=False.
@@ -465,14 +469,13 @@ def start(job_id, dag_yaml, retry_until_up):
             time.sleep(1)
     except exceptions.ManagedJobUserCancelledError:
         dag, _ = _get_dag_and_name(dag_yaml)
-        task_id, _ = job_state.get_latest_task_id_status(job_id)
+        task_id, _ = managed_job_state.get_latest_task_id_status(job_id)
         logger.info(
             f'Cancelling managed job, job_id: {job_id}, task_id: {task_id}')
-        job_state.set_cancelling(job_id=job_id,
-                                 callback_func=job_utils.event_callback_func(
-                                     job_id=job_id,
-                                     task_id=task_id,
-                                     task=dag.tasks[task_id]))
+        managed_job_state.set_cancelling(
+            job_id=job_id,
+            callback_func=managed_job_utils.event_callback_func(
+                job_id=job_id, task_id=task_id, task=dag.tasks[task_id]))
         cancelling = True
     finally:
         if controller_process is not None:
@@ -498,24 +501,24 @@ def start(job_id, dag_yaml, retry_until_up):
         logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
         if cancelling:
-            job_state.set_cancelled(job_id=job_id,
-                                    callback_func=job_utils.event_callback_func(
-                                        job_id=job_id,
-                                        task_id=task_id,
-                                        task=dag.tasks[task_id]))
+            managed_job_state.set_cancelled(
+                job_id=job_id,
+                callback_func=managed_job_utils.event_callback_func(
+                    job_id=job_id, task_id=task_id, task=dag.tasks[task_id]))
 
         # We should check job status after 'set_cancelled', otherwise
         # the job status is not terminal.
-        job_status = job_state.get_status(job_id)
+        job_status = managed_job_state.get_status(job_id)
         assert job_status is not None
         # The job can be non-terminal if the controller exited abnormally,
         # e.g. failed to launch cluster after reaching the MAX_RETRY.
         if not job_status.is_terminal():
             logger.info(f'Previous job status: {job_status.value}')
-            job_state.set_failed(
+            managed_job_state.set_failed(
                 job_id,
                 task_id=None,
-                failure_type=job_state.ManagedJobStatus.FAILED_CONTROLLER,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_CONTROLLER,
                 failure_reason=('Unexpected error occurred. For details, '
                                 f'run: sky job logs --controller {job_id}'))
 

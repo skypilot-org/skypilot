@@ -5,7 +5,7 @@ Managed Jobs
 
 .. tip::
 
-  This feature is great for scaling out: running a single job for long durations, or running many job pipelines.
+  This feature is great for scaling out: running a single job for long durations, or running many jobs (pipelines).
 
 SkyPilot supports managed jobs that allows:
 

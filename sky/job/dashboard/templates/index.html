@@ -107,6 +107,8 @@
         </table>
     </div>
     <script>
+        // Folder toggle for pipelines, this will fold/unfold the rows for
+        // a pipeline and its tasks.
         document.querySelectorAll('.folder').forEach(function (folder) {
             folder.addEventListener('click', function () {
                 let plusSign = folder.querySelector('.clickable');

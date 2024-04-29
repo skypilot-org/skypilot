@@ -777,8 +777,8 @@ class Resources:
                             f'memory. {self.instance_type} has {mem} GB '
                             f'memory, but {self.memory} is requested.')
 
-    def _try_validate_job(self) -> None:
-        """Try to validate the job related attributes.
+    def _try_validate_managed_job_attributes(self) -> None:
+        """Try to validate the managed job related attributes.
 
         Raises:
             ValueError: if the attributes are invalid.
@@ -1294,7 +1294,8 @@ class Resources:
         resources_fields['use_spot'] = config.pop('use_spot', None)
         if config.get('spot_recovery') is not None:
             logger.warning('spot_recovery is deprecated. Use job_recovery '
-                           'instead.')
+                           'instead (the system is defaulting to that for '
+                           'you).')
             resources_fields['job_recovery'] = config.pop('spot_recovery', None)
         else:
             # spot_recovery and job_recovery are guaranteed to be mutually

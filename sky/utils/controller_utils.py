@@ -20,8 +20,8 @@ from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.job import constants as job_constants
-from sky.job import utils as job_utils
+from sky.job import constants as managed_job_constants
+from sky.job import utils as managed_job_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
 from sky.skylet import constants
@@ -65,7 +65,7 @@ class _ControllerSpec:
 
     @property
     def cluster_name(self) -> str:
-        """Returns the cluster name that exists."""
+        """The name in candidate_cluster_names that exists, else the first."""
         for candidate_name in self.candidate_cluster_names:
             record = global_user_state.get_cluster_from_name(candidate_name)
             if record is not None:
@@ -91,7 +91,8 @@ class Controllers(enum.Enum):
         controller_type='jobs',
         name='managed job controller',
         candidate_cluster_names=[
-            job_utils.JOB_CONTROLLER_NAME, job_utils.LEGACY_JOB_CONTROLLER_NAME
+            managed_job_utils.JOB_CONTROLLER_NAME,
+            managed_job_utils.LEGACY_JOB_CONTROLLER_NAME
         ],
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
@@ -118,7 +119,7 @@ class Controllers(enum.Enum):
         default_hint_if_non_existent='No in-progress managed jobs.',
         connection_error_hint=(
             'Failed to connect to job controller, please try again later.'),
-        default_resources_config=job_constants.CONTROLLER_RESOURCES)
+        default_resources_config=managed_job_constants.CONTROLLER_RESOURCES)
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',

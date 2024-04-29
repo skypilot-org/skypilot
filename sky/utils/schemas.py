@@ -5,7 +5,7 @@ https://json-schema.org/
 """
 
 
-def _only_one_of_two_field_config(field1: str, field2: str):
+def _check_not_both_fields_present(field1: str, field2: str):
     return {
         'oneOf': [{
             'required': [field1],
@@ -218,7 +218,7 @@ def get_resources_schema():
             }
         },
         # Avoid job_recovery and spot_recovery being present at the same time.
-        **_only_one_of_two_field_config('job_recovery', 'spot_recovery')
+        **_check_not_both_fields_present('job_recovery', 'spot_recovery')
     }
 
 
@@ -656,5 +656,5 @@ def get_config_schema():
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.
-        **_only_one_of_two_field_config('spot', 'jobs')
+        **_check_not_both_fields_present('spot', 'jobs')
     }

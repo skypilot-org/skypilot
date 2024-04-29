@@ -158,13 +158,11 @@ sky logs ${CLUSTER_NAME}-6 2 --status
 sky logs ${CLUSTER_NAME}-6 2
 fi
 
-# Test managed jobs to make sure existing jobs and new job can run correctly, after
-# the job controller is updated.
+# Test managed jobs to make sure existing jobs and new job can run correctly,
+# after the job controller is updated.
 # Get a new uuid to avoid conflict with previous back-compat tests.
 uuid=$(uuidgen)
 MANAGED_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}
-# Test managed jobs to make sure existing jobs and new job can run correctly, after
-# the job controller is updated.
 if [ "$start_from" -le 7 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true

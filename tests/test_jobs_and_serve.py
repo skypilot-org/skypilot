@@ -142,7 +142,7 @@ def mock_is_controller_accessible(
 
 
 class TestSpotOperations:
-    """Test operations for managed job."""
+    """Test operations for managed jobs."""
 
     @pytest.mark.timeout(60)
     def test_down_spot_controller(self, _mock_cluster_state,

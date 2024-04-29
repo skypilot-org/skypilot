@@ -18,7 +18,7 @@ import pytest
 # To only run tests for a specific cloud (as well as generic tests), use
 # --aws, --gcp, --azure, or --lambda.
 #
-# To only run tests for managed job (without generic tests), use
+# To only run tests for managed jobs (without generic tests), use
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
@@ -60,7 +60,7 @@ def pytest_addoption(parser):
     parser.addoption('--managed-jobs',
                      action='store_true',
                      default=False,
-                     help='Only run tests for managed job.')
+                     help='Only run tests for managed jobs.')
     parser.addoption('--serve',
                      action='store_true',
                      default=False,

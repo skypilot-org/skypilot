@@ -12,7 +12,7 @@ import pathlib
 import flask
 import yaml
 
-from sky import job
+from sky import job as managed_jobs
 from sky.utils import common_utils
 from sky.utils import controller_utils
 
@@ -44,15 +44,15 @@ def _is_running_on_job_controller() -> bool:
 def home():
     if not _is_running_on_job_controller():
         # Experimental: run on laptop (refresh is very slow).
-        all_managed_jobs = job.queue(refresh=True, skip_finished=False)
+        all_managed_jobs = managed_jobs.queue(refresh=True, skip_finished=False)
     else:
-        job_table = job.dump_managed_job_queue()
-        all_managed_jobs = job.load_managed_job_queue(job_table)
+        job_table = managed_jobs.dump_managed_job_queue()
+        all_managed_jobs = managed_jobs.load_managed_job_queue(job_table)
 
     timestamp = datetime.datetime.now(datetime.timezone.utc)
-    rows = job.format_job_table(all_managed_jobs,
-                                show_all=True,
-                                return_rows=True)
+    rows = managed_jobs.format_job_table(all_managed_jobs,
+                                         show_all=True,
+                                         return_rows=True)
 
     # FIXME(zongheng): make the job table/queue funcs return structured info so
     # that we don't have to do things like row[-5] below.

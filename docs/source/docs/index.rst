@@ -139,7 +139,7 @@ Contents
    :maxdepth: 1
    :caption: Cutting Cloud Costs
 
-   ../examples/managed-jobs
+   Managed Spot Jobs <../examples/spot-jobs>
    ../reference/auto-stop
    ../reference/benchmark/index
 

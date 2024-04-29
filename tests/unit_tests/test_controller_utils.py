@@ -4,7 +4,7 @@ from typing import Any, Dict
 import pytest
 
 import sky
-from sky.job import constants as job_constants
+from sky.job import constants as managed_job_constants
 from sky.serve import constants as serve_constants
 from sky.utils import controller_utils
 
@@ -66,7 +66,7 @@ def test_get_controller_resources(
 
 
 @pytest.mark.parametrize(('controller_type', 'default_controller_resources'), [
-    ('jobs', job_constants.CONTROLLER_RESOURCES),
+    ('jobs', managed_job_constants.CONTROLLER_RESOURCES),
     ('serve', serve_constants.CONTROLLER_RESOURCES),
 ])
 def test_get_controller_resources_with_task_resources(

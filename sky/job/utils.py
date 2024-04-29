@@ -18,8 +18,8 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
-from sky.job import constants as job_constants
-from sky.job import state as job_state
+from sky.job import constants as managed_job_constants
+from sky.job import state as managed_job_state
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet.log_lib import run_bash_command_with_log
@@ -104,7 +104,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
     is called.
     """
     if job_id is None:
-        job_ids = job_state.get_nonterminal_job_ids_by_name(None)
+        job_ids = managed_job_state.get_nonterminal_job_ids_by_name(None)
     else:
         job_ids = [job_id]
     for job_id_ in job_ids:
@@ -112,7 +112,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
         if controller_status is None or controller_status.is_terminal():
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
-            tasks = job_state.get_managed_jobs(job_id_)
+            tasks = managed_job_state.get_managed_jobs(job_id_)
             for task in tasks:
                 task_name = task['job_name']
                 # Tear down the abnormal cluster to avoid resource leakage.
@@ -137,10 +137,11 @@ def update_managed_job_status(job_id: Optional[int] = None):
             # FAILED_CONTROLLER.
             # The `set_failed` will only update the task's status if the
             # status is non-terminal.
-            job_state.set_failed(
+            managed_job_state.set_failed(
                 job_id_,
                 task_id=None,
-                failure_type=job_state.ManagedJobStatus.FAILED_CONTROLLER,
+                failure_type=managed_job_state.ManagedJobStatus.
+                FAILED_CONTROLLER,
                 failure_reason=
                 'Controller process has exited abnormally. For more details,'
                 f' run: sky job logs --controller {job_id_}')
@@ -209,7 +210,7 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     # the underlying sky.launch, hiding the `job_id` in the cluster name.
     cluster_name = common_utils.make_cluster_name_on_cloud(
         task_name,
-        job_constants.JOB_CLUSTER_NAME_PREFIX_LENGTH,
+        managed_job_constants.JOB_CLUSTER_NAME_PREFIX_LENGTH,
         add_user_hash=False)
     return f'{cluster_name}-{job_id}'
 
@@ -220,7 +221,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     If job_ids is None, cancel all jobs.
     """
     if job_ids is None:
-        job_ids = job_state.get_nonterminal_job_ids_by_name(None)
+        job_ids = managed_job_state.get_nonterminal_job_ids_by_name(None)
     job_ids = list(set(job_ids))
     if len(job_ids) == 0:
         return 'No job to cancel.'
@@ -230,7 +231,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
-        job_status = job_state.get_status(job_id)
+        job_status = managed_job_state.get_status(job_id)
         if job_status is None:
             logger.info(f'Job {job_id} not found. Skipped.')
             continue
@@ -270,7 +271,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
 
 def cancel_job_by_name(job_name: str) -> str:
     """Cancel a job by name."""
-    job_ids = job_state.get_nonterminal_job_ids_by_name(job_name)
+    job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if len(job_ids) == 0:
         return f'No running job found with name {job_name!r}.'
     if len(job_ids) > 1:
@@ -287,7 +288,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     status_msg = ('[bold cyan]Waiting for controller process to be RUNNING'
                   '{status_str}[/].')
     status_display = rich_utils.safe_status(status_msg.format(status_str=''))
-    num_tasks = job_state.get_num_tasks(job_id)
+    num_tasks = managed_job_state.get_num_tasks(job_id)
 
     with status_display:
         prev_msg = None
@@ -307,23 +308,23 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='')
         status_display.update(msg)
         prev_msg = msg
-        managed_job_status = job_state.get_status(job_id)
+        managed_job_status = managed_job_state.get_status(job_id)
         while managed_job_status is None:
             time.sleep(1)
-            managed_job_status = job_state.get_status(job_id)
+            managed_job_status = managed_job_state.get_status(job_id)
 
         if managed_job_status.is_terminal():
             job_msg = ''
             if managed_job_status.is_failed():
-                job_msg = (
-                    f'\nFailure reason: {job_state.get_failure_reason(job_id)}')
+                job_msg = ('\nFailure reason: '
+                           f'{managed_job_state.get_failure_reason(job_id)}')
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. Logs will not be shown.'
                     f'{colorama.Style.RESET_ALL}{job_msg}')
         backend = backends.CloudVmRayBackend()
-        task_id, managed_job_status = job_state.get_latest_task_id_status(
-            job_id)
+        task_id, managed_job_status = (
+            managed_job_state.get_latest_task_id_status(job_id))
 
         # task_id and managed_job_status can be None if the controller process
         # just started and the managed job status has not set to PENDING yet.
@@ -331,7 +332,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         ):
             handle = None
             if task_id is not None:
-                task_name = job_state.get_task_name(job_id, task_id)
+                task_name = managed_job_state.get_task_name(job_id, task_id)
                 cluster_name = generate_managed_job_cluster_name(
                     task_name, job_id)
                 handle = global_user_state.get_handle_from_cluster_name(
@@ -341,11 +342,11 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # the table before the managed job state is updated by the
             # controller. In this case, we should skip the logging, and wait for
             # the next round of status check.
-            if (handle is None or
-                    managed_job_status != job_state.ManagedJobStatus.RUNNING):
+            if (handle is None or managed_job_status !=
+                    managed_job_state.ManagedJobStatus.RUNNING):
                 status_str = ''
                 if (managed_job_status is not None and managed_job_status !=
-                        job_state.ManagedJobStatus.RUNNING):
+                        managed_job_state.ManagedJobStatus.RUNNING):
                     status_str = f' (status: {managed_job_status.value})'
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
@@ -356,7 +357,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 task_id, managed_job_status = (
-                    job_state.get_latest_task_id_status(job_id))
+                    managed_job_state.get_latest_task_id_status(job_id))
                 continue
             assert managed_job_status is not None
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
@@ -388,7 +389,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         original_task_id = task_id
                         while True:
                             task_id, managed_job_status = (
-                                job_state.get_latest_task_id_status(job_id))
+                                managed_job_state.get_latest_task_id_status(
+                                    job_id))
                             if original_task_id != task_id:
                                 break
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
@@ -406,7 +408,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'Retrying in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             # Finish early if the managed job status is already in terminal
             # state.
-            managed_job_status = job_state.get_status(job_id)
+            managed_job_status = managed_job_state.get_status(job_id)
             assert managed_job_status is not None, job_id
             if managed_job_status.is_terminal():
                 break
@@ -422,19 +424,19 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # Wait a bit longer than the controller, so as to make sure the
             # managed job state is updated.
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
-            managed_job_status = job_state.get_status(job_id)
+            managed_job_status = managed_job_state.get_status(job_id)
 
     # The managed_job_status may not be in terminal status yet, since the
     # controller has not updated the managed job state yet. We wait for a while,
     # until the managed job state is updated.
     wait_seconds = 0
-    managed_job_status = job_state.get_status(job_id)
+    managed_job_status = managed_job_state.get_status(job_id)
     assert managed_job_status is not None, job_id
     while (not managed_job_status.is_terminal() and follow and
            wait_seconds < _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
         time.sleep(1)
         wait_seconds += 1
-        managed_job_status = job_state.get_status(job_id)
+        managed_job_status = managed_job_state.get_status(job_id)
         assert managed_job_status is not None, job_id
 
     logger.info(f'Logs finished for job {job_id} '
@@ -444,7 +446,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
 
 def stream_logs_by_name(job_name: str, follow: bool = True) -> str:
     """Stream logs by name."""
-    job_ids = job_state.get_nonterminal_job_ids_by_name(job_name)
+    job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if len(job_ids) == 0:
         return (f'{colorama.Fore.RED}No job found with name {job_name!r}.'
                 f'{colorama.Style.RESET_ALL}')
@@ -457,7 +459,7 @@ def stream_logs_by_name(job_name: str, follow: bool = True) -> str:
 
 
 def dump_managed_job_queue() -> str:
-    jobs = job_state.get_managed_jobs()
+    jobs = managed_job_state.get_managed_jobs()
 
     for job in jobs:
         end_at = job['end_at']
@@ -465,7 +467,7 @@ def dump_managed_job_queue() -> str:
             end_at = time.time()
 
         job_submitted_at = job['last_recovered_at'] - job['job_duration']
-        if job['status'] == job_state.ManagedJobStatus.RECOVERING:
+        if job['status'] == managed_job_state.ManagedJobStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = job['job_duration']
         elif job_submitted_at > 0:
@@ -497,22 +499,22 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     """Load job queue from json string."""
     jobs = common_utils.decode_payload(payload)
     for job in jobs:
-        job['status'] = job_state.ManagedJobStatus(job['status'])
+        job['status'] = managed_job_state.ManagedJobStatus(job['status'])
     return jobs
 
 
 def _get_job_status_from_tasks(
-        job_tasks: List[Dict[str,
-                             Any]]) -> Tuple[job_state.ManagedJobStatus, int]:
+    job_tasks: List[Dict[str, Any]]
+) -> Tuple[managed_job_state.ManagedJobStatus, int]:
     """Get the current task status and the current task id for a job."""
-    managed_task_status = job_state.ManagedJobStatus.SUCCEEDED
+    managed_task_status = managed_job_state.ManagedJobStatus.SUCCEEDED
     current_task_id = 0
     for task in job_tasks:
         managed_task_status = task['status']
         current_task_id = task['task_id']
 
         # Use the first non-succeeded status.
-        if managed_task_status != job_state.ManagedJobStatus.SUCCEEDED:
+        if managed_task_status != managed_job_state.ManagedJobStatus.SUCCEEDED:
             # TODO(zhwu): we should not blindly use the first non-
             # succeeded as the status could be changed to SUBMITTED
             # when going from one task to the next one, which can be

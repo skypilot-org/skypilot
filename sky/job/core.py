@@ -1,4 +1,4 @@
-"""SDK functions for managed job."""
+"""SDK functions for managed jobs."""
 import os
 import tempfile
 from typing import Any, Dict, List, Optional, Union
@@ -14,8 +14,8 @@ from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
-from sky.job import constants as job_constants
-from sky.job import utils as job_utils
+from sky.job import constants as managed_job_constants
+from sky.job import utils as managed_job_utils
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -37,7 +37,7 @@ def launch(
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
 
-    Please refer to the sky.cli.job_launch for the document.
+    Please refer to sky.cli.job_launch for documentation.
 
     Args:
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
@@ -83,7 +83,7 @@ def launch(
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller = controller_utils.Controllers.JOB_CONTROLLER
         controller_name = controller.value.cluster_name
-        prefix = job_constants.JOB_TASK_YAML_PREFIX
+        prefix = managed_job_constants.JOB_TASK_YAML_PREFIX
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         controller_resources = controller_utils.get_controller_resources(
@@ -107,11 +107,13 @@ def launch(
             ),
         }
 
-        yaml_path = os.path.join(job_constants.JOB_CONTROLLER_YAML_PREFIX,
-                                 f'{name}-{dag_uuid}.yaml')
-        common_utils.fill_template(job_constants.JOB_CONTROLLER_TEMPLATE,
-                                   vars_to_fill,
-                                   output_path=yaml_path)
+        yaml_path = os.path.join(
+            managed_job_constants.JOB_CONTROLLER_YAML_PREFIX,
+            f'{name}-{dag_uuid}.yaml')
+        common_utils.fill_template(
+            managed_job_constants.JOB_CONTROLLER_TEMPLATE,
+            vars_to_fill,
+            output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.set_resources(controller_resources)
 
@@ -138,7 +140,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed jobs.
 
-    Please refer to the sky.cli.job_queue for the documentation.
+    Please refer to sky.cli.job_queue for documentation.
 
     Returns:
         [
@@ -181,7 +183,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
         rich_utils.force_update_status(
             '[cyan] Checking managed jobs - restarting '
             'controller[/]')
-        handle = sky.start(job_utils.JOB_CONTROLLER_NAME)
+        handle = sky.start(managed_job_utils.JOB_CONTROLLER_NAME)
         controller_status = status_lib.ClusterStatus.UP
         rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
 
@@ -190,7 +192,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = job_utils.ManagedJobCodeGen.get_job_table()
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
     returncode, job_table_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -207,7 +209,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     except exceptions.CommandError as e:
         raise RuntimeError(str(e)) from e
 
-    jobs = job_utils.load_managed_job_queue(job_table_payload)
+    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
     if skip_finished:
         # Filter out the finished jobs. If a multi-task job is partially
         # finished, we will include all its tasks.
@@ -227,7 +229,7 @@ def cancel(name: Optional[str] = None,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel managed jobs.
 
-    Please refer to the sky.cli.job_cancel for the document.
+    Please refer to the sky.cli.job_cancel for the documentation.
 
     Raises:
         sky.exceptions.ClusterNotUpError: the job controller is not up.
@@ -250,12 +252,12 @@ def cancel(name: Optional[str] = None,
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     if all:
-        code = job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
+        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
     elif job_ids:
-        code = job_utils.ManagedJobCodeGen.cancel_jobs_by_id(job_ids)
+        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(job_ids)
     else:
         assert name is not None, (job_ids, name, all)
-        code = job_utils.ManagedJobCodeGen.cancel_job_by_name(name)
+        code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(name)
     # The stderr is redirected to stdout
     returncode, stdout, _ = backend.run_on_head(handle,
                                                 code,
@@ -290,8 +292,9 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
     # TODO(zhwu): Automatically restart the job controller
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.JOB_CONTROLLER,
-        stopped_message=('Please restart the job controller with '
-                         f'`sky start {job_utils.JOB_CONTROLLER_NAME}`.'))
+        stopped_message=(
+            'Please restart the job controller with '
+            f'`sky start {managed_job_utils.JOB_CONTROLLER_NAME}`.'))
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')
@@ -304,20 +307,22 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
                                   follow=follow)
 
 
-spot_launch = common_utils.deprecated_function(launch,
-                                               name='sky.job.launch',
-                                               deprecated_name='spot_launch',
-                                               removing_version='0.7.0')
+spot_launch = common_utils.deprecated_function(
+    launch,
+    name='sky.job.launch',
+    deprecated_name='spot_launch',
+    removing_version='0.8.0',
+    override_argument={'use_spot': True})
 spot_queue = common_utils.deprecated_function(queue,
                                               name='sky.job.queue',
                                               deprecated_name='spot_queue',
-                                              removing_version='0.7.0')
+                                              removing_version='0.8.0')
 spot_cancel = common_utils.deprecated_function(cancel,
                                                name='sky.job.cancel',
                                                deprecated_name='spot_cancel',
-                                               removing_version='0.7.0')
+                                               removing_version='0.8.0')
 spot_tail_logs = common_utils.deprecated_function(
     tail_logs,
     name='sky.job.tail_logs',
     deprecated_name='spot_tail_logs',
-    removing_version='0.7.0')
+    removing_version='0.8.0')

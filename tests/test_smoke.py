@@ -13,7 +13,7 @@
 # Run one of the smoke tests
 # > pytest tests/test_smoke.py::test_minimal
 #
-# Only run managed jobtests
+# Only run managed job tests
 # > pytest tests/test_smoke.py --managed-jobs
 #
 # Only run sky serve tests

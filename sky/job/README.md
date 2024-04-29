@@ -1,6 +1,6 @@
 # SkyPilot Managed Jobs
 
-This module is used for running and managing user jobs, which automatically recovers the job from spot preemptions and machine failures.
+This module is used for running and managing user jobs, which automatically recovers failed jobs from spot preemptions and/or machine failures.
 
 ## Concepts
 

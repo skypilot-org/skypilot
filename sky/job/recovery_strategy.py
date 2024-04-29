@@ -1,4 +1,4 @@
-"""The strategy to handle launching/recovery/termination of clusters.
+"""Strategies to handle launching/recovery/termination of managed job clusters.
 
 In the YAML file, the user can specify the strategy to use for managed jobs.
 
@@ -17,7 +17,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
-from sky.job import utils as job_utils
+from sky.job import utils as managed_job_utils
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -60,7 +60,7 @@ def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
 
 
 class StrategyExecutor:
-    """Handle each launching, recovery and termination of the clusters."""
+    """Handle the launching, recovery and termination of managed job clusters"""
 
     RETRY_INIT_GAP_SECONDS = 60
 
@@ -214,8 +214,8 @@ class StrategyExecutor:
                 break
 
             try:
-                status = job_utils.get_job_status(self.backend,
-                                                  self.cluster_name)
+                status = managed_job_utils.get_job_status(
+                    self.backend, self.cluster_name)
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
                 # loop.
@@ -230,7 +230,7 @@ class StrategyExecutor:
             # Check the job status until it is not in initialized status
             if status is not None and status > job_lib.JobStatus.INIT:
                 try:
-                    job_submitted_at = job_utils.get_job_timestamp(
+                    job_submitted_at = managed_job_utils.get_job_timestamp(
                         self.backend, self.cluster_name, get_end_time=False)
                     return job_submitted_at
                 except Exception as e:  # pylint: disable=broad-except
@@ -240,7 +240,7 @@ class StrategyExecutor:
                                 'the job start timestamp. Retrying.')
                     continue
             # Wait for the job to be started
-            time.sleep(job_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
+            time.sleep(managed_job_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
         return None
 
     def _launch(self,
@@ -330,12 +330,12 @@ class StrategyExecutor:
                         raise exceptions.ProvisionPrechecksError(
                             reasons=reasons)
                     return None
-                logger.info('Failed to launch the cluster with error: '
+                logger.info('Failed to launch a cluster with error: '
                             f'{common_utils.format_exception(e)})')
             except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
-                logger.info('Failed to launch the cluster with error: '
+                logger.info('Failed to launch a cluster with error: '
                             f'{common_utils.format_exception(e)})')
                 with ux_utils.enable_traceback():
                     logger.info(f'  Traceback: {traceback.format_exc()}')
@@ -359,8 +359,8 @@ class StrategyExecutor:
                 if raise_on_failure:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ManagedJobReachedMaxRetriesError(
-                            'Resources unavailable: failed to launch the '
-                            f'cluster after {max_retry} retries.')
+                            'Resources unavailable: failed to launch clusters '
+                            f'after {max_retry} retries.')
                 else:
                     return None
             gap_seconds = backoff.current_backoff()
