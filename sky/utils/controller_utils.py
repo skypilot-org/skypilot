@@ -204,7 +204,7 @@ def _get_cloud_dependencies_installation_commands(
     if controller_type == 'spot':
         # oci doesn't support open port yet, so we don't install oci
         # dependencies for sky serve controller.
-        if clouds.cloud_in_list(clouds.OCI(), enabled_clouds):
+        if clouds.cloud_in_iterable(clouds.OCI(), enabled_clouds):
             commands.append('pip list | grep oci > /dev/null 2>&1 || '
                             'pip install oci > /dev/null 2>&1')
     # ibm doesn't support open port and spot instance yet, so we don't
