@@ -164,6 +164,9 @@ def bulk_provision(
         tags={},
         resume_stopped_nodes=True)
 
+    if 'initDiskSize' in original_config:
+        bootstrap_config.node_config['metadata']['diskSize'] = original_config['initDiskSize']
+
     with provision_logging.setup_provision_logging(log_dir):
         try:
             logger.debug(f'SkyPilot version: {sky.__version__}; '

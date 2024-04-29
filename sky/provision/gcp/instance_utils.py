@@ -1373,7 +1373,10 @@ class GCPTPUVMInstance(GCPInstance):
         """Resizes disk for TPU VMs by adding a persistent disk when needed."""
         import time
         from googleapiclient.errors import HttpError
-        resource = cls.load_resource()
+        from googleapiclient import discovery
+
+        resource = discovery.build("compute", "v1")
+
 
         # Determine the required disk size from configuration
         default_disk_size = 100  # Default boot disk size for TPUVMs
