@@ -165,12 +165,12 @@ def run_controller(service_name: str, service_spec: serve.SkyServiceSpec,
     # kubernetes cluster to allow external load balancers (example, for
     # high availability load balancers) to communicate with the controller.
     def _get_host():
-        if "KUBERNETES_SERVICE_HOST" in os.environ:
+        if 'KUBERNETES_SERVICE_HOST' in os.environ:
             return '0.0.0.0'
         else:
             return 'localhost'
 
     host = _get_host()
-    controller = SkyServeController(service_name, service_spec, task_yaml,
-                                    host, controller_port)
+    controller = SkyServeController(service_name, service_spec, task_yaml, host,
+                                    controller_port)
     controller.run()

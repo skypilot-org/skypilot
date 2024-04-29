@@ -732,9 +732,9 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     if load_balancer_port is None:
         return '-'
     try:
-        endpoint = backend_utils.get_endpoints(
-            handle.cluster_name, load_balancer_port).get(load_balancer_port,
-                                                         None)
+        endpoint = backend_utils.get_endpoints(handle.cluster_name,
+                                               load_balancer_port).get(
+                                                   load_balancer_port, None)
     except exceptions.ClusterNotUpError:
         return '-'
     if endpoint is None:

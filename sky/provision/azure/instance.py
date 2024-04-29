@@ -4,7 +4,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import azure
-from sky.provision import common
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)

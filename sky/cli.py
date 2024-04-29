@@ -1564,8 +1564,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             if show_endpoints:
                 if endpoint:
                     cluster_endpoint = core.endpoints(cluster_record['name'],
-                                                      endpoint).get(endpoint,
-                                                                    None)
+                                                      endpoint).get(
+                                                          endpoint, None)
                     if not cluster_endpoint:
                         raise click.Abort(
                             f'Endpoint {endpoint} not found for cluster '
@@ -1575,9 +1575,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     cluster_endpoints = core.endpoints(cluster_record['name'])
                     assert isinstance(cluster_endpoints, dict)
                     if not cluster_endpoints:
-                        raise click.Abort(
-                            f'No endpoint found for cluster '
-                            f'{cluster_record["name"]!r}.')
+                        raise click.Abort(f'No endpoint found for cluster '
+                                          f'{cluster_record["name"]!r}.')
                     for port, port_endpoint in cluster_endpoints.items():
                         click.echo(
                             f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
