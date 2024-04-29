@@ -578,20 +578,24 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                            'The `envs` field contains invalid keys:\n' +
                            e.message)
             else:
-                err_msg = err_msg_prefix + 'The following fields are invalid:'
+                err_msg = err_msg_prefix
                 known_fields = set(e.schema.get('properties', {}).keys())
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(
                             field, known_fields, 1)
                         if most_similar_field:
-                            err_msg += (f'\nInstead of {field!r}, did you mean '
+                            err_msg += (f'Instead of {field!r}, did you mean '
                                         f'{most_similar_field[0]!r}?')
                         else:
-                            err_msg += f'\nFound unsupported field {field!r}.'
+                            err_msg += f'Found unsupported field {field!r}.'
         else:
+            message = e.message
+            # Object in jsonschema is represented as dict in Python. Replace
+            # 'object' with 'dict' for better readability.
+            message = message.replace('type \'object\'', 'type \'dict\'')
             # Example e.json_path value: '$.resources'
-            err_msg = (err_msg_prefix + e.message +
+            err_msg = (err_msg_prefix + message +
                        f'. Check problematic field(s): {e.json_path}')
 
     if err_msg:
@@ -641,3 +645,20 @@ def fill_template(template_name: str, variables: Dict,
     content = j2_template.render(**variables)
     with open(output_path, 'w', encoding='utf-8') as fout:
         fout.write(content)
+
+
+def deprecated_function(func: Callable, name: str, deprecated_name: str,
+                        removing_version: str) -> Callable:
+    """Decorator for creating deprecated functions, for backward compatibility.
+
+    It will result in a warning being emitted when the function is used.
+    """
+
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        logger.warning(
+            f'Call to deprecated function {deprecated_name}, which will be '
+            f'removed in {removing_version}. Please use {name}() instead.')
+        return func(*args, **kwargs)
+
+    return new_func

@@ -78,7 +78,7 @@ def open_ports(
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Failed to open ports {ports} in NSG '
                                      f'{nsg.name}: {poller.status()}')
-        except azure.exceptions().HttpResponseError() as e:
+        except azure.exceptions().HttpResponseError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Failed to open ports {ports} in NSG {nsg.name}.') from e

@@ -40,7 +40,7 @@ def _get_df() -> 'pd.DataFrame':
 
         df = common.read_catalog('oci/vms.csv')
         try:
-            oci_adaptor.oci
+            oci_adaptor.oci.load_module()
         except ImportError:
             _df = df
             return _df

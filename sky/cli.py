@@ -1249,8 +1249,8 @@ def _get_spot_jobs(
             usage_lib.messages.usage.set_internal()
         with sky_logging.silent():
             # Make the call silent
-            spot_jobs = core.spot_queue(refresh=refresh,
-                                        skip_finished=skip_finished)
+            spot_jobs = spot_lib.queue(refresh=refresh,
+                                       skip_finished=skip_finished)
         num_in_progress_jobs = len(spot_jobs)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -2475,7 +2475,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
     with rich_utils.safe_status(
             '[bold cyan]Checking for in-progress spot jobs[/]'):
         try:
-            spot_jobs = core.spot_queue(refresh=False, skip_finished=True)
+            spot_jobs = spot_lib.queue(refresh=False, skip_finished=True)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -3268,7 +3268,7 @@ def spot_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
-    sky.spot_launch(dag,
+    spot_lib.launch(dag,
                     name,
                     detach_run=detach_run,
                     retry_until_up=retry_until_up)
@@ -3427,7 +3427,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
                       abort=True,
                       show_default=True)
 
-    core.spot_cancel(job_ids=job_ids, name=name, all=all)
+    spot_lib.cancel(job_ids=job_ids, name=name, all=all)
 
 
 @spot.command('logs', cls=_DocumentedCodeCommand)
@@ -3459,7 +3459,7 @@ def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                            job_id=job_id,
                            follow=follow)
         else:
-            core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
+            spot_lib.tail_logs(name=name, job_id=job_id, follow=follow)
     except exceptions.ClusterNotUpError as e:
         click.echo(e)
         sys.exit(1)

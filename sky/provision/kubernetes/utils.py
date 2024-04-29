@@ -1112,28 +1112,64 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
 
 
 def check_port_forward_mode_dependencies() -> None:
-    """Checks if 'socat' is installed"""
-    # We store the dependency list as a list of lists. Each inner list
-    # contains the name of the dependency, the command to check if it is
-    # installed, and the package name to install it.
-    dependency_list = [['socat', ['socat', '-V'], 'socat'],
-                       ['nc', ['nc', '-h'], 'netcat']]
-    for name, check_cmd, install_cmd in dependency_list:
-        try:
-            subprocess.run(check_cmd,
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL,
-                           check=True)
-        except (FileNotFoundError, subprocess.CalledProcessError):
+    """Checks if 'socat' and 'nc' are installed"""
+
+    # Construct runtime errors
+    socat_default_error = RuntimeError(
+        f'`socat` is required to setup Kubernetes cloud with '
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+        'default networking mode and it is not installed. '
+        'On Debian/Ubuntu, install it with:\n'
+        f'  $ sudo apt install socat\n'
+        f'On MacOS, install it with: \n'
+        f'  $ brew install socat')
+    netcat_default_error = RuntimeError(
+        f'`nc` is required to setup Kubernetes cloud with '
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+        'default networking mode and it is not installed. '
+        'On Debian/Ubuntu, install it with:\n'
+        f'  $ sudo apt install netcat\n'
+        f'On MacOS, install it with: \n'
+        f'  $ brew install netcat')
+    mac_installed_error = RuntimeError(
+        f'The default MacOS `nc` is installed. However, for '
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+        'default networking mode, GNU netcat is required. '
+        f'On MacOS, install it with: \n'
+        f'  $ brew install netcat')
+
+    # Ensure socat is installed
+    try:
+        subprocess.run(['socat', '-V'],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        with ux_utils.print_exception_no_traceback():
+            raise socat_default_error from None
+
+    # Ensure netcat is installed
+    #
+    # In some cases, the user may have the default MacOS nc installed, which
+    # does not support the -z flag. To use the -z flag for port scanning,
+    # they need GNU nc installed. We check for this case and raise an error.
+    try:
+        netcat_output = subprocess.run(['nc', '-h'],
+                                       capture_output=True,
+                                       check=False)
+        nc_mac_installed = netcat_output.returncode == 1 and 'apple' in str(
+            netcat_output.stderr)
+
+        if nc_mac_installed:
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'`{name}` is required to setup Kubernetes cloud with '
-                    f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-                    'default networking mode and it is not installed. '
-                    'On Debian/Ubuntu, install it with:\n'
-                    f'  $ sudo apt install {install_cmd}\n'
-                    f'On MacOS, install it with: \n'
-                    f'  $ brew install {install_cmd}') from None
+                raise mac_installed_error from None
+        elif netcat_output.returncode != 0:
+            with ux_utils.print_exception_no_traceback():
+                raise netcat_default_error from None
+
+    except FileNotFoundError:
+        with ux_utils.print_exception_no_traceback():
+            raise netcat_default_error from None
 
 
 def get_endpoint_debug_message() -> str:
@@ -1322,3 +1358,24 @@ def check_secret_exists(secret_name: str, namespace: str) -> bool:
         raise
     else:
         return True
+
+
+def create_namespace(namespace: str) -> None:
+    """Creates a namespace in the cluster.
+
+    If the namespace already exists, logs a message and does nothing.
+
+    Args:
+        namespace: Name of the namespace to create
+    """
+    kubernetes_client = kubernetes.kubernetes.client
+    ns_metadata = dict(name=namespace, labels={'parent': 'skypilot'})
+    merge_custom_metadata(ns_metadata)
+    namespace_obj = kubernetes_client.V1Namespace(metadata=ns_metadata)
+    try:
+        kubernetes.core_api().create_namespace(namespace_obj)
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.info(f'Namespace {namespace} already exists in the cluster.')
+        else:
+            raise

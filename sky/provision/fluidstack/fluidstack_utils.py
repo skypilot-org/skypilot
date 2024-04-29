@@ -8,8 +8,6 @@ import uuid
 
 import requests
 
-from sky.clouds.service_catalog.data_fetchers import fetch_fluidstack
-
 
 def get_key_suffix():
     return str(uuid.uuid4()).replace('-', '')[:8]
@@ -119,17 +117,8 @@ class FluidstackClient:
     ) -> List[str]:
         """Launch new instances."""
 
-        config = {}
+        config: Dict[str, Any] = {}
         plans = self.get_plans()
-        if 'custom' in instance_type:
-            values = instance_type.split(':')
-            index = values[1]
-            instance_type = values[2]
-            config = fetch_fluidstack.CUSTOM_PLANS_CONFIG[int(index)]
-            plan = [plan for plan in plans if plan['plan_id'] == instance_type
-                   ][0]
-            config['gpu_model'] = plan['gpu_type']
-
         regions = self.list_regions()
         plans = [
             plan for plan in plans if plan['plan_id'] == instance_type and

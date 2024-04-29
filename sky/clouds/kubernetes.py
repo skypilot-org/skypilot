@@ -25,6 +25,11 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
 CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
+# Namespace for SkyPilot resources shared across multiple tenants on the
+# same cluster (even if they might be running in different namespaces).
+# E.g., FUSE device manager daemonset is run in this namespace.
+_SKY_SYSTEM_NAMESPACE = 'skypilot-system'
+
 
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
@@ -278,6 +283,8 @@ class Kubernetes(clouds.Cloud):
             k8s_service_account_name = remote_identity
             k8s_automount_sa_token = 'true'
 
+        fuse_device_required = bool(resources.requires_fuse)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -296,6 +303,9 @@ class Kubernetes(clouds.Cloud):
             'k8s_ssh_jump_image': ssh_jump_image,
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': k8s_automount_sa_token,
+            'k8s_fuse_device_required': fuse_device_required,
+            # Namespace to run the FUSE device manager in
+            'k8s_fuse_device_manager_namespace': _SKY_SYSTEM_NAMESPACE,
             'image_id': image_id,
         }
 
