@@ -2600,7 +2600,7 @@ def get_task_resources_str(task: 'task_lib.Task',
         if is_managed_job:
             if len(task.resources) > 1:
                 task_cpu_demand = f'{min_cpus}+'
-            if 'spot' in spot_type:
+            if 'Spot' in spot_type:
                 spot_str = '|'.join(sorted(spot_type))
                 spot_str = f'({spot_str})'
         if resource_accelerators:
