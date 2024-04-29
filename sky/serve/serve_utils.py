@@ -815,7 +815,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         replica_records = replica_records[:_REPLICA_TRUNC_NUM]
 
     for record in replica_records:
-        endpoint = record.get('endpoint', None)
+        endpoint = record.get('endpoint', '-')
         service_name = record['service_name']
         replica_id = record['replica_id']
         version = (record['version'] if 'version' in record else '-')

@@ -148,7 +148,7 @@ def query_ports(
 
     If head_ip is provided, it may be used by the cloud implementation to
     return the endpoint without querying the cloud provider. If head_ip is not
-    provider, the cloud provider will be queried to get the endpoint info.
+    provided, the cloud provider will be queried to get the endpoint info.
 
     Returns a dict with port as the key and a list of common.Endpoint.
     """
