@@ -3594,7 +3594,7 @@ def job_dashboard(port: Optional[int]):
 # Remove in v0.8.0.
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
-    """Alias for Managed Job CLI (default to spot instances)."""
+    """Alias for Managed Job CLI (default to managed spot jobs)."""
     pass
 
 
