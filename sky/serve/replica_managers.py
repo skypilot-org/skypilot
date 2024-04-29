@@ -429,17 +429,20 @@ class ReplicaInfo:
         handle = self.handle()
         if handle is None:
             return None
+        replica_port_int = int(self.replica_port)
         try:
-            replica_port_int = int(self.replica_port)
-            endpoint = core.endpoints(handle.cluster_name,
-                                      replica_port_int)[replica_port_int]
-            assert isinstance(endpoint, str), endpoint
-            # If replica doesn't start with http or https, add http://
-            if not endpoint.startswith('http'):
-                endpoint = 'http://' + endpoint
-            return endpoint
-        except (RuntimeError, exceptions.ClusterNotUpError):
+            endpoint_dict = core.endpoints(handle.cluster_name,
+                                           replica_port_int)
+        except exceptions.ClusterNotUpError:
             return None
+        endpoint = endpoint_dict.get(replica_port_int, None)
+        if not endpoint:
+            return None
+        assert isinstance(endpoint, str), endpoint
+        # If replica doesn't start with http or https, add http://
+        if not endpoint.startswith('http'):
+            endpoint = 'http://' + endpoint
+        return endpoint
 
     @property
     def status(self) -> serve_state.ReplicaStatus:

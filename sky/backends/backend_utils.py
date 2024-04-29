@@ -2702,11 +2702,14 @@ def get_endpoints(cluster: str,
 
     Returns: A dictionary of port numbers to endpoints. If endpoint is None,
         the dictionary will contain all ports:endpoints exposed on the cluster.
+        If the endpoint is not exposed yet (e.g., during cluster launch or
+        waiting for cloud provider to expose the endpoint), an empty dictionary
+        is returned.
 
     Raises:
-        ValueError: if the cluster is not UP or the endpoint is not exposed.
-        RuntimeError: if the cluster has no ports to be exposed or no endpoints
-            are exposed yet.
+        ValueError: if the port is invalid or the cloud provider does not
+            support querying endpoints.
+        exceptions.ClusterNotUpError: if the cluster is not in UP status.
     """
     # Cast endpoint to int if it is not None
     if port is not None:
@@ -2754,10 +2757,9 @@ def get_endpoints(cluster: str,
         port_set = resources_utils.port_ranges_to_set(
             handle.launched_resources.ports)
         if port not in port_set:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Port {port} is not exposed '
-                                 'on cluster '
-                                 f'{cluster!r}.')
+            logger.warning(f'Port {port} is not exposed on '
+                           f'cluster {cluster!r}.')
+            return {}
         # If the user requested a specific port endpoint, check if it is exposed
         if port not in port_details:
             error_msg = (f'Port {port} not exposed yet. '
@@ -2766,16 +2768,16 @@ def get_endpoints(cluster: str,
                     clouds.Kubernetes()):
                 # Add Kubernetes specific debugging info
                 error_msg += (kubernetes_utils.get_endpoint_debug_message())
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(error_msg)
+            logger.warning(error_msg)
+            return {}
         return {port: port_details[port][0].url()}
     else:
         if not port_details:
             # If cluster had no ports to be exposed
             if handle.launched_resources.ports is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Cluster does not have any ports '
-                                     'to be exposed.')
+                logger.warning(f'Cluster {cluster!r} does not have any '
+                               'ports to be exposed.')
+                return {}
             # Else ports have not been exposed even though they exist.
             # In this case, ask the user to retry.
             else:
@@ -2786,8 +2788,8 @@ def get_endpoints(cluster: str,
                     # Add Kubernetes specific debugging info
                     error_msg += \
                         kubernetes_utils.get_endpoint_debug_message()
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(error_msg)
+                logger.warning(error_msg)
+                return {}
         return {
             port_num: urls[0].url() for port_num, urls in port_details.items()
         }
