@@ -1151,9 +1151,6 @@ def get_endpoint_debug_message() -> str:
     elif port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         endpoint_type = 'LoadBalancer'
         debug_cmd = 'kubectl describe service'
-    elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
-        endpoint_type = 'PodIP'
-        debug_cmd = 'kubectl describe pod'
     return ENDPOINTS_DEBUG_MESSAGE.format(endpoint_type=endpoint_type,
                                           debug_cmd=debug_cmd)
 
@@ -1325,18 +1322,3 @@ def check_secret_exists(secret_name: str, namespace: str) -> bool:
         raise
     else:
         return True
-
-
-def get_pod_name(cluster_name_on_cloud: str):
-    """Returns the pod name of the head pod for the given cluster name on cloud
-
-    Args:
-        cluster_name_on_cloud: Name of the cluster on cloud
-
-    Returns:
-        str: Pod name of the head pod
-    """
-    # We could have iterated over all pods in the namespace and checked for the
-    # label, but since we know the naming convention, we can directly return the
-    # head pod name.
-    return f'{cluster_name_on_cloud}-head'
