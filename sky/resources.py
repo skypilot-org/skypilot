@@ -215,7 +215,7 @@ class Resources:
 
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
-        self._try_validate_job()
+        self._try_validate_managed_job_attributes()
         self._try_validate_image_id()
         self._try_validate_disk_tier()
         self._try_validate_ports()
