@@ -2728,7 +2728,8 @@ def get_endpoints(cluster: str,
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Querying IP address is not supported '
-                             'for local clusters.')
+                             f'for cluster {cluster!r} with backend '
+                             f'{get_backend_from_handle(handle).NAME}.')
 
     launched_resources = handle.launched_resources
     cloud = launched_resources.cloud
@@ -2738,7 +2739,7 @@ def get_endpoints(cluster: str,
     except exceptions.NotSupportedError:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Querying endpoints is not supported '
-                             f'for {cloud}.') from None
+                             f'for cluster {cluster!r} on {cloud}.') from None
 
     config = common_utils.read_yaml(handle.cluster_yaml)
     port_details = provision_lib.query_ports(repr(cloud),
@@ -2756,7 +2757,7 @@ def get_endpoints(cluster: str,
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Port {port} is not exposed '
                                  'on cluster '
-                                 f'{cluster_record["name"]!r}.')
+                                 f'{cluster!r}.')
         # If the user requested a specific port endpoint, check if it is exposed
         if port not in port_details:
             error_msg = (f'Port {port} not exposed yet. '

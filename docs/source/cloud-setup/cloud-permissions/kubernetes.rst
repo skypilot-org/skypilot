@@ -92,7 +92,7 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
       resources: ["runtimeclasses"]   # Required for autodetecting the runtime class of the nodes.
       verbs: ["get", "list", "watch"]
     ---
-    # If using ingresses, role for accessing ingress service IP
+    # Optional: If using ingresses, role for accessing ingress service IP
     apiVersion: rbac.authorization.k8s.io/v1
     kind: Role
     metadata:

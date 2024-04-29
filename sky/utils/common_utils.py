@@ -70,8 +70,9 @@ def get_user_hash(force_fresh_hash: bool = False) -> str:
     Args:
         force_fresh_hash: Bypasses the cached hash in USER_HASH_FILE and the
             hash in the USER_ID_ENV_VAR and forces a fresh user-machine hash
-            to be generated.
-
+            to be generated. Used by `kubernetes.ssh_key_secret_field_name` to
+            avoid controllers sharing the same ssh key field name as the
+            local client.
     """
 
     def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
