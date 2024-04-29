@@ -43,23 +43,6 @@ def get_port_mode(
     return port_mode
 
 
-def get_networking_mode(mode_str: Optional[str] = None) -> kubernetes_enums.KubernetesNetworkingMode:
-    """Get the networking mode from the provider config."""
-    mode_str = mode_str or skypilot_config.get_nested(
-        ('kubernetes', 'networking_mode'),
-        kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value)
-    try:
-        networking_mode = kubernetes_enums.KubernetesNetworkingMode(mode_str)
-    except ValueError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e)
-                + ' Cluster was setup with invalid networking mode.'
-                + 'Please check the networking_mode in provider config.') \
-                from None
-
-    return networking_mode
-
-
 def fill_loadbalancer_template(namespace: str, service_name: str,
                                ports: List[int], selector_key: str,
                                selector_value: str) -> Dict:

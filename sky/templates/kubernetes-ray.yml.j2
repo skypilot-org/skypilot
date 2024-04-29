@@ -155,11 +155,8 @@ provider:
             name: skypilot-service-account-cluster-role
             apiGroup: rbac.authorization.k8s.io
 
-    {% if k8s_networking_mode == "nodeport" or num_nodes > 1 %}
     services:
-      {% if k8s_networking_mode == "nodeport" %}
       # Service to expose the head node pod's SSH port.
-      # Required only when using nodeport for accessing ssh.
       - apiVersion: v1
         kind: Service
         metadata:
@@ -174,10 +171,7 @@ provider:
             - protocol: TCP
               port: 22
               targetPort: 22
-      {% endif %}
-      {% if num_nodes > 1 %}
       # Service that maps to the head node of the Ray cluster.
-      # Required only in multi-node settings.
       - apiVersion: v1
         kind: Service
         metadata:
@@ -201,8 +195,6 @@ provider:
                   protocol: TCP
                   port: 8265
                   targetPort: 8265
-      {% endif %}
-    {% endif %}
 
 # Specify the pod type for the ray head node (as configured below).
 head_node_type: ray_head_default
