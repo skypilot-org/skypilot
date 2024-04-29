@@ -33,7 +33,7 @@ def launch(
     stream_logs: bool = True,
     detach_run: bool = False,
     retry_until_up: bool = False,
-):
+) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
 

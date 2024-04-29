@@ -3208,7 +3208,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo view all managed jobs:\t'
                     f'{backend_utils.BOLD}sky job queue'
                     f'{backend_utils.RESET_BOLD}'
-                    '\nTo view the managed job dashboard:\t'
+                    '\nTo view managed job dashboard:\t'
                     f'{backend_utils.BOLD}sky job dashboard'
                     f'{backend_utils.RESET_BOLD}')
             elif controller is None:
