@@ -100,10 +100,10 @@ Available fields:
       # if the node fails, and go to the next region if no available resources
       # are found in the same region. 
       #
-      # If `EAGER_NEXT_REGION` is specified, the
-      # job will go to the next region directly if the node fails. This is
-      # useful for spot instances, as in practice, preemptions in a region
-      # usually indicate a shortage of resources in that region.
+      # If `EAGER_NEXT_REGION` is specified, the job will go to the next region
+      # directly if the node fails. This is useful for spot instances, as in
+      # practice, preemptions in a region usually indicate a shortage of resources
+      # in that region.
       #
       # default: EAGER_NEXT_REGION
       job_recovery: none
