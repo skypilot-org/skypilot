@@ -4167,7 +4167,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             A tuple of (returncode, stdout, stderr).
 
         Raises:
-            exceptions.FetchClusterInfoError: If the head node IP cannot be
+            exceptions.FetchClusterInfoError: If the head node cluster info cannot be
                 fetched.
         """
         # This will try to fetch the head node IP if it is not cached.
