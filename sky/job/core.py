@@ -283,7 +283,7 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
-    Please refer to the sky.cli.job_logs for the document.
+    Please refer to sky.cli.job_logs for documentation.
 
     Raises:
         ValueError: invalid arguments.
