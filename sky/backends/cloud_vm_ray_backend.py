@@ -2288,7 +2288,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 external IPs from the cloud provider.
 
         Raises:
-            exceptions.FetchClusterInfoError: if we failed to get the IPs.
+            exceptions.FetchClusterInfoError: if we failed to get the cluster infos.
                 e.reason is HEAD or WORKER.
         """
         if cluster_info is not None:
@@ -4167,7 +4167,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             A tuple of (returncode, stdout, stderr).
 
         Raises:
-            exceptions.FetchClusterInfoError: If the head node IP cannot be
+            exceptions.FetchClusterInfoError: If the head node cluster info cannot be
                 fetched.
         """
         # This will try to fetch the head node IP if it is not cached.
