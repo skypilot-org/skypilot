@@ -170,6 +170,7 @@ sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "
 sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 300"
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
+s=$(sky job queue | grep ${MANAGED_JOB_JOB_NAME}-7 | grep "RUNNING" | wc -l)
 s=$(sky job logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-1)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
