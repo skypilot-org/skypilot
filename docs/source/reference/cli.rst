@@ -3,7 +3,7 @@
 Command Line Interface
 ======================
 
-Core CLI
+Cluster CLI
 ---------
 
 .. _sky-launch:
@@ -41,9 +41,6 @@ Core CLI
    :prog: sky autostop
    :nested: full
 
-Job Queue CLI
---------------
-
 .. _sky-queue:
 .. click:: sky.cli:queue
    :prog: sky queue
@@ -58,6 +55,30 @@ Job Queue CLI
 .. click:: sky.cli:cancel
    :prog: sky cancel
    :nested: full
+
+Managed (Spot) Jobs CLI
+---------------------------
+
+.. _sky-job-launch:
+.. click:: sky.cli:job_launch
+   :prog: sky job launch
+   :nested: full
+
+.. _sky-job-queue:
+.. click:: sky.cli:job_queue
+   :prog: sky job queue
+   :nested: full
+
+.. _sky-job-cancel:
+.. click:: sky.cli:job_cancel
+   :prog: sky job cancel
+   :nested: full
+
+.. _sky-job-logs:
+.. click:: sky.cli:job_logs
+   :prog: sky job logs
+   :nested: full
+
 
 Sky Serve CLI
 -------------
@@ -82,28 +103,6 @@ Sky Serve CLI
    :prog: sky serve update
    :nested: full
 
-Managed Jobs CLI
----------------------------
-
-.. _sky-job-launch:
-.. click:: sky.cli:job_launch
-   :prog: sky job launch
-   :nested: full
-
-.. _sky-job-queue:
-.. click:: sky.cli:job_queue
-   :prog: sky job queue
-   :nested: full
-
-.. _sky-job-cancel:
-.. click:: sky.cli:job_cancel
-   :prog: sky job cancel
-   :nested: full
-
-.. _sky-job-logs:
-.. click:: sky.cli:job_logs
-   :prog: sky job logs
-   :nested: full
 
 Storage CLI
 ------------
