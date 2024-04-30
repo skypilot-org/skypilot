@@ -4431,6 +4431,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # (2) Run the commands to create symlinks on all the nodes.
         symlink_command = ' && '.join(symlink_commands)
         if symlink_command:
+            # HANDLE_SUDO_FOR_ROOT_CMD sets sudo to empty string for root. We
+            # need this as we do not source bashrc for the command for better
+            # performance, and our sudo handling is only in bashrc.
             symlink_command = (f'{command_runner.HANDLE_SUDO_FOR_ROOT_CMD} && '
                                f'{symlink_command}')
 
