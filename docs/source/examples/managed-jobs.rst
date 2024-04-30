@@ -271,8 +271,8 @@ Despite spot instances, you can use both spot and on-demand instances as candida
       - use_spot: false
 
 In this example, the job will try to use spot instances first. If spot instances are not available, it will fall back to on-demand instances.
-Details of resource specification can be found in the `YAML spec <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
-More advanced policies for resource selection, such as `Can't Be Late <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>` (NSDI'24) paper, will be supported in the future.
+Details of resource specification can be found in the :ref:`YAML spec <yaml-spec>`.
+More advanced policies for resource selection, such as `Can't Be Late <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`__ (NSDI'24) paper, will be supported in the future.
 
 .. _pipeline:
 
