@@ -130,7 +130,7 @@ class ManagedJobStatus(enum.Enum):
     """Managed job status, designed to be in serverless style.
 
     The ManagedJobStatus is a higher level status than the JobStatus.
-    Each managed job submitted to a cluster, will have a JobStatus
+    Each managed job submitted to a cluster will have a JobStatus
     on that cluster:
         JobStatus = [INIT, SETTING_UP, PENDING, RUNNING, ...]
     Whenever the cluster is preempted and recovered, the JobStatus
