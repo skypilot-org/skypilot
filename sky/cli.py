@@ -2879,7 +2879,7 @@ def show_gpus(
 
     * ``HOST_MEM``: Memory of the host instance (VM).
 
-    * ``QTY_PER_NODE`` (Kubernetes only): Maximum quantity of the GPU available
+    * ``QTY_PER_NODE`` (Kubernetes only): GPU quantities that can be requested
       on a single node.
 
     * ``TOTAL_GPUS`` (Kubernetes only): Total number of GPUs available in the
