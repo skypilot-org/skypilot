@@ -2376,10 +2376,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     @functools.lru_cache()
     @timeline.event
-    def get_command_runners(
-            self,
-            avoid_ssh_control: bool = False
-    ) -> List[command_runner.CommandRunner]:
+    def get_command_runners(self,
+                            force_cached: bool = False,
+                            avoid_ssh_control: bool = False
+                           ) -> List[command_runner.CommandRunner]:
         """Returns a list of command runners for the cluster."""
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             self.cluster_yaml, self.docker_user, self.ssh_user)
@@ -2387,12 +2387,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             ssh_credentials.pop('ssh_control_name', None)
         if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR >=
                 self.launched_resources.cloud.PROVISIONER_VERSION):
-            ip_list = self.external_ips()
+            ip_list = (self.cached_external_ips
+                       if force_cached else self.external_ips())
+            if ip_list is None:
+                return []
+            # Potentially refresh the external SSH ports, in case the existing
+            # cluster before #2491 was launched without external SSH ports
+            # cached.
             port_list = self.external_ssh_ports()
             runners = command_runner.SSHCommandRunner.make_runner_list(
                 zip(ip_list, port_list), **ssh_credentials)
             return runners
         if self.cached_cluster_info is None:
+            assert not force_cached, 'cached_cluster_info is None.'
             self._update_cluster_info()
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
