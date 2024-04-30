@@ -5,6 +5,7 @@ import os
 import pathlib
 import shlex
 import shutil
+import textwrap
 import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -709,85 +710,80 @@ class ManagedJobCodeGen:
 
       >> codegen = ManagedJobCodeGen.show_jobs(...)
     """
-    _PREFIX = [
-        'try: from sky.job import constants; '
-        'managed_job = constants.MANAGED_JOB_VERSION',
-        'except: managed_job_version = 0',
-        'if managed_job_version < 1:'
-        'from sky.spot import spot_state as state',
-        'from sky.spot import spot_utils as utils',
-        'else:',
-        'from sky.job import (state, utils)',
-    ]
+    _PREFIX = textwrap.dedent("""\
+        managed_job_version = 0
+        try:
+            from sky.job import constants, state, utils;
+            managed_job_version = constants.MANAGED_JOB_VERSION;
+        except ImportError:
+            from sky.spot import spot_state as state, spot_utils as utils
+        """)
+
 
     @classmethod
     def get_job_table(cls) -> str:
-        code = [
-            'if managed_job_version > 1:'
-            'job_table = utils.dump_managed_job_queue()',
-            'else:',
-            'job_table = utils.dump_spot_job_queue()',
-            'print(job_table, flush=True)',
-        ]
+        code = textwrap.dedent("""\
+        if managed_job_version > 1:
+            job_table = utils.dump_managed_job_queue()
+        else:
+            job_table = utils.dump_spot_job_queue()
+        print(job_table, flush=True)
+        """)
         return cls._build(code)
 
     @classmethod
     def cancel_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
-        code = [
-            f'msg = utils.cancel_jobs_by_id({job_ids})',
-            'print(msg, end="", flush=True)',
-        ]
+        code = textwrap.dedent(f"""\
+        msg = utils.cancel_jobs_by_id({job_ids})
+        print(msg, end="", flush=True)
+        """)
         return cls._build(code)
 
     @classmethod
     def cancel_job_by_name(cls, job_name: str) -> str:
-        code = [
-            f'msg = utils.cancel_job_by_name({job_name!r})',
-            'print(msg, end="", flush=True)',
-        ]
+        code = textwrap.dedent(f"""\
+        msg = utils.cancel_job_by_name({job_name!r})
+        print(msg, end="", flush=True)
+        """)
         return cls._build(code)
 
     @classmethod
     def stream_logs_by_name(cls, job_name: str, follow: bool = True) -> str:
-        code = [
-            f'msg = utils.stream_logs_by_name({job_name!r}, '
-            f'follow={follow})',
-            'print(msg, flush=True)',
-        ]
+        code = textwrap.dedent(f"""\
+        msg = utils.stream_logs_by_name({job_name!r}, follow={follow})
+        print(msg, flush=True)
+        """)
         return cls._build(code)
 
     @classmethod
     def stream_logs_by_id(cls,
                           job_id: Optional[int],
                           follow: bool = True) -> str:
-        code = [
-            f'job_id = {job_id} if {job_id} is not None '
-            'else state.get_latest_job_id()',
-            f'msg = utils.stream_logs_by_id(job_id, follow={follow})',
-            'print(msg, flush=True)',
-        ]
+        code = textwrap.dedent(f"""\
+        job_id = {job_id} if {job_id} is not None else state.get_latest_job_id()
+        msg = utils.stream_logs_by_id(job_id, follow={follow})
+        print(msg, flush=True)
+        """)
         return cls._build(code)
 
     @classmethod
     def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag') -> str:
         dag_name = managed_job_dag.name
         # Add the managed job to queue table.
-        code = [
-            f'state.set_job_name('
-            f'{job_id}, {dag_name!r})',
-        ]
+        code = textwrap.dedent(f"""\
+            state.set_job_name({job_id}, {dag_name!r})
+            
+            """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
-            code += [
-                f'state.set_pending('
-                f'{job_id}, {task_id}, {task.name!r}, '
-                f'{resources_str!r})',
-            ]
+            code += textwrap.dedent(f"""\
+                state.set_pending({job_id}, {task_id}, 
+                                  {task.name!r}, {resources_str!r})
+                """)
         return cls._build(code)
 
     @classmethod
-    def _build(cls, code: List[str]) -> str:
-        code = cls._PREFIX + code
-        generated_code = '; '.join(code)
+    def _build(cls, code: str) -> str:
+        generated_code = cls._PREFIX + '\n'+ code
         return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}'
