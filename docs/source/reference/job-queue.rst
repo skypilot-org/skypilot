@@ -1,7 +1,7 @@
 .. _job-queue:
 
 Cluster Job Queue
-=========
+=================
 
 SkyPilot's **job queue** allows multiple jobs to be scheduled on a cluster.
 

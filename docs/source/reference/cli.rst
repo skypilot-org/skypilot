@@ -4,7 +4,7 @@ Command Line Interface
 ======================
 
 Cluster CLI
----------
+-----------
 
 .. _sky-launch:
 .. click:: sky.cli:launch
