@@ -710,14 +710,23 @@ class ManagedJobCodeGen:
       >> codegen = ManagedJobCodeGen.show_jobs(...)
     """
     _PREFIX = [
-        'from sky.job import state',
-        'from sky.job import utils',
+        'try: from sky.job import constants; '
+        'managed_job = constants.MANAGED_JOB_VERSION',
+        'except: managed_job_version = 0',
+        'if managed_job_version < 1:'
+        'from sky.spot import spot_state as state',
+        'from sky.spot import spot_utils as utils',
+        'else:',
+        'from sky.job import (state, utils)',
     ]
 
     @classmethod
     def get_job_table(cls) -> str:
         code = [
+            'if managed_job_version > 1:'
             'job_table = utils.dump_managed_job_queue()',
+            'else:',
+            'job_table = utils.dump_spot_job_queue()',
             'print(job_table, flush=True)',
         ]
         return cls._build(code)
