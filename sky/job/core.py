@@ -229,7 +229,7 @@ def cancel(name: Optional[str] = None,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel managed jobs.
 
-    Please refer to the sky.cli.job_cancel for the documentation.
+    Please refer to sky.cli.job_cancel for documentation.
 
     Raises:
         sky.exceptions.ClusterNotUpError: the job controller is not up.
