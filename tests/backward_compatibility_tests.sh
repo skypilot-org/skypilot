@@ -177,7 +177,7 @@ sky job launch -d --cloud ${CLOUD} -y -n ${MANAGED_JOB_JOB_NAME}-7-2 "echo hi; s
 s=$(sky job logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-2)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
-s=$(sky job queue | grep ${CLUSTER_NAME}-7)
+s=$(sky job queue | grep ${MANAGED_JOB_JOB_NAME}-7)
 echo "$s"
 echo "$s" | grep "RUNNING" | wc -l | grep 3 || exit 1
 sky job cancel -y -n ${MANAGED_JOB_JOB_NAME}-7-0
