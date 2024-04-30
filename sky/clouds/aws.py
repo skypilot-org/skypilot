@@ -428,10 +428,28 @@ class AWS(clouds.Cloud):
             **AWS._get_disk_specs(r.disk_tier)
         }
         if tailscale_config is not None:
-            resources_vars['vpn_unique_id'] = cluster_name_on_cloud
-            resources_vars['vpn_auth_key'] = tailscale_config['auth_key']
-            resources_vars['vpn_api_key'] = tailscale_config['api_key']
-            resources_vars['vpn_network'] = tailscale_config['tailnet']
+            unique_id = cluster_name_on_cloud
+            resources_vars['vpn_unique_id'] = unique_id
+            resources_vars['vpn_config'] = tailscale_config
+            resources_vars['vpn_cloud_init_commands'] = [
+                [
+                    'sh', '-c',
+                    'curl -fsSL https://tailscale.com/install.sh | sh'
+                ],
+                [
+                    'sh', '-c',
+                    ('echo \'net.ipv4.ip_forward = 1\' | '
+                     'sudo tee -a /etc/sysctl.d/99-tailscale.conf && '
+                     'echo \'net.ipv6.conf.all.forwarding = 1\' | '
+                     'sudo tee -a /etc/sysctl.d/99-tailscale.conf && '
+                     'sudo sysctl -p /etc/sysctl.d/99-tailscale.conf')
+                ],
+                [
+                    'tailscale', 'up',
+                    f'--authkey={tailscale_config["auth_key"]}',
+                    f'--hostname={unique_id}'
+                ],
+            ]
 
         return resources_vars
 

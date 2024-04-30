@@ -855,7 +855,7 @@ def write_cluster_config(
     )
 
     # TODO(tian): Hack. Reformat here.
-    default_use_internal_ips = 'vpn_auth_key' in resources_vars
+    default_use_internal_ips = 'vpn_config' in resources_vars
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.

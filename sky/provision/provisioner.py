@@ -418,7 +418,7 @@ def _post_provision_setup(
     config_from_yaml = common_utils.read_yaml(cluster_yaml)
     provider_config = config_from_yaml.get('provider')
     if (provider_config is not None and
-            provider_config.get('vpn_unique_id', None) is not None):
+            provider_config.get('vpn_config', None) is not None):
         get_info_status = rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for VPN setup[/]')
     else:

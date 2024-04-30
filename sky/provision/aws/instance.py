@@ -613,11 +613,9 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances.terminate()
-    use_vpn = provider_config.get('vpn_unique_id', None) is not None
-    if use_vpn:
-        auth_headers = {
-            'Authorization': f'Bearer {provider_config["vpn_api_key"]}'
-        }
+    vpn_config = provider_config.get('vpn_config', None)
+    if vpn_config is not None:
+        auth_headers = {'Authorization': f'Bearer {vpn_config["api_key"]}'}
 
         def _get_node_id_from_hostname(network_name: str,
                                        hostname: str) -> Optional[str]:
@@ -632,7 +630,7 @@ def terminate_instances(
             return None
 
         node_id_in_vpn = _get_node_id_from_hostname(
-            provider_config['vpn_network'], provider_config['vpn_unique_id'])
+            vpn_config['tailnet'], provider_config['vpn_unique_id'])
         if node_id_in_vpn is None:
             logger.warning('Cannot find node id for '
                            f'{provider_config["vpn_unique_id"]}. '
