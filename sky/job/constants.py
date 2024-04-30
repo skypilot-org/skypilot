@@ -21,7 +21,6 @@ CONTROLLER_RESOURCES = {'cpus': '8+', 'memory': '3x', 'disk_size': 50}
 # long and truncated twice during the cluster creation.
 JOB_CLUSTER_NAME_PREFIX_LENGTH = 25
 
-
 # The version of the lib files that job/utils use. Whenever there is an API
 # change for the job/utils, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.

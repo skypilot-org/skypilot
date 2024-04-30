@@ -719,7 +719,6 @@ class ManagedJobCodeGen:
             from sky.spot import spot_state as state, spot_utils as utils
         """)
 
-
     @classmethod
     def get_job_table(cls) -> str:
         code = textwrap.dedent("""\
@@ -785,5 +784,5 @@ class ManagedJobCodeGen:
 
     @classmethod
     def _build(cls, code: str) -> str:
-        generated_code = cls._PREFIX + '\n'+ code
+        generated_code = cls._PREFIX + '\n' + code
         return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}'
