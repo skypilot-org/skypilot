@@ -73,7 +73,7 @@ class UserSignal(enum.Enum):
 # ====== internal functions ======
 def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
-    """Check the status of the job running on the cluster.
+    """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
     """
