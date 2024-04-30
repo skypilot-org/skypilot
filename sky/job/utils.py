@@ -73,7 +73,7 @@ class UserSignal(enum.Enum):
 # ====== internal functions ======
 def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
-    """Check the status of the job running on the cluster.
+    """Check the status of the job running on a managed job cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
     """
@@ -176,7 +176,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
             task.name, job_id) if task.name else None
         logger.info(f'=== START: event callback for {status!r} ===')
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                'managed_jobs_event',
+                                'managed_job_event',
                                 f'job-callback-{job_id}-{task_id}.log')
         result = run_bash_command_with_log(
             bash_command=event_callback,

@@ -3225,7 +3225,7 @@ def job():
         '(Default: True; this flag is deprecated and will be removed in a '
         'future release.) Whether to retry provisioning infinitely until the '
         'cluster is up, if unavailability errors are encountered. This '  # pylint: disable=bad-docstring-quotes
-        'applies to launching the managed job clusters (both the initial and '
+        'applies to launching all managed jobs (both the initial and '
         'any recovery attempts), not the job controller.'))
 @click.option('--yes',
               '-y',
