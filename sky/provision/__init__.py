@@ -179,6 +179,7 @@ def get_command_runners(
     """Get a command runner for the given cluster."""
     ip_list = cluster_info.get_feasible_ips()
     port_list = cluster_info.get_ssh_ports()
-    return command_runner.SSHCommandRunner.make_runner_list(node_list=zip(
-        ip_list, port_list),
-                                                            **crednetials)
+    return command_runner.SSHCommandRunner.make_runner_list(
+        node_list=zip(ip_list, port_list),
+        **crednetials,
+    )
