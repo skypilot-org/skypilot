@@ -835,8 +835,8 @@ def _with_deprecation_warning(
             override_str = ' with additional arguments ' + ' '.join(overrides)
         click.secho(
             f'WARNING: `{alias_name}` has been renamed to `{original_name}` '
-            f'and will be removed in a future release. Instead, please use the '
-            f'latter{override_str}.\n',
+            f'and will be removed in a future release. Please use the '
+            f'latter{override_str} instead.\n',
             err=True,
             fg='yellow')
         return f(self, *args, **kwargs)
