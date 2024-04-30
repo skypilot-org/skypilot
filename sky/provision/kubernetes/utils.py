@@ -251,6 +251,18 @@ def get_kubernetes_nodes() -> List[Any]:
     return nodes
 
 
+def get_kubernetes_pods() -> List[Any]:
+    try:
+        ns = get_current_kube_config_context_namespace()
+        pods = kubernetes.core_api().list_namespaced_pod(
+            ns, _request_timeout=kubernetes.API_TIMEOUT).items
+    except kubernetes.max_retry_error():
+        raise exceptions.ResourcesUnavailableError(
+            'Timed out when trying to get pod info from Kubernetes cluster. '
+            'Please check if the cluster is healthy and retry.') from None
+    return pods
+
+
 def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
 

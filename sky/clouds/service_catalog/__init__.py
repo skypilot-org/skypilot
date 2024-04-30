@@ -117,6 +117,38 @@ def list_accelerator_counts(
     return ret
 
 
+def list_accelerator_realtime(
+    gpus_only: bool = True,
+    name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    clouds: CloudFilter = None,
+) -> Tuple[Dict[str, List[int]], Dict[str, int], Dict[str, int]]:
+    """List all accelerators offered by Sky and their realtime availability.
+
+    Useful for fixed size clusters.
+
+    Returns:
+    """
+    qtys_map, total_accelerators_capacity, total_accelerators_available = (
+        _map_clouds_catalog(
+            clouds,
+            'list_accelerators_realtime',
+            gpus_only,
+            name_filter,
+            region_filter,
+            quantity_filter,
+            all_regions=False,
+            require_price=False))
+    accelerator_counts: Dict[str, List[int]] = collections.defaultdict(list)
+    for gpu, items in qtys_map.items():
+        for item in items:
+            accelerator_counts[gpu].append(item.accelerator_count)
+        accelerator_counts[gpu] = sorted(accelerator_counts[gpu])
+    return (accelerator_counts, total_accelerators_capacity,
+            total_accelerators_available)
+
+
 def instance_type_exists(instance_type: str,
                          clouds: CloudFilter = None) -> bool:
     """Check the existence of a instance type."""

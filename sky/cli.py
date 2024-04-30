@@ -2902,6 +2902,10 @@ def show_gpus(
     def _output():
         gpu_table = log_utils.create_table(
             ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
+        realtime_gpu_table = log_utils.create_table([
+            'COMMON_GPU', 'REQUESTABLE_QUANTITIES', 'TOTAL_GPUS',
+            'AVAILABLE_GPUS'
+        ])
         tpu_table = log_utils.create_table(
             ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
         other_table = log_utils.create_table(
@@ -2910,49 +2914,68 @@ def show_gpus(
         name, quantity = None, None
 
         if accelerator_str is None:
-            result = service_catalog.list_accelerator_counts(
-                gpus_only=True,
-                clouds=cloud,
-                region_filter=region,
-            )
 
-            if (len(result) == 0 and cloud_obj is not None and
-                    cloud_obj.is_same_cloud(clouds.Kubernetes())):
-                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
-                return
-
-            # "Common" GPUs
-            # If cloud is kubernetes, we want to show all GPUs here, even if
-            # they are not listed as common in SkyPilot.
+            # If cloud is kubernetes, we want to show real-time capacity
             if (cloud_obj is not None and
                     cloud_obj.is_same_cloud(clouds.Kubernetes())):
-                for gpu, _ in sorted(result.items()):
-                    gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
-            else:
-                for gpu in service_catalog.get_common_gpus():
-                    if gpu in result:
-                        gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
-            yield from gpu_table.get_string()
-
-            # Google TPUs
-            for tpu in service_catalog.get_tpus():
-                if tpu in result:
-                    tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
-            if len(tpu_table.get_string()) > 0:
-                yield '\n\n'
-            yield from tpu_table.get_string()
-
-            # Other GPUs
-            if show_all:
-                yield '\n\n'
-                for gpu, qty in sorted(result.items()):
-                    other_table.add_row([gpu, _list_to_str(qty)])
-                yield from other_table.get_string()
-                yield '\n\n'
-            else:
+                counts, capacity, available = service_catalog.list_accelerator_realtime(
+                    gpus_only=True, clouds=cloud, region_filter=region)
+                assert (set(counts.keys()) == set(capacity.keys()) == set(
+                    available.keys())), ('Keys of counts, capacity, '
+                                         'and available must be same.')
+                if len(counts) == 0:
+                    yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+                    return
+                for gpu, _ in sorted(counts.items()):
+                    realtime_gpu_table.add_row([
+                        gpu,
+                        _list_to_str(counts.pop(gpu)), capacity[gpu],
+                        available[gpu]
+                    ])
+                yield from realtime_gpu_table.get_string()
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
                 return
+            else:
+                result = service_catalog.list_accelerator_counts(
+                    gpus_only=True,
+                    clouds=cloud,
+                    region_filter=region,
+                )
+
+                # "Common" GPUs
+                # If cloud is kubernetes, we want to show all GPUs here, even if
+                # they are not listed as common in SkyPilot.
+                if (cloud_obj is not None and
+                        cloud_obj.is_same_cloud(clouds.Kubernetes())):
+                    for gpu, _ in sorted(result.items()):
+                        gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+                else:
+                    for gpu in service_catalog.get_common_gpus():
+                        if gpu in result:
+                            gpu_table.add_row(
+                                [gpu, _list_to_str(result.pop(gpu))])
+                yield from gpu_table.get_string()
+
+                # Google TPUs
+                for tpu in service_catalog.get_tpus():
+                    if tpu in result:
+                        tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+                if len(tpu_table.get_string()) > 0:
+                    yield '\n\n'
+                yield from tpu_table.get_string()
+
+                # Other GPUs
+                if show_all:
+                    yield '\n\n'
+                    for gpu, qty in sorted(result.items()):
+                        other_table.add_row([gpu, _list_to_str(qty)])
+                    yield from other_table.get_string()
+                    yield '\n\n'
+                else:
+                    yield ('\n\nHint: use -a/--all to see all accelerators '
+                           '(including non-common ones) and pricing.')
+                    return
         else:
             # Parse accelerator string
             accelerator_split = accelerator_str.split(':')

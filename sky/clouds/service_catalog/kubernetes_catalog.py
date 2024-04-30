@@ -46,38 +46,91 @@ def list_accelerators(
         case_sensitive: bool = True,
         all_regions: bool = False,
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
+    return list_accelerators_realtime(gpus_only, name_filter, region_filter,
+                                      quantity_filter, case_sensitive,
+                                      all_regions, require_price)[0]
+
+
+def list_accelerators_realtime(
+    gpus_only: bool,
+    name_filter: Optional[str],
+    region_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool = True,
+    all_regions: bool = False,
+    require_price: bool = True
+) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
+                                                                          int]]:
     del all_regions, require_price  # Unused.
     k8s_cloud = Kubernetes()
     if not any(
             map(k8s_cloud.is_same_cloud,
                 sky_check.get_cached_enabled_clouds_or_refresh())
     ) or not kubernetes_utils.check_credentials()[0]:
-        return {}
+        return {}, {}, {}
 
     has_gpu = kubernetes_utils.detect_gpu_resource()
     if not has_gpu:
-        return {}
+        return {}, {}, {}
 
     label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter()
     if not label_formatter:
-        return {}
+        return {}, {}, {}
 
-    accelerators: Set[Tuple[str, int]] = set()
+    accelerators_qtys: Set[Tuple[str, int]] = set()
     key = label_formatter.get_label_key()
     nodes = kubernetes_utils.get_kubernetes_nodes()
+    # Get the pods to get the real-time GPU usage
+    pods = kubernetes_utils.get_kubernetes_pods()
+    # Total number of GPUs in the cluster
+    total_accelerators_capacity: Dict[str, int] = {}
+    # Total number of GPUs currently available in the cluster
+    total_accelerators_available: Dict[str, int] = {}
+
     for node in nodes:
         if key in node.metadata.labels:
+            allocated_qty = 0
             accelerator_name = label_formatter.get_accelerator_from_label_value(
                 node.metadata.labels.get(key))
             accelerator_count = int(
                 node.status.allocatable.get('nvidia.com/gpu', 0))
 
+            # Generate the GPU quantities for the accelerators
             if accelerator_name and accelerator_count > 0:
                 for count in range(1, accelerator_count + 1):
-                    accelerators.add((accelerator_name, count))
+                    accelerators_qtys.add((accelerator_name, count))
+
+            for pod in pods:
+                # Get all the pods running on the node
+                if (pod.spec.node_name == node.metadata.name and
+                        pod.status.phase in ['Running', 'Pending']):
+                    # Iterate over all the containers in the pod and sum the
+                    # GPU requests
+                    for container in pod.spec.containers:
+                        if container.resources.requests:
+                            allocated_qty += int(
+                                container.resources.requests.get(
+                                    'nvidia.com/gpu', 0))
+
+            accelerators_availabe = accelerator_count - allocated_qty
+
+            if accelerator_name not in total_accelerators_capacity:
+                total_accelerators_capacity[
+                    accelerator_name] = accelerator_count
+            else:
+                total_accelerators_capacity[
+                    accelerator_name] += accelerator_count
+            if accelerator_name not in total_accelerators_available:
+                total_accelerators_available[
+                    accelerator_name] = accelerators_availabe
+            else:
+                total_accelerators_available[
+                    accelerator_name] += accelerators_availabe
 
     result = []
-    for accelerator_name, accelerator_count in accelerators:
+
+    # Generate dataframe for common.list_accelerators_impl
+    for accelerator_name, accelerator_count in accelerators_qtys:
         result.append(
             common.InstanceTypeInfo(cloud='Kubernetes',
                                     instance_type=None,
@@ -98,9 +151,13 @@ def list_accelerators(
                       ])
     df['GpuInfo'] = True
 
-    return common.list_accelerators_impl('Kubernetes', df, gpus_only,
-                                         name_filter, region_filter,
-                                         quantity_filter, case_sensitive)
+    qtys_map = common.list_accelerators_impl('Kubernetes', df, gpus_only,
+                                             name_filter, region_filter,
+                                             quantity_filter, case_sensitive)
+
+    # TODO(romilb): Add filtering for total_accelerators_capacity and total_accelerators_available
+
+    return qtys_map, total_accelerators_capacity, total_accelerators_available
 
 
 def validate_region_zone(
