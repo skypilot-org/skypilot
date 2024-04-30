@@ -1389,6 +1389,11 @@ class Resources:
         if version < 2:
             self._region = None
 
+        # spot_recovery is deprecated. We do not need to set the _spot_recovery
+        # here any more.
+        # if version < 3:
+        #     self._spot_recovery = None
+
         if version < 4:
             self._image_id = None
 
