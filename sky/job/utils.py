@@ -722,10 +722,10 @@ class ManagedJobCodeGen:
     @classmethod
     def get_job_table(cls) -> str:
         code = textwrap.dedent("""\
-        if managed_job_version > 1:
-            job_table = utils.dump_managed_job_queue()
-        else:
+        if managed_job_version < 1:
             job_table = utils.dump_spot_job_queue()
+        else:
+            job_table = utils.dump_managed_job_queue()
         print(job_table, flush=True)
         """)
         return cls._build(code)
