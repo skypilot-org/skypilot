@@ -44,8 +44,8 @@ def _mock_db_conn(monkeypatch, tmp_path):
     monkeypatch.setattr(
         global_user_state, '_DB',
         db_utils.SQLiteConn(str(db_path), global_user_state.create_table))
-    monkeypatch.setattr(backends.CloudVmRayResourceHandle, '_get_use_vpn',
-                        lambda *args, **kwargs: False)
+    monkeypatch.setattr(backends.CloudVmRayResourceHandle, '_get_vpn_config',
+                        lambda *args, **kwargs: None)
 
 
 @pytest.fixture

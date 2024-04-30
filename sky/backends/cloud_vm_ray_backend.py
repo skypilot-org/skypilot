@@ -1480,7 +1480,6 @@ class RetryingVmProvisioner(object):
                 launched_resources = launched_resources.copy(zone=zones[0].name)
 
             prev_cluster_ips, prev_ssh_ports = None, None
-            # TODO(tian): Raise if prev handle does not use VPN, and vise versa.
             if prev_handle is not None:
                 prev_cluster_ips = prev_handle.stable_internal_external_ips
                 prev_ssh_ports = prev_handle.stable_ssh_ports
@@ -2112,7 +2111,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Launched num nodes
     - (optional) Launched resources
     - (optional) Docker user name
-    - (optional) Whether the cluster uses VPN
+    - (optional) The cluster VPN configuration (if used)
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
     # Bump if any fields get added/removed/changed, and add backward
@@ -2569,7 +2568,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 (str(launched_resources.cloud).lower(), 'vpn', 'tailscale'),
                 None)
             use_or_not_mismatch_str = (
-                '{} VPN, but the task requires the opposite')
+                '{} VPN, but current config requires the opposite')
             if handle.vpn_config is None:
                 if now_vpn_config is None:
                     return None
@@ -2974,7 +2973,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         open_new_ports = bool(
             resources_utils.port_ranges_to_set(current_ports) -
             resources_utils.port_ranges_to_set(prev_ports))
-        # TODO(tian): Skip open ports if VPN is used.
         if open_new_ports:
             with rich_utils.safe_status(
                     '[bold cyan]Launching - Opening new ports'):

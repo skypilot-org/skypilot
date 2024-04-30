@@ -613,6 +613,7 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances.terminate()
+    # Cleanup VPN record.
     vpn_config = provider_config.get('vpn_config', None)
     if vpn_config is not None:
         auth_headers = {'Authorization': f'Bearer {vpn_config["api_key"]}'}
@@ -904,8 +905,8 @@ def get_cluster_info(
             # TODO(tian): Using cluster name as hostname is problematic for
             # multi-node cluster. Should use f'{unique_id}-{node_id}'
             # TODO(tian): max_retry=1000 ==> infinite retry.
-            # TODO(tian): Should we wait here? Or use the cloud Private IP
-            # to setup and only use the VPN Private IP for traffics?
+            # TODO(tian): Check cloud status and set a timeout after the
+            # instance is ready on the cloud.
             query_cmd = f'tailscale ip -4 {vpn_unique_id}'
             rc, stdout, stderr = subprocess_utils.run_with_retries(
                 query_cmd,

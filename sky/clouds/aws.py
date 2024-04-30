@@ -427,10 +427,10 @@ class AWS(clouds.Cloud):
                 str(security_group != user_security_group).lower(),
             **AWS._get_disk_specs(r.disk_tier)
         }
+        resources_vars['vpn_config'] = tailscale_config
         if tailscale_config is not None:
             unique_id = cluster_name_on_cloud
             resources_vars['vpn_unique_id'] = unique_id
-            resources_vars['vpn_config'] = tailscale_config
             resources_vars['vpn_cloud_init_commands'] = [
                 [
                     'sh', '-c',

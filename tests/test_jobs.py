@@ -4,6 +4,7 @@ import sky
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import skypilot_config
 from sky.utils import db_utils
 from sky.utils import resources_utils
 
@@ -18,8 +19,10 @@ class TestExecutionOnExistingClusters:
         monkeypatch.setattr(
             global_user_state, '_DB',
             db_utils.SQLiteConn(str(db_path), global_user_state.create_table))
-        monkeypatch.setattr(backends.CloudVmRayResourceHandle, '_get_use_vpn',
-                            lambda *args, **kwargs: False)
+        monkeypatch.setattr(backends.CloudVmRayResourceHandle,
+                            '_get_vpn_config', lambda *args, **kwargs: None)
+        # Disable any configuration in the unittest
+        monkeypatch.setattr(skypilot_config, '_dict', None)
 
     @pytest.fixture
     def _mock_cluster_state(self, _mock_db_conn, enable_all_clouds):
