@@ -2863,6 +2863,15 @@ def show_gpus(
     To show all regions for a specified accelerator, use
     ``sky show-gpus <accelerator> --all-regions``.
 
+    If ``--region`` or ``--all-regions`` is not specified, the price displayed
+    for each instance type is the lowest across all regions for both on-demand
+    and spot instances. There may be multiple regions with the same lowest
+    price.
+
+    If ``--cloud kubernetes`` is specified, it will show the maximum quantities
+    of the GPU available on a single node and the real-time availability of
+    the GPU across all nodes in the Kubernetes cluster.
+
     Definitions of certain fields:
 
     * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
@@ -2870,10 +2879,15 @@ def show_gpus(
 
     * ``HOST_MEM``: Memory of the host instance (VM).
 
-    If ``--region`` or ``--all-regions`` is not specified, the price displayed
-    for each instance type is the lowest across all regions for both on-demand
-    and spot instances. There may be multiple regions with the same lowest
-    price.
+    * ``QTY_PER_NODE`` (Kubernetes only): Maximum quantity of the GPU available
+      on a single node.
+
+    * ``TOTAL_GPUS`` (Kubernetes only): Total number of GPUs available in the
+      Kubernetes cluster.
+
+    * ``AVAILABLE_GPUS`` (Kubernetes only): Number of currently available GPUs
+      in the Kubernetes cluster. This is fetched in real-time and may change
+      when other users are using the cluster.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
@@ -2899,13 +2913,48 @@ def show_gpus(
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
 
+    def _kubernetes_realtime_gpu_output(name_filter: Optional[str] = None,
+                                        quantity_filter: Optional[int] = None):
+        if quantity_filter:
+            qty_header = 'QTY_FILTER'
+        else:
+            qty_header = 'QTY_PER_NODE'
+        realtime_gpu_table = log_utils.create_table([
+            'GPU', qty_header, 'TOTAL_GPUS',
+            'AVAILABLE_GPUS'
+        ])
+        counts, capacity, available = service_catalog.list_accelerator_realtime(
+            gpus_only=True,
+            clouds=cloud,
+            name_filter=name_filter,
+            quantity_filter=quantity_filter,
+            region_filter=region)
+        assert (set(counts.keys()) == set(capacity.keys()) == set(
+            available.keys())), ('Keys of counts, capacity, '
+                                 'and available must be same.')
+        if len(counts) == 0:
+            gpu_info_msg = ''
+            debug_msg = 'To further debug, run: sky check.'
+            if name_filter is not None:
+                gpu_info_msg = f' matching name {name_filter!r}'
+                debug_msg = ('To list all available accelerators, '
+                             'run: sky show-gpus --cloud kubernetes.')
+                if quantity_filter is not None:
+                    gpu_info_msg += f' with quantity {quantity_filter}'
+            err_msg = kubernetes_utils.NO_GPU_ERROR_MESSAGE.format(gpu_info_msg=gpu_info_msg, debug_msg=debug_msg)
+            yield err_msg
+            return
+        for gpu, _ in sorted(counts.items()):
+            realtime_gpu_table.add_row([
+                gpu,
+                _list_to_str(counts.pop(gpu)), capacity[gpu],
+                available[gpu]
+            ])
+        yield from realtime_gpu_table.get_string()
+
     def _output():
         gpu_table = log_utils.create_table(
             ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
-        realtime_gpu_table = log_utils.create_table([
-            'COMMON_GPU', 'REQUESTABLE_QUANTITIES', 'TOTAL_GPUS',
-            'AVAILABLE_GPUS'
-        ])
         tpu_table = log_utils.create_table(
             ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
         other_table = log_utils.create_table(
@@ -2914,27 +2963,10 @@ def show_gpus(
         name, quantity = None, None
 
         if accelerator_str is None:
-
             # If cloud is kubernetes, we want to show real-time capacity
             if (cloud_obj is not None and
                     cloud_obj.is_same_cloud(clouds.Kubernetes())):
-                counts, capacity, available = service_catalog.list_accelerator_realtime(
-                    gpus_only=True, clouds=cloud, region_filter=region)
-                assert (set(counts.keys()) == set(capacity.keys()) == set(
-                    available.keys())), ('Keys of counts, capacity, '
-                                         'and available must be same.')
-                if len(counts) == 0:
-                    yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
-                    return
-                for gpu, _ in sorted(counts.items()):
-                    realtime_gpu_table.add_row([
-                        gpu,
-                        _list_to_str(counts.pop(gpu)), capacity[gpu],
-                        available[gpu]
-                    ])
-                yield from realtime_gpu_table.get_string()
-                yield ('\n\nHint: use -a/--all to see all accelerators '
-                       '(including non-common ones) and pricing.')
+                yield from _kubernetes_realtime_gpu_output()
                 return
             else:
                 result = service_catalog.list_accelerator_counts(
@@ -2998,81 +3030,85 @@ def show_gpus(
             else:
                 name, quantity = accelerator_str, None
 
-        # Case-sensitive
-        result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=name,
-                                                   quantity_filter=quantity,
-                                                   region_filter=region,
-                                                   clouds=cloud,
-                                                   case_sensitive=False,
-                                                   all_regions=all_regions)
+        if (cloud_obj is not None and
+                cloud_obj.is_same_cloud(clouds.Kubernetes())):
+            # Get real-time availability of GPUs for Kubernetes
+            yield from _kubernetes_realtime_gpu_output(name_filter=name,
+                                                       quantity_filter=quantity)
+            return
+        else:
+            # For clouds other than Kubernetes, get the accelerator details
+            # Case-sensitive
+            result = service_catalog.list_accelerators(gpus_only=True,
+                                                       name_filter=name,
+                                                       quantity_filter=quantity,
+                                                       region_filter=region,
+                                                       clouds=cloud,
+                                                       case_sensitive=False,
+                                                       all_regions=all_regions)
 
-        if len(result) == 0:
-            if cloud == 'kubernetes':
-                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+            if len(result) == 0:
+                quantity_str = (f' with requested quantity {quantity}'
+                                if quantity else '')
+                yield f'Resources \'{name}\'{quantity_str} not found. '
+                yield 'Try \'sky show-gpus --all\' '
+                yield 'to show available accelerators.'
                 return
 
-            quantity_str = (f' with requested quantity {quantity}'
-                            if quantity else '')
-            yield f'Resources \'{name}\'{quantity_str} not found. '
-            yield 'Try \'sky show-gpus --all\' '
-            yield 'to show available accelerators.'
-            return
-
-        for i, (gpu, items) in enumerate(result.items()):
-            accelerator_table_headers = [
-                'GPU',
-                'QTY',
-                'CLOUD',
-                'INSTANCE_TYPE',
-                'DEVICE_MEM',
-                'vCPUs',
-                'HOST_MEM',
-                'HOURLY_PRICE',
-                'HOURLY_SPOT_PRICE',
-            ]
-            if not show_all:
-                accelerator_table_headers.append('REGION')
-            accelerator_table = log_utils.create_table(
-                accelerator_table_headers)
-            for item in items:
-                instance_type_str = item.instance_type if not pd.isna(
-                    item.instance_type) else '(attachable)'
-                cpu_count = item.cpu_count
-                if pd.isna(cpu_count):
-                    cpu_str = '-'
-                elif isinstance(cpu_count, (float, int)):
-                    if int(cpu_count) == cpu_count:
-                        cpu_str = str(int(cpu_count))
-                    else:
-                        cpu_str = f'{cpu_count:.1f}'
-                device_memory_str = (f'{item.device_memory:.0f}GB' if
-                                     not pd.isna(item.device_memory) else '-')
-                host_memory_str = f'{item.memory:.0f}GB' if not pd.isna(
-                    item.memory) else '-'
-                price_str = f'$ {item.price:.3f}' if not pd.isna(
-                    item.price) else '-'
-                spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
-                    item.spot_price) else '-'
-                region_str = item.region if not pd.isna(item.region) else '-'
-                accelerator_table_vals = [
-                    item.accelerator_name,
-                    item.accelerator_count,
-                    item.cloud,
-                    instance_type_str,
-                    device_memory_str,
-                    cpu_str,
-                    host_memory_str,
-                    price_str,
-                    spot_price_str,
+            for i, (gpu, items) in enumerate(result.items()):
+                accelerator_table_headers = [
+                    'GPU',
+                    'QTY',
+                    'CLOUD',
+                    'INSTANCE_TYPE',
+                    'DEVICE_MEM',
+                    'vCPUs',
+                    'HOST_MEM',
+                    'HOURLY_PRICE',
+                    'HOURLY_SPOT_PRICE',
                 ]
                 if not show_all:
-                    accelerator_table_vals.append(region_str)
-                accelerator_table.add_row(accelerator_table_vals)
+                    accelerator_table_headers.append('REGION')
+                accelerator_table = log_utils.create_table(
+                    accelerator_table_headers)
+                for item in items:
+                    instance_type_str = item.instance_type if not pd.isna(
+                        item.instance_type) else '(attachable)'
+                    cpu_count = item.cpu_count
+                    if pd.isna(cpu_count):
+                        cpu_str = '-'
+                    elif isinstance(cpu_count, (float, int)):
+                        if int(cpu_count) == cpu_count:
+                            cpu_str = str(int(cpu_count))
+                        else:
+                            cpu_str = f'{cpu_count:.1f}'
+                    device_memory_str = (f'{item.device_memory:.0f}GB' if
+                                         not pd.isna(item.device_memory) else '-')
+                    host_memory_str = f'{item.memory:.0f}GB' if not pd.isna(
+                        item.memory) else '-'
+                    price_str = f'$ {item.price:.3f}' if not pd.isna(
+                        item.price) else '-'
+                    spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
+                        item.spot_price) else '-'
+                    region_str = item.region if not pd.isna(item.region) else '-'
+                    accelerator_table_vals = [
+                        item.accelerator_name,
+                        item.accelerator_count,
+                        item.cloud,
+                        instance_type_str,
+                        device_memory_str,
+                        cpu_str,
+                        host_memory_str,
+                        price_str,
+                        spot_price_str,
+                    ]
+                    if not show_all:
+                        accelerator_table_vals.append(region_str)
+                    accelerator_table.add_row(accelerator_table_vals)
 
-            if i != 0:
-                yield '\n\n'
-            yield from accelerator_table.get_string()
+                if i != 0:
+                    yield '\n\n'
+                yield from accelerator_table.get_string()
 
     if show_all:
         click.echo_via_pager(_output())

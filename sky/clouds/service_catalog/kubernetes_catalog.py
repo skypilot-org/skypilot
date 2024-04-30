@@ -3,6 +3,7 @@
 Kubernetes does not require a catalog of instances, but we need an image catalog
 mapping SkyPilot image tags to corresponding container image tags.
 """
+import re
 import typing
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -86,12 +87,18 @@ def list_accelerators_realtime(
     total_accelerators_capacity: Dict[str, int] = {}
     # Total number of GPUs currently available in the cluster
     total_accelerators_available: Dict[str, int] = {}
+    min_quantity_filter = quantity_filter if quantity_filter else 1
 
     for node in nodes:
         if key in node.metadata.labels:
             allocated_qty = 0
             accelerator_name = label_formatter.get_accelerator_from_label_value(
                 node.metadata.labels.get(key))
+
+            # Check if name_filter regex matches the accelerator_name
+            if name_filter and not re.match(name_filter, accelerator_name):
+                continue
+
             accelerator_count = int(
                 node.status.allocatable.get('nvidia.com/gpu', 0))
 
@@ -112,20 +119,27 @@ def list_accelerators_realtime(
                                 container.resources.requests.get(
                                     'nvidia.com/gpu', 0))
 
-            accelerators_availabe = accelerator_count - allocated_qty
+            accelerators_available = accelerator_count - allocated_qty
 
-            if accelerator_name not in total_accelerators_capacity:
-                total_accelerators_capacity[
-                    accelerator_name] = accelerator_count
-            else:
-                total_accelerators_capacity[
-                    accelerator_name] += accelerator_count
-            if accelerator_name not in total_accelerators_available:
-                total_accelerators_available[
-                    accelerator_name] = accelerators_availabe
-            else:
-                total_accelerators_available[
-                    accelerator_name] += accelerators_availabe
+            if accelerator_count >= min_quantity_filter:
+                quantized_count = (min_quantity_filter *
+                                   (accelerator_count//min_quantity_filter))
+                if accelerator_name not in total_accelerators_capacity:
+                    total_accelerators_capacity[
+                        accelerator_name] = quantized_count
+                else:
+                    total_accelerators_capacity[
+                        accelerator_name] += quantized_count
+
+            if accelerators_available >= min_quantity_filter:
+                quantized_availability = min_quantity_filter * (
+                            accelerators_available // min_quantity_filter)
+                if accelerator_name not in total_accelerators_available:
+                    total_accelerators_available[
+                        accelerator_name] = quantized_availability
+                else:
+                    total_accelerators_available[
+                        accelerator_name] += quantized_availability
 
     result = []
 
@@ -151,11 +165,11 @@ def list_accelerators_realtime(
                       ])
     df['GpuInfo'] = True
 
+    # Use common.list_accelerators_impl to get InstanceTypeInfo objects used
+    # by sky show-gpus when cloud is not specified.
     qtys_map = common.list_accelerators_impl('Kubernetes', df, gpus_only,
                                              name_filter, region_filter,
                                              quantity_filter, case_sensitive)
-
-    # TODO(romilb): Add filtering for total_accelerators_capacity and total_accelerators_available
 
     return qtys_map, total_accelerators_capacity, total_accelerators_available
 

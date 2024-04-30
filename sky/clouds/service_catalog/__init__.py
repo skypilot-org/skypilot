@@ -124,11 +124,18 @@ def list_accelerator_realtime(
     quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
 ) -> Tuple[Dict[str, List[int]], Dict[str, int], Dict[str, int]]:
-    """List all accelerators offered by Sky and their realtime availability.
+    """List all accelerators offered by Sky with their realtime availability.
 
-    Useful for fixed size clusters.
+    Realtime availability is the total number of accelerators in the cluster
+    and number of accelerators available at the time of the call.
+
+    Used for fixed size cluster settings, such as Kubernetes.
 
     Returns:
+        A tuple of three dictionaries mapping canonical accelerator names to:
+        - A list of available counts. (e.g., [1, 2, 4])
+        - Total number of accelerators in the cluster (capacity).
+        - Number of accelerators available at the time of call (availability).
     """
     qtys_map, total_accelerators_capacity, total_accelerators_available = (
         _map_clouds_catalog(
