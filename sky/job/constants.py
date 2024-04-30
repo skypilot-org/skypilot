@@ -1,4 +1,4 @@
-"""Constants used for Managed Job."""
+"""Constants used for Managed Jobs."""
 
 JOB_CONTROLLER_TEMPLATE = 'job-controller.yaml.j2'
 JOB_CONTROLLER_YAML_PREFIX = '~/.sky/job_controller'
