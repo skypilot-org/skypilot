@@ -41,6 +41,9 @@
             /* Replace with your desired text color */
             z-index: 1;
         }
+        .clickable {
+           cursor: pointer; /* This makes the cursor a pointer when hovering over the element */
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script
@@ -69,38 +72,38 @@
             </thead>
             <tbody>
                 {% for row in rows %}
-                <tr class="{% if row[1] == '' %}folder{% endif %}{% if row[0] == ' \u21B3' %}folded{% endif %}">
-                    <td>{% if row[1] == '' %}<span class="clickable">+</span>{% endif %}{{ row[0]|string|replace(' \u21B3', '') }}</td>
-                    <td>{{ row[1] }}</td>
+                <tr class="{% if row[2] == '' %}folder{% endif %}{% if row[1] == ' \u21B3' %}folded{% endif %}">
+                    <td>{% if row[2] == '' %}<span class="clickable">▶</span>{% endif %}</td>
+                    <td>{{ row[1]|string|replace(' \u21B3', '') }}</td>
                     <td>{{ row[2] }}</td>
                     <td>{{ row[3] }}</td>
                     <td>{{ row[4] }}</td>
                     <td>{{ row[5] }}</td>
                     <td>{{ row[6] }}</td>
                     <td>{{ row[7] }}</td>
+                    <td>{{ row[8] }}</td>
                     <td>
                         <!-- https://getbootstrap.com/docs/4.0/components/badge/ -->
-                        {% if row[8].startswith('RUNNING') %}
-                        <span class="badge bg-primary">{{ 'RUNNING' }}</span>{{ row[8].replace('RUNNING', '') }}
-                        {% elif row[8] == 'PENDING' or row[8] == 'SUBMITTED' %}
-                        <span class="badge bg-light badge-light">{{ row[8] }}</span>
-                        {% elif row[8] == 'RECOVERING' or row[8] == 'CANCELLING' or row[8] == 'STARTING' %}
-                        <!-- transient states, so same color makes sense? -->
-                        <span class="badge bg-info">{{ row[8] }}</span>
-                        {% elif row[8] == 'SUCCEEDED' %}
-                        <span class="badge bg-success">{{ row[8] }}</span>
-                        {% elif row[8] == 'CANCELLED' %}
-                        <span class="badge bg-secondary">{{ row[8] }}</span>
-                        {% elif row[8].startswith('FAILED') %}
-                        <span class="badge bg-warning">{{ row[8] }}</span>
+                        {% if row[9].startswith('RUNNING') %}
+                        <span class="badge bg-primary">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                        {% elif row[9].startswith('PENDING') or row[9].startswith('SUBMITTED') %}
+                        <span class="badge bg-light">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                        {% elif row[9].startswith('RECOVERING') or row[9].startswith('CANCELLING') or row[9].startswith('STARTING') %}
+                        <span class="badge bg-info">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                        {% elif row[9].startswith('SUCCEEDED') %}
+                        <span class="badge bg-success">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                        {% elif row[9].startswith('CANCELLED') %}
+                        <span class="badge bg-secondary">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                        {% elif row[9].startswith('FAILED') %}
+                        <span class="badge bg-warning">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
                         {% else %}
-                        {{ row[8] }}
+                        {{ row[9] }}
                         {% endif %}
                     </td>
-                    <td>{{ row[9] }}</td>
                     <td>{{ row[10] }}</td>
                     <td>{{ row[11] }}</td>
                     <td>{{ row[12] }}</td>
+                    <td>{{ row[13] }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -112,12 +115,18 @@
         document.querySelectorAll('.folder').forEach(function (folder) {
             folder.addEventListener('click', function () {
                 let plusSign = folder.querySelector('.clickable');
+                if (!plusSign) {
+                    plusSign = document.createElement('span');
+                    plusSign.classList.add('clickable');
+                    folder.children[0].prepend(plusSign); // Ensure the clickable span is the first child of the folder cell
+                }
+
                 let displayState = 'none';
-                if (plusSign.textContent === '+') {
-                    plusSign.textContent = '−'; // Change to minus sign
+                if (plusSign.textContent === '▶') {
+                    plusSign.textContent = '▼'; // Change to downward-pointing triangle
                     displayState = '';
                 } else {
-                    plusSign.textContent = '+'; // Change back to plus sign
+                    plusSign.textContent = '▶'; // Change back to right-pointing triangle
                 }
 
                 let next = folder.nextElementSibling;
@@ -129,8 +138,24 @@
         });
 
         document.addEventListener("DOMContentLoaded", function () {
-            document.querySelectorAll('.folded').forEach(function (folded) {
-                folded.style.display = 'none'; // Make sure these rows are initially hidden
+            // Setting initial fold state for each folder
+            document.querySelectorAll('.folder').forEach(function (folder, index) {
+                let storedState = localStorage.getItem('folderState' + index);
+                let plusSign = folder.querySelector('.clickable');
+                let next = folder.nextElementSibling;
+                if (storedState === 'expanded') {
+                    plusSign.textContent = '▼';
+                    while (next && next.classList.contains('folded')) {
+                        next.style.display = '';  // Show
+                        next = next.nextElementSibling;
+                    }
+                } else {
+                    plusSign.textContent = '▶';
+                    while (next && next.classList.contains('folded')) {
+                        next.style.display = 'none';  // Hide initially
+                        next = next.nextElementSibling;
+                    }
+                }
             });
         });
     </script>

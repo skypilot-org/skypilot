@@ -163,7 +163,7 @@ def _execute(
     if any(r.job_recovery is not None for r in task.resources):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                'Job recovery is specified in the task. To launch the '
+                'Job recovery is specified in the task. To launch a '
                 'managed job, please use: sky job launch')
 
     cluster_exists = False
@@ -225,8 +225,8 @@ def _execute(
                                               task)
 
     if not cluster_exists:
-        # If spot is launched by skyserve controller or managed job controller,
-        # We don't need to print out the logger info.
+        # If spot is launched on serve or job controller, we don't need to print
+        # out the hint.
         if (Stage.PROVISION in stages and task.use_spot and
                 not _is_launched_by_job_controller and
                 not _is_launched_by_sky_serve_controller):

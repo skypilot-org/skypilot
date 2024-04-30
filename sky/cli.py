@@ -831,7 +831,7 @@ def _with_deprecation_warning(
                 if isinstance(v, bool):
                     overrides.append(f'--{k}')
                 else:
-                    overrides.append(f'--{k}={v}')
+                    overrides.append(f'--{k.replace("_", "-")}={v}')
             override_str = ' with additional arguments ' + ' '.join(overrides)
         click.secho(
             f'WARNING: `{alias_name}` has been renamed to `{original_name}` '
@@ -3192,7 +3192,7 @@ def bench():
 
 @cli.group(cls=_NaturalOrderGroup)
 def job():
-    """Managed Job CLI (jobs with auto-recovery)."""
+    """Managed Jobs CLI (jobs with auto-recovery)."""
     pass
 
 
@@ -3207,7 +3207,7 @@ def job():
 @click.option('--job-recovery',
               default=None,
               type=str,
-              help='Spot recovery strategy to use for the managed job task.')
+              help='Recovery strategy to use for managed jobs.')
 @click.option(
     '--detach-run',
     '-d',
@@ -3326,7 +3326,7 @@ def job_launch(
     dag = sky.optimize(dag)
 
     if not yes:
-        prompt = f'Launching the managed job {dag.name!r}. Proceed?'
+        prompt = f'Launching a managed job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
@@ -3594,7 +3594,7 @@ def job_dashboard(port: Optional[int]):
 # Remove in v0.8.0.
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
-    """Alias for Managed Job CLI (default to managed spot jobs)."""
+    """Alias for Managed Jobs CLI (default to managed spot jobs)."""
     pass
 
 

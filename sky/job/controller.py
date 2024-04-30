@@ -130,7 +130,8 @@ class JobController:
                 due to:
                 1. Any of the underlying failover exceptions is due to resources
                 unavailability.
-                2. The cluster is preempted before the job is submitted.
+                2. The cluster is preempted or failed before the job is
+                submitted.
                 3. Any unexpected error happens during the `sky.launch`.
         Other exceptions may be raised depending on the backend.
         """
@@ -224,7 +225,8 @@ class JobController:
             # healthy cluster. We can safely continue monitoring.
             # For multi-node jobs, since the job may not be set to FAILED
             # immediately (depending on user program) when only some of the
-            # nodes are preempted, need to check the actual cluster status.
+            # nodes are preempted or failed, need to check the actual cluster
+            # status.
             if (job_status is not None and not job_status.is_terminal() and
                     task.num_nodes == 1):
                 continue
@@ -236,16 +238,17 @@ class JobController:
                 # false alarm for job failure.
                 time.sleep(5)
             # Pull the actual cluster status from the cloud provider to
-            # determine whether the cluster is preempted.
+            # determine whether the cluster is preempted or failed.
             (cluster_status,
              handle) = backend_utils.refresh_cluster_status_handle(
                  cluster_name,
                  force_refresh_statuses=set(status_lib.ClusterStatus))
 
             if cluster_status != status_lib.ClusterStatus.UP:
-                # The cluster is (partially) preempted. It can be down, INIT
-                # or STOPPED, based on the interruption behavior of the cloud.
-                # Spot recovery is needed (will be done later in the code).
+                # The cluster is (partially) preempted or failed. It can be
+                # down, INIT or STOPPED, based on the interruption behavior of
+                # the cloud. Spot recovery is needed (will be done later in the
+                # code).
                 cluster_status_str = ('' if cluster_status is None else
                                       f' (status: {cluster_status.value})')
                 logger.info(
@@ -295,16 +298,16 @@ class JobController:
             if handle is not None:
                 resources = handle.launched_resources
                 assert resources is not None, handle
-                if (resources.use_spot and
-                        resources.need_cleanup_after_preemption()):
+                if resources.need_cleanup_after_preemption_or_failure():
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption, as running launch again on
                     # those clusters again may fail.
-                    logger.info('Cleaning up the preempted spot cluster...')
+                    logger.info('Cleaning up the preempted or failed spot '
+                                'cluster...')
                     recovery_strategy.terminate_cluster(cluster_name)
 
-            # Try to recover the managed jobs, when the cluster is preempted
-            # or the job status is failed to be fetched.
+            # Try to recover the managed jobs, when the cluster is preempted or
+            # failed or the job status is failed to be fetched.
             managed_job_state.set_recovering(job_id=self._job_id,
                                              task_id=task_id,
                                              callback_func=callback_func)

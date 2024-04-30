@@ -328,8 +328,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
 
         # task_id and managed_job_status can be None if the controller process
         # just started and the managed job status has not set to PENDING yet.
-        while managed_job_status is None or not managed_job_status.is_terminal(
-        ):
+        while (managed_job_status is None or
+               not managed_job_status.is_terminal()):
             handle = None
             if task_id is not None:
                 task_name = managed_job_state.get_task_name(job_id, task_id)

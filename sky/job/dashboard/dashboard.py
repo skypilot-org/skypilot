@@ -53,11 +53,12 @@ def home():
     rows = managed_jobs.format_job_table(all_managed_jobs,
                                          show_all=True,
                                          return_rows=True)
+    rows = [[''] + row for row in rows]
 
     # FIXME(zongheng): make the job table/queue funcs return structured info so
     # that we don't have to do things like row[-5] below.
     columns = [
-        'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
+        '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
         'Job Duration', 'Recoveries', 'Status', 'Started', 'Cluster', 'Region',
         'Failure'
     ]

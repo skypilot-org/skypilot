@@ -1,4 +1,4 @@
-"""Modules for managed job clusters."""
+"""Managed jobs."""
 import pathlib
 
 from sky.job.constants import JOB_CLUSTER_NAME_PREFIX_LENGTH

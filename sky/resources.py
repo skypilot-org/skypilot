@@ -569,10 +569,10 @@ class Resources:
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
 
-    def need_cleanup_after_preemption(self) -> bool:
-        """Returns whether a spot resource needs cleanup after preemption."""
+    def need_cleanup_after_preemption_or_failure(self) -> bool:
+        """Whether a resource needs cleanup after preemption or failure."""
         assert self.is_launchable(), self
-        return self.cloud.need_cleanup_after_preemption(self)
+        return self.cloud.need_cleanup_after_preemption_or_failure(self)
 
     def _validate_and_set_region_zone(self, region: Optional[str],
                                       zone: Optional[str]) -> None:
@@ -778,7 +778,7 @@ class Resources:
                             f'memory, but {self.memory} is requested.')
 
     def _try_validate_managed_job_attributes(self) -> None:
-        """Try to validate the managed job related attributes.
+        """Try to validate managed job related attributes.
 
         Raises:
             ValueError: if the attributes are invalid.
