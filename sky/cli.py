@@ -2919,10 +2919,8 @@ def show_gpus(
             qty_header = 'QTY_FILTER'
         else:
             qty_header = 'QTY_PER_NODE'
-        realtime_gpu_table = log_utils.create_table([
-            'GPU', qty_header, 'TOTAL_GPUS',
-            'AVAILABLE_GPUS'
-        ])
+        realtime_gpu_table = log_utils.create_table(
+            ['GPU', qty_header, 'TOTAL_GPUS', 'AVAILABLE_GPUS'])
         counts, capacity, available = service_catalog.list_accelerator_realtime(
             gpus_only=True,
             clouds=cloud,
@@ -2941,14 +2939,14 @@ def show_gpus(
                              'run: sky show-gpus --cloud kubernetes.')
                 if quantity_filter is not None:
                     gpu_info_msg += f' with quantity {quantity_filter}'
-            err_msg = kubernetes_utils.NO_GPU_ERROR_MESSAGE.format(gpu_info_msg=gpu_info_msg, debug_msg=debug_msg)
+            err_msg = kubernetes_utils.NO_GPU_ERROR_MESSAGE.format(
+                gpu_info_msg=gpu_info_msg, debug_msg=debug_msg)
             yield err_msg
             return
         for gpu, _ in sorted(counts.items()):
             realtime_gpu_table.add_row([
                 gpu,
-                _list_to_str(counts.pop(gpu)), capacity[gpu],
-                available[gpu]
+                _list_to_str(counts.pop(gpu)), capacity[gpu], available[gpu]
             ])
         yield from realtime_gpu_table.get_string()
 
@@ -3082,15 +3080,17 @@ def show_gpus(
                             cpu_str = str(int(cpu_count))
                         else:
                             cpu_str = f'{cpu_count:.1f}'
-                    device_memory_str = (f'{item.device_memory:.0f}GB' if
-                                         not pd.isna(item.device_memory) else '-')
+                    device_memory_str = (f'{item.device_memory:.0f}GB'
+                                         if not pd.isna(item.device_memory) else
+                                         '-')
                     host_memory_str = f'{item.memory:.0f}GB' if not pd.isna(
                         item.memory) else '-'
                     price_str = f'$ {item.price:.3f}' if not pd.isna(
                         item.price) else '-'
                     spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
                         item.spot_price) else '-'
-                    region_str = item.region if not pd.isna(item.region) else '-'
+                    region_str = item.region if not pd.isna(
+                        item.region) else '-'
                     accelerator_table_vals = [
                         item.accelerator_name,
                         item.accelerator_count,

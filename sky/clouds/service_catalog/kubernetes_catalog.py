@@ -123,7 +123,7 @@ def list_accelerators_realtime(
 
             if accelerator_count >= min_quantity_filter:
                 quantized_count = (min_quantity_filter *
-                                   (accelerator_count//min_quantity_filter))
+                                   (accelerator_count // min_quantity_filter))
                 if accelerator_name not in total_accelerators_capacity:
                     total_accelerators_capacity[
                         accelerator_name] = quantized_count
@@ -133,7 +133,7 @@ def list_accelerators_realtime(
 
             if accelerators_available >= min_quantity_filter:
                 quantized_availability = min_quantity_filter * (
-                            accelerators_available // min_quantity_filter)
+                    accelerators_available // min_quantity_filter)
                 if accelerator_name not in total_accelerators_available:
                     total_accelerators_available[
                         accelerator_name] = quantized_availability

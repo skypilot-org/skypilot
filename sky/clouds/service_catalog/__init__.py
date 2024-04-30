@@ -138,15 +138,14 @@ def list_accelerator_realtime(
         - Number of accelerators available at the time of call (availability).
     """
     qtys_map, total_accelerators_capacity, total_accelerators_available = (
-        _map_clouds_catalog(
-            clouds,
-            'list_accelerators_realtime',
-            gpus_only,
-            name_filter,
-            region_filter,
-            quantity_filter,
-            all_regions=False,
-            require_price=False))
+        _map_clouds_catalog(clouds,
+                            'list_accelerators_realtime',
+                            gpus_only,
+                            name_filter,
+                            region_filter,
+                            quantity_filter,
+                            all_regions=False,
+                            require_price=False))
     accelerator_counts: Dict[str, List[int]] = collections.defaultdict(list)
     for gpu, items in qtys_map.items():
         for item in items:
