@@ -131,7 +131,7 @@ def get_mounting_script(
         #!/usr/bin/env bash
         set -e
                              
-        {command_runner.HANDLE_SUDO_FOR_ROOT_CMD}
+        {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
         MOUNT_PATH={mount_path}
         MOUNT_BINARY={mount_binary}
