@@ -24,4 +24,4 @@ JOB_CLUSTER_NAME_PREFIX_LENGTH = 25
 # The version of the lib files that job/utils use. Whenever there is an API
 # change for the job/utils, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-MANAGED_LIB_VERSION = 1
+MANAGED_JOB_VERSION = 1
