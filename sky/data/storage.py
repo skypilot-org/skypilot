@@ -123,8 +123,7 @@ class StoreType(enum.Enum):
         elif cloud.lower() == cloudflare.NAME.lower():
             return StoreType.R2
         elif cloud.lower() == str(clouds.Azure()).lower():
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Azure Blob Storage is not supported yet.')
+            return StoreType.AZURE
         elif cloud.lower() == str(clouds.Lambda()).lower():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Lambda Cloud does not provide cloud storage.')
