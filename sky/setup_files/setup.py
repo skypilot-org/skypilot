@@ -169,7 +169,7 @@ local_ray = [
     # click/grpcio/protobuf.
     # Excluded 2.6.0 as it has a bug in the cluster launcher:
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
-    'ray[default] >= 2.2.0, <= 2.9.3, != 2.6.0',
+    'ray[default] >= 2.2.0, != 2.6.0',
 ]
 
 remote = [
@@ -236,6 +236,7 @@ extras_require: Dict[str, List[str]] = {
     'runpod': ['runpod>=1.5.1'],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.8'],
+    'paperspace': [],  # No dependencies needed for paperspace
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have

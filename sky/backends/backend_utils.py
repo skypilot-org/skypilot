@@ -745,7 +745,7 @@ def write_cluster_config(
         cluster_name: str,
         local_wheel_path: pathlib.Path,
         wheel_hash: str,
-        region: Optional[clouds.Region] = None,
+        region: clouds.Region,
         zones: Optional[List[clouds.Zone]] = None,
         dryrun: bool = False,
         keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
@@ -2292,7 +2292,7 @@ def is_controller_accessible(
         # will not start the controller manually from the cloud console.
         #
         # The acquire_lock_timeout is set to 0 to avoid hanging the command when
-        # multiple spot_launch commands are running at the same time. Our later
+        # multiple spot.launch commands are running at the same time. Our later
         # code will check if the controller is accessible by directly checking
         # the ssh connection to the controller, if it fails to get accurate
         # status of the controller.

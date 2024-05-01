@@ -43,6 +43,8 @@ class RunPod(clouds.Cloud):
             ('Mounting object stores is not supported on RunPod. To read data '
              'from object stores on RunPod, use `mode: COPY` to copy the data '
              'to local disk.'),
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
+            ('Host controllers are not supported on RunPod.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []

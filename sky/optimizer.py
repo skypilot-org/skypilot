@@ -7,7 +7,6 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import colorama
-import networkx as nx
 import numpy as np
 import prettytable
 
@@ -17,13 +16,17 @@ from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.adaptors import common as adaptors_common
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    # pylint: disable=ungrouped-imports
+    import networkx as nx
+
     from sky import dag as dag_lib
+else:
+    nx = adaptors_common.LazyImport('networkx')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -334,7 +337,8 @@ class Optimizer:
                 # in the error message.
                 enabled_clouds = (
                     sky_check.get_cached_enabled_clouds_or_refresh())
-                if clouds.cloud_in_list(clouds.Kubernetes(), enabled_clouds):
+                if clouds.cloud_in_iterable(clouds.Kubernetes(),
+                                            enabled_clouds):
                     if any(orig_resources.cloud is None
                            for orig_resources in node.resources):
                         source_hint = 'catalog and kubernetes cluster'
@@ -1166,7 +1170,7 @@ def _fill_in_launchable_resources(
         blocked_resources = []
     for resources in task.resources:
         if (resources.cloud is not None and
-                not clouds.cloud_in_list(resources.cloud, enabled_clouds)):
+                not clouds.cloud_in_iterable(resources.cloud, enabled_clouds)):
             if try_fix_with_sky_check:
                 # Explicitly check again to update the enabled cloud list.
                 sky_check.check(quiet=True)

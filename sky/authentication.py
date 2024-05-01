@@ -410,7 +410,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_FIELD_NAME
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-    k8s = kubernetes.get_kubernetes()
+    k8s = kubernetes.kubernetes
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read()
         if not public_key.endswith('\n'):
@@ -476,7 +476,7 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
-        runpod.runpod().cli.groups.ssh.functions.add_ssh_key(public_key)
+        runpod.runpod.cli.groups.ssh.functions.add_ssh_key(public_key)
 
     return configure_ssh_info(config)
 

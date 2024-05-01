@@ -7,7 +7,7 @@ FROM rayproject/ray:2.9.3-py310-gpu
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
 RUN sudo rm -rf /etc/apt/sources.list.d/cuda* && \
     sudo apt update -y && \
-    sudo apt install gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat -y && \
+    sudo apt install gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat curl -y && \
     sudo rm -rf /var/lib/apt/lists/* && \
     sudo apt remove -y python3 && \
     conda init
@@ -39,7 +39,8 @@ RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install rich tabulate filelock && \
     pip install packaging 'protobuf<4.0.0' pulp && \
     pip install pycryptodome==3.12.0 && \
-    pip install docker kubernetes==28.1.0
+    pip install docker kubernetes==28.1.0 && \
+    pip install grpcio==1.51.3 python-dotenv==1.0.1
 
 # Add /home/sky/.local/bin/ to PATH
 RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc

@@ -12,13 +12,18 @@ import logging
 import re
 import time
 import traceback
+import typing
 from typing import Optional
 
-import pandas as pd
-
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
 from sky.skylet.providers.oci import utils
+
+if typing.TYPE_CHECKING:
+    import pandas as pd
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +48,10 @@ class oci_query_helper:
                   f" && (lifecycleState != 'TERMINATED'"
                   f" && lifecycleState != 'TERMINATING')")
 
-        qv = oci_adaptor.get_oci(
-        ).resource_search.models.StructuredSearchDetails(
+        qv = oci_adaptor.oci.resource_search.models.StructuredSearchDetails(
             query=qv_str,
             type="Structured",
-            matching_context_type=oci_adaptor.get_oci().resource_search.models.
+            matching_context_type=oci_adaptor.oci.resource_search.models.
             SearchDetails.MATCHING_CONTEXT_TYPE_NONE,
         )
 
@@ -99,8 +103,8 @@ class oci_query_helper:
             agreements = agreements_response.data
 
             core_client.create_app_catalog_subscription(
-                create_app_catalog_subscription_details=oci_adaptor.get_oci(
-                ).core.models.CreateAppCatalogSubscriptionDetails(
+                create_app_catalog_subscription_details=oci_adaptor.oci.core.
+                models.CreateAppCatalogSubscriptionDetails(
                     compartment_id=compartment_id,
                     listing_id=listing_id,
                     listing_resource_version=agreements.
@@ -202,12 +206,12 @@ class oci_query_helper:
                           skypilot_compartment) -> Optional[str]:
         try:
             create_vcn_response = net_client.create_vcn(
-                create_vcn_details=oci_adaptor.get_oci().core.models.
-                CreateVcnDetails(compartment_id=skypilot_compartment,
-                                 cidr_blocks=[oci_utils.oci_config.VCN_CIDR],
-                                 display_name=oci_utils.oci_config.VCN_NAME,
-                                 is_ipv6_enabled=False,
-                                 dns_label=oci_utils.oci_config.VCN_DNS_LABEL))
+                create_vcn_details=oci_adaptor.oci.core.models.CreateVcnDetails(
+                    compartment_id=skypilot_compartment,
+                    cidr_blocks=[oci_utils.oci_config.VCN_CIDR],
+                    display_name=oci_utils.oci_config.VCN_NAME,
+                    is_ipv6_enabled=False,
+                    dns_label=oci_utils.oci_config.VCN_DNS_LABEL))
             vcn_data = create_vcn_response.data
             logger.debug(f'Created VCN \n{vcn_data}')
             skypilot_vcn = vcn_data.id
@@ -217,21 +221,21 @@ class oci_query_helper:
 
             # Create internet gateway for internet access
             create_ig_response = net_client.create_internet_gateway(
-                create_internet_gateway_details=oci_adaptor.get_oci(
-                ).core.models.CreateInternetGatewayDetails(
+                create_internet_gateway_details=oci_adaptor.oci.core.models.
+                CreateInternetGatewayDetails(
                     compartment_id=skypilot_compartment,
                     is_enabled=True,
                     vcn_id=skypilot_vcn,
-                    display_name=oci_utils.oci_config.VCN_INTERNET_GATEWAY_NAME)
-            )
+                    display_name=oci_utils.oci_config.VCN_INTERNET_GATEWAY_NAME
+                ))
             logger.debug(
                 f'Created internet gateway \n{create_ig_response.data}')
             ig = create_ig_response.data.id
 
             # Create a public subnet.
             create_subnet_response = net_client.create_subnet(
-                create_subnet_details=oci_adaptor.get_oci(
-                ).core.models.CreateSubnetDetails(
+                create_subnet_details=oci_adaptor.oci.core.models.
+                CreateSubnetDetails(
                     cidr_block=oci_utils.oci_config.VCN_SUBNET_CIDR,
                     compartment_id=skypilot_compartment,
                     vcn_id=skypilot_vcn,
@@ -253,12 +257,12 @@ class oci_query_helper:
             if len(services) > 0:
                 # Create service gateway for regional services.
                 create_sg_response = net_client.create_service_gateway(
-                    create_service_gateway_details=oci_adaptor.get_oci(
-                    ).core.models.CreateServiceGatewayDetails(
+                    create_service_gateway_details=oci_adaptor.oci.core.models.
+                    CreateServiceGatewayDetails(
                         compartment_id=skypilot_compartment,
                         services=[
-                            oci_adaptor.get_oci().core.models.
-                            ServiceIdRequestDetails(service_id=services[0].id)
+                            oci_adaptor.oci.core.models.ServiceIdRequestDetails(
+                                service_id=services[0].id)
                         ],
                         vcn_id=skypilot_vcn))
                 logger.debug(f'Service Gateway: \n{create_sg_response.data}')
@@ -267,40 +271,40 @@ class oci_query_helper:
             # Update security list: Allow all traffic in the same subnet
             update_security_list_response = net_client.update_security_list(
                 security_list_id=security_list,
-                update_security_list_details=oci_adaptor.get_oci(
-                ).core.models.UpdateSecurityListDetails(ingress_security_rules=[
-                    oci_adaptor.get_oci().core.models.IngressSecurityRule(
+                update_security_list_details=oci_adaptor.oci.core.models.
+                UpdateSecurityListDetails(ingress_security_rules=[
+                    oci_adaptor.oci.core.models.IngressSecurityRule(
                         protocol="6",
                         source=oci_utils.oci_config.VCN_CIDR_INTERNET,
                         is_stateless=False,
                         source_type="CIDR_BLOCK",
-                        tcp_options=oci_adaptor.get_oci().core.models.
-                        TcpOptions(destination_port_range=oci_adaptor.get_oci().
-                                   core.models.PortRange(max=22, min=22),
-                                   source_port_range=oci_adaptor.get_oci(
-                                   ).core.models.PortRange(max=65535, min=1)),
+                        tcp_options=oci_adaptor.oci.core.models.TcpOptions(
+                            destination_port_range=oci_adaptor.oci.core.models.
+                            PortRange(max=22, min=22),
+                            source_port_range=oci_adaptor.oci.core.models.
+                            PortRange(max=65535, min=1)),
                         description="Allow SSH port."),
-                    oci_adaptor.get_oci().core.models.IngressSecurityRule(
+                    oci_adaptor.oci.core.models.IngressSecurityRule(
                         protocol="all",
                         source=oci_utils.oci_config.VCN_SUBNET_CIDR,
                         is_stateless=False,
                         source_type="CIDR_BLOCK",
                         description="Allow all traffic from/to same subnet."),
-                    oci_adaptor.get_oci().core.models.IngressSecurityRule(
+                    oci_adaptor.oci.core.models.IngressSecurityRule(
                         protocol="1",
                         source=oci_utils.oci_config.VCN_CIDR_INTERNET,
                         is_stateless=False,
                         source_type="CIDR_BLOCK",
-                        icmp_options=oci_adaptor.get_oci(
-                        ).core.models.IcmpOptions(type=3, code=4),
+                        icmp_options=oci_adaptor.oci.core.models.IcmpOptions(
+                            type=3, code=4),
                         description="ICMP traffic."),
-                    oci_adaptor.get_oci().core.models.IngressSecurityRule(
+                    oci_adaptor.oci.core.models.IngressSecurityRule(
                         protocol="1",
                         source=oci_utils.oci_config.VCN_CIDR,
                         is_stateless=False,
                         source_type="CIDR_BLOCK",
-                        icmp_options=oci_adaptor.get_oci(
-                        ).core.models.IcmpOptions(type=3),
+                        icmp_options=oci_adaptor.oci.core.models.IcmpOptions(
+                            type=3),
                         description="ICMP traffic (VCN)."),
                 ]))
             logger.debug(
@@ -310,9 +314,9 @@ class oci_query_helper:
             # Update route table: bind to the internet gateway
             update_route_table_response = net_client.update_route_table(
                 rt_id=route_table,
-                update_route_table_details=oci_adaptor.get_oci(
-                ).core.models.UpdateRouteTableDetails(route_rules=[
-                    oci_adaptor.get_oci().core.models.RouteRule(
+                update_route_table_details=oci_adaptor.oci.core.models.
+                UpdateRouteTableDetails(route_rules=[
+                    oci_adaptor.oci.core.models.RouteRule(
                         network_entity_id=create_ig_response.data.id,
                         destination='0.0.0.0/0',
                         destination_type='CIDR_BLOCK',

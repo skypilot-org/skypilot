@@ -419,6 +419,8 @@ class AWS(clouds.Cloud):
             'zones': ','.join(zone_names),
             'image_id': image_id,
             'security_group': security_group,
+            'security_group_managed_by_skypilot':
+                str(security_group != user_security_group).lower(),
             **AWS._get_disk_specs(r.disk_tier)
         }
 
@@ -427,6 +429,15 @@ class AWS(clouds.Cloud):
     ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            # Check the instance type is valid in the cloud
+            regions = self.regions_with_offering(
+                resources.instance_type,
+                accelerators=resources.accelerators,
+                use_spot=resources.use_spot,
+                region=resources.region,
+                zone=resources.zone)
+            if not regions:
+                return ([], [])
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(accelerators=None)
             return ([resources], [])

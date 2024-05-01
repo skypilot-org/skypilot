@@ -54,7 +54,7 @@ def retry(func):
         while True:
             try:
                 return func(*args, **kwargs)
-            except runpod.runpod().error.QueryError as e:
+            except runpod.runpod.error.QueryError as e:
                 if cnt >= 3:
                     raise
                 logger.warning('Retrying for exception: '
@@ -66,7 +66,7 @@ def retry(func):
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
-    instances = runpod.runpod().get_pods()
+    instances = runpod.runpod.get_pods()
 
     instance_dict: Dict[str, Dict[str, Any]] = {}
     for instance in instances:
@@ -98,9 +98,9 @@ def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
     gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
     cloud_type = instance_type.split('_')[2]
 
-    gpu_specs = runpod.runpod().get_gpu(gpu_type)
+    gpu_specs = runpod.runpod.get_gpu(gpu_type)
 
-    new_instance = runpod.runpod().create_pod(
+    new_instance = runpod.runpod.create_pod(
         name=name,
         image_name='runpod/base:0.0.2',
         gpu_type_id=gpu_type,
@@ -121,7 +121,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
 
 def remove(instance_id: str) -> None:
     """Terminates the given instance."""
-    runpod.runpod().terminate_pod(instance_id)
+    runpod.runpod.terminate_pod(instance_id)
 
 
 def get_ssh_ports(cluster_name) -> List[int]:

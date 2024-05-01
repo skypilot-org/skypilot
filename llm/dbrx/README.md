@@ -171,7 +171,7 @@ Wait until the model is ready (this can take 10+ minutes), as indicated by these
 ...
 (task, pid=17433) INFO 03-28 04:32:50 metrics.py:218] Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Swapped: 0 reqs, Pending: 0 reqs, GPU KV cache usage: 0.0%, CPU KV cache usage: 0.0%
 ```
-:tada: **Congratulations!** :tada: You have now launched the DBRX Instruct LLM on your infra.
+🎉 **Congratulations!** 🎉 You have now launched the DBRX Instruct LLM on your infra.
 
 You can play with the model via
 - Standard OpenAPI-compatible endpoints (e.g., `/v1/chat/completions`)

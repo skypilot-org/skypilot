@@ -42,6 +42,7 @@ class CloudImplementationFeatures(enum.Enum):
     CUSTOM_DISK_TIER = 'custom_disk_tier'
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
+    HOST_CONTROLLERS = 'host_controllers'  # Can run spot/serve controllers
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -745,6 +746,6 @@ class Cloud:
 
 
 # === Helper functions ===
-def cloud_in_list(cloud: Cloud, cloud_list: Iterable[Cloud]) -> bool:
+def cloud_in_iterable(cloud: Cloud, cloud_list: Iterable[Cloud]) -> bool:
     """Returns whether the cloud is in the given cloud list."""
     return any(cloud.is_same_cloud(c) for c in cloud_list)
