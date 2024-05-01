@@ -963,11 +963,16 @@ class Resources:
                     'Cloud must be specified when labels are provided.')
 
         # Check if the label key value pairs are valid.
+        invalid_table = log_utils.create_table(['Label', 'Reason'])
         for key, value in self._labels.items():
             valid, err_msg = self.cloud.is_label_valid(key, value)
             if not valid:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Invalid label {key}={value}. {err_msg}')
+                invalid_table.add_row([f'{key}: {value}', err_msg])
+        if len(invalid_table.rows) > 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                        f'The following labels are invalid:'
+                        '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

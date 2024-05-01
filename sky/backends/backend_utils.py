@@ -847,12 +847,11 @@ def write_cluster_config(
     # `labels` are not specified. This should be removed after 0.7.0.
     labels = skypilot_config.get_nested((str(cloud).lower(), 'instance_tags'),
                                         labels)
-    # instance_tags is a dict, which is guaranteed by the type check in
+    # labels is a dict, which is guaranteed by the type check in
     # schemas.py
     assert isinstance(labels, dict), labels
 
-    # Get labels from resources to be used as instance tags and override on to
-    # the instance_tags.
+    # Get labels from resources and override from the labels to_provision.
     if to_provision.labels:
         labels.update(to_provision.labels)
 
@@ -887,7 +886,7 @@ def write_cluster_config(
                 'vpc_name': skypilot_config.get_nested(
                     (str(cloud).lower(), 'vpc_name'), None),
 
-                # User-supplied instance tags.
+                # User-supplied labels.
                 'labels': labels,
                 # The reservation pools that specified by the user. This is
                 # currently only used by GCP.
