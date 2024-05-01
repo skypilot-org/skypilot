@@ -620,9 +620,11 @@ def terminate_instances(
 
         def _get_node_id_from_hostname(network_name: str,
                                        hostname: str) -> Optional[str]:
-            # TODO(tian): Refactor to a dedicated file
+            # TODO(tian): Refactor to a dedicated file for all
+            # VPN related functions and constants.
             url_to_query = ('https://api.tailscale.com/api/v2/'
                             f'tailnet/{network_name}/devices')
+            # TODO(tian): Error handling if api key is wrong.
             resp = requests.get(url_to_query, headers=auth_headers)
             all_devices_in_network = resp.json().get('devices', [])
             for device_info in all_devices_in_network:
