@@ -7,10 +7,12 @@ Managed Jobs
 
   This feature is great for scaling out: running a single job for long durations, or running many jobs (pipelines).
 
-SkyPilot supports managed jobs that allows:
+SkyPilot supports **managed jobs**, which can automatically recover from any spot preemptions or hardware failures.
+It can be used in three modes:
 
-#. :ref:`Managed Spot Jobs <spot-jobs>`: Automatically recover from preemptions/hardware failures. This can **save significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
-#. :ref:`Job Pipeline <pipeline>`: Run job pipeline that conatin multiple tasks with different resource requirements. This is useful for running a sequence of tasks that depend on each other, e.g., data processing, training a model, and then running inference on it.
+#. :ref:`Managed Spot Jobs <spot-jobs>`: Jobs run on auto-recovering spot instances. This can **save significant costs** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
+#. :ref:`On-demand <on-demand>`: Jobs run on auto-recovering on-demand instances. This is useful for jobs that require guaranteed resources.
+#. :ref:`Pipelines <pipeline>`: Run pipelines that contain multiple tasks (which can have different resource requirements and ``setup``/``run`` commands). This is useful for running a sequence of tasks that depend on each other, e.g., data processing, training a model, and then running inference on it.
 
 
 .. _spot-jobs:
@@ -19,6 +21,8 @@ Managed Spot Jobs
 -----------------
 
 SkyPilot automatically finds available spot resources across regions and clouds to maximize availability.
+Any spot preemptions are automatically handled by SkyPilot without user intervention.
+
 Here is an example of a BERT training job failing over different regions across AWS and GCP.
 
 .. image:: https://i.imgur.com/Vteg3fK.gif
@@ -209,8 +213,61 @@ cost savings from spot instances without worrying about preemption or losing pro
   Try copy-paste this example and adapt it to your own job.
 
 
+
+Real-World Examples
+~~~~~~~~~~~~~~~~~~~
+
+* `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_, `YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml>`__
+* BERT (shown above): `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`__
+* PyTorch DDP, ResNet: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/resnet.yaml>`__
+* PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`__
+
+
+.. _on-demand:
+
+Using On-Demand Instances
+--------------------------------
+
+The same ``sky job launch`` and YAML interfaces can run jobs on auto-recovering
+on-demand instances. This is useful to have SkyPilot monitor any underlying
+machine failures and transparently recover the job.
+
+To do so, simply set :code:`use_spot: false` in the :code:`resources` section, or override it with :code:`--use-spot false` in the CLI.
+
+.. code-block:: console
+
+  $ sky job launch -n bert-qa bert_qa.yaml --use-spot false
+
+.. tip::
+
+  It is useful to think of ``sky job launch`` as a "serverless" managed job
+  interface, while ``sky launch`` is a cluster interface (that you can launch
+  tasks on, albeit not managed).
+
+Either Spot Or On-Demand
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can use ``any_of`` to specify either spot or on-demand instances as
+candidate resources for a job. See documentation :ref:`here
+<multiple-resources>` for more details.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    any_of:
+      - use_spot: true
+      - use_spot: false
+
+In this example, SkyPilot will perform cost optimizations to select the resource to use, which almost certainly
+will be spot instances. If spot instances are not available, SkyPilot will fall back to launch on-demand instances.
+
+More advanced policies for resource selection, such as the `Can't Be Late
+<https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`__ (NSDI'24)
+paper, may be supported in the future.
+
 Useful CLIs
-~~~~~~~~~~~
+-----------
 
 Here are some commands for managed jobs. Check :code:`sky job --help` and :ref:`CLI reference <cli>` for more details.
 
@@ -247,55 +304,27 @@ Cancel a managed job:
   of the failure. For more details, it would be helpful to check :code:`sky job logs --controller <job_id>`.
 
 
-Real-World Examples
-~~~~~~~~~~~~~~~~~~~
-
-* `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_, `YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml>`__
-* BERT (shown above): `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`__
-* PyTorch DDP, ResNet: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/resnet.yaml>`__
-* PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`__
-
-
-
-Using Both Spot and On-Demand Instances
-----------------------------------------
-
-Despite spot instances, you can use both spot and on-demand instances as candidate resources for a job. You can specify the resources as below:
-
-.. code-block:: yaml
-
-  resources:
-    accelerators: A100:8
-    any_of:
-      - use_spot: true
-      - use_spot: false
-
-In this example, the job will try to use spot instances first. If spot instances are not available, it will fall back to on-demand instances.
-Details of resource specification can be found in the :ref:`YAML spec <yaml-spec>`.
-More advanced policies for resource selection, such as `Can't Be Late <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`__ (NSDI'24) paper, will be supported in the future.
-
 .. _pipeline:
 
-Job Pipeline
-------------
+Job Pipelines
+-------------
 
-Job Pipeline is a feature that allows you to submit a managed job that contains a sequence of managed tasks running one after another.
-This is useful for running a sequence of jobs that depend on each other, e.g., training a model and then running inference on it.
-This allows the multiple tasks to have different resource requirements to fully utilize the resources and save cost, while keeping the burden of managing the tasks off the user. 
+A pipeline is a managed job that contains a sequence of tasks running one after another.
+
+This is useful for running a sequence of tasks that depend on each other, e.g., training a model and then running inference on it.
+Different tasks can have different resource requirements to use appropriate per-task resources, which saves costs, while  keeping the burden of managing the tasks off the user.
 
 .. note::
-  A managed job is either a single task or a pipeline of tasks. A managed job is submitted by :code:`sky job launch`.
-  
-  Tasks in a pipeline will be run on spot or on-demand instances.
+  In other words, a managed job is either a single task or a pipeline of tasks. All managed jobs are submitted by :code:`sky job launch`.
 
-To use Job Pipeline, you can specify the sequence of jobs in a YAML file. Here is an example:
+To run a pipeline, specify the sequence of tasks in a YAML file. Here is an example:
 
 .. code-block:: yaml
 
   name: pipeline
 
   ---
-  
+
   name: train
 
   resources:
@@ -337,15 +366,13 @@ To use Job Pipeline, you can specify the sequence of jobs in a YAML file. Here i
     echo eval model on test set
 
 
-The above YAML file defines a pipeline with two tasks. The first :code:`name: pipeline` names the pipeline. The first task has name :code:`train` and the second task has name :code:`eval`. The tasks are separated by a line with three dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and :code:`run` sections. The :code:`setup` and :code:`run` sections are executed sequentially.
+The YAML above defines a pipeline with two tasks. The first :code:`name:
+pipeline` names the pipeline. The first task has name :code:`train` and the
+second task has name :code:`eval`. The tasks are separated by a line with three
+dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and
+:code:`run` sections. Tasks are executed sequentially.
 
 To submit the pipeline, the same command :code:`sky job launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky job queue` or :code:`sky job dashboard`.
-
-.. note::
-
-  The :code:`$SKYPILOT_TASK_ID` environment variable is also available in the :code:`run` section of each task. It is unique for each task in the pipeline.
-  For example, the :code:`$SKYPILOT_TASK_ID` for the :code:`eval` task above is:
-  "sky-managed-2022-10-06-05-17-09-750781_pipeline_eval_8-1".
 
 .. code-block:: console
 
@@ -354,10 +381,17 @@ To submit the pipeline, the same command :code:`sky job launch` is used. The pip
   Fetching managed job statuses...
   Managed jobs
   In progress jobs: 1 RECOVERING
-  ID  TASK  NAME      RESOURCES                    SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS     
-  8         pipeline  -                            50 mins ago  47m 45s        -             1            RECOVERING   
-   ↳  0     train     1x [V100:8](spot|on-demand)  50 mins ago  47m 45s        -             1            RECOVERING 
-   ↳  1     eval      1x [T4:1]                    -            -              -             0            PENDING 
+  ID  TASK  NAME      RESOURCES                    SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+  8         pipeline  -                            50 mins ago  47m 45s        -             1            RECOVERING
+   ↳  0     train     1x [V100:8](spot|on-demand)  50 mins ago  47m 45s        -             1            RECOVERING
+   ↳  1     eval      1x [T4:1]                    -            -              -             0            PENDING
+
+.. note::
+
+  The :code:`$SKYPILOT_TASK_ID` environment variable is also available in the :code:`run` section of each task. It is unique for each task in the pipeline.
+  For example, the :code:`$SKYPILOT_TASK_ID` for the :code:`eval` task above is:
+  "sky-managed-2022-10-06-05-17-09-750781_pipeline_eval_8-1".
+
 
 
 Dashboard
