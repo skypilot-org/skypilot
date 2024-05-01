@@ -746,6 +746,6 @@ class Cloud:
 
 
 # === Helper functions ===
-def cloud_in_list(cloud: Cloud, cloud_list: Iterable[Cloud]) -> bool:
+def cloud_in_iterable(cloud: Cloud, cloud_list: Iterable[Cloud]) -> bool:
     """Returns whether the cloud is in the given cloud list."""
     return any(cloud.is_same_cloud(c) for c in cloud_list)

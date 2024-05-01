@@ -200,12 +200,16 @@ def cluster_name_in_hint(cluster_name: str, cluster_name_on_cloud: str) -> str:
 def get_global_job_id(job_timestamp: str,
                       cluster_name: Optional[str],
                       job_id: str,
-                      task_id: Optional[int] = None) -> str:
+                      task_id: Optional[int] = None,
+                      is_managed_job: bool = False) -> str:
     """Returns a unique job run id for each job run.
 
     A job run is defined as the lifetime of a job that has been launched.
     """
-    global_job_id = f'{job_timestamp}_{cluster_name}_id-{job_id}'
+    managed_job_str = 'managed-' if is_managed_job else ''
+    _, sep, timestamp = job_timestamp.partition('sky-')
+    job_timestamp = f'{sep}{managed_job_str}{timestamp}'
+    global_job_id = f'{job_timestamp}_{cluster_name}_{job_id}'
     if task_id is not None:
         global_job_id += f'-{task_id}'
     return global_job_id
@@ -563,20 +567,24 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                            'The `envs` field contains invalid keys:\n' +
                            e.message)
             else:
-                err_msg = err_msg_prefix + 'The following fields are invalid:'
+                err_msg = err_msg_prefix
                 known_fields = set(e.schema.get('properties', {}).keys())
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(
                             field, known_fields, 1)
                         if most_similar_field:
-                            err_msg += (f'\nInstead of {field!r}, did you mean '
+                            err_msg += (f'Instead of {field!r}, did you mean '
                                         f'{most_similar_field[0]!r}?')
                         else:
-                            err_msg += f'\nFound unsupported field {field!r}.'
+                            err_msg += f'Found unsupported field {field!r}.'
         else:
+            message = e.message
+            # Object in jsonschema is represented as dict in Python. Replace
+            # 'object' with 'dict' for better readability.
+            message = message.replace('type \'object\'', 'type \'dict\'')
             # Example e.json_path value: '$.resources'
-            err_msg = (err_msg_prefix + e.message +
+            err_msg = (err_msg_prefix + message +
                        f'. Check problematic field(s): {e.json_path}')
 
     if err_msg:
@@ -626,3 +634,20 @@ def fill_template(template_name: str, variables: Dict,
     content = j2_template.render(**variables)
     with open(output_path, 'w', encoding='utf-8') as fout:
         fout.write(content)
+
+
+def deprecated_function(func: Callable, name: str, deprecated_name: str,
+                        removing_version: str) -> Callable:
+    """Decorator for creating deprecated functions, for backward compatibility.
+
+    It will result in a warning being emitted when the function is used.
+    """
+
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        logger.warning(
+            f'Call to deprecated function {deprecated_name}, which will be '
+            f'removed in {removing_version}. Please use {name}() instead.')
+        return func(*args, **kwargs)
+
+    return new_func

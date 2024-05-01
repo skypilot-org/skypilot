@@ -98,8 +98,17 @@ class ReplicaStatus(enum.Enum):
     # The replica VM is being shut down. i.e., the `sky down` is still running.
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
-    # The replica VM is once failed and has been deleted.
+    # The replica fails due to user's run/setup.
     FAILED = 'FAILED'
+
+    # The replica fails due to initial delay exceeded.
+    FAILED_INITIAL_DELAY = 'FAILED_INITIAL_DELAY'
+
+    # The replica fails due to healthiness check.
+    FAILED_PROBING = 'FAILED_PROBING'
+
+    # The replica fails during launching
+    FAILED_PROVISION = 'FAILED_PROVISION'
 
     # `sky.down` failed during service teardown.
     # This could mean resource leakage.
@@ -115,14 +124,15 @@ class ReplicaStatus(enum.Enum):
 
     @classmethod
     def failed_statuses(cls) -> List['ReplicaStatus']:
-        return [cls.FAILED, cls.FAILED_CLEANUP, cls.UNKNOWN]
+        return [
+            cls.FAILED, cls.FAILED_CLEANUP, cls.FAILED_INITIAL_DELAY,
+            cls.FAILED_PROBING, cls.FAILED_PROVISION, cls.UNKNOWN
+        ]
 
     @classmethod
     def terminal_statuses(cls) -> List['ReplicaStatus']:
-        return [
-            cls.SHUTTING_DOWN, cls.FAILED, cls.FAILED_CLEANUP, cls.PREEMPTED,
-            cls.UNKNOWN
-        ]
+        return [cls.SHUTTING_DOWN, cls.PREEMPTED, cls.UNKNOWN
+               ] + cls.failed_statuses()
 
     @classmethod
     def scale_down_decision_order(cls) -> List['ReplicaStatus']:
@@ -145,6 +155,9 @@ _REPLICA_STATUS_TO_COLOR = {
     ReplicaStatus.NOT_READY: colorama.Fore.YELLOW,
     ReplicaStatus.SHUTTING_DOWN: colorama.Fore.MAGENTA,
     ReplicaStatus.FAILED: colorama.Fore.RED,
+    ReplicaStatus.FAILED_INITIAL_DELAY: colorama.Fore.RED,
+    ReplicaStatus.FAILED_PROBING: colorama.Fore.RED,
+    ReplicaStatus.FAILED_PROVISION: colorama.Fore.RED,
     ReplicaStatus.FAILED_CLEANUP: colorama.Fore.RED,
     ReplicaStatus.PREEMPTED: colorama.Fore.MAGENTA,
     ReplicaStatus.UNKNOWN: colorama.Fore.RED,

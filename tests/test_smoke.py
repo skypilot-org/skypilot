@@ -282,6 +282,11 @@ def test_minimal(generic_cloud: str):
             # Ensure the raylet process has the correct file descriptor limit.
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            # Check the cluster info
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cluster_name | grep {name}\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i {generic_cloud}\'',
+            f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
         _get_timeout(generic_cloud),
@@ -300,6 +305,8 @@ def test_aws_region():
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-east-2\'',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -318,6 +325,8 @@ def test_gcp_region_and_service_account():
             f'sky exec {name} \'curl -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?format=standard&audience=gcp"\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-central1',  # Ensure the region is correct.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-central1\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -351,6 +360,10 @@ def test_azure_region():
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep eastus2',  # Ensure the region is correct.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep eastus2\'',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .zone | grep null\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -420,6 +433,8 @@ def test_aws_images():
             f'sky launch -y -c {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i aws\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -438,6 +453,8 @@ def test_gcp_images():
             f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i gcp\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -456,6 +473,8 @@ def test_azure_images():
             f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .cloud | grep -i azure\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -1034,8 +1053,9 @@ def test_kubernetes_storage_mounts():
     [
         "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
         "docker:ubuntu:18.04",
-        # Test image with python 3.11 installed by default.
-        "docker:continuumio/miniconda3",
+        # Test latest image with python 3.11 installed by default.
+        # Does not work for python 3.12 due to ray's requirement for 3.11.
+        'docker:continuumio/miniconda3:24.1.2-0',
     ])
 def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Tests bucket mounting on docker container
@@ -1215,18 +1235,21 @@ def test_job_queue(generic_cloud: str):
     [
         "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
         "docker:ubuntu:18.04",
-        # Test image with python 3.11 installed by default.
-        "docker:continuumio/miniconda3",
+        # Test latest image with python 3.11 installed by default.
+        # Does not work for python 3.12 due to ray's requirement for 3.11.
+        'docker:continuumio/miniconda3:24.1.2-0',
     ])
 def test_job_queue_with_docker(generic_cloud: str, image_id: str):
     name = _get_cluster_name() + image_id[len('docker:'):][:4]
+    total_timeout_minutes = 40 if generic_cloud == 'azure' else 15
+    time_to_sleep = 300 if generic_cloud == 'azure' else 180
     test = Test(
         'job_queue_with_docker',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} examples/job_queue/cluster_docker.yaml',
-            f'sky exec {name} -n {name}-1 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-2 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-3 -d --image-id {image_id} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-1 -d --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-2 -d --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-3 -d --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
@@ -1234,6 +1257,9 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
             'sleep 5',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 3',
+            # Make sure the GPU is still visible to the container.
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
+            f'sky logs {name} 4 --status',
             f'sky stop -y {name}',
             # Make sure the job status preserve after stop and start the
             # cluster. This is also a test for the docker container to be
@@ -1244,10 +1270,14 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep CANCELLED',
             f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
+            # Make sure it is still visible after an stop & start cycle.
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
+            f'sky logs {name} 7 --status'
         ],
         f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
@@ -1475,6 +1505,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
+# TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -2191,7 +2222,7 @@ def test_spot(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_spot
 def test_spot_pipeline(generic_cloud: str):
-    """Test a spot pipeline."""
+    """Test a spot pipeline."""
     name = _get_cluster_name()
     test = Test(
         'spot-pipeline',
@@ -2380,7 +2411,7 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
             # separated by `-`.
             (
                 f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
-                'cut -d\'-\' -f2 | rev`;'
+                'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`;'
                 f'aws ec2 terminate-instances --region {region} --instance-ids $('
                 f'aws ec2 describe-instances --region {region} '
                 # TODO(zhwu): fix the name for spot cluster.
@@ -2429,7 +2460,7 @@ def test_spot_pipeline_recovery_gcp():
             # SKYPILOT_TASK_ID, which gets the second to last field
             # separated by `-`.
             (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
-             f'cut -d\'-\' -f2 | rev`;{terminate_cmd}'),
+             f'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`; {terminate_cmd}'),
             'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
@@ -2738,7 +2769,7 @@ def test_spot_tpu():
             f'sky spot launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep STARTING',
-            'sleep 840',  # TPU takes a while to launch
+            'sleep 900',  # TPU takes a while to launch
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),
@@ -2834,8 +2865,9 @@ def test_aws_custom_image():
     [
         "docker:nvidia/cuda:11.8.0-devel-ubuntu18.04",
         "docker:ubuntu:18.04",
-        # Test image with python 3.11 installed by default.
-        "docker:continuumio/miniconda3",
+        # Test latest image with python 3.11 installed by default.
+        # Does not work for python 3.12 due to ray's requirement for 3.11.
+        'docker:continuumio/miniconda3:24.1.2-0',
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
@@ -3072,10 +3104,13 @@ _SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
 # The teardown command has a 10-mins timeout, so we don't need to do
 # the timeout here. See implementation of run_one_test() for details.
 _TEARDOWN_SERVICE = (
-    '(while true; do'
+    '(for i in `seq 1 20`; do'
     '     s=$(sky serve down -y {name});'
-    '     echo "$s" | grep -q "scheduled to be terminated" && break;'
+    '     echo "Trying to terminate {name}";'
+    '     echo "$s";'
+    '     echo "$s" | grep -q "scheduled to be terminated\|No service to terminate" && break;'
     '     sleep 10;'
+    '     [ $i -eq 20 ] && echo "Failed to terminate service {name}";'
     'done)')
 
 _SERVE_ENDPOINT_WAIT = (
@@ -3130,7 +3165,8 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
     for check_tuple in check_tuples:
         count, is_spot, status = check_tuple
         resource_str = ''
-        if status not in ['PENDING', 'SHUTTING_DOWN', 'FAILED']:
+        if status not in ['PENDING', 'SHUTTING_DOWN'
+                         ] and not status.startswith('FAILED'):
             spot_str = ''
             if is_spot:
                 spot_str = '\[Spot\]'
@@ -3203,7 +3239,7 @@ def test_skyserve_llm(generic_cloud: str):
             ],
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        timeout=20 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -3307,22 +3343,22 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/restart/user_bug.yaml',
             f's=$(sky serve status {name}); echo "$s";'
-            'until echo "$s" | grep -A2 "Service Replicas" | grep "SHUTTING_DOWN"; '
+            'until echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN"; '
             'do echo "Waiting for first service to be SHUTTING DOWN..."; '
-            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; sleep 20; '
-            + _SERVE_STATUS_WAIT.format(name=name) +
-            # When the first replica is detected failed, the controller will
-            # start to provision a new replica, and shut down the first one.
-            _check_replica_in_status(
-                name, [(1, True, 'SHUTTING_DOWN'),
-                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; ',
             f's=$(sky serve status {name}); echo "$s";'
-            'until echo "$s" | grep -A2 "Service Replicas" | grep "FAILED"; '
+            'until echo "$s" | grep -A 100 "Service Replicas" | grep "FAILED"; '
             'do echo "Waiting for first service to be FAILED..."; '
             f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
-            + _check_replica_in_status(
-                name, [(1, True, 'FAILED'),
-                       (1, True, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            + _check_replica_in_status(name, [(1, True, 'FAILED')]) +
+            # User bug failure will cause no further scaling.
+            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
+            f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'until curl -L http://$endpoint | grep "Hi, SkyPilot here!"; do sleep 2; done; sleep 2; '
+            + _check_replica_in_status(name, [(1, False, 'READY'),
+                                              (1, False, 'FAILED')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3471,7 +3507,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             # should be able to get observe the period that the traffic is mixed
             # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; '
+            'until curl -L http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; sleep 2; '
             # The latest version should have one READY and the one of the older versions should be shutting down
             f'{single_new_replica} {_check_service_version(name, "1,2")} '
             # Check the output from the old version, immediately after the
@@ -3595,7 +3631,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             _check_service_version(name, "1"),
         ]
     test = Test(
-        f'test-skyserve-new-autoscaler-update',
+        'test-skyserve-new-autoscaler-update',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
@@ -3615,6 +3651,45 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             'curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             _check_replica_in_status(name, [(4, True, 'READY'),
                                             (1, False, 'READY')]),
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_failures(generic_cloud: str):
+    """Test replica failure statuses"""
+    name = _get_service_name()
+
+    test = Test(
+        'test-skyserve-failures',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/failures/initial_delay.yaml',
+            f's=$(sky serve status {name}); '
+            f'until echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done;',
+            'sleep 60',
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 2; '
+            # Make sure no new replicas are started for early failure.
+            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 2;',
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/failures/probing.yaml',
+            f's=$(sky serve status {name}); '
+            # Wait for replica to be ready.
+            f'until echo "$s" | grep "READY"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done;',
+            # Wait for replica to change to FAILED_PROBING
+            f's=$(sky serve status {name}); '
+            f'until echo "$s" | grep "FAILED_PROBING"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done;' +
+            _check_replica_in_status(
+                name, [(1, False, 'FAILED_PROBING'),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            # TODO(zhwu): add test for FAILED_PROVISION
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,

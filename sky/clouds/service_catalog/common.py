@@ -350,6 +350,10 @@ def get_hourly_cost_impl(
         # all the zones in the same region.
         assert region is None or len(set(df[price_str])) == 1, df
 
+    if pd.isna(df[price_str]).all():
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No {price_str} found for instance type '
+                             f'{instance_type!r}.')
     cheapest_idx = df[price_str].idxmin()
     cheapest = df.loc[cheapest_idx]
     return cheapest[price_str]
@@ -523,6 +527,8 @@ def get_instance_type_for_accelerator_impl(
 
     # Current strategy: choose the cheapest instance
     price_str = 'SpotPrice' if use_spot else 'Price'
+    if pd.isna(result[price_str]).all():
+        return ([], [])
     result = result.sort_values(price_str, ascending=True)
     instance_types = list(result['InstanceType'].drop_duplicates())
     return (instance_types, [])

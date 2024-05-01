@@ -165,9 +165,9 @@ class JobScheduler:
         _CONN.commit()
         subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
 
-    def schedule_step(self) -> None:
+    def schedule_step(self, force_update_jobs: bool = False) -> None:
         jobs = self._get_jobs()
-        if len(jobs) > 0:
+        if len(jobs) > 0 or force_update_jobs:
             update_status()
         # TODO(zhwu, mraheja): One optimization can be allowing more than one
         # job staying in the pending state after ray job submit, so that to be
