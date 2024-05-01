@@ -414,7 +414,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             if managed_job_status.is_terminal():
                 break
             logger.info(f'{colorama.Fore.YELLOW}The job cluster is preempted '
-            f'or failed.{colorama.Style.RESET_ALL}')
+                        f'or failed.{colorama.Style.RESET_ALL}')
             msg = _JOB_CANCELLED_MESSAGE
             status_display.update(msg)
             prev_msg = msg
