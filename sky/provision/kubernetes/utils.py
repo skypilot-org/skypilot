@@ -67,9 +67,6 @@ class GPULabelFormatter:
     def get_accelerator_from_label_value(cls, value: str) -> str:
         """Given a label value, returns the GPU type"""
         raise NotImplementedError
-    
-    @classmethod
-    def 
 
     @classmethod
     def validate_label_value(cls, value: str) -> Tuple[bool, str]:
