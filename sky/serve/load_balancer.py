@@ -129,8 +129,9 @@ class SkyServeLoadBalancer:
         backoff = common_utils.Backoff(initial_backoff=1)
         # SkyServe supports serving on Spot Instances. To avoid preemptions
         # during request handling, we add a retry here.
-        # TODO(tian): Max number of retries.
+        retry_cnt = 0
         while True:
+            retry_cnt += 1
             ready_replica_url = self._load_balancing_policy.select_replica(
                 request)
             if ready_replica_url is None:
@@ -142,6 +143,13 @@ class SkyServeLoadBalancer:
             response = await self._proxy_request_to(ready_replica_url, request)
             if response is not None:
                 return response
+            # TODO(tian): Fail fast for errors like 404 not found.
+            if retry_cnt == constants.LB_MAX_RETRY:
+                raise fastapi.HTTPException(
+                    status_code=500,
+                    detail=f'Max retries {constants.LB_MAX_RETRY} exceeded. '
+                    'Please use "sky serve logs [SERVICE_NAME] '
+                    '--load-balancer" for more information.')
             current_backoff = backoff.current_backoff()
             logger.error(f'Retry in {current_backoff} seconds.')
             await asyncio.sleep(current_backoff)

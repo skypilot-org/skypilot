@@ -21,6 +21,11 @@ SERVICE_REGISTER_TIMEOUT_SECONDS = 60
 # interval.
 LB_CONTROLLER_SYNC_INTERVAL_SECONDS = 20
 
+# The maximum retry times for load balancer for each request. After changing to
+# proxy implementation, we do retry for failed requests.
+# TODO(tian): Expose this option to users in yaml file.
+LB_MAX_RETRY = 3
+
 # Interval in seconds to probe replica endpoint.
 ENDPOINT_PROBE_INTERVAL_SECONDS = 10
 
