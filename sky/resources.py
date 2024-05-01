@@ -1512,6 +1512,6 @@ class Resources:
             state['_requires_fuse'] = state.get('_requires_fuse', True)
 
         if version < 17:
-            state['labels'] = state.get('_labels', None)
+            state['_labels'] = state.get('_labels', None)
 
         self.__dict__.update(state)
