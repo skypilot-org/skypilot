@@ -1312,12 +1312,10 @@ def _get_managed_jobs(
             # Check the controller status again, as the RuntimeError is likely
             # due to the controller being autostopped when querying the jobs.
             controller_type = controller_utils.Controllers.JOB_CONTROLLER
-            backend_utils.is_controller_accessible(
-                controller_type,
-                stopped_message=controller_type.value.
-                default_hint_if_non_existent)
-        except exceptions.ClusterNotUpError as cluster_e:
-            msg = str(cluster_e)
+            record = backend_utils.refresh_cluster_record(
+                controller_type.value.cluster_name)
+            if (record is None or record['status'] == status_lib.ClusterStatus.STOPPED):
+                msg = controller_type.value.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
             pass
         if not msg:
@@ -1379,12 +1377,10 @@ def _get_services(service_names: Optional[List[str]],
             # due to the controller being autostopped when querying the
             # services.
             controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
-            backend_utils.is_controller_accessible(
-                controller_type,
-                stopped_message=controller_type.value.
-                default_hint_if_non_existent)
-        except exceptions.ClusterNotUpError as cluster_e:
-            msg = str(cluster_e)
+            record = backend_utils.refresh_cluster_record(
+                controller_type.value.cluster_name)
+            if (record is None or record['status'] == status_lib.ClusterStatus.STOPPED):
+                msg = controller_type.value.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
             pass
         if not msg:
