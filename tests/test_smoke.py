@@ -1464,6 +1464,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
+# TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -2812,7 +2813,7 @@ def test_spot_tpu():
             f'sky spot launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep STARTING',
-            'sleep 840',  # TPU takes a while to launch
+            'sleep 900',  # TPU takes a while to launch
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         _SPOT_CANCEL_WAIT.format(job_name=name),

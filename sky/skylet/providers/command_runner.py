@@ -234,6 +234,8 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             self.run(
+                '[ -f /etc/docker/daemon.json ] || '
+                'echo "{}" | sudo tee /etc/docker/daemon.json;'
                 'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
                 '/etc/docker/daemon.json > /tmp/daemon.json;'
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'

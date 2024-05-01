@@ -116,7 +116,7 @@ available_node_types:
               Value: {{ user }}
             {%- for label_key, label_value in labels.items() %}
             - Key: {{ label_key }}
-              Value: {{ label_value }}
+              Value: {{ label_value|tojson }}
             {%- endfor %}
 
 head_node_type: ray.head.default
@@ -161,5 +161,3 @@ setup_commands:
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
 # We do not need to list it here anymore.
-
-

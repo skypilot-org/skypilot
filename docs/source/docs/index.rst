@@ -69,6 +69,8 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
+  * `Llama 3 <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3>`_
+  * `Qwen <https://github.com/skypilot-org/skypilot/tree/master/llm/qwen>`_
   * `Databricks DBRX <https://github.com/skypilot-org/skypilot/tree/master/llm/dbrx>`_
   * `Gemma <https://github.com/skypilot-org/skypilot/tree/master/llm/gemma>`_
   * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)

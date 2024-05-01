@@ -77,7 +77,7 @@ available_node_types:
       labels:
         skypilot-user: {{ user }}
       {%- for label_key, label_value in labels.items() %}
-        {{ label_key }}: {{ label_value }}
+        {{ label_key }}: {{ label_value|tojson }}
       {%- endfor %}
       {%- if specific_reservations %}
       reservationAffinity:
