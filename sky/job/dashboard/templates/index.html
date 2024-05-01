@@ -115,6 +115,8 @@
         document.querySelectorAll('.folder').forEach(function (folder) {
             folder.addEventListener('click', function () {
                 let plusSign = folder.querySelector('.clickable');
+                let folderIndex = Array.from(document.querySelectorAll('.folder')).indexOf(folder);
+
                 if (!plusSign) {
                     plusSign = document.createElement('span');
                     plusSign.classList.add('clickable');
@@ -125,8 +127,10 @@
                 if (plusSign.textContent === '▶') {
                     plusSign.textContent = '▼'; // Change to downward-pointing triangle
                     displayState = '';
+                    localStorage.setItem('folderState' + folderIndex, 'expanded');
                 } else {
                     plusSign.textContent = '▶'; // Change back to right-pointing triangle
+                    localStorage.setItem('folderState' + folderIndex, 'collapsed');
                 }
 
                 let next = folder.nextElementSibling;
@@ -155,6 +159,11 @@
                         next.style.display = 'none';  // Hide initially
                         next = next.nextElementSibling;
                     }
+                }
+            });
+            document.querySelectorAll('.folded').forEach(function (folded) {
+                if (!folded.previousElementSibling.querySelector('.clickable').textContent.includes('▼')) {
+                    folded.style.display = 'none'; // Make sure these rows are initially hidden unless state is expanded
                 }
             });
         });
