@@ -1242,6 +1242,19 @@ class Resources:
         common_utils.validate_schema(config, schemas.get_resources_schema(),
                                      'Invalid resources YAML: ')
 
+        def _merge_labels(base_resource_config: Dict[str, Any],
+                          override_config: Dict[str, Any]):
+            # Returns the base labels "updated" with the override labels.
+            labels = base_resource_config.get('labels')
+            # Merge the labels from the base and override resources.
+            if labels is not None:
+                override_labels = override_config.get('labels')
+                if override_labels is not None:
+                    new_resource_labels = labels.copy()
+                    new_resource_labels.update(override_labels)
+                    return new_resource_labels
+            return labels
+
         def _override_resources(
                 base_resource_config: Dict[str, Any],
                 override_configs: List[Dict[str, Any]]) -> List[Resources]:
@@ -1249,6 +1262,13 @@ class Resources:
             for override_config in override_configs:
                 new_resource_config = base_resource_config.copy()
                 new_resource_config.update(override_config)
+
+                # Handle label merging. When any_of or ordered is specified,
+                # the labels from the base resource are updated with the labels
+                # from the override resource.
+                new_resource_config['labels'] = _merge_labels(
+                    base_resource_config, override_config)
+
                 # Call from_yaml_config again instead of
                 # _from_yaml_config_single to handle the case, where both
                 # multiple accelerators and `any_of` is specified.

@@ -5,6 +5,30 @@ https://json-schema.org/
 """
 
 
+def _check_not_both_fields_present(field1: str, field2: str):
+    return {
+        'oneOf': [{
+            'required': [field1],
+            'not': {
+                'required': [field2]
+            }
+        }, {
+            'required': [field2],
+            'not': {
+                'required': [field1]
+            }
+        }, {
+            'not': {
+                'anyOf': [{
+                    'required': [field1]
+                }, {
+                    'required': [field2]
+                }]
+            }
+        }]
+    }
+
+
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
@@ -147,8 +171,6 @@ def _get_multi_resources_schema():
         # Validation may fail if $schema is included.
         if k != '$schema'
     }
-    # 'labels' is not allowed in any_of and ordered (global only field).
-    multi_resources_schema['properties'].pop('labels')
     return multi_resources_schema
 
 
@@ -474,7 +496,9 @@ _NETWORK_CONFIG_SCHEMA = {
     },
 }
 
-_INSTANCE_TAGS_SCHEMA = {
+_LABELS_SCHEMA = {
+    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
+    # compatibility. Will be removed after 0.7.0.
     'instance_tags': {
         'type': 'object',
         'required': [],
@@ -482,6 +506,13 @@ _INSTANCE_TAGS_SCHEMA = {
             'type': 'string',
         },
     },
+    'labels': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': {
+            'type': 'string',
+        },
+    }
 }
 
 _REMOTE_IDENTITY_SCHEMA = {
@@ -527,9 +558,10 @@ def get_config_schema():
                 'security_group_name': {
                     'type': 'string',
                 },
-                **_INSTANCE_TAGS_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
-            }
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'gcp': {
             'type': 'object',
@@ -545,9 +577,10 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                **_INSTANCE_TAGS_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
-            }
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'kubernetes': {
             'type': 'object',

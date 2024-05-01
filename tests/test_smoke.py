@@ -1796,7 +1796,7 @@ def test_task_labels_aws():
         run_one_test(test)
 
 
-# ---------- Labels from task on GCP (instance_tags) ----------
+# ---------- Labels from task on GCP (labels) ----------
 @pytest.mark.gcp
 def test_task_labels_gcp():
     name = _get_cluster_name()
