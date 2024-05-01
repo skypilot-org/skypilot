@@ -1,4 +1,4 @@
-"""LoadBalancer: redirect any incoming request to an endpoint replica."""
+"""LoadBalancer: Redistribute any incoming request to all ready replicas."""
 import asyncio
 import logging
 import threading
