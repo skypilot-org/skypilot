@@ -771,7 +771,6 @@ class ManagedJobCodeGen:
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
             state.set_job_name({job_id}, {dag_name!r})
-            
             """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(

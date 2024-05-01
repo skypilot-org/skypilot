@@ -302,7 +302,7 @@ class JobController:
                     # Some spot resource (e.g., Spot TPU VM) may need to be
                     # cleaned up after preemption, as running launch again on
                     # those clusters again may fail.
-                    logger.info('Cleaning up the preempted or failed spot '
+                    logger.info('Cleaning up the preempted or failed '
                                 'cluster...')
                     recovery_strategy.terminate_cluster(cluster_name)
 
