@@ -971,8 +971,8 @@ class Resources:
         if len(invalid_table.rows) > 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                        f'The following labels are invalid:'
-                        '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
+                    'The following labels are invalid:'
+                    '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
