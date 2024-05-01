@@ -116,9 +116,7 @@ def get_gfd_accelerator_from_value(value: str) -> str:
     # If we didn't find a canonical name:
     # 1. remove 'NVIDIA-' (e.g., 'NVIDIA-RTX-A6000' -> 'RTX-A6000')
     # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
-    # 3. replace 'RTX-' with 'RTX' (e.g., 'RTX-6000' -> 'RTX6000')
-    return value.replace('NVIDIA-', '').replace('GEFORCE-',
-                                                '').replace('RTX-', 'RTX')
+    return value.replace('NVIDIA-', '').replace('GEFORCE-', '')
 
 
 class SkyPilotLabelFormatter(GPULabelFormatter):
@@ -456,7 +454,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                             k8s_acc_label_value in value):
                         # If a node is found, we can break out of the loop
                         # and proceed to deploy.
-                        return k8s_acc_label_key, k8s_acc_label_value
+                        return k8s_acc_label_key, value
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
                 suffix = ''
