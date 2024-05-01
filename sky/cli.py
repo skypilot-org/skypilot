@@ -1313,8 +1313,10 @@ def _get_managed_jobs(
             # due to the controller being autostopped when querying the jobs.
             controller_type = controller_utils.Controllers.JOB_CONTROLLER
             record = backend_utils.refresh_cluster_record(
-                controller_type.value.cluster_name)
-            if (record is None or record['status'] == status_lib.ClusterStatus.STOPPED):
+                controller_type.value.cluster_name,
+                cluster_status_lock_timeout=0)
+            if (record is None or
+                    record['status'] == status_lib.ClusterStatus.STOPPED):
                 msg = controller_type.value.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
             pass
@@ -1378,8 +1380,10 @@ def _get_services(service_names: Optional[List[str]],
             # services.
             controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
             record = backend_utils.refresh_cluster_record(
-                controller_type.value.cluster_name)
-            if (record is None or record['status'] == status_lib.ClusterStatus.STOPPED):
+                controller_type.value.cluster_name,
+                cluster_status_lock_timeout=0)
+            if (record is None or
+                    record['status'] == status_lib.ClusterStatus.STOPPED):
                 msg = controller_type.value.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
             pass
