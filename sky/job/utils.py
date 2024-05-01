@@ -713,8 +713,8 @@ class ManagedJobCodeGen:
     _PREFIX = textwrap.dedent("""\
         managed_job_version = 0
         try:
-            from sky.job import constants, state, utils;
-            managed_job_version = constants.MANAGED_JOB_VERSION;
+            from sky.job import constants, state, utils
+            managed_job_version = constants.MANAGED_JOB_VERSION
         except ImportError:
             from sky.spot import spot_state as state, spot_utils as utils
         """)

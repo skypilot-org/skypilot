@@ -53,6 +53,8 @@ def home():
     rows = managed_jobs.format_job_table(all_managed_jobs,
                                          show_all=True,
                                          return_rows=True)
+    # Add an empty column for the dropdown button. This will be added in the
+    # job/templates/index.html file.
     rows = [[''] + row for row in rows]
 
     # FIXME(zongheng): make the job table/queue funcs return structured info so
