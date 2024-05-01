@@ -952,7 +952,7 @@ class Resources:
         Raises:
             ValueError: if the attribute is invalid.
         """
-        if self._labels is None:
+        if not self._labels:
             return
 
         if self.cloud is None:
