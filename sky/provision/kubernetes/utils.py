@@ -67,6 +67,9 @@ class GPULabelFormatter:
     def get_accelerator_from_label_value(cls, value: str) -> str:
         """Given a label value, returns the GPU type"""
         raise NotImplementedError
+    
+    @classmethod
+    def 
 
     @classmethod
     def validate_label_value(cls, value: str) -> Tuple[bool, str]:
@@ -453,7 +456,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
                     if (label == k8s_acc_label_key and
-                            value == k8s_acc_label_value):
+                            k8s_acc_label_value in value):
                         # If a node is found, we can break out of the loop
                         # and proceed to deploy.
                         return k8s_acc_label_key, k8s_acc_label_value
