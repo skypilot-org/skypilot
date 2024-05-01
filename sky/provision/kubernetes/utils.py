@@ -59,11 +59,6 @@ class GPULabelFormatter:
         raise NotImplementedError
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        """Given a GPU type, returns the label value to be used"""
-        raise NotImplementedError
-
-    @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         """Given a label value, returns the GPU type"""
         raise NotImplementedError
@@ -133,12 +128,6 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
         return cls.LABEL_KEY
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        # For SkyPilot formatter, we use the accelerator str directly.
-        # See sky.utils.kubernetes.gpu_labeler.
-        return accelerator.lower()
-
-    @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         return value.upper()
 
@@ -165,10 +154,6 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
         return cls.LABEL_KEY
 
     @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        return accelerator.upper()
-
-    @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         return value
 
@@ -185,10 +170,6 @@ class GKELabelFormatter(GPULabelFormatter):
     @classmethod
     def get_label_key(cls) -> str:
         return cls.LABEL_KEY
-
-    @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        return get_gke_accelerator_name(accelerator)
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
@@ -218,10 +199,6 @@ class GFDLabelFormatter(GPULabelFormatter):
     @classmethod
     def get_label_key(cls) -> str:
         return cls.LABEL_KEY
-
-    @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        return accelerator.upper()
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
@@ -441,7 +418,6 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 # conclude that the cluster is setup correctly and return.
                 return '', ''
             k8s_acc_label_key = label_formatter.get_label_key()
-            k8s_acc_label_value = label_formatter.get_label_value(acc_type)
             # Search in node_labels to see if any node has the requested
             # GPU type.
             # Note - this only checks if the label is available on a
@@ -451,10 +427,11 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
                     if (label == k8s_acc_label_key and
-                            k8s_acc_label_value in value):
+                            label_formatter.get_accelerator_from_label_value(
+                                value) == acc_type):
                         # If a node is found, we can break out of the loop
                         # and proceed to deploy.
-                        return k8s_acc_label_key, value
+                        return label, value
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
                 suffix = ''
