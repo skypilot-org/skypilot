@@ -237,8 +237,13 @@ class JobController:
                 # Add a grace period before the check of preemption to avoid
                 # false alarm for job failure.
                 time.sleep(5)
+            
             # Pull the actual cluster status from the cloud provider to
             # determine whether the cluster is preempted or failed.
+            # TODO(zhwu): For hardware failure, such as GPU failure, it may not
+            # be reflected in the cluster status, depending on the cloud, which
+            # can also cause failure of the job, and we need to recover it
+            # rather than fail immediately.
             (cluster_status,
              handle) = backend_utils.refresh_cluster_status_handle(
                  cluster_name,
