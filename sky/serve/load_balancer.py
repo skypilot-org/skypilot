@@ -92,17 +92,30 @@ class SkyServeLoadBalancer:
         path = f'http://{url}{request.url.path}'
         logger.info(f'Proxy request to {path}')
         try:
-            async with httpx.AsyncClient() as client:
-                # TODO(tian): Support streaming.
-                response = await client.request(method,
-                                                url,
-                                                headers=headers,
-                                                content=body)
-                response.raise_for_status()
-                return fastapi.responses.Response(
-                    content=response.content,
-                    status_code=response.status_code,
-                    headers=dict(response.headers))
+
+            async def stream_response():
+                async with httpx.AsyncClient() as client:
+                    async with client.stream(method,
+                                             path,
+                                             headers=headers,
+                                             content=body) as response:
+                        response.raise_for_status()
+                        # TODO(tian): Hacky. Investigate a way to not directly
+                        # yielding the response status code and headers.
+                        yield response.status_code
+                        yield dict(response.headers)
+                        try:
+                            async for chunk in response.aiter_bytes():
+                                yield chunk
+                        finally:
+                            await response.aclose()
+
+            content = stream_response()
+            status_code = await content.__anext__()
+            headers = await content.__anext__()
+            return fastapi.responses.StreamingResponse(content=content,
+                                                       status_code=status_code,
+                                                       headers=headers)
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             logger.error(f'Error when proxy request to {path}: '
                          f'{common_utils.format_exception(e)}')
