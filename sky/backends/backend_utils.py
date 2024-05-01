@@ -2571,7 +2571,7 @@ def get_task_resources_str(task: 'task_lib.Task',
         accelerator_dict = task.best_resources.accelerators
         if is_managed_job:
             if task.best_resources.use_spot:
-                spot_str = '(Spot)'
+                spot_str = '[Spot]'
             task_cpu_demand = task.best_resources.cpus
         if accelerator_dict is None:
             resources_str = f'CPU:{task_cpu_demand}'
@@ -2602,7 +2602,7 @@ def get_task_resources_str(task: 'task_lib.Task',
                 task_cpu_demand = f'{min_cpus}+'
             if 'Spot' in spot_type:
                 spot_str = '|'.join(sorted(spot_type))
-                spot_str = f'({spot_str})'
+                spot_str = f'[{spot_str}]'
         if resource_accelerators:
             resources_str = ', '.join(set(resource_accelerators))
         else:

@@ -282,8 +282,8 @@ See all managed jobs:
   Fetching managed job statuses...
   Managed jobs:
   ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
-  2  roberta  1x [A100:8](spot)   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
-  1  bert-qa  1x [V100:1](spot)   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
+  2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
+  1  bert-qa  1x [V100:1][Spot]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
 
 Stream the logs of a running managed job:
 
@@ -383,7 +383,7 @@ To submit the pipeline, the same command :code:`sky job launch` is used. The pip
   In progress jobs: 1 RECOVERING
   ID  TASK  NAME      RESOURCES                    SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
   8         pipeline  -                            50 mins ago  47m 45s        -             1            RECOVERING
-   ↳  0     train     1x [V100:8](spot|on-demand)  50 mins ago  47m 45s        -             1            RECOVERING
+   ↳  0     train     1x [V100:8][Spot|On-demand]  50 mins ago  47m 45s        -             1            RECOVERING
    ↳  1     eval      1x [T4:1]                    -            -              -             0            PENDING
 
 .. note::

@@ -1,4 +1,8 @@
-"""Constants used for Managed Jobs."""
+"""Constants used for Managed Jobs.
+
+NOTE: whenever an API change is made to job/utils, we need to bump the
+MANAGED_JOB_VERSION
+"""
 
 JOB_CONTROLLER_TEMPLATE = 'job-controller.yaml.j2'
 JOB_CONTROLLER_YAML_PREFIX = '~/.sky/job_controller'
@@ -22,6 +26,6 @@ CONTROLLER_RESOURCES = {'cpus': '8+', 'memory': '3x', 'disk_size': 50}
 JOB_CLUSTER_NAME_PREFIX_LENGTH = 25
 
 # The version of the lib files that job/utils use. Whenever there is an API
-# change for the job/utils, we need to bump this version, so that the
-# user can be notified to update their SkyPilot version on the remote cluster.
+# change for the job/utils, we need to bump this version and update the
+# job.utils.ManagedJobCodeGen to handle the version update.
 MANAGED_JOB_VERSION = 1
