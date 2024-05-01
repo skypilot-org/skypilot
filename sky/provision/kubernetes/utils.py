@@ -95,28 +95,30 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
 
+
 def get_gfd_accelerator_from_value(value: str) -> str:
-    """Returns the accelerator name for GPU feature discovery (GFD) labeled nodes.
-    
+    """Returns the accelerator name for GPU feature discovery (GFD)
+    labeled nodes.
+
     Searches against a canonical list of NVIDIA GPUs and pattern
     matches the canonical GPU name against the GFD label. Taken from
     sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
     """
     canonical_gpu_names = [
-        'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4', 'V100', 
+        'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4', 'V100',
         'A10', 'P100', 'P40', 'P4', 'L4'
     ]
 
     for canonical_name in canonical_gpu_names:
         if canonical_name in value:
             return canonical_name
-    
+
     # If we didn't find a canonical name:
-    # 1. remove 'NVIDIA ' if present (e.g., 'NVIDIA RTX A6000' -> 'RTX A6000')
-    # 2. remove 'GeForce ' if present (e.g., 'NVIDIA GeForce RTX 3070' -> 'RTX 3070')
-    # 3. replace 'RTX ' with 'RTX' (without spaces) (e.g., 'RTX 6000' -> 'RTX6000')
-    # 4. replace any other spaces with dashes (e.g. 'RTX 2080 Ti' -> 'RTX2080-Ti')
-    return gpu_name.lower().replace('nvidia ', '').replace('geforce ', '').replace('rtx ', 'rtx').replace(' ', '-')
+    # 1. remove 'NVIDIA-' (e.g., 'NVIDIA-RTX-A6000' -> 'RTX-A6000')
+    # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
+    # 3. replace 'RTX-' with 'RTX' (e.g., 'RTX-6000' -> 'RTX6000')
+    return value.replace('NVIDIA-', '').replace('GEFORCE-',
+                                                '').replace('RTX-', 'RTX')
 
 
 class SkyPilotLabelFormatter(GPULabelFormatter):
@@ -220,6 +222,10 @@ class GFDLabelFormatter(GPULabelFormatter):
         return cls.LABEL_KEY
 
     @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        return accelerator.upper()
+
+    @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         return get_gfd_accelerator_from_value(value)
 
@@ -228,7 +234,8 @@ class GFDLabelFormatter(GPULabelFormatter):
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats.
 LABEL_FORMATTER_REGISTRY = [
-    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter, GFDLabelFormatter
+    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter,
+    GFDLabelFormatter
 ]
 
 
