@@ -3419,6 +3419,26 @@ def test_skyserve_cancel(generic_cloud: str):
 
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
+def test_skyserve_streaming(generic_cloud: str):
+    """Test skyserve with streaming"""
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-streaming',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/streaming/streaming.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'python3 tests/skyserve/streaming/send_streaming_request.py '
+            '--endpoint $endpoint',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
+@pytest.mark.no_kubernetes
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
