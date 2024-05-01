@@ -1307,9 +1307,25 @@ def _get_managed_jobs(
             msg += (f' (See finished jobs: {colorama.Style.BRIGHT}'
                     f'sky job queue --refresh{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
-        msg = ('Failed to query managed jobs due to connection '
-               'issues. Try again later. '
-               f'Details: {common_utils.format_exception(e, use_bracket=True)}')
+        msg = ''
+        try:
+            # Check the controller status again, as the RuntimeError is likely
+            # due to the controller being autostopped when querying the jobs.
+            controller_type = controller_utils.Controllers.JOB_CONTROLLER
+            backend_utils.is_controller_accessible(
+                controller_type,
+                stopped_message=controller_type.value.
+                default_hint_if_non_existent)
+        except exceptions.ClusterNotUpError as cluster_e:
+            msg = str(cluster_e)
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if not msg:
+            msg = (
+                'Failed to query managed jobs due to connection '
+                'issues. Try again later. '
+                f'Details: {common_utils.format_exception(e, use_bracket=True)}'
+            )
     except Exception as e:  # pylint: disable=broad-except
         msg = ('Failed to query managed jobs: '
                f'{common_utils.format_exception(e, use_bracket=True)}')
@@ -1357,9 +1373,24 @@ def _get_services(service_names: Optional[List[str]],
             msg += (f' (See: {colorama.Style.BRIGHT}sky serve -h'
                     f'{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
-        msg = ('Failed to fetch service statuses due to connection issues. '
-               'Please try again later. Details: '
-               f'{common_utils.format_exception(e, use_bracket=True)}')
+        msg = ''
+        try:
+            # Check the controller status again, as the RuntimeError is likely
+            # due to the controller being autostopped when querying the
+            # services.
+            controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+            backend_utils.is_controller_accessible(
+                controller_type,
+                stopped_message=controller_type.value.
+                default_hint_if_non_existent)
+        except exceptions.ClusterNotUpError as cluster_e:
+            msg = str(cluster_e)
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if not msg:
+            msg = ('Failed to fetch service statuses due to connection issues. '
+                   'Please try again later. Details: '
+                   f'{common_utils.format_exception(e, use_bracket=True)}')
     except Exception as e:  # pylint: disable=broad-except
         msg = ('Failed to fetch service statuses: '
                f'{common_utils.format_exception(e, use_bracket=True)}')
