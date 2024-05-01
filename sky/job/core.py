@@ -162,12 +162,13 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    job_controller_type = controller_utils.Controllers.JOB_CONTROLLER
     stopped_message = ''
     if not refresh:
         stopped_message = 'No in-progress managed jobs.'
     try:
         handle = backend_utils.is_controller_accessible(
-            controller=controller_utils.Controllers.JOB_CONTROLLER,
+            controller=job_controller_type,
             stopped_message=stopped_message)
     except exceptions.ClusterNotUpError as e:
         if not refresh:
@@ -183,7 +184,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
         rich_utils.force_update_status(
             '[cyan] Checking managed jobs - restarting '
             'controller[/]')
-        handle = sky.start(managed_job_utils.JOB_CONTROLLER_NAME)
+        handle = sky.start(job_controller_type.value.cluster_name)
         controller_status = status_lib.ClusterStatus.UP
         rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
 
@@ -290,11 +291,12 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
         sky.exceptions.ClusterNotUpError: the job controller is not up.
     """
     # TODO(zhwu): Automatically restart the job controller
+    job_controller_type = controller_utils.Controllers.JOB_CONTROLLER
     handle = backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOB_CONTROLLER,
+        controller=job_controller_type,
         stopped_message=(
             'Please restart the job controller with '
-            f'`sky start {managed_job_utils.JOB_CONTROLLER_NAME}`.'))
+            f'`sky start {job_controller_type.value.cluster_name}`.'))
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')
