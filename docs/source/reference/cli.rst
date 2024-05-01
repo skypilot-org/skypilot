@@ -80,7 +80,7 @@ Managed (Spot) Jobs CLI
    :nested: full
 
 
-Sky Serve CLI
+SkyServe CLI
 -------------
 
 .. click:: sky.cli:serve_up
