@@ -212,7 +212,7 @@ class Resources:
                 ports = None
         self._ports = ports
 
-        self._labels = labels if labels is not None else {}
+        self._labels = labels
 
         self._docker_login_config = _docker_login_config
 
@@ -1254,12 +1254,15 @@ class Resources:
             for override_config in override_configs:
                 new_resource_config = base_resource_config.copy()
                 # Labels are handled separately.
-                override_labels = override_config.pop('labels', {})
+                override_labels = override_config.pop('labels', None)
                 new_resource_config.update(override_config)
 
                 # Update the labels with the override labels.
-                labels = new_resource_config.get('labels', {})
-                labels.update(override_labels)
+                labels = new_resource_config.get('labels', None)
+                if labels is not None and override_labels is not None:
+                    labels.update(override_labels)
+                elif override_labels is not None:
+                    labels = override_labels
                 new_resource_config['labels'] = labels
 
                 # Call from_yaml_config again instead of
