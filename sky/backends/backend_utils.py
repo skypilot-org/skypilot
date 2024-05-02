@@ -895,7 +895,7 @@ def write_cluster_config(
                 # User-supplied labels.
                 'labels': labels,
                 # User-supplied remote_identity
-                "remote_identity": remote_identity,
+                'remote_identity': remote_identity,
                 # The reservation pools that specified by the user. This is
                 # currently only used by GCP.
                 'specific_reservations': specific_reservations,
