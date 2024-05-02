@@ -254,7 +254,7 @@ def _get_cloud_dependencies_installation_commands(
                     'pip install "cudo-compute>=0.1.8" > /dev/null 2>&1')
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
-        commands.append(f'echo -en "\\r{prefix_str}AWS{empty_str}" && ' +
+        commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
                         aws_dependencies_installation)
     commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '
                     'clouds."')
