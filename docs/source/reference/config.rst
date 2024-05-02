@@ -36,7 +36,7 @@ Available fields and semantics:
     #
     # Users should guarantee that these key-values are valid AWS tags, otherwise
     # errors from the cloud provider will be surfaced.
-    instance_tags:
+    labels:
       # (Example) AWS Migration Acceleration Program (MAP). This tag enables the
       # program's discounts.
       # Ref: https://docs.aws.amazon.com/mgn/latest/ug/map-program-tagging.html
@@ -142,9 +142,9 @@ Available fields and semantics:
     #
     # Users should guarantee that these key-values are valid GCP labels, otherwise
     # errors from the cloud provider will be surfaced.
-    instance_tags:
+    labels:
       Owner: user-unique-name
-      my-tag: my-value
+      my-label: my-value
 
     # VPC to use (optional).
     #
@@ -262,8 +262,7 @@ Available fields and semantics:
 
     # The mode to use for opening ports on Kubernetes
     #
-    # This must be either: 'ingress' or 'loadbalancer'. If not specified,
-    # defaults to 'loadbalancer'.
+    # This must be either: 'loadbalancer', 'ingress' or 'podip'.
     #
     # loadbalancer: Creates services of type `LoadBalancer` to expose ports.
     # See https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#loadbalancer-service.
@@ -274,6 +273,14 @@ Available fields and semantics:
     # Requires an Nginx ingress controller to be configured on the Kubernetes cluster.
     # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#nginx-ingress
     # for details on deploying the NGINX ingress controller.
+    #
+    # podip: Directly returns the IP address of the pod. This mode does not
+    # create any Kubernetes services and is a lightweight way to expose ports.
+    # NOTE - ports exposed with podip mode are not accessible from outside the
+    # Kubernetes cluster. This mode is useful for hosting internal services
+    # that need to be accessed only by other pods in the same cluster.
+    #
+    # Default: loadbalancer
     ports: loadbalancer
 
     # Attach custom metadata to Kubernetes objects created by SkyPilot
