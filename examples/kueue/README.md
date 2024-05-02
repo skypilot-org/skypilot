@@ -71,7 +71,8 @@ kubectl apply -f single-clusterqueue-setup.yaml
 1. Specify the queue name in the task YAML with the `resources.labels` field:
     ```yaml
     resources:
-      cpus: 2
+      cpus: 6
+      cloud: kubernetes
       labels:
         kueue.x-k8s.io/queue-name: user-queue
     ...
@@ -100,7 +101,7 @@ pod-job2-2ea4-head-8afd4   user-queue                   54s
 
 Optionally, you can assign priorities to your SkyPilot jobs, and Kueue will preempt lower-priority jobs to run higher-priority jobs.
 
-SkyPilot controller will detect any preemptions, and re-submit the jobs which get preempted.
+SkyPilot job controller will detect any preemptions, and re-submit the jobs which get preempted.
 
 1. Before you start, make sure your `ClusterQueue` allows preemption through priorities by setting `withinClusterQueue: LowerPriority`. Refer to `single-clusterqueue-setup.yaml` for an example:
 ```yaml
@@ -114,39 +115,43 @@ SkyPilot controller will detect any preemptions, and re-submit the jobs which ge
 kubectl apply -f priority-classes.yaml
 ```
 
-3. Use the `kueue.x-k8s.io/priority-class` label in the pod metadata to set the priority of the pod:
+3. Use the `kueue.x-k8s.io/priority-class` label to set the priority of the pod:
 ```yaml
-kubernetes:
-  provision_timeout: -1
-  pod_config:
-    metadata:
-      labels:
-        kueue.x-k8s.io/queue-name: user-queue
-        kueue.x-k8s.io/priority-class: low-priority 
+resources:
+  ...
+  labels:
+    ...
+    kueue.x-k8s.io/priority-class: low-priority
 ```
 
 4. 🎉SkyPilot jobs will now run with priorities on Kueue!
 
-To demonstrate an example, first we will run a job with `low-priority` that uses 8 CPUs, assuming a 9 CPU quota. To start, edit your `~/.sky/config` to use `low-priority`:
+To demonstrate an example, first we will run a job with `low-priority` that uses 8 CPUs, assuming a 9 CPU quota. To start, edit your task (`sky-kueue-task.yaml`) to use `low-priority`:
 ```yaml
-...
-kueue.x-k8s.io/priority-class: low-priority 
+resources:
+  ...
+  labels:
+    ...
+    kueue.x-k8s.io/priority-class: low-priority
 ```
 
-Then run a job with `low-priority` that uses 8 CPUs out of 9 CPU quota:
+Then run launch the job with `sky launch` that uses 6 CPUs out of 9 CPU quota:
 ```console
-sky job launch -n job1 --cloud kubernetes --cpus 8 --down -- sleep 1200
+sky job launch -n job1 sky-kueue-task.yaml
 ```
 
-Now edit your `~/.sky/config`to use `high-priority` for its jobs:
+Now edit your task `sky-kueue-task.yaml` to use `high-priority` for its jobs:
 ```yaml
-...
-kueue.x-k8s.io/priority-class: high-priority 
+resources:
+  ...
+  labels:
+    ...
+    kueue.x-k8s.io/priority-class: high-priority
 ```
 
-In a new terminal, launch the new job with that also uses 8 CPUs out of 9 CPU quota:
+In a new terminal, launch the new job with that also uses 6 CPUs out of 9 CPU quota:
 ```console
-sky job launch -n job2 --cloud kubernetes --cpus 8 --down -- sleep 1200
+sky job launch -n job2 sky-kueue-task.yaml
 ```
 
 Now, if you run `sky job status`, you will see that the `low-priority` job is preempted by the `high-priority` job.
@@ -158,6 +163,13 @@ Now, if you run `sky job status`, you will see that the `low-priority` job is pr
 
 ## ⚠️ Notes
 * Preempted jobs are re-submitted by the SkyPilot controller, so the job will enter the queue at the back of the line. This may cause starvation for the preempted job in some cases. This can be addressed by having the job controller incrementally increase the priority of the preempted job.
-* The `queue-name` and `priority-class` configs apply globally to all tasks and the user must edit `~/.sky/config.yaml` to switch between queues and priorities. This can be cumbersome, and we can look into supporting per-task queue and priority settings in the task YAML if needed.
+* You can also specify labels to be applied globally in `~/.sky/config.yaml` by adding these labels under `kubernetes`. Task labels will override these global labels, if specified.
+    ```yaml`
+    kubernetes:
+      pod_config:
+        metadata:
+          labels:
+            kueue.x-k8s.io/queue-name: user-queue
+    ```
 * The job controller is single-tenant - each user wanting to submit jobs will have their own job controller running. Eventually we can look into running a single job controller for all users.
 * By setting `provision_timeout: <seconds>`, you can set a timeout for how long a job will wait to be scheduled on the Kubernetes cluster before bursting to the cloud. 

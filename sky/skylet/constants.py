@@ -185,7 +185,7 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 # The default idle timeout for SkyPilot controllers. This include spot
 # controller and sky serve controller.
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
-CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
+CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = None # Hack - disable for k8s for now.
 
 # Due to the CPU/memory usage of the controller process launched with sky job (
 # use ray job under the hood), we need to reserve some CPU/memory for each job/
