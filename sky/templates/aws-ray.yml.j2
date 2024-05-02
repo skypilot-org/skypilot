@@ -114,10 +114,10 @@ available_node_types:
           Tags:
             - Key: skypilot-user
               Value: {{ user }}
-{%- for tag_key, tag_value in instance_tags.items() %}
-            - Key: {{ tag_key }}
-              Value: {{ tag_value|tojson }}
-{%- endfor %}
+            {%- for label_key, label_value in labels.items() %}
+            - Key: {{ label_key }}
+              Value: {{ label_value|tojson }}
+            {%- endfor %}
 
 head_node_type: ray.head.default
 
