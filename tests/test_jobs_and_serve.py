@@ -141,7 +141,7 @@ def mock_is_controller_accessible(
     return record['handle']
 
 
-class TestSpotOperations:
+class TestJobsOperations:
     """Test operations for managed jobs."""
 
     @pytest.mark.timeout(60)
@@ -168,7 +168,6 @@ class TestSpotOperations:
                 'last_recovered_at': None,
                 'recovery_count': 0,
                 'failure_reason': '',
-                'spot_job_id': '1',
                 'managed_job_id': '1',
                 'task_id': 0,
                 'task_name': 'test_task',
