@@ -1,4 +1,4 @@
-"""LoadBalancer: Redistribute any incoming request to all ready replicas."""
+"""LoadBalancer: Distribute any incoming request to all ready replicas."""
 import asyncio
 import logging
 import threading
@@ -20,7 +20,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 class SkyServeLoadBalancer:
-    """SkyServeLoadBalancer: proxy incoming traffic.
+    """SkyServeLoadBalancer: distribute incoming traffic with proxy.
 
     This class accept any traffic to the controller and proxies it
     to the appropriate endpoint replica according to the load balancing

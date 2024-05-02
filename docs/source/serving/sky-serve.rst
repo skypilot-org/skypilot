@@ -22,7 +22,7 @@ Why SkyServe?
 
 How it works:
 
-- Each service gets an endpoint that automatically redistributes requests to its replicas.
+- Each service gets an endpoint that automatically distributes requests to its replicas.
 - Replicas of the same service can run in different regions and clouds — reducing cloud costs and increasing availability.
 - SkyServe handles the load balancing, recovery, and autoscaling of the replicas.
 
@@ -240,7 +240,7 @@ Under the hood, :code:`sky serve up`:
 #. Launches a controller which handles autoscaling, monitoring and load balancing;
 #. Returns a Service Endpoint which will be used to accept traffic;
 #. Meanwhile, the controller provisions replica VMs which later run the services;
-#. Once any replica is ready, the requests sent to the Service Endpoint will be redistributed to one of the endpoint replicas.
+#. Once any replica is ready, the requests sent to the Service Endpoint will be distributed to one of the endpoint replicas.
 
 After the controller is provisioned, you'll see the following in :code:`sky serve status` output:
 
@@ -461,7 +461,7 @@ SkyServe has a centralized controller VM that manages the deployment of your ser
 It is composed of the following components:
 
 #. **Controller**: The controller will monitor the status of the replicas and re-launch a new replica if one of them fails. It also autoscales the number of replicas if autoscaling config is set (see :ref:`Service YAML spec <service-yaml-spec>` for more information).
-#. **Load Balancer**: The load balancer will route the traffic to all ready replicas. It is a lightweight HTTP server that listens on the service endpoint and redistribute the requests to one of the replicas.
+#. **Load Balancer**: The load balancer will route the traffic to all ready replicas. It is a lightweight HTTP server that listens on the service endpoint and distribute the requests to one of the replicas.
 
 All of the process group shares a single controller VM. The controller VM will be launched in the cloud with the best price/performance ratio. You can also :ref:`customize the controller resources <customizing-sky-serve-controller-resources>` based on your needs.
 
