@@ -164,7 +164,7 @@ Now, if you run `sky job status`, you will see that the `low-priority` job is pr
 ## ⚠️ Notes
 * Preempted jobs are re-submitted by the SkyPilot controller, so the job will enter the queue at the back of the line. This may cause starvation for the preempted job in some cases. This can be addressed by having the job controller incrementally increase the priority of the preempted job.
 * You can also specify labels to be applied globally in `~/.sky/config.yaml` by adding these labels under `kubernetes`. Task labels will override these global labels, if specified.
-    ```yaml`
+    ```yaml
     kubernetes:
       pod_config:
         metadata:
