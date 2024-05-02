@@ -412,10 +412,12 @@ class AWS(clouds.Cloud):
             security_group = DEFAULT_SECURITY_GROUP_NAME
 
         iam_instance_profile = skypilot_config.get_nested(
-                ('aws', 'iam_instance_profile'), None)
-        if iam_instance_profile is not None and not isinstance(iam_instance_profile, str):
+            ('aws', 'iam_instance_profile'), None)
+        if iam_instance_profile is not None and not isinstance(
+                iam_instance_profile, str):
             for profile in iam_instance_profile:
-                if cluster_name_on_cloud.startswith(profile) and profile != 'default':
+                if cluster_name_on_cloud.startswith(
+                        profile) and profile != 'default':
                     iam_instance_profile = iam_instance_profile[profile]
                     break
                 elif profile == 'default':
