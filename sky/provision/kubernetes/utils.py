@@ -78,29 +78,6 @@ class GPULabelFormatter:
         return True, ''
 
 
-def get_gfd_accelerator_from_value(value: str) -> str:
-    """Returns the accelerator name for GPU feature discovery (GFD)
-    labeled nodes.
-
-    Searches against a canonical list of NVIDIA GPUs and pattern
-    matches the canonical GPU name against the GFD label. Taken from
-    sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
-    """
-    canonical_gpu_names = [
-        'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4', 'V100',
-        'A10', 'P100', 'P40', 'P4', 'L4'
-    ]
-
-    for canonical_name in canonical_gpu_names:
-        if canonical_name in value:
-            return canonical_name
-
-    # If we didn't find a canonical name:
-    # 1. remove 'NVIDIA-' (e.g., 'NVIDIA-RTX-A6000' -> 'RTX-A6000')
-    # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
-    return value.replace('NVIDIA-', '').replace('GEFORCE-', '')
-
-
 class SkyPilotLabelFormatter(GPULabelFormatter):
     """Custom label formatter for SkyPilot
 
@@ -189,7 +166,23 @@ class GFDLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
-        return get_gfd_accelerator_from_value(value)
+        """Searches against a canonical list of NVIDIA GPUs and pattern
+        matches the canonical GPU name against the GFD label. Taken from
+        sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
+        """
+        canonical_gpu_names = [
+            'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4',
+            'V100', 'A10', 'P100', 'P40', 'P4', 'L4'
+        ]
+
+        for canonical_name in canonical_gpu_names:
+            if canonical_name in value:
+                return canonical_name
+
+        # If we didn't find a canonical name:
+        # 1. remove 'NVIDIA-' (e.g., 'NVIDIA-RTX-A6000' -> 'RTX-A6000')
+        # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
+        return value.replace('NVIDIA-', '').replace('GEFORCE-', '')
 
 
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
