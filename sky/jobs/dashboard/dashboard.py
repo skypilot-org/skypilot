@@ -12,7 +12,7 @@ import pathlib
 import flask
 import yaml
 
-from sky import job as managed_jobs
+from sky import jobs as managed_jobs
 from sky.utils import common_utils
 from sky.utils import controller_utils
 
@@ -54,7 +54,7 @@ def home():
                                          show_all=True,
                                          return_rows=True)
     # Add an empty column for the dropdown button. This will be added in the
-    # job/templates/index.html file.
+    # jobs/templates/index.html file.
     rows = [[''] + row for row in rows]
 
     # FIXME(zongheng): make the job table/queue funcs return structured info so

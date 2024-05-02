@@ -14,7 +14,7 @@ from sky import backends
 from sky import cli
 from sky import exceptions
 from sky import global_user_state
-from sky import job
+from sky import jobs
 from sky import serve
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -97,8 +97,8 @@ def _mock_cluster_state(_mock_db_conn):
 @pytest.fixture
 def _mock_spot_controller(_mock_db_conn):
     handle = backends.CloudVmRayResourceHandle(
-        cluster_name=job.JOB_CONTROLLER_NAME,
-        cluster_name_on_cloud=job.JOB_CONTROLLER_NAME,
+        cluster_name=jobs.JOB_CONTROLLER_NAME,
+        cluster_name_on_cloud=jobs.JOB_CONTROLLER_NAME,
         cluster_yaml='/tmp/spot_controller.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(sky.AWS(),
@@ -106,7 +106,7 @@ def _mock_spot_controller(_mock_db_conn):
                                          region='us-west-1'),
     )
     global_user_state.add_or_update_cluster(
-        job.JOB_CONTROLLER_NAME,
+        jobs.JOB_CONTROLLER_NAME,
         handle,
         requested_resources={handle.launched_resources},
         ready=True)
@@ -183,7 +183,7 @@ class TestSpotOperations:
             mock_get_job_table_no_job)
 
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.down, [job.JOB_CONTROLLER_NAME],
+        result = cli_runner.invoke(cli.down, [jobs.JOB_CONTROLLER_NAME],
                                    input='n')
         assert 'WARNING: Tearing down the managed job controller.' in result.output, (
             result.exception, result.output, result.exc_info)
@@ -193,7 +193,7 @@ class TestSpotOperations:
         monkeypatch.setattr(
             'sky.backends.cloud_vm_ray_backend.CloudVmRayBackend.run_on_head',
             mock_get_job_table_one_job)
-        result = cli_runner.invoke(cli.down, [job.JOB_CONTROLLER_NAME],
+        result = cli_runner.invoke(cli.down, [jobs.JOB_CONTROLLER_NAME],
                                    input='n')
         assert 'WARNING: Tearing down the managed job controller.' in result.output, (
             result.exception, result.output, result.exc_info)
@@ -219,9 +219,9 @@ class TestSpotOperations:
     def test_stop_spot_controller(self, _mock_cluster_state,
                                   _mock_spot_controller):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.stop, [job.JOB_CONTROLLER_NAME])
+        result = cli_runner.invoke(cli.stop, [jobs.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
-        assert (f'Stopping controller(s) \'{job.JOB_CONTROLLER_NAME}\' is '
+        assert (f'Stopping controller(s) \'{jobs.JOB_CONTROLLER_NAME}\' is '
                 'currently not supported' in result.output)
 
         result = cli_runner.invoke(cli.stop, ['sky-spot-con*'])
@@ -236,10 +236,10 @@ class TestSpotOperations:
     def test_autostop_spot_controller(self, _mock_cluster_state,
                                       _mock_spot_controller):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.autostop, [job.JOB_CONTROLLER_NAME])
+        result = cli_runner.invoke(cli.autostop, [jobs.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
         assert ('Scheduling autostop on controller(s) '
-                f'\'{job.JOB_CONTROLLER_NAME}\' is currently not supported'
+                f'\'{jobs.JOB_CONTROLLER_NAME}\' is currently not supported'
                 in result.output)
 
         result = cli_runner.invoke(cli.autostop, ['sky-job-con*'])
@@ -253,7 +253,7 @@ class TestSpotOperations:
     def test_cancel_on_spot_controller(self, _mock_cluster_state,
                                        _mock_spot_controller):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.cancel, [job.JOB_CONTROLLER_NAME, '-a'])
+        result = cli_runner.invoke(cli.cancel, [jobs.JOB_CONTROLLER_NAME, '-a'])
         assert result.exit_code == 1
         assert 'Cancelling the job controller\'s jobs is not allowed.' in str(
             result.output)

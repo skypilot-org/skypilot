@@ -20,8 +20,8 @@ from sky import skypilot_config
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.job import constants as managed_job_constants
-from sky.job import utils as managed_job_utils
+from sky.jobs import constants as managed_job_constants
+from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
 from sky.skylet import constants
@@ -35,7 +35,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Message thrown when APIs sky.job.launch(),sky.serve.up() received an invalid
+# Message thrown when APIs sky.jobs.launch(), sky.serve.up() received an invalid
 # controller resources spec.
 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type} controller resources is not valid, please check '

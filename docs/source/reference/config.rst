@@ -14,12 +14,12 @@ Available fields and semantics:
 
 .. code-block:: yaml
 
-  # Custom spot controller resources (optional).
+  # Custom managed job controller resources (optional).
   #
-  # These take effects only when a spot controller does not already exist.
+  # These take effects only when a managed job controller does not already exist.
   #
   # Ref: https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html#customizing-spot-controller-resources
-  spot:
+  jobs:
     controller:
       resources:  # same spec as 'resources' in a task YAML
         cloud: gcp

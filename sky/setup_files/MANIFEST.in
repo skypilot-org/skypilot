@@ -13,8 +13,8 @@ include sky/skylet/providers/oci/*
 include sky/skylet/providers/scp/*
 include sky/skylet/providers/*.py
 include sky/skylet/ray_patches/*.patch
-include sky/job/dashboard/*
-include sky/job/dashboard/templates/*
-include sky/job/dashboard/static/*
+include sky/jobs/dashboard/*
+include sky/jobs/dashboard/templates/*
+include sky/jobs/dashboard/static/*
 include sky/templates/*
 include sky/utils/kubernetes/*

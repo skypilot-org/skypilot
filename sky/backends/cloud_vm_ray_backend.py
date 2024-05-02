@@ -28,7 +28,7 @@ from sky import cloud_stores
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
-from sky import job
+from sky import jobs as managed_jobs
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
@@ -3147,7 +3147,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if managed_job_dag is not None:
             # Add the managed job to job queue database.
-            managed_job_codegen = job.ManagedJobCodeGen()
+            managed_job_codegen = managed_jobs.ManagedJobCodeGen()
             managed_job_code = managed_job_codegen.set_pending(
                 job_id, managed_job_dag)
             # Set the managed job to PENDING state to make sure that this
@@ -3579,9 +3579,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         if job_name is not None:
-            code = job.ManagedJobCodeGen.stream_logs_by_name(job_name, follow)
+            code = managed_jobs.ManagedJobCodeGen.stream_logs_by_name(
+                job_name, follow)
         else:
-            code = job.ManagedJobCodeGen.stream_logs_by_id(job_id, follow)
+            code = managed_jobs.ManagedJobCodeGen.stream_logs_by_id(
+                job_id, follow)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.

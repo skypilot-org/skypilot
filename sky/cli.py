@@ -51,7 +51,7 @@ from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
-from sky import job as managed_job
+from sky import jobs as managed_jobs
 from sky import provision as provision_lib
 from sky import serve as serve_lib
 from sky import sky_logging
@@ -854,13 +854,15 @@ def _override_arguments(callback, override_command_argument: Dict[str, Any]):
     return wrapper
 
 
-def _add_command_alias(group: click.Group,
-                       command: click.Command,
-                       hidden: bool,
-                       new_group: Optional[click.Group] = None,
-                       new_command_name: Optional[str] = None,
-                       override_command_argument: Optional[Dict[str,
-                                                                Any]] = None):
+def _add_command_alias(
+    group: click.Group,
+    command: click.Command,
+    hidden: bool = False,
+    new_group: Optional[click.Group] = None,
+    new_command_name: Optional[str] = None,
+    override_command_argument: Optional[Dict[str, Any]] = None,
+    with_warning: bool = True,
+):
     """Add a alias of a command to a group."""
     if new_group is None:
         new_group = group
@@ -878,11 +880,12 @@ def _add_command_alias(group: click.Group,
 
     orig = f'sky {group.name} {command.name}'
     alias = f'sky {new_group.name} {new_command_name}'
-    new_command.invoke = _with_deprecation_warning(
-        new_command.invoke,
-        orig,
-        alias,
-        override_command_argument=override_command_argument)
+    if with_warning:
+        new_command.invoke = _with_deprecation_warning(
+            new_command.invoke,
+            orig,
+            alias,
+            override_command_argument=override_command_argument)
     new_group.add_command(new_command, name=new_command_name)
 
 
@@ -1293,9 +1296,9 @@ def _get_managed_jobs(
             usage_lib.messages.usage.set_internal()
         with sky_logging.silent():
             # Make the call silent
-            jobs = managed_job.queue(refresh=refresh,
-                                     skip_finished=skip_finished)
-        num_in_progress_jobs = len(set(job['job_id'] for job in jobs))
+            managed_jobs_ = managed_jobs.queue(refresh=refresh,
+                                               skip_finished=skip_finished)
+        num_in_progress_jobs = len(set(job['job_id'] for job in managed_jobs_))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         msg = str(e)
@@ -1304,7 +1307,7 @@ def _get_managed_jobs(
                     f'{colorama.Style.RESET_ALL})')
         elif (controller_status == status_lib.ClusterStatus.STOPPED and
               is_called_by_user):
-            msg += (f' (See finished jobs: {colorama.Style.BRIGHT}'
+            msg += (f' (See finished managed jobs: {colorama.Style.BRIGHT}'
                     f'sky job queue --refresh{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
         msg = ''
@@ -1332,9 +1335,9 @@ def _get_managed_jobs(
     else:
         max_jobs_to_show = (_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS
                             if limit_num_jobs_to_show else None)
-        msg = managed_job.format_job_table(jobs,
-                                           show_all=show_all,
-                                           max_jobs=max_jobs_to_show)
+        msg = managed_jobs.format_job_table(managed_jobs_,
+                                            show_all=show_all,
+                                            max_jobs=max_jobs_to_show)
     return num_in_progress_jobs, msg
 
 
@@ -2059,7 +2062,7 @@ def logs(
               help='Skip confirmation prompt.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
-def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
+def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin, redefined-outer-name
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s).
 
@@ -2584,7 +2587,8 @@ def _hint_or_raise_for_down_job_controller(controller_name: str):
     with rich_utils.safe_status(
             '[bold cyan]Checking for in-progress managed jobs[/]'):
         try:
-            managed_jobs = managed_job.queue(refresh=False, skip_finished=True)
+            managed_jobs_ = managed_jobs.queue(refresh=False,
+                                               skip_finished=True)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -2597,7 +2601,7 @@ def _hint_or_raise_for_down_job_controller(controller_name: str):
             # At this point, the managed jobs are failed to be fetched due to
             # the controller being STOPPED or being firstly launched, i.e.,
             # there is no in-prgress managed jobs.
-            managed_jobs = []
+            managed_jobs_ = []
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'job controller. Please be aware of the following:'
@@ -2605,8 +2609,8 @@ def _hint_or_raise_for_down_job_controller(controller_name: str):
            '\n * All logs and status information of the managed '
            'jobs (output of `sky job queue`) will be lost.')
     click.echo(msg)
-    if managed_jobs:
-        job_table = managed_job.format_job_table(managed_jobs, show_all=False)
+    if managed_jobs_:
+        job_table = managed_jobs.format_job_table(managed_jobs_, show_all=False)
         msg = controller.value.decline_down_for_dirty_controller_hint
         # Add prefix to each line to align with the bullet point.
         msg += '\n'.join(
@@ -3222,12 +3226,12 @@ def bench():
 
 
 @cli.group(cls=_NaturalOrderGroup)
-def job():
+def jobs():
     """Managed Jobs CLI (jobs with auto-recovery)."""
     pass
 
 
-@job.command('launch', cls=_DocumentedCodeCommand)
+@jobs.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
@@ -3363,13 +3367,13 @@ def job_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
-    managed_job.launch(dag,
-                       name,
-                       detach_run=detach_run,
-                       retry_until_up=retry_until_up)
+    managed_jobs.launch(dag,
+                        name,
+                        detach_run=detach_run,
+                        retry_until_up=retry_until_up)
 
 
-@job.command('queue', cls=_DocumentedCodeCommand)
+@jobs.command('queue', cls=_DocumentedCodeCommand)
 @click.option('--all',
               '-a',
               default=False,
@@ -3460,7 +3464,7 @@ def job_queue(all: bool, refresh: bool, skip_finished: bool):
                f'{in_progress_only_hint}\n{msg}')
 
 
-@job.command('cancel', cls=_DocumentedCodeCommand)
+@jobs.command('cancel', cls=_DocumentedCodeCommand)
 @click.option('--name',
               '-n',
               required=False,
@@ -3521,10 +3525,10 @@ def job_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
                       abort=True,
                       show_default=True)
 
-    managed_job.cancel(job_ids=job_ids, name=name, all=all)
+    managed_jobs.cancel(job_ids=job_ids, name=name, all=all)
 
 
-@job.command('logs', cls=_DocumentedCodeCommand)
+@jobs.command('logs', cls=_DocumentedCodeCommand)
 @click.option('--name',
               '-n',
               required=False,
@@ -3554,13 +3558,13 @@ def job_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 job_id=job_id,
                 follow=follow)
         else:
-            managed_job.tail_logs(name=name, job_id=job_id, follow=follow)
+            managed_jobs.tail_logs(name=name, job_id=job_id, follow=follow)
     except exceptions.ClusterNotUpError as e:
         click.echo(e)
         sys.exit(1)
 
 
-@job.command('dashboard', cls=_DocumentedCodeCommand)
+@jobs.command('dashboard', cls=_DocumentedCodeCommand)
 @click.option(
     '--port',
     '-p',
@@ -3629,15 +3633,27 @@ def spot():
     pass
 
 
-_add_command_alias(job,
+_add_command_alias(jobs,
                    job_launch,
-                   hidden=False,
                    new_group=spot,
                    override_command_argument={'use_spot': True})
-_add_command_alias(job, job_queue, hidden=False, new_group=spot)
-_add_command_alias(job, job_logs, hidden=False, new_group=spot)
-_add_command_alias(job, job_cancel, hidden=False, new_group=spot)
-_add_command_alias(job, job_dashboard, hidden=False, new_group=spot)
+_add_command_alias(jobs, job_queue, new_group=spot)
+_add_command_alias(jobs, job_logs, new_group=spot)
+_add_command_alias(jobs, job_cancel, new_group=spot)
+_add_command_alias(jobs, job_dashboard, new_group=spot)
+
+
+@cli.group(cls=_NaturalOrderGroup, hidden=True)
+def job():
+    """Alias for Managed Jobs CLI."""
+    pass
+
+
+_add_command_alias(jobs, job_launch, new_group=job, with_warning=False)
+_add_command_alias(jobs, job_queue, new_group=job, with_warning=False)
+_add_command_alias(jobs, job_logs, new_group=job, with_warning=False)
+_add_command_alias(jobs, job_cancel, new_group=job, with_warning=False)
+_add_command_alias(jobs, job_dashboard, new_group=job, with_warning=False)
 
 
 @cli.group(cls=_NaturalOrderGroup)

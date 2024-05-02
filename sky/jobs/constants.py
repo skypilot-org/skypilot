@@ -21,7 +21,7 @@ CONTROLLER_RESOURCES = {'cpus': '8+', 'memory': '3x', 'disk_size': 50}
 # long and truncated twice during the cluster creation.
 JOB_CLUSTER_NAME_PREFIX_LENGTH = 25
 
-# The version of the lib files that job/utils use. Whenever there is an API
-# change for the job/utils, we need to bump this version and update
+# The version of the lib files that jobs/utils use. Whenever there is an API
+# change for the jobs/utils, we need to bump this version and update
 # job.utils.ManagedJobCodeGen to handle the version update.
 MANAGED_JOB_VERSION = 1

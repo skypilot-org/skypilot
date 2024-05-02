@@ -9,7 +9,7 @@ import colorama
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
-from sky import job
+from sky import jobs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import service_catalog
@@ -107,7 +107,7 @@ class Resources:
             False.
           job_recovery: the job recovery strategy to use for the managed
             job to recover the cluster from preemption. Refer to
-            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/job/recovery_strategy.py>`__ # pylint: disable=line-too-long
+            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
           region: the region to use.
           zone: the zone to use.
@@ -785,12 +785,12 @@ class Resources:
         """
         if self._job_recovery is None:
             return
-        if self._job_recovery not in job.RECOVERY_STRATEGIES:
+        if self._job_recovery not in jobs.RECOVERY_STRATEGIES:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Spot recovery strategy {self._job_recovery} '
                     'is not supported. The strategy should be among '
-                    f'{list(job.RECOVERY_STRATEGIES.keys())}')
+                    f'{list(jobs.RECOVERY_STRATEGIES.keys())}')
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:

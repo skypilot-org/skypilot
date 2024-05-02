@@ -15,9 +15,9 @@ from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
-from sky.job import recovery_strategy
-from sky.job import state as managed_job_state
-from sky.job import utils as managed_job_utils
+from sky.jobs import recovery_strategy
+from sky.jobs import state as managed_job_state
+from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -31,9 +31,9 @@ if typing.TYPE_CHECKING:
     import sky
 
 # Use the explicit logger name so that the logger is under the
-# `sky.job.controller` namespace when executed directly, so as
+# `sky.jobs.controller` namespace when executed directly, so as
 # to inherit the setup from the `sky` logger.
-logger = sky_logging.init_logger('sky.job.controller')
+logger = sky_logging.init_logger('sky.jobs.controller')
 
 
 def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:

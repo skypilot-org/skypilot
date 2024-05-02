@@ -2243,7 +2243,7 @@ def is_controller_accessible(
     connection is successful.
 
     It can be used to check if the controller is accessible (since the autostop
-    is set for the controller) before the job/serve commands interact with the
+    is set for the controller) before the jobs/serve commands interact with the
     controller.
 
     ClusterNotUpError will be raised whenever the controller cannot be accessed.
@@ -2290,7 +2290,7 @@ def is_controller_accessible(
         # will not start the controller manually from the cloud console.
         #
         # The acquire_lock_timeout is set to 0 to avoid hanging the command when
-        # multiple job.launch commands are running at the same time. Our later
+        # multiple jobs.launch commands are running at the same time. Our later
         # code will check if the controller is accessible by directly checking
         # the ssh connection to the controller, if it fails to get accurate
         # status of the controller.

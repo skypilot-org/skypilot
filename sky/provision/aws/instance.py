@@ -69,9 +69,9 @@ def _default_ec2_resource(region: str) -> Any:
         # job controller running a managed job and then the code gets updated on
         # the controller due to a new `sky job launch or `sky start`.
         #
-        # First, controller consists of an outer process (sky.job.controller's
+        # First, controller consists of an outer process (sky.jobs.controller's
         # main) and an inner process running the controller logic (started as a
-        # multiprocessing.Process in sky.job.controller). `sky.provision.aws`
+        # multiprocessing.Process in sky.jobs.controller). `sky.provision.aws`
         # is only imported in the inner process due to its load-on-use
         # semantics.
         #

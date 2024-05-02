@@ -25,8 +25,8 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
-from sky.job import constants as managed_job_constants
-from sky.job import state as managed_job_state
+from sky.jobs import constants as managed_job_constants
+from sky.jobs import state as managed_job_state
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet.log_lib import run_bash_command_with_log
@@ -719,7 +719,7 @@ class ManagedJobCodeGen:
     _PREFIX = textwrap.dedent("""\
         managed_job_version = 0
         try:
-            from sky.job import constants, state, utils
+            from sky.jobs import constants, state, utils
             managed_job_version = constants.MANAGED_JOB_VERSION
         except ImportError:
             from sky.spot import spot_state as state, spot_utils as utils
