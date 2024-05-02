@@ -403,7 +403,7 @@ class Kubernetes(clouds.Cloud):
     @classmethod
     def is_label_valid(cls, label_key: str,
                        label_value: str) -> Tuple[bool, Optional[str]]:
-        # Kubernetes labels are of the format <domain>/<key>: <value>
+        # Kubernetes labels can be of the format <domain>/<key>: <value>
         key_regex = re.compile(
             # Look-ahead to ensure proper domain formatting up to a slash
             r'^(?:(?=[a-z0-9]([-a-z0-9.]*[a-z0-9])?\/)'
