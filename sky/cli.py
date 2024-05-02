@@ -2917,10 +2917,12 @@ def show_gpus(
                                         quantity_filter: Optional[int] = None):
         if quantity_filter:
             qty_header = 'QTY_FILTER'
+            free_header = 'FILTERED_FREE_GPUS'
         else:
             qty_header = 'QTY_PER_NODE'
+            free_header = 'TOTAL_FREE_GPUS'
         realtime_gpu_table = log_utils.create_table(
-            ['GPU', qty_header, 'TOTAL_GPUS', 'AVAILABLE_GPUS'])
+            ['GPU', qty_header, 'TOTAL_GPUS', free_header])
         counts, capacity, available = service_catalog.list_accelerator_realtime(
             gpus_only=True,
             clouds=cloud,
