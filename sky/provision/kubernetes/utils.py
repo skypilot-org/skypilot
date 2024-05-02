@@ -177,7 +177,7 @@ class GFDLabelFormatter(GPULabelFormatter):
 
         for canonical_name in canonical_gpu_names:
             # A100-80G accelerator is A100-SXM-80GB or A100-PCIE-80GB
-            if canonical_name == 'A100-80G' and re.match(r'A100.*-80G', value):
+            if canonical_name == 'A100-80GB' and re.match(r'A100.*-80GB', value):
                 return canonical_name
             elif canonical_name in value:
                 return canonical_name
