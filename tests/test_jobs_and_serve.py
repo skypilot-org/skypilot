@@ -95,11 +95,11 @@ def _mock_cluster_state(_mock_db_conn):
 
 
 @pytest.fixture
-def _mock_spot_controller(_mock_db_conn):
+def _mock_job_controller(_mock_db_conn):
     handle = backends.CloudVmRayResourceHandle(
         cluster_name=jobs.JOB_CONTROLLER_NAME,
         cluster_name_on_cloud=jobs.JOB_CONTROLLER_NAME,
-        cluster_yaml='/tmp/spot_controller.yaml',
+        cluster_yaml='/tmp/job_controller.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(sky.AWS(),
                                          instance_type='m4.2xlarge',
@@ -145,8 +145,8 @@ class TestSpotOperations:
     """Test operations for managed jobs."""
 
     @pytest.mark.timeout(60)
-    def test_down_spot_controller(self, _mock_cluster_state,
-                                  _mock_spot_controller, monkeypatch):
+    def test_down_job_controller(self, _mock_cluster_state,
+                                  _mock_job_controller, monkeypatch):
 
         def mock_get_job_table_no_job(cls, handle, code, require_outputs,
                                       stream_logs,
@@ -169,6 +169,7 @@ class TestSpotOperations:
                 'recovery_count': 0,
                 'failure_reason': '',
                 'spot_job_id': '1',
+                'managed_job_id': '1',
                 'task_id': 0,
                 'task_name': 'test_task',
                 'job_duration': 20,
@@ -217,7 +218,7 @@ class TestSpotOperations:
 
     @pytest.mark.timeout(60)
     def test_stop_job_controller(self, _mock_cluster_state,
-                                  _mock_spot_controller):
+                                  _mock_job_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.stop, [jobs.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
@@ -233,8 +234,8 @@ class TestSpotOperations:
         assert 'Aborted' in result.output
 
     @pytest.mark.timeout(60)
-    def test_autostop_spot_controller(self, _mock_cluster_state,
-                                      _mock_spot_controller):
+    def test_autostop_job_controller(self, _mock_cluster_state,
+                                      _mock_job_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.autostop, [jobs.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
@@ -250,8 +251,8 @@ class TestSpotOperations:
         assert isinstance(result.exception, SystemExit)
         assert 'Aborted' in result.output
 
-    def test_cancel_on_spot_controller(self, _mock_cluster_state,
-                                       _mock_spot_controller):
+    def test_cancel_on_job_controller(self, _mock_cluster_state,
+                                       _mock_job_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, [jobs.JOB_CONTROLLER_NAME, '-a'])
         assert result.exit_code == 1
@@ -287,7 +288,7 @@ class TestServeOperations:
     """Test operations for services."""
 
     @pytest.mark.timeout(60)
-    def test_down_spot_controller(self, _mock_cluster_state,
+    def test_down_job_controller(self, _mock_cluster_state,
                                   _mock_serve_controller, monkeypatch):
 
         def mock_get_services_no_service(

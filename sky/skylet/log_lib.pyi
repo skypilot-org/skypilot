@@ -13,6 +13,7 @@ from sky.skylet import constants as constants
 from sky.skylet import job_lib as job_lib
 from sky.utils import log_utils as log_utils
 
+
 class _ProcessingArgs:
     log_path: str
     stream_logs: bool
@@ -120,6 +121,6 @@ def run_bash_command_with_log(bash_command: str,
 
 def tail_logs(job_id: int,
               log_dir: Optional[str],
-              spot_job_id: Optional[int] = ...,
+              managed_job_id: Optional[int] = ...,
               follow: bool = ...) -> None:
     ...

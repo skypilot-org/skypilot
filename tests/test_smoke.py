@@ -2362,12 +2362,12 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
             # SKYPILOT_TASK_ID, which gets the second to last field
             # separated by `-`.
             (
-                f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
+                f'MANAGED_JOB_ID=`cat /tmp/{name}-run-id | rev | '
                 'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`;'
                 f'aws ec2 terminate-instances --region {region} --instance-ids $('
                 f'aws ec2 describe-instances --region {region} '
                 # TODO(zhwu): fix the name for spot cluster.
-                '--filters Name=tag:ray-cluster-name,Values=*-${SPOT_JOB_ID}'
+                '--filters Name=tag:ray-cluster-name,Values=*-${MANAGED_JOB_ID}'
                 f'-{user_hash} '
                 f'--query Reservations[].Instances[].InstanceId '
                 '--output text)'),
@@ -2395,7 +2395,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
     user_hash = common_utils.get_user_hash()
     user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     query_cmd = ('gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:*-${{SPOT_JOB_ID}}-{user_hash})" '
+                 f'"(labels.ray-cluster-name:*-${{MANAGED_JOB_ID}}-{user_hash})" '
                  f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
@@ -2411,7 +2411,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
             # The `cat ...| rev` is to retrieve the job_id from the
             # SKYPILOT_TASK_ID, which gets the second to last field
             # separated by `-`.
-            (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
+            (f'MANAGED_JOB_ID=`cat /tmp/{name}-run-id | rev | '
              f'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`; {terminate_cmd}'),
             'sleep 60',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
