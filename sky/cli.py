@@ -3329,7 +3329,8 @@ def jobs_launch(
         ports=ports,
         job_recovery=job_recovery,
     )
-    # Deprecation.
+    # Deprecation. We set the default behavior to be retry until up, and the
+    # flag `--retry-until-up` is deprecated. We can remove the flag in 0.8.0.
     if retry_until_up is not None:
         flag_str = '--retry-until-up'
         if not retry_until_up:
