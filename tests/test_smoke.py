@@ -2394,9 +2394,10 @@ def test_managed_jobs_pipeline_recovery_gcp():
     zone = 'us-east4-b'
     user_hash = common_utils.get_user_hash()
     user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
-    query_cmd = ('gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:*-${{MANAGED_JOB_ID}}-{user_hash})" '
-                 f'--zones={zone} --format="value(name)"')
+    query_cmd = (
+        'gcloud compute instances list --filter='
+        f'"(labels.ray-cluster-name:*-${{MANAGED_JOB_ID}}-{user_hash})" '
+        f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(

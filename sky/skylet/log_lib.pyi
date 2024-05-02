@@ -13,7 +13,6 @@ from sky.skylet import constants as constants
 from sky.skylet import job_lib as job_lib
 from sky.utils import log_utils as log_utils
 
-
 class _ProcessingArgs:
     log_path: str
     stream_logs: bool
