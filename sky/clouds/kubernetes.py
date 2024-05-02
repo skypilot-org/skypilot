@@ -405,13 +405,13 @@ class Kubernetes(clouds.Cloud):
                        label_value: str) -> Tuple[bool, Optional[str]]:
         # Kubernetes labels are of the format <domain>/<key>: <value>
         key_regex = re.compile(
-                # Look-ahead to ensure proper domain formatting up to a slash
-                r'^(?:(?=[a-z0-9]([-a-z0-9.]*[a-z0-9])?\/)'
-                # Match domain: starts and ends with alphanum up to 253 chars
-                # including a slash in the domain.
-                r'[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?\/)?'
-                # Match key: starts and ends with alphanum, upto to 63 chars.
-                r'[a-z0-9]([-a-z0-9_.]{0,61}[a-z0-9])?$')
+            # Look-ahead to ensure proper domain formatting up to a slash
+            r'^(?:(?=[a-z0-9]([-a-z0-9.]*[a-z0-9])?\/)'
+            # Match domain: starts and ends with alphanum up to 253 chars
+            # including a slash in the domain.
+            r'[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?\/)?'
+            # Match key: starts and ends with alphanum, upto to 63 chars.
+            r'[a-z0-9]([-a-z0-9_.]{0,61}[a-z0-9])?$')
         value_regex = re.compile(
             r'^([a-zA-Z0-9]([-a-zA-Z0-9_.]{0,61}[a-zA-Z0-9])?)?$')
         key_valid = bool(key_regex.match(label_key))

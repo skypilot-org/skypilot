@@ -1,6 +1,7 @@
 from unittest.mock import Mock
 
 import pytest
+from typing import Dict
 
 from sky import clouds
 from sky.resources import Resources
@@ -11,11 +12,12 @@ GLOBAL_VALID_LABELS = {
 }
 
 GLOBAL_INVALID_LABELS = {
-    'l'*129: 'value',    # Long key
-    'key': 'v'*257,      # Long value
+    'l' * 129: 'value',  # Long key
+    'key': 'v' * 257,  # Long value
     'spaces in label': 'spaces in value',
     '': 'emptykey',
 }
+
 
 def test_get_reservations_available_resources():
     mock = Mock()
@@ -27,8 +29,11 @@ def test_get_reservations_available_resources():
         "instance_type", "region", "zone", set())
 
 
-def _run_label_test(allowed_labels, invalid_labels, cloud):
-    r_allowed = Resources(cloud=cloud, labels=allowed_labels) # Should pass
+def _run_label_test(allowed_labels: Dict[str, str],
+                    invalid_labels: Dict[str, str],
+                    cloud: clouds.Cloud):
+    """Run a test for labels with the given allowed and invalid labels."""
+    r_allowed = Resources(cloud=cloud, labels=allowed_labels)  # Should pass
     assert r_allowed.labels == allowed_labels, ('Allowed labels '
                                                 'should be the same')
 
@@ -70,13 +75,15 @@ def test_kubernetes_labels_resources():
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
         'kueue.x-k8s.io/queue-name': 'queue',
-        'a'*253 + '/' + 'k'*63: 'v'*63,  # upto 253 chars in domain, 63 in key
+        'a' * 253 + '/' + 'k' * 63: 'v' *
+                                    63,  # upto 253 chars in domain, 63 in key
         'mylabel': '',  # empty label values are allowed by k8s
-        '1numericstart': 'value',   # numeric start is allowed by k8s
+        '1numericstart': 'value',  # numeric start is allowed by k8s
     }
     invalid_labels = {
         **GLOBAL_INVALID_LABELS,
-        'a'*254 + '/' + 'k'*64: 'v'*63,  # exceed 253 chars in domain, 63 in key
+        'a' * 254 + '/' + 'k' * 64: 'v' *
+                                    63,  # exceed 253 chars in domain, 63 in key
     }
     cloud = clouds.Kubernetes()
     _run_label_test(allowed_labels, invalid_labels, cloud)
