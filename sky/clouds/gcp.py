@@ -848,6 +848,7 @@ class GCP(clouds.Cloud):
         # "If your Cloud TPU is preempted,
         # you must delete it and create a new one ..."
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
+        # On-demand TPU VMs are likely to require manual cleanup as well.
 
         return gcp_utils.is_tpu_vm(resources)
 
