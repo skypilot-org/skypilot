@@ -60,9 +60,9 @@ available_node_types:
   ray.head.default:
     resources: {}
     node_config:
-      {% if iam_instance_profile %}
+      {% if remote_identity not in ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'] %}
       IamInstanceProfile:
-        Name: {{iam_instance_profile}}
+        Name: {{remote_identity}}
       {% endif %}
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.

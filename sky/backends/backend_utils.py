@@ -1,6 +1,7 @@
 """Util constants/functions for the backends."""
 from datetime import datetime
 import enum
+import fnmatch
 import functools
 import os
 import pathlib
@@ -798,7 +799,13 @@ def write_cluster_config(
     excluded_clouds = []
     remote_identity = skypilot_config.get_nested(
         (str(cloud).lower(), 'remote_identity'), 'LOCAL_CREDENTIALS')
-    if remote_identity == 'SERVICE_ACCOUNT':
+    if remote_identity is not None and not isinstance(
+            remote_identity, str):
+        for profile in remote_identity:
+            if fnmatch.fnmatchcase(cluster_name_on_cloud, profile):
+                remote_identity = remote_identity[profile]
+                break
+    if remote_identity != 'LOCAL_CREDENTIALS':
         if not cloud.supports_service_account_on_remote():
             raise exceptions.InvalidCloudConfigs(
                 'remote_identity: SERVICE_ACCOUNT is specified in '
@@ -888,6 +895,8 @@ def write_cluster_config(
 
                 # User-supplied labels.
                 'labels': labels,
+                # User-supplied remote_identity
+                "remote_identity": remote_identity,
                 # The reservation pools that specified by the user. This is
                 # currently only used by GCP.
                 'specific_reservations': specific_reservations,

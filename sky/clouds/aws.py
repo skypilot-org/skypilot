@@ -411,18 +411,6 @@ class AWS(clouds.Cloud):
         else:
             security_group = DEFAULT_SECURITY_GROUP_NAME
 
-        iam_instance_profile = skypilot_config.get_nested(
-            ('aws', 'iam_instance_profile'), None)
-        if iam_instance_profile is not None and not isinstance(
-                iam_instance_profile, str):
-            for profile in iam_instance_profile:
-                if cluster_name_on_cloud.startswith(
-                        profile) and profile != 'default':
-                    iam_instance_profile = iam_instance_profile[profile]
-                    break
-                elif profile == 'default':
-                    iam_instance_profile = iam_instance_profile[profile]
-
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
@@ -430,7 +418,6 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
-            'iam_instance_profile': iam_instance_profile,
             'security_group': security_group,
             'security_group_managed_by_skypilot':
                 str(security_group != user_security_group).lower(),

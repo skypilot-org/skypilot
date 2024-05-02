@@ -517,8 +517,15 @@ _LABELS_SCHEMA = {
 
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
-        'type': 'string',
-        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'],
+        'oneOf': [{
+            'type': 'string'
+        }, {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': {
+                'type': 'string',
+            },
+        }]
     }
 }
 
@@ -557,23 +564,6 @@ def get_config_schema():
             'properties': {
                 'security_group_name': {
                     'type': 'string'
-                },
-                'iam_instance_profile': {
-                    'oneOf': [{
-                        'type': 'string'
-                    }, {
-                        'type': 'object',
-                        'additionalProperties': False,
-                        'required': [],
-                        'properties': {
-                            'sky-serve-controller': {
-                                'type': 'string',
-                            },
-                            'default': {
-                                'type': 'string'
-                            }
-                        }
-                    }]
                 },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
