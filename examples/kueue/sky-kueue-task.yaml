@@ -1,4 +1,5 @@
 resources:
+  cloud: kubernetes
   cpus: 6
   labels:
     kueue.x-k8s.io/queue-name: user-queue
