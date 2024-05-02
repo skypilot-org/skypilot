@@ -556,7 +556,7 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'security_group_name': {
-                     'type': 'string'
+                    'type': 'string'
                 },
                 'iam_instance_profile': {
                     'oneOf': [{
@@ -564,17 +564,13 @@ def get_config_schema():
                     }, {
                         'type': 'object',
                         'additionalProperties': False,
-                        'required': ['default'],
+                        'required': [],
                         'properties': {
                             'sky-serve-controller': {
                                 'type': 'string',
                             },
                             'default':{
-                                'oneOf': [{
-                                    'type': 'string'
-                                }, {
-                                    'type': 'null'
-                                }]
+                                'type': 'string'
                             }
                         }
                     }]
