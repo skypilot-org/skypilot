@@ -1,7 +1,7 @@
+from typing import Dict
 from unittest.mock import Mock
 
 import pytest
-from typing import Dict
 
 from sky import clouds
 from sky.resources import Resources
@@ -30,8 +30,7 @@ def test_get_reservations_available_resources():
 
 
 def _run_label_test(allowed_labels: Dict[str, str],
-                    invalid_labels: Dict[str, str],
-                    cloud: clouds.Cloud):
+                    invalid_labels: Dict[str, str], cloud: clouds.Cloud):
     """Run a test for labels with the given allowed and invalid labels."""
     r_allowed = Resources(cloud=cloud, labels=allowed_labels)  # Should pass
     assert r_allowed.labels == allowed_labels, ('Allowed labels '
