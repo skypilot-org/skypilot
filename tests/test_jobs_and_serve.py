@@ -146,7 +146,7 @@ class TestJobsOperations:
 
     @pytest.mark.timeout(60)
     def test_down_job_controller(self, _mock_cluster_state,
-                                  _mock_job_controller, monkeypatch):
+                                 _mock_job_controller, monkeypatch):
 
         def mock_get_job_table_no_job(cls, handle, code, require_outputs,
                                       stream_logs,
@@ -217,7 +217,7 @@ class TestJobsOperations:
 
     @pytest.mark.timeout(60)
     def test_stop_job_controller(self, _mock_cluster_state,
-                                  _mock_job_controller):
+                                 _mock_job_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.stop, [jobs.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
@@ -234,7 +234,7 @@ class TestJobsOperations:
 
     @pytest.mark.timeout(60)
     def test_autostop_job_controller(self, _mock_cluster_state,
-                                      _mock_job_controller):
+                                     _mock_job_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.autostop, [jobs.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
@@ -251,7 +251,7 @@ class TestJobsOperations:
         assert 'Aborted' in result.output
 
     def test_cancel_on_job_controller(self, _mock_cluster_state,
-                                       _mock_job_controller):
+                                      _mock_job_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, [jobs.JOB_CONTROLLER_NAME, '-a'])
         assert result.exit_code == 1
@@ -288,7 +288,7 @@ class TestServeOperations:
 
     @pytest.mark.timeout(60)
     def test_down_job_controller(self, _mock_cluster_state,
-                                  _mock_serve_controller, monkeypatch):
+                                 _mock_serve_controller, monkeypatch):
 
         def mock_get_services_no_service(
                 cls, handle, code, require_outputs, stream_logs,
