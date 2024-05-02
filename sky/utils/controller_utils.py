@@ -188,12 +188,11 @@ def _get_cloud_dependencies_installation_commands(
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
     commands = []
-    prefix_str = 'Checking & installing dependencies: '
+    prefix_str = 'Check & install dependencies on controller: '
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
     empty_str = ' ' * 5
     aws_dependencies_installation = (
-        f'echo -n "{prefix_str}AWS{empty_str}" &&'
         'pip list | grep boto3 > /dev/null 2>&1 || '
         'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
         'boto3>=1.26.1 "colorama<0.4.5" > /dev/null 2>&1')
@@ -205,7 +204,8 @@ def _get_cloud_dependencies_installation_commands(
             # fluidstack and paperspace
             continue
         if cloud.is_same_cloud(clouds.AWS()):
-            commands.append(aws_dependencies_installation)
+            commands.append(f'echo -n "{prefix_str}AWS{empty_str}" && ' +
+                            aws_dependencies_installation)
         elif cloud.is_same_cloud(clouds.Azure()):
             commands.append(
                 f'echo -en "\\r{prefix_str}Azure{empty_str}" && '
@@ -254,8 +254,8 @@ def _get_cloud_dependencies_installation_commands(
                     'pip install "cudo-compute>=0.1.8" > /dev/null 2>&1')
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
-        commands.append(
-            aws_dependencies_installation.replace('AWS', 'Cloudflare'))
+        commands.append(f'echo -en "\\r{prefix_str}AWS{empty_str}" && ' +
+                        aws_dependencies_installation)
     commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '
                     'clouds."')
     return commands
