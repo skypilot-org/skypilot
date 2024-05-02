@@ -60,23 +60,23 @@ Managed (Spot) Jobs CLI
 ---------------------------
 
 .. _sky-job-launch:
-.. click:: sky.cli:job_launch
-   :prog: sky job launch
+.. click:: sky.cli:jobs_launch
+   :prog: sky jobs launch
    :nested: full
 
 .. _sky-job-queue:
-.. click:: sky.cli:job_queue
-   :prog: sky job queue
+.. click:: sky.cli:jobs_queue
+   :prog: sky jobs queue
    :nested: full
 
 .. _sky-job-cancel:
-.. click:: sky.cli:job_cancel
-   :prog: sky job cancel
+.. click:: sky.cli:jobs_cancel
+   :prog: sky jobs cancel
    :nested: full
 
 .. _sky-job-logs:
-.. click:: sky.cli:job_logs
-   :prog: sky job logs
+.. click:: sky.cli:jobs_logs
+   :prog: sky jobs logs
    :nested: full
 
 
