@@ -3429,7 +3429,7 @@ def test_skyserve_streaming(generic_cloud: str):
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'python3 tests/skyserve/streaming/send_streaming_request.py '
-            '--endpoint $endpoint',
+            '--endpoint $endpoint | grep "Streaming test passed"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
