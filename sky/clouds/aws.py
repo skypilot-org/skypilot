@@ -548,11 +548,10 @@ class AWS(clouds.Cloud):
             # role: skypilot-v1.
             hints = f'AWS IAM role is set.{single_cloud_hint}'
         elif identity_type == AWSIdentityType.CONTAINER_ROLE:
-            # When using an IAM role, the credentials may not exist in the
-            # ~/.aws/credentials file. So we don't check for the existence of the
-            # file. This will happen when the user is on a VM (or spot-controller)
-            # created by an SSO account, i.e. the VM will be assigned the IAM
-            # role: skypilot-v1.
+            # Similar to the IAM ROLE, an ECS container may not store credentials
+            # in the~/.aws/credentials file. So we don't check for the existence of
+            # the file. i.e. the container will be assigned the IAM role of the
+            # task: skypilot-v1.
             hints = f'AWS container-role is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
