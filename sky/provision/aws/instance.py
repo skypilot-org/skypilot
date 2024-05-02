@@ -876,13 +876,3 @@ def get_cluster_info(
         instances=instances,
         head_instance_id=head_instance_id,
     )
-
-
-def query_ports(
-    cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
-) -> Dict[int, List[common.Endpoint]]:
-    """See sky/provision/__init__.py"""
-    return common.query_ports_passthrough(cluster_name_on_cloud, ports,
-                                          provider_config)

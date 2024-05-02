@@ -3254,8 +3254,16 @@ def test_skyserve_azure_http():
     run_one_test(test)
 
 
+@pytest.mark.kubernetes
+@pytest.mark.sky_serve
+def test_skyserve_kubernetes_http():
+    """Test skyserve on Kubernetes"""
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'kubernetes', 30)
+    run_one_test(test)
+
+
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_llm(generic_cloud: str):
     """Test skyserve with real LLM usecase"""
     name = _get_service_name()
@@ -3283,7 +3291,7 @@ def test_skyserve_llm(generic_cloud: str):
             ],
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        timeout=25 * 60,
+        timeout=40 * 60,
     )
     run_one_test(test)
 
@@ -3377,7 +3385,6 @@ def test_skyserve_dynamic_ondemand_fallback():
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -3411,7 +3418,6 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
@@ -3477,7 +3483,6 @@ def test_skyserve_auto_restart():
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
@@ -3503,7 +3508,6 @@ def test_skyserve_cancel(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
@@ -3532,7 +3536,6 @@ def test_skyserve_update(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
     name = _get_service_name()
@@ -3569,7 +3572,6 @@ def test_skyserve_rolling_update(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
@@ -3611,7 +3613,6 @@ def test_skyserve_fast_update(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     name = _get_service_name()
@@ -3648,8 +3649,8 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
-@pytest.mark.no_kubernetes
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
     name = _get_service_name() + mode

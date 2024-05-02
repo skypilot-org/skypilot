@@ -670,7 +670,28 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # whenever task.storage_mounts is non-empty.
         logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
                     f'{colorama.Style.RESET_ALL} See: sky storage ls')
-    task.sync_storage_mounts()
+    try:
+        task.sync_storage_mounts()
+    except ValueError as e:
+        if 'No enabled cloud for storage' in str(e):
+            data_src = None
+            if has_local_source_paths_file_mounts:
+                data_src = 'file_mounts'
+            if has_local_source_paths_workdir:
+                if data_src:
+                    data_src += ' and workdir'
+                else:
+                    data_src = 'workdir'
+            store_enabled_clouds = ', '.join(storage_lib.STORE_ENABLED_CLOUDS)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'Unable to use {data_src} - no cloud with object store '
+                    'is enabled. Please enable at least one cloud with '
+                    f'object store support ({store_enabled_clouds}) by running '
+                    f'`sky check`, or remove {data_src} from your task.'
+                    '\nHint: If you do not have any cloud access, you may still'
+                    ' download data and code over the network using curl or '
+                    'other tools in the `setup` section of the task.') from None
 
     # Step 5: Add the file download into the file mounts, such as
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0

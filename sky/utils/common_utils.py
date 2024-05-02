@@ -61,11 +61,18 @@ def get_usage_run_id() -> str:
     return _usage_run_id
 
 
-def get_user_hash() -> str:
+def get_user_hash(force_fresh_hash: bool = False) -> str:
     """Returns a unique user-machine specific hash as a user id.
 
     We cache the user hash in a file to avoid potential user_name or
     hostname changes causing a new user hash to be generated.
+
+    Args:
+        force_fresh_hash: Bypasses the cached hash in USER_HASH_FILE and the
+            hash in the USER_ID_ENV_VAR and forces a fresh user-machine hash
+            to be generated. Used by `kubernetes.ssh_key_secret_field_name` to
+            avoid controllers sharing the same ssh key field name as the
+            local client.
     """
 
     def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
@@ -77,12 +84,13 @@ def get_user_hash() -> str:
             return False
         return len(user_hash) == USER_HASH_LENGTH
 
-    user_hash = os.getenv(constants.USER_ID_ENV_VAR)
-    if _is_valid_user_hash(user_hash):
-        assert user_hash is not None
-        return user_hash
+    if not force_fresh_hash:
+        user_hash = os.getenv(constants.USER_ID_ENV_VAR)
+        if _is_valid_user_hash(user_hash):
+            assert user_hash is not None
+            return user_hash
 
-    if os.path.exists(_USER_HASH_FILE):
+    if not force_fresh_hash and os.path.exists(_USER_HASH_FILE):
         # Read from cached user hash file.
         with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
@@ -96,8 +104,11 @@ def get_user_hash() -> str:
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
-        f.write(user_hash)
+    if not force_fresh_hash:
+        # Do not cache to file if force_fresh_hash is True since the file may
+        # be intentionally using a different hash.
+        with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
+            f.write(user_hash)
     return user_hash
 
 

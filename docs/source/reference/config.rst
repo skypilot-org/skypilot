@@ -190,21 +190,21 @@ Available fields and semantics:
 
 
     # Reserved capacity (optional).
-    # 
+    #
     # Whether to prioritize reserved instance types/locations (considered as 0
     # cost) in the optimizer.
-    # 
+    #
     # If you have "automatically consumed" reservations in your GCP project:
     # Setting this to true guarantees the optimizer will pick any matching
     # reservation and GCP will auto consume your reservation, and setting to
     # false means optimizer uses regular, non-zero pricing in optimization (if
     # by chance any matching reservation is selected, GCP still auto consumes
     # the reservation).
-    # 
+    #
     # If you have "specifically targeted" reservations (set by the
     # `specific_reservations` field below): This field will automatically be set
     # to true.
-    # 
+    #
     # Default: false.
     prioritize_reservations: false
     #
@@ -282,6 +282,30 @@ Available fields and semantics:
     #
     # Default: loadbalancer
     ports: loadbalancer
+
+    # Identity to use for all Kubernetes pods (optional).
+    #
+    # LOCAL_CREDENTIALS: The user's local ~/.kube/config will be uploaded to the
+    # Kubernetes pods created by SkyPilot. They are used for authenticating with
+    # the Kubernetes API server and launching new pods (e.g., for
+    # spot/serve controllers).
+    #
+    # SERVICE_ACCOUNT: Local ~/.kube/config is not uploaded to Kubernetes pods.
+    # SkyPilot will auto-create and reuse a service account with necessary roles
+    # in the user's namespace.
+    #
+    # <string>: The name of a service account to use for all Kubernetes pods.
+    # This service account must exist in the user's namespace and have all
+    # necessary permissions. Refer to https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/kubernetes.html
+    # for details on the roles required by the service account.
+    #
+    # Using SERVICE_ACCOUNT or a custom service account only affects Kubernetes
+    # instances. Local ~/.kube/config will still be uploaded to non-Kubernetes
+    # instances (e.g., a serve controller on GCP or AWS may need to provision
+    # Kubernetes resources).
+    #
+    # Default: 'LOCAL_CREDENTIALS'.
+    remote_identity: my-k8s-service-account
 
     # Attach custom metadata to Kubernetes objects created by SkyPilot
     #
