@@ -22,10 +22,25 @@ _session_creation_lock = threading.RLock()
 
 
 def _get_account():
-    return json.loads(
-        run('az account show -o json',
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL).stdout.decode())
+    result = run('az account show -o json',
+                 stdout=subprocess.PIPE,
+                 stderr=subprocess.PIPE)
+
+    if result.returncode != 0:
+        error_message = result.stderr.decode()
+        print(f'Error executing command: {error_message}')
+        raise RuntimeError(
+            'Failed to execute az account show -o json command.')
+
+    try:
+        return json.loads(result.stdout.decode())
+    except json.JSONDecodeError as e:
+        error_message = result.stderr.decode()
+        print(f'JSON parsing error: {e.msg}')
+        raise RuntimeError(
+            f'Failed to parse JSON output. Error: {e.msg}\n'
+            f'Command Error: {error_message}'
+        ) from e
 
 
 def get_subscription_id() -> str:
