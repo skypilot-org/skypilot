@@ -94,6 +94,12 @@ class SkyServeLoadBalancer:
         try:
 
             async def stream_response():
+                """Construct the response stream.
+
+                Yields:
+                    The response status code and headers first. Then the
+                    response body.
+                """
                 async with httpx.AsyncClient() as client:
                     async with client.stream(method,
                                              path,
