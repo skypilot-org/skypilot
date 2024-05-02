@@ -57,7 +57,7 @@ class ProvisionPrechecksError(Exception):
     Developer note: For now this should only be used by managed
     job code path (technically, this can/should be raised by the
     lower-level sky.launch()). Please refer to the docstring of
-    `spot.recovery_strategy._launch` for more details about when
+    `jobs.recovery_strategy._launch` for more details about when
     the error will be raised.
 
     Args:

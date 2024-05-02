@@ -484,7 +484,8 @@ class Cloud:
         In most cases, spot resources do not need cleanup after preemption,
         as long as the cluster can be relaunched with the same name and tag,
         no matter the preemption behavior is to terminate or stop the cluster.
-        The only exception by far is GCP's TPU VM. We override this method in
+        Similar for on-demand resources that goes into maintenance mode. The
+        only exception by far is GCP's TPU VM. We override this method in
         gcp.py.
         """
         del resources

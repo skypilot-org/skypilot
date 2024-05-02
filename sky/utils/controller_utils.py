@@ -17,6 +17,7 @@ from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import cloudflare
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -52,7 +53,8 @@ class _ControllerSpec:
     """Spec for skypilot controllers."""
     controller_type: str
     name: str
-    # Use a list of strings to support fallback to old names.
+    # Use a list of strings to support fallback to old names. The list is in the
+    # fallback order.
     candidate_cluster_names: List[str]
     in_progress_hint: str
     decline_cancel_hint: str
@@ -183,40 +185,79 @@ class Controllers(enum.Enum):
 # TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
         controller: Controllers) -> List[str]:
-    # TODO(zhwu): Add dependencies for the other clouds when on-demand is used.
-    commands = [
-        # aws
-        'pip list | grep boto3 > /dev/null 2>&1 || '
-        'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
-        'boto3>=1.26.1 > /dev/null 2>&1',
-        # gcp
-        'pip list | grep google-api-python-client > /dev/null 2>&1 || '
-        'pip install google-api-python-client>=2.69.0 '
-        '> /dev/null 2>&1',
-        # Have to separate the installation of google-cloud-storage from above
-        # because for a VM launched on GCP, the VM may have
-        # google-api-python-client installed alone.
-        'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
-        'pip install google-cloud-storage > /dev/null 2>&1',
-        f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}',
-        # fluidstack does not need to install any cloud dependencies.
-    ]
-    # k8s and ibm doesn't support open port and spot instance yet, so we don't
-    # install them for either controller.
-    if controller == Controllers.JOB_CONTROLLER:
-        # oci doesn't support open port yet, so we don't install oci
-        # dependencies for sky serve controller.
-        commands.append('pip list | grep oci > /dev/null 2>&1 || '
-                        'pip install oci > /dev/null 2>&1')
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
-    if any(
-            cloud.is_same_cloud(clouds.Azure())
-            for cloud in sky_check.get_cached_enabled_clouds_or_refresh()):
+    commands = []
+    prefix_str = 'Checking & installing dependencies: '
+    # This is to make sure the shorter checking message does not have junk
+    # characters from the previous message.
+    empty_str = ' ' * 5
+    aws_dependencies_installation = (
+        f'echo -n "{prefix_str}AWS{empty_str}" &&'
+        'pip list | grep boto3 > /dev/null 2>&1 || '
+        'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
+        'boto3>=1.26.1 "colorama<0.4.5" > /dev/null 2>&1')
+    for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
+        if isinstance(
+                clouds,
+            (clouds.Lambda, clouds.SCP, clouds.Fluidstack, clouds.Paperspace)):
+            # no need to install any cloud dependencies for lambda, scp,
+            # fluidstack and paperspace
+            continue
+        if cloud.is_same_cloud(clouds.AWS()):
+            commands.append(aws_dependencies_installation)
+        elif cloud.is_same_cloud(clouds.Azure()):
+            commands.append(
+                f'echo -en "\\r{prefix_str}Azure{empty_str}" && '
+                'pip list | grep azure-cli > /dev/null 2>&1 || '
+                'pip install "azure-cli>=2.31.0" azure-core '
+                '"azure-identity>=1.13.0" azure-mgmt-network > /dev/null 2>&1')
+        elif cloud.is_same_cloud(clouds.GCP()):
+            commands.append(
+                f'echo -en "\\r{prefix_str}GCP{empty_str}" && '
+                'pip list | grep google-api-python-client > /dev/null 2>&1 || '
+                'pip install "google-api-python-client>=2.69.0" '
+                '> /dev/null 2>&1')
+            # Have to separate the installation of google-cloud-storage from
+            # above because for a VM launched on GCP, the VM may have
+            # google-api-python-client installed alone.
+            commands.append(
+                'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
+                'pip install google-cloud-storage > /dev/null 2>&1')
+            commands.append(f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
+        if controller == Controllers.JOB_CONTROLLER:
+            if cloud.is_same_cloud(clouds.IBM()):
+                commands.append(
+                    f'echo -en "\\r{prefix_str}IBM{empty_str}" '
+                    '&& pip list | grep ibm-cloud-sdk-core > /dev/null 2>&1 || '
+                    'pip install ibm-cloud-sdk-core ibm-vpc '
+                    'ibm-platform-services ibm-cos-sdk > /dev/null 2>&1')
+            elif cloud.is_same_cloud(clouds.OCI()):
+                commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
+                                'pip list | grep oci > /dev/null 2>&1 || '
+                                'pip install oci > /dev/null 2>&1')
+            elif isinstance(cloud, clouds.Kubernetes):
+                commands.append(
+                    f'echo -en "\\r{prefix_str}Kubernetes{empty_str}" && '
+                    'pip list | grep kubernetes > /dev/null 2>&1 || '
+                    'pip install "kubernetes>=20.0.0" > /dev/null 2>&1')
+            elif isinstance(cloud, clouds.RunPod):
+                commands.append(
+                    f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
+                    'pip list | grep runpod > /dev/null 2>&1 || '
+                    'pip install "runpod>=1.5.1" > /dev/null 2>&1')
+            elif cloud.is_same_cloud(clouds.Cudo()):
+                # cudo doesn't support open port
+                commands.append(
+                    f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
+                    'pip list | grep cudo-compute > /dev/null 2>&1 || '
+                    'pip install "cudo-compute>=0.1.8" > /dev/null 2>&1')
+    if (cloudflare.NAME
+            in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
         commands.append(
-            'pip list | grep azure-cli > /dev/null 2>&1 || '
-            'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
-            'azure-mgmt-network > /dev/null 2>&1')
+            aws_dependencies_installation.replace('AWS', 'Cloudflare'))
+    commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '
+                    'clouds."')
     return commands
 
 

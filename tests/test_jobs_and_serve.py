@@ -199,11 +199,11 @@ class TestSpotOperations:
             result.exception, result.output, result.exc_info)
         assert isinstance(result.exception, exceptions.NotSupportedError)
 
-        result = cli_runner.invoke(cli.down, ['sky-spot-con*'])
+        result = cli_runner.invoke(cli.down, ['sky-job-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
-        result = cli_runner.invoke(cli.down, ['sky-spot-con*', '-p'])
+        result = cli_runner.invoke(cli.down, ['sky-job-con*', '-p'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
@@ -216,7 +216,7 @@ class TestSpotOperations:
         assert 'Aborted' in result.output
 
     @pytest.mark.timeout(60)
-    def test_stop_spot_controller(self, _mock_cluster_state,
+    def test_stop_job_controller(self, _mock_cluster_state,
                                   _mock_spot_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.stop, [jobs.JOB_CONTROLLER_NAME])
@@ -224,7 +224,7 @@ class TestSpotOperations:
         assert (f'Stopping controller(s) \'{jobs.JOB_CONTROLLER_NAME}\' is '
                 'currently not supported' in result.output)
 
-        result = cli_runner.invoke(cli.stop, ['sky-spot-con*'])
+        result = cli_runner.invoke(cli.stop, ['sky-job-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
@@ -261,7 +261,7 @@ class TestSpotOperations:
     @pytest.mark.timeout(60)
     def test_cancel(self, _mock_db_conn):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.job_cancel, ['-a'])
+        result = cli_runner.invoke(cli.jobs_cancel, ['-a'])
         assert result.exit_code == 1
         assert controller_utils.Controllers.JOB_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
@@ -269,7 +269,7 @@ class TestSpotOperations:
     @pytest.mark.timeout(60)
     def test_logs(self, _mock_db_conn):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.job_logs, ['1'])
+        result = cli_runner.invoke(cli.jobs_logs, ['1'])
         assert result.exit_code == 1
         assert controller_utils.Controllers.JOB_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
@@ -277,7 +277,7 @@ class TestSpotOperations:
     @pytest.mark.timeout(60)
     def test_queue(self, _mock_db_conn):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.job_queue)
+        result = cli_runner.invoke(cli.jobs_queue)
         assert result.exit_code == 0
         assert controller_utils.Controllers.JOB_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)

@@ -777,7 +777,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if workdir is not None:
         task.workdir = workdir
 
-    # Spot launch specific.
+    # job launch specific.
     if job_recovery is not None:
         override_params['job_recovery'] = job_recovery
 
@@ -3270,7 +3270,7 @@ def jobs():
               help='Skip confirmation prompt.')
 @timeline.event
 @usage_lib.entrypoint
-def job_launch(
+def jobs_launch(
     entrypoint: List[str],
     name: Optional[str],
     workdir: Optional[str],
@@ -3395,7 +3395,7 @@ def job_launch(
               help='Show only pending/running jobs\' information.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def job_queue(all: bool, refresh: bool, skip_finished: bool):
+def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed jobs.
 
     Each managed job can have one of the following statuses:
@@ -3485,7 +3485,7 @@ def job_queue(all: bool, refresh: bool, skip_finished: bool):
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def job_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
+def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     """Cancel managed jobs.
 
     You can provide either a job name or a list of job IDs to be cancelled.
@@ -3548,8 +3548,8 @@ def job_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
           'launching/recoveries, etc.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def job_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-             controller: bool):
+def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
+              controller: bool):
     """Tail the log of a managed job."""
     try:
         if controller:
@@ -3574,7 +3574,7 @@ def job_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     help=('Local port to use for the dashboard. If None, a free port is '
           'automatically chosen.'))
 @usage_lib.entrypoint
-def job_dashboard(port: Optional[int]):
+def jobs_dashboard(port: Optional[int]):
     """Opens a dashboard for managed jobs (needs controller to be UP)."""
     # TODO(zongheng): ideally, the controller/dashboard server should expose the
     # API perhaps via REST. Then here we would (1) not have to use SSH to try to
@@ -3634,13 +3634,13 @@ def spot():
 
 
 _add_command_alias(jobs,
-                   job_launch,
+                   jobs_launch,
                    new_group=spot,
                    override_command_argument={'use_spot': True})
-_add_command_alias(jobs, job_queue, new_group=spot)
-_add_command_alias(jobs, job_logs, new_group=spot)
-_add_command_alias(jobs, job_cancel, new_group=spot)
-_add_command_alias(jobs, job_dashboard, new_group=spot)
+_add_command_alias(jobs, jobs_queue, new_group=spot)
+_add_command_alias(jobs, jobs_logs, new_group=spot)
+_add_command_alias(jobs, jobs_cancel, new_group=spot)
+_add_command_alias(jobs, jobs_dashboard, new_group=spot)
 
 
 @cli.group(cls=_NaturalOrderGroup, hidden=True)
@@ -3649,11 +3649,11 @@ def job():
     pass
 
 
-_add_command_alias(jobs, job_launch, new_group=job, with_warning=False)
-_add_command_alias(jobs, job_queue, new_group=job, with_warning=False)
-_add_command_alias(jobs, job_logs, new_group=job, with_warning=False)
-_add_command_alias(jobs, job_cancel, new_group=job, with_warning=False)
-_add_command_alias(jobs, job_dashboard, new_group=job, with_warning=False)
+_add_command_alias(jobs, jobs_launch, new_group=job, with_warning=False)
+_add_command_alias(jobs, jobs_queue, new_group=job, with_warning=False)
+_add_command_alias(jobs, jobs_logs, new_group=job, with_warning=False)
+_add_command_alias(jobs, jobs_cancel, new_group=job, with_warning=False)
+_add_command_alias(jobs, jobs_dashboard, new_group=job, with_warning=False)
 
 
 @cli.group(cls=_NaturalOrderGroup)
