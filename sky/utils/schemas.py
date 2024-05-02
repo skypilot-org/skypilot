@@ -5,6 +5,30 @@ https://json-schema.org/
 """
 
 
+def _check_not_both_fields_present(field1: str, field2: str):
+    return {
+        'oneOf': [{
+            'required': [field1],
+            'not': {
+                'required': [field2]
+            }
+        }, {
+            'required': [field2],
+            'not': {
+                'required': [field1]
+            }
+        }, {
+            'not': {
+                'anyOf': [{
+                    'required': [field1]
+                }, {
+                    'required': [field2]
+                }]
+            }
+        }]
+    }
+
+
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
@@ -83,6 +107,12 @@ def _get_single_resources_schema():
                     }
                 }],
             },
+            'labels': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                }
+            },
             'accelerator_args': {
                 'type': 'object',
                 'required': [],
@@ -134,10 +164,21 @@ def _get_single_resources_schema():
     }
 
 
+def _get_multi_resources_schema():
+    multi_resources_schema = {
+        k: v
+        for k, v in _get_single_resources_schema().items()
+        # Validation may fail if $schema is included.
+        if k != '$schema'
+    }
+    return multi_resources_schema
+
+
 def get_resources_schema():
     """Resource schema in task config."""
     single_resources_schema = _get_single_resources_schema()['properties']
     single_resources_schema.pop('accelerators')
+    multi_resources_schema = _get_multi_resources_schema()
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
@@ -171,21 +212,11 @@ def get_resources_schema():
             },
             'any_of': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in _get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             },
             'ordered': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in _get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             }
         }
     }
@@ -465,7 +496,9 @@ _NETWORK_CONFIG_SCHEMA = {
     },
 }
 
-_INSTANCE_TAGS_SCHEMA = {
+_LABELS_SCHEMA = {
+    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
+    # compatibility. Will be removed after 0.7.0.
     'instance_tags': {
         'type': 'object',
         'required': [],
@@ -473,6 +506,13 @@ _INSTANCE_TAGS_SCHEMA = {
             'type': 'string',
         },
     },
+    'labels': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': {
+            'type': 'string',
+        },
+    }
 }
 
 _REMOTE_IDENTITY_SCHEMA = {
@@ -518,9 +558,10 @@ def get_config_schema():
                 'security_group_name': {
                     'type': 'string',
                 },
-                **_INSTANCE_TAGS_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
-            }
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'gcp': {
             'type': 'object',
@@ -536,9 +577,10 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                **_INSTANCE_TAGS_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
-            }
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'kubernetes': {
             'type': 'object',

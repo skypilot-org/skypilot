@@ -208,6 +208,20 @@ Available fields:
       # To use a more limited but easier to manage tool:
       # https://github.com/IBM/vpc-img-inst
 
+      # Labels to apply to the instances (optional).
+      #
+      # If specified, these labels will be applied to the VMs or pods created
+      # by SkyPilot. These are useful for assigning metadata that may be
+      # used by external tools. Implementation depends on the chosen cloud -
+      # On AWS, labels map to instance tags. On GCP, labels map to instance
+      # labels. On Kubernetes, labels map to pod labels. On other clouds,
+      # labels are not supported and will be ignored.
+      #
+      # Note: Labels are applied only on the first launch of the cluster. They
+      # are not updated on subsequent launches.
+      labels:
+        my-label: my-value
+
       # Candidate resources (optional). If specified, SkyPilot will only use
       # these candidate resources to launch the cluster. The fields specified
       # outside of `any_of`, `ordered` will be used as the default values for

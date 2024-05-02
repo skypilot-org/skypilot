@@ -36,7 +36,7 @@ Available fields and semantics:
     #
     # Users should guarantee that these key-values are valid AWS tags, otherwise
     # errors from the cloud provider will be surfaced.
-    instance_tags:
+    labels:
       # (Example) AWS Migration Acceleration Program (MAP). This tag enables the
       # program's discounts.
       # Ref: https://docs.aws.amazon.com/mgn/latest/ug/map-program-tagging.html
@@ -142,9 +142,9 @@ Available fields and semantics:
     #
     # Users should guarantee that these key-values are valid GCP labels, otherwise
     # errors from the cloud provider will be surfaced.
-    instance_tags:
+    labels:
       Owner: user-unique-name
-      my-tag: my-value
+      my-label: my-value
 
     # VPC to use (optional).
     #

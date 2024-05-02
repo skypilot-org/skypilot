@@ -320,6 +320,25 @@ class Cloud:
                                                   region,
                                                   clouds=cls._REPR.lower())
 
+    @classmethod
+    def is_label_valid(cls, label_key: str,
+                       label_value: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the label key and value are valid for this cloud.
+
+        Labels can be implemented in different ways across clouds. For example,
+        on AWS we use instance tags, on GCP we use labels, and on Kubernetes we
+        use labels. This method should be implemented to validate the label
+        format for the cloud.
+
+        Returns:
+            A tuple of a boolean indicating whether the label is valid and an
+            optional string describing the reason if the label is invalid.
+        """
+        # If a cloud does not support labels, they are ignored. Only clouds
+        # that support labels implement this method.
+        del label_key, label_value
+        return True, None
+
     def get_feasible_launchable_resources(
         self,
         resources: 'resources_lib.Resources',

@@ -44,7 +44,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 16
+    _VERSION = 17
 
     def __init__(
         self,
@@ -62,6 +62,7 @@ class Resources:
         disk_size: Optional[int] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
+        labels: Optional[Dict[str, str]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -130,7 +131,13 @@ class Resources:
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
           ports: the ports to open on the instance.
-          _docker_login_config: the docker configuration to use. This include
+          labels: the labels to apply to the instance. These are useful for
+            assigning metadata that may be used by external tools.
+            Implementation depends on the chosen cloud - On AWS, labels map to
+            instance tags. On GCP, labels map to instance labels. On
+            Kubernetes, labels map to pod labels. On other clouds, labels are
+            not supported and will be ignored.
+          _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
           _requires_fuse: whether the task requires FUSE mounting support. This
@@ -205,6 +212,8 @@ class Resources:
                 ports = None
         self._ports = ports
 
+        self._labels = labels
+
         self._docker_login_config = _docker_login_config
 
         self._requires_fuse = _requires_fuse
@@ -219,6 +228,7 @@ class Resources:
         self._try_validate_image_id()
         self._try_validate_disk_tier()
         self._try_validate_ports()
+        self._try_validate_labels()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -416,6 +426,10 @@ class Resources:
     @property
     def ports(self) -> Optional[List[str]]:
         return self._ports
+
+    @property
+    def labels(self) -> Optional[Dict[str, str]]:
+        return self._labels
 
     @property
     def is_image_managed(self) -> Optional[bool]:
@@ -932,6 +946,34 @@ class Resources:
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
 
+    def _try_validate_labels(self) -> None:
+        """Try to validate the labels attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
+        if not self._labels:
+            return
+
+        if self.cloud is None:
+            # Because each cloud has its own label format, we cannot validate
+            # the labels without knowing the cloud.
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cloud must be specified when labels are provided.')
+
+        # Check if the label key value pairs are valid.
+        invalid_table = log_utils.create_table(['Label', 'Reason'])
+        for key, value in self._labels.items():
+            valid, err_msg = self.cloud.is_label_valid(key, value)
+            if not valid:
+                invalid_table.add_row([f'{key}: {value}', err_msg])
+        if len(invalid_table.rows) > 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'The following labels are invalid:'
+                    '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -1158,6 +1200,7 @@ class Resources:
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
             ports=override.pop('ports', self.ports),
+            labels=override.pop('labels', self.labels),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
             _is_image_managed=override.pop('_is_image_managed',
@@ -1210,7 +1253,18 @@ class Resources:
             resources_list = []
             for override_config in override_configs:
                 new_resource_config = base_resource_config.copy()
+                # Labels are handled separately.
+                override_labels = override_config.pop('labels', None)
                 new_resource_config.update(override_config)
+
+                # Update the labels with the override labels.
+                labels = new_resource_config.get('labels', None)
+                if labels is not None and override_labels is not None:
+                    labels.update(override_labels)
+                elif override_labels is not None:
+                    labels = override_labels
+                new_resource_config['labels'] = labels
+
                 # Call from_yaml_config again instead of
                 # _from_yaml_config_single to handle the case, where both
                 # multiple accelerators and `any_of` is specified.
@@ -1297,6 +1351,7 @@ class Resources:
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
+        resources_fields['labels'] = config.pop('labels', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
         resources_fields['_is_image_managed'] = config.pop(
@@ -1341,6 +1396,7 @@ class Resources:
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
+        add_if_not_none('labels', self.labels)
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
@@ -1450,5 +1506,8 @@ class Resources:
             # mode and have FUSE support enabled by default. As a result, we
             # set the default to True for backward compatibility.
             state['_requires_fuse'] = state.get('_requires_fuse', True)
+
+        if version < 17:
+            state['_labels'] = state.get('_labels', None)
 
         self.__dict__.update(state)
