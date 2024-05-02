@@ -61,7 +61,7 @@ from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
-# smoke test. Also required for test_spot_recovery to make sure the manual
+# smoke test. Also required for test_managed_jobs_recovery to make sure the manual
 # termination with aws ec2 does not accidentally terminate other spot clusters
 # from the different job launch with the same cluster name but a different job
 # id.
@@ -85,16 +85,16 @@ storage_setup_commands = [
 # This is a workaround for the issue that when multiple job tests
 # are running in parallel, the job controller may be in INIT and
 # the job queue/cancel command will return staled table.
-_JOB_QUEUE_WAIT = ('s=$(sky job queue); '
+_JOB_QUEUE_WAIT = ('s=$(sky jobs queue); '
                    'until ! echo "$s" | grep "jobs will not be shown until"; '
                    'do echo "Waiting for job queue to be ready..."; '
-                   'sleep 5; s=$(sky job queue); done; echo "$s"; '
+                   'sleep 5; s=$(sky jobs queue); done; echo "$s"; '
                    'echo; echo; echo "$s"')
 _JOB_CANCEL_WAIT = (
-    's=$(sky job cancel -y -n {job_name}); '
+    's=$(sky jobs cancel -y -n {job_name}); '
     'until ! echo "$s" | grep "Please wait for the controller to be ready."; '
     'do echo "Waiting for the job controller '
-    'to be ready"; sleep 5; s=$(sky job cancel -y -n {job_name}); '
+    'to be ready"; sleep 5; s=$(sky jobs cancel -y -n {job_name}); '
     'done; echo "$s"; echo; echo; echo "$s"')
 # TODO(zhwu): make the job controller on GCP.
 
@@ -2136,22 +2136,15 @@ def test_stop_gcp_spot():
 
 
 # ---------- Testing managed job ----------
-@pytest.mark.no_fluidstack  # FluidStack does not support spot instances
-@pytest.mark.no_azure  # Azure does not support spot instances
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
-@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
-@pytest.mark.no_scp  # SCP does not support spot instances
-@pytest.mark.no_paperspace  # Papperspace does not support spot instances
-@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_jobs
-def test_spot(generic_cloud: str):
-    """Test the spot yaml."""
+def test_managed_jobs(generic_cloud: str):
+    """Test the managed jobs yaml."""
     name = _get_cluster_name()
     test = Test(
-        'managed-spot',
+        'managed-jobs',
         [
-            f'sky job launch -n {name}-1 --cloud {generic_cloud} examples/managed_spot.yaml -y -d',
-            f'sky job launch -n {name}-2 --cloud {generic_cloud} examples/managed_spot.yaml -y -d',
+            f'sky jobs launch -n {name}-1 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
+            f'sky jobs launch -n {name}-2 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
             'sleep 5',
             f'{_JOB_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
             f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
@@ -2166,7 +2159,7 @@ def test_spot(generic_cloud: str):
         # canceling multiple job names is supported.
         (_JOB_CANCEL_WAIT.format(job_name=f'{name}-1') + '; ' +
          _JOB_CANCEL_WAIT.format(job_name=f'{name}-2')),
-        # Increase timeout since sky job queue -r can be blocked by other spot tests.
+        # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2186,7 +2179,7 @@ def test_job_pipeline(generic_cloud: str):
     test = Test(
         'spot-pipeline',
         [
-            f'sky job launch -n {name} tests/test_yamls/pipeline.yaml -y -d',
+            f'sky jobs launch -n {name} tests/test_yamls/pipeline.yaml -y -d',
             'sleep 5',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING\|RUNNING"',
             # `grep -A 4 {name}` finds the job with {name} and the 4 lines
@@ -2208,7 +2201,7 @@ def test_job_pipeline(generic_cloud: str):
             f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=f'{name}'),
-        # Increase timeout since sky job queue -r can be blocked by other spot tests.
+        # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=30 * 60,
     )
     run_one_test(test)
@@ -2222,19 +2215,19 @@ def test_job_pipeline(generic_cloud: str):
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_jobs
-def test_spot_failed_setup(generic_cloud: str):
+def test_managed_jobs_failed_setup(generic_cloud: str):
     """Test managed job with failed setup."""
     name = _get_cluster_name()
     test = Test(
-        'spot_failed_setup',
+        'managed_jobs_failed_setup',
         [
-            f'sky job launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
+            f'sky jobs launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             'sleep 330',
             # Make sure the job failed quickly.
             f'{_JOB_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
-        # Increase timeout since sky job queue -r can be blocked by other spot tests.
+        # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2248,13 +2241,13 @@ def test_spot_failed_setup(generic_cloud: str):
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_jobs
-def test_spot_pipeline_failed_setup(generic_cloud: str):
+def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
     """Test managed job with failed setup for a pipeline."""
     name = _get_cluster_name()
     test = Test(
-        'spot_pipeline_failed_setup',
+        'managed_jobs_pipeline_failed_setup',
         [
-            f'sky job launch -n {name} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
+            f'sky jobs launch -n {name} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
             'sleep 600',
             # Make sure the job failed quickly.
             f'{_JOB_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
@@ -2268,7 +2261,7 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
             f'{_JOB_QUEUE_WAIT} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
-        # Increase timeout since sky job queue -r can be blocked by other spot tests.
+        # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=30 * 60,
     )
     run_one_test(test)
@@ -2279,19 +2272,19 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
 
 @pytest.mark.aws
 @pytest.mark.managed_jobs
-def test_spot_recovery_aws(aws_config_region):
+def test_managed_jobs_recovery_aws(aws_config_region):
     """Test managed job recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
-        'spot_recovery_aws',
+        'managed_jobs_recovery_aws',
         [
-            f'sky job launch --cloud aws --region {region} -n {name} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
+            f'sky jobs launch --cloud aws --region {region} --use-spot -n {name} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
             'sleep 360',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
@@ -2302,7 +2295,7 @@ def test_spot_recovery_aws(aws_config_region):
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
@@ -2312,7 +2305,7 @@ def test_spot_recovery_aws(aws_config_region):
 
 @pytest.mark.gcp
 @pytest.mark.managed_jobs
-def test_spot_recovery_gcp():
+def test_managed_jobs_recovery_gcp():
     """Test managed job recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
@@ -2326,19 +2319,19 @@ def test_spot_recovery_gcp():
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
-        'spot_recovery_gcp',
+        'managed_jobs_recovery_gcp',
         [
-            f'sky job launch --cloud gcp --zone {zone} -n {name} --cpus 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --cpus 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
             'sleep 360',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             terminate_cmd,
             'sleep 60',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
@@ -2348,7 +2341,7 @@ def test_spot_recovery_gcp():
 
 @pytest.mark.aws
 @pytest.mark.managed_jobs
-def test_spot_pipeline_recovery_aws(aws_config_region):
+def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
     """Test managed job recovery for a pipeline."""
     name = _get_cluster_name()
     user_hash = common_utils.get_user_hash()
@@ -2357,13 +2350,13 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
     if region != 'us-east-2':
         pytest.skip('Only run spot pipeline recovery test in us-east-2')
     test = Test(
-        'spot_pipeline_recovery_aws',
+        'managed_jobs_pipeline_recovery_aws',
         [
-            f'sky job launch -n {name} tests/test_yamls/pipeline_aws.yaml  -y -d',
+            f'sky jobs launch -n {name} tests/test_yamls/pipeline_aws.yaml  -y -d',
             'sleep 400',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
-            f'RUN_IDS=$(sky job logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
+            f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
             # Terminate the cluster manually.
             # The `cat ...| rev` is to retrieve the job_id from the
             # SKYPILOT_TASK_ID, which gets the second to last field
@@ -2382,8 +2375,8 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
-            f'RUN_IDS=$(sky job logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
+            f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
             f'diff /tmp/{name}-run-ids /tmp/{name}-run-ids-new',
             f'cat /tmp/{name}-run-ids | sed -n 2p | grep `cat /tmp/{name}-run-id`',
         ],
@@ -2395,7 +2388,7 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
 
 @pytest.mark.gcp
 @pytest.mark.managed_jobs
-def test_spot_pipeline_recovery_gcp():
+def test_managed_jobs_pipeline_recovery_gcp():
     """Test managed job recovery for a pipeline."""
     name = _get_cluster_name()
     zone = 'us-east4-b'
@@ -2407,13 +2400,13 @@ def test_spot_pipeline_recovery_gcp():
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
-        'spot_pipeline_recovery_gcp',
+        'managed_jobs_pipeline_recovery_gcp',
         [
-            f'sky job launch -n {name} tests/test_yamls/pipeline_gcp.yaml  -y -d',
+            f'sky jobs launch -n {name} tests/test_yamls/pipeline_gcp.yaml  -y -d',
             'sleep 400',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
-            f'RUN_IDS=$(sky job logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
+            f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
             # Terminate the cluster manually.
             # The `cat ...| rev` is to retrieve the job_id from the
             # SKYPILOT_TASK_ID, which gets the second to last field
@@ -2424,8 +2417,8 @@ def test_spot_pipeline_recovery_gcp():
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
-            f'RUN_IDS=$(sky job logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
+            f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
             f'diff /tmp/{name}-run-ids /tmp/{name}-run-ids-new',
             f'cat /tmp/{name}-run-ids | sed -n 2p | grep `cat /tmp/{name}-run-id`',
         ],
@@ -2443,13 +2436,13 @@ def test_spot_pipeline_recovery_gcp():
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_jobs
-def test_spot_recovery_default_resources(generic_cloud: str):
+def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     """Test managed job recovery for default resources."""
     name = _get_cluster_name()
     test = Test(
         'managed-spot-recovery-default-resources',
         [
-            f'sky job launch -n {name} --cloud {generic_cloud} "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
+            f'sky jobs launch -n {name} --cloud {generic_cloud} --use-spot "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
             'sleep 360',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
         ],
@@ -2461,19 +2454,19 @@ def test_spot_recovery_default_resources(generic_cloud: str):
 
 @pytest.mark.aws
 @pytest.mark.managed_jobs
-def test_spot_recovery_multi_node_aws(aws_config_region):
+def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
     """Test managed job recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
-        'spot_recovery_multi_node_aws',
+        'managed_jobs_recovery_multi_node_aws',
         [
-            f'sky job launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
+            f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
             'sleep 450',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
@@ -2485,7 +2478,7 @@ def test_spot_recovery_multi_node_aws(aws_config_region):
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 560',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
         timeout=30 * 60,
@@ -2495,7 +2488,7 @@ def test_spot_recovery_multi_node_aws(aws_config_region):
 
 @pytest.mark.gcp
 @pytest.mark.managed_jobs
-def test_spot_recovery_multi_node_gcp():
+def test_managed_jobs_recovery_multi_node_gcp():
     """Test managed job recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
@@ -2509,19 +2502,19 @@ def test_spot_recovery_multi_node_gcp():
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
-        'spot_recovery_multi_node_gcp',
+        'managed_jobs_recovery_multi_node_gcp',
         [
-            f'sky job launch --cloud gcp --zone {zone} -n {name} --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
             'sleep 400',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
             terminate_cmd,
             'sleep 50',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 420',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky job logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
         timeout=25 * 60,
@@ -2531,7 +2524,7 @@ def test_spot_recovery_multi_node_gcp():
 
 @pytest.mark.aws
 @pytest.mark.managed_jobs
-def test_spot_cancellation_aws(aws_config_region):
+def test_managed_jobs_cancellation_aws(aws_config_region):
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, jobs.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
@@ -2541,10 +2534,10 @@ def test_spot_cancellation_aws(aws_config_region):
         f'{name}-3', jobs.JOB_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
-        'spot_cancellation_aws',
+        'managed_jobs_cancellation_aws',
         [
             # Test cancellation during spot cluster being launched.
-            f'sky job launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
+            f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot "sleep 1000"  -y -d',
             'sleep 60',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
             _JOB_CANCEL_WAIT.format(job_name=name),
@@ -2558,7 +2551,7 @@ def test_spot_cancellation_aws(aws_config_region):
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancelling the spot cluster during spot job being setup.
-            f'sky job launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
+            f'sky jobs launch --cloud aws --region {region} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
             _JOB_CANCEL_WAIT.format(job_name=f'{name}-2'),
             'sleep 5',
@@ -2571,7 +2564,7 @@ def test_spot_cancellation_aws(aws_config_region):
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancellation during spot job is recovering.
-            f'sky job launch --cloud aws --region {region} -n {name}-3 "sleep 1000"  -y -d',
+            f'sky jobs launch --cloud aws --region {region} -n {name}-3 --use-spot "sleep 1000"  -y -d',
             'sleep 300',
             f'{_JOB_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
@@ -2601,7 +2594,7 @@ def test_spot_cancellation_aws(aws_config_region):
 
 @pytest.mark.gcp
 @pytest.mark.managed_jobs
-def test_spot_cancellation_gcp():
+def test_managed_jobs_cancellation_gcp():
     name = _get_cluster_name()
     name_3 = f'{name}-3'
     name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
@@ -2617,10 +2610,10 @@ def test_spot_cancellation_gcp():
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
-        'spot_cancellation_gcp',
+        'managed_jobs_cancellation_gcp',
         [
             # Test cancellation during spot cluster being launched.
-            f'sky job launch --cloud gcp --zone {zone} -n {name} "sleep 1000"  -y -d',
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot "sleep 1000"  -y -d',
             'sleep 60',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
             _JOB_CANCEL_WAIT.format(job_name=name),
@@ -2629,7 +2622,7 @@ def test_spot_cancellation_gcp():
             'sleep 120',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
             # Test cancelling the spot cluster during spot job being setup.
-            f'sky job launch --cloud gcp --zone {zone} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
             _JOB_CANCEL_WAIT.format(job_name=f'{name}-2'),
             'sleep 5',
@@ -2637,7 +2630,7 @@ def test_spot_cancellation_gcp():
             'sleep 120',
             f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
             # Test cancellation during spot job is recovering.
-            f'sky job launch --cloud gcp --zone {zone} -n {name}-3 "sleep 1000"  -y -d',
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name}-3 --use-spot "sleep 1000"  -y -d',
             'sleep 300',
             f'{_JOB_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
@@ -2667,11 +2660,11 @@ def test_spot_cancellation_gcp():
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_jobs
-def test_spot_storage(generic_cloud: str):
+def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
     name = _get_cluster_name()
     yaml_str = pathlib.Path(
-        'examples/managed_spot_with_storage.yaml').read_text()
+        'examples/managed_job_with_storage.yaml').read_text()
     storage_name = f'sky-test-{int(time.time())}'
 
     # Also perform region testing for bucket creation to validate if buckets are
@@ -2699,17 +2692,17 @@ def test_spot_storage(generic_cloud: str):
         f.flush()
         file_path = f.name
         test = Test(
-            'spot_storage',
+            'managed_jobs_storage',
             [
                 *storage_setup_commands,
-                f'sky job launch -n {name} --cloud {generic_cloud}{region_flag} {file_path} -y',
+                f'sky jobs launch -n {name} --use-spot --cloud {generic_cloud}{region_flag} {file_path} -y',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 'sleep 60',  # Wait the spot queue to be updated
                 f'{_JOB_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
             _JOB_CANCEL_WAIT.format(job_name=name),
-            # Increase timeout since sky job queue -r can be blocked by other spot tests.
+            # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
             timeout=20 * 60,
         )
         run_one_test(test)
@@ -2719,46 +2712,39 @@ def test_spot_storage(generic_cloud: str):
 @pytest.mark.gcp
 @pytest.mark.managed_jobs
 @pytest.mark.tpu
-def test_spot_tpu():
+def test_managed_jobs_tpu():
     """Test managed job on TPU."""
     name = _get_cluster_name()
     test = Test(
         'test-spot-tpu',
         [
-            f'sky job launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
+            f'sky jobs launch -n {name} --use-spot examples/tpu/tpuvm_mnist.yaml -y -d',
             'sleep 5',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep STARTING',
             'sleep 900',  # TPU takes a while to launch
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
-        # Increase timeout since sky job queue -r can be blocked by other spot tests.
+        # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
     run_one_test(test)
 
 
-# ---------- Testing env for spot ----------
-@pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
-@pytest.mark.no_azure  # Azure does not support spot instances
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
-@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
-@pytest.mark.no_scp  # SCP does not support spot instances
-@pytest.mark.no_paperspace  # Paperspace does not support spot instances
-@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
+# ---------- Testing env for managed jobs ----------
 @pytest.mark.managed_jobs
-def test_spot_inline_env(generic_cloud: str):
-    """Test spot env"""
+def test_managed_jobs_inline_env(generic_cloud: str):
+    """Test managed jobs env"""
     name = _get_cluster_name()
     test = Test(
-        'test-spot-inline-env',
+        'test-managed-jobs-inline-env',
         [
-            f'sky job launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             'sleep 20',
             f'{_JOB_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
         ],
         _JOB_CANCEL_WAIT.format(job_name=name),
-        # Increase timeout since sky job queue -r can be blocked by other spot tests.
+        # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -4570,7 +4556,7 @@ class TestStorageWithCredentials:
     ])
     def test_aws_regions(self, tmp_local_storage_obj, region):
         # This tests creation and upload to bucket in all AWS s3 regions
-        # To test full functionality, use test_spot_storage above.
+        # To test full functionality, use test_managed_jobs_storage above.
         store_type = storage_lib.StoreType.S3
         tmp_local_storage_obj.add_store(store_type, region=region)
         bucket_name = tmp_local_storage_obj.name
@@ -4608,7 +4594,7 @@ class TestStorageWithCredentials:
     ])
     def test_gcs_regions(self, tmp_local_storage_obj, region):
         # This tests creation and upload to bucket in all GCS regions
-        # To test full functionality, use test_spot_storage above.
+        # To test full functionality, use test_managed_jobs_storage above.
         store_type = storage_lib.StoreType.GCS
         tmp_local_storage_obj.add_store(store_type, region=region)
         bucket_name = tmp_local_storage_obj.name
@@ -4637,7 +4623,7 @@ class TestYamlSpecs:
     #  We should not use `examples/storage_demo.yaml` here, since it requires
     #  users to ensure bucket names to not exist and/or be unique.
     _TEST_YAML_PATHS = [
-        'examples/minimal.yaml', 'examples/managed_spot.yaml',
+        'examples/minimal.yaml', 'examples/managed_job.yaml',
         'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
         'examples/multi_hostname.yaml'
     ]
