@@ -83,7 +83,7 @@ def _get_single_resources_schema():
                 'type': 'boolean',
             },
             # Deprecated: use 'job_recovery' instead. This is for backward
-            # compatibility, and can be removed in 0.7.0.
+            # compatibility, and can be removed in 0.8.0.
             'spot_recovery': {
                 'type': 'string',
             },
