@@ -255,14 +255,12 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
             LEGACY_SIGNAL_FILE_PREFIX.format(job_id))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
-        # TODO(mraheja): remove pylint disabling when filelock version updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(str(signal_file) + '.lock'):
             with signal_file.open('w', encoding='utf-8') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
             # Backward compatibility for managed jobs launched before #3419. It
-            # can be removed in the future 0.7.0 release.
+            # can be removed in the future 0.8.0 release.
             shutil.copy(str(signal_file), str(legacy_signal_file))
         cancelled_job_ids.append(job_id)
 
