@@ -2231,7 +2231,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if (self.launched_resources.cloud.PROVISIONER_VERSION >=
                 clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
-            config = common_utils.read_yaml(self.cluster_yaml)
+            config = {}
+            if os.path.exists(self.cluster_yaml):
+                # It is possible that the cluster yaml is not available when
+                # the handle is unpickled for service replicas from the
+                # controller with older version.
+                config = common_utils.read_yaml(self.cluster_yaml)
             try:
                 cluster_info = provision_lib.get_cluster_info(
                     provider_name,
