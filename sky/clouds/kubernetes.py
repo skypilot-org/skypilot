@@ -363,13 +363,19 @@ class Kubernetes(clouds.Cloud):
 
         # Check if requested instance type will fit in the cluster.
         # TODO(romilb): This will fail early for autoscaling clusters.
-        fits, reason = kubernetes_utils.check_instance_fits(
-            chosen_instance_type)
-        if not fits:
-            logger.debug(f'Instance type {chosen_instance_type} does '
-                         'not fit in the Kubernetes cluster. '
-                         f'Reason: {reason}')
-            return [], []
+        # TODO(romilb): We disable the check to support scale-to-0 autoscaling
+        #  clusters. Note that this will cause the pod to be stuck in pending
+        #  state and eventually timeout if the instance type does not fit. We
+        #  should have autoscaler detection in the future and possibly a way to
+        #  detect if the instance type fits in the nodepools before
+        #  provisioning.
+        # fits, reason = kubernetes_utils.check_instance_fits(
+        #     chosen_instance_type)
+        # if not fits:
+        #     logger.debug(f'Instance type {chosen_instance_type} does '
+        #                  'not fit in the Kubernetes cluster. '
+        #                  f'Reason: {reason}')
+        #     return [], []
 
         # No fuzzy lists for Kubernetes
         return _make([chosen_instance_type]), []

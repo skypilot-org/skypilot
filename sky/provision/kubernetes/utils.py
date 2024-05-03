@@ -353,6 +353,12 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
     #  For AS clusters, we may need a way for users to specify GPU node pools
     #  to use since the cluster may be scaling up from zero nodes and may not
     #  have any GPU nodes yet.
+    # FIXME(romilb): This is a temporary fix to avoid early failure for AS
+    #  nodes. We need to find a way to detect GPU labels on AS nodes.
+    #  Currently forcing use of GKELabelFormatter.
+    logger.info('Using GKELabelFormatter for autoscaling cluster.')
+    return (GKELabelFormatter.get_label_key(),
+            GKELabelFormatter.get_label_value(acc_type))
     has_gpus, cluster_resources = detect_gpu_resource()
     if has_gpus:
         # Check if the cluster has GPU labels setup correctly
