@@ -52,7 +52,7 @@ We can launch it with the following:
 
 .. code-block:: console
 
-  $ sky job launch -n bert-qa bert_qa.yaml
+  $ sky jobs launch -n bert-qa bert_qa.yaml
 
 
 .. code-block:: yaml
@@ -158,7 +158,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
   setup: |
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
-    # to pass the key in the command line, during `sky job launch`.
+    # to pass the key in the command line, during `sky jobs launch`.
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
     pip install -e .
@@ -206,7 +206,7 @@ cost savings from spot instances without worrying about preemption or losing pro
 
 .. code-block:: console
 
-  $ sky job launch -n bert-qa bert_qa.yaml
+  $ sky jobs launch -n bert-qa bert_qa.yaml
 
 .. tip::
 
@@ -228,7 +228,7 @@ Real-World Examples
 Using On-Demand Instances
 --------------------------------
 
-The same ``sky job launch`` and YAML interfaces can run jobs on auto-recovering
+The same ``sky jobs launch`` and YAML interfaces can run jobs on auto-recovering
 on-demand instances. This is useful to have SkyPilot monitor any underlying
 machine failures and transparently recover the job.
 
@@ -236,11 +236,11 @@ To do so, simply set :code:`use_spot: false` in the :code:`resources` section, o
 
 .. code-block:: console
 
-  $ sky job launch -n bert-qa bert_qa.yaml --use-spot false
+  $ sky jobs launch -n bert-qa bert_qa.yaml --use-spot false
 
 .. tip::
 
-  It is useful to think of ``sky job launch`` as a "serverless" managed job
+  It is useful to think of ``sky jobs launch`` as a "serverless" managed job
   interface, while ``sky launch`` is a cluster interface (that you can launch
   tasks on, albeit not managed).
 
@@ -269,13 +269,13 @@ paper, may be supported in the future.
 Useful CLIs
 -----------
 
-Here are some commands for managed jobs. Check :code:`sky job --help` and :ref:`CLI reference <cli>` for more details.
+Here are some commands for managed jobs. Check :code:`sky jobs --help` and :ref:`CLI reference <cli>` for more details.
 
 See all managed jobs:
 
 .. code-block:: console
 
-  $ sky job queue
+  $ sky jobs queue
 
 .. code-block:: console
 
@@ -289,19 +289,19 @@ Stream the logs of a running managed job:
 
 .. code-block:: console
 
-  $ sky job logs -n bert-qa  # by name
-  $ sky job logs 2           # by job ID
+  $ sky jobs logs -n bert-qa  # by name
+  $ sky jobs logs 2           # by job ID
 
 Cancel a managed job:
 
 .. code-block:: console
 
-  $ sky job cancel -n bert-qa  # by name
-  $ sky job cancel 2           # by job ID
+  $ sky jobs cancel -n bert-qa  # by name
+  $ sky jobs cancel 2           # by job ID
 
 .. note::
-  If any failure happens for a managed job, you can check :code:`sky job queue -a` for the brief reason
-  of the failure. For more details, it would be helpful to check :code:`sky job logs --controller <job_id>`.
+  If any failure happens for a managed job, you can check :code:`sky jobs queue -a` for the brief reason
+  of the failure. For more details, it would be helpful to check :code:`sky jobs logs --controller <job_id>`.
 
 
 .. _pipeline:
@@ -315,7 +315,7 @@ This is useful for running a sequence of tasks that depend on each other, e.g., 
 Different tasks can have different resource requirements to use appropriate per-task resources, which saves costs, while  keeping the burden of managing the tasks off the user.
 
 .. note::
-  In other words, a managed job is either a single task or a pipeline of tasks. All managed jobs are submitted by :code:`sky job launch`.
+  In other words, a managed job is either a single task or a pipeline of tasks. All managed jobs are submitted by :code:`sky jobs launch`.
 
 To run a pipeline, specify the sequence of tasks in a YAML file. Here is an example:
 
@@ -372,12 +372,12 @@ second task has name :code:`eval`. The tasks are separated by a line with three
 dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and
 :code:`run` sections. Tasks are executed sequentially.
 
-To submit the pipeline, the same command :code:`sky job launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky job queue` or :code:`sky job dashboard`.
+To submit the pipeline, the same command :code:`sky jobs launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky jobs queue` or :code:`sky jobs dashboard`.
 
 .. code-block:: console
 
-  $ sky job launch -n pipeline pipeline.yaml
-  $ sky job queue
+  $ sky jobs launch -n pipeline pipeline.yaml
+  $ sky jobs queue
   Fetching managed job statuses...
   Managed jobs
   In progress jobs: 1 RECOVERING
@@ -397,17 +397,17 @@ To submit the pipeline, the same command :code:`sky job launch` is used. The pip
 Dashboard
 ---------
 
-Use ``sky job dashboard`` to open a dashboard to see all jobs:
+Use ``sky jobs dashboard`` to open a dashboard to see all jobs:
 
 .. code-block:: console
 
-  $ sky job dashboard
+  $ sky jobs dashboard
 
 This automatically opens a browser tab to show the dashboard:
 
 .. image:: ../images/job-dashboard.png
 
-The UI shows the same information as the CLI ``sky job queue -a``. The UI is
+The UI shows the same information as the CLI ``sky jobs queue -a``. The UI is
 especially useful when there are many in-progress jobs to monitor, which the
 terminal-based CLI may need more than one page to display.
 
