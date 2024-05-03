@@ -178,11 +178,21 @@ class GKELabelFormatter(GPULabelFormatter):
                 f'Invalid accelerator name in GKE cluster: {value}')
 
 
+class KarpenterLabelFormatter(SkyPilotLabelFormatter):
+    """Karpeneter label formatter
+
+    Karpenter uses the label `karpenter.k8s.aws/instance-gpu-name` to identify
+    the GPU type. Details: https://karpenter.sh/docs/reference/instance-types/
+
+    The naming scheme is same as the SkyPilot formatter, so we inherit from it.
+    """
+    LABEL_KEY = 'karpenter.k8s.aws/instance-gpu-name'
+
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats.
 LABEL_FORMATTER_REGISTRY = [
-    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter
+    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter, KarpenterLabelFormatter
 ]
 
 
