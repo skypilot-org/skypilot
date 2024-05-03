@@ -117,7 +117,7 @@ metadata:
 handler: nvidia
 EOF
 
-if [ ! "$SKY_SKIP_K8S_LABEL" -eq 1 ]
+if [ ! "$SKY_SKIP_K8S_LABEL" == "1" ]
 then
     # Label nodes with GPUs
     echo "Labelling nodes with GPUs..."
