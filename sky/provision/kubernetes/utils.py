@@ -174,10 +174,9 @@ class GFDLabelFormatter(GPULabelFormatter):
             'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4',
             'V100', 'A10', 'P100', 'P40', 'P4', 'L4'
         ]
-
         for canonical_name in canonical_gpu_names:
             # A100-80G accelerator is A100-SXM-80GB or A100-PCIE-80GB
-            if canonical_name == 'A100-80GB' and re.match(
+            if canonical_name == 'A100-80GB' and re.search(
                     r'A100.*-80GB', value):
                 return canonical_name
             elif canonical_name in value:
@@ -413,8 +412,6 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                     if (label == k8s_acc_label_key and
                             label_formatter.get_accelerator_from_label_value(
                                 value) == acc_type):
-                        # If a node is found, we can break out of the loop
-                        # and proceed to deploy.
                         return label, value
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
