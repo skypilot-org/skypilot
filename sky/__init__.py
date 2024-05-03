@@ -103,7 +103,7 @@ from sky.data import StoreType
 from sky.execution import exec  # pylint: disable=redefined-builtin
 from sky.execution import launch
 # TODO (zhwu): These imports are for backward compatibility, and spot APIs
-# should be called with `sky.spot.xxx` instead. Remove in release 0.7.0
+# should be called with `sky.spot.xxx` instead. Remove in release 0.8.0
 from sky.jobs.core import spot_cancel
 from sky.jobs.core import spot_launch
 from sky.jobs.core import spot_queue

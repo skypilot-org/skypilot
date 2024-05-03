@@ -203,16 +203,16 @@ def _get_cloud_dependencies_installation_commands(
             # no need to install any cloud dependencies for lambda, scp,
             # fluidstack and paperspace
             continue
-        if cloud.is_same_cloud(clouds.AWS()):
+        if isinstance(cloud, clouds.AWS):
             commands.append(f'echo -n "{prefix_str}AWS{empty_str}" && ' +
                             aws_dependencies_installation)
-        elif cloud.is_same_cloud(clouds.Azure()):
+        elif isinstance(cloud, clouds.Azure):
             commands.append(
                 f'echo -en "\\r{prefix_str}Azure{empty_str}" && '
                 'pip list | grep azure-cli > /dev/null 2>&1 || '
                 'pip install "azure-cli>=2.31.0" azure-core '
                 '"azure-identity>=1.13.0" azure-mgmt-network > /dev/null 2>&1')
-        elif cloud.is_same_cloud(clouds.GCP()):
+        elif isinstance(cloud, clouds.GCP):
             commands.append(
                 f'echo -en "\\r{prefix_str}GCP{empty_str}" && '
                 'pip list | grep google-api-python-client > /dev/null 2>&1 || '
@@ -226,13 +226,13 @@ def _get_cloud_dependencies_installation_commands(
                 'pip install google-cloud-storage > /dev/null 2>&1')
             commands.append(f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
         if controller == Controllers.JOB_CONTROLLER:
-            if cloud.is_same_cloud(clouds.IBM()):
+            if isinstance(cloud, clouds.IBM):
                 commands.append(
                     f'echo -en "\\r{prefix_str}IBM{empty_str}" '
                     '&& pip list | grep ibm-cloud-sdk-core > /dev/null 2>&1 || '
                     'pip install ibm-cloud-sdk-core ibm-vpc '
                     'ibm-platform-services ibm-cos-sdk > /dev/null 2>&1')
-            elif cloud.is_same_cloud(clouds.OCI()):
+            elif isinstance(cloud, clouds.OCI):
                 commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
                                 'pip list | grep oci > /dev/null 2>&1 || '
                                 'pip install oci > /dev/null 2>&1')
@@ -246,7 +246,7 @@ def _get_cloud_dependencies_installation_commands(
                     f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
                     'pip list | grep runpod > /dev/null 2>&1 || '
                     'pip install "runpod>=1.5.1" > /dev/null 2>&1')
-            elif cloud.is_same_cloud(clouds.Cudo()):
+            elif isinstance(cloud, clouds.Cudo):
                 # cudo doesn't support open port
                 commands.append(
                     f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
