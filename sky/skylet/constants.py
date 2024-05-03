@@ -66,7 +66,7 @@ SKYLET_VERSION = '8'
 SKYLET_LIB_VERSION = 1
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
-# `sky job dashboard`-related
+# `sky jobs dashboard`-related
 #
 # Port on the remote job controller that the dashboard is running on.
 SPOT_DASHBOARD_REMOTE_PORT = 5000
@@ -187,7 +187,7 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
-# Due to the CPU/memory usage of the controller process launched with sky job (
+# Due to the CPU/memory usage of the controller process launched with sky jobs (
 # use ray job under the hood), we need to reserve some CPU/memory for each job/
 # serve controller process.
 # Spot: A default controller with 8 vCPU and 32 GB memory can manage up to 32

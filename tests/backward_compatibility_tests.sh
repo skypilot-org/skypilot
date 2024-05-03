@@ -170,24 +170,24 @@ sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "
 sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 300"
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
-s=$(sky job queue | grep ${MANAGED_JOB_JOB_NAME}-7 | grep "RUNNING" | wc -l)
-s=$(sky job logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-1)
+s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7 | grep "RUNNING" | wc -l)
+s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-1)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
-sky job launch -d --cloud ${CLOUD} -y -n ${MANAGED_JOB_JOB_NAME}-7-2 "echo hi; sleep 40"
-s=$(sky job logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-2)
+sky jobs launch -d --cloud ${CLOUD} -y -n ${MANAGED_JOB_JOB_NAME}-7-2 "echo hi; sleep 40"
+s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-2)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
-s=$(sky job queue | grep ${MANAGED_JOB_JOB_NAME}-7)
+s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
 echo "$s"
 echo "$s" | grep "RUNNING" | wc -l | grep 3 || exit 1
-sky job cancel -y -n ${MANAGED_JOB_JOB_NAME}-7-0
-sky job logs -n "${MANAGED_JOB_JOB_NAME}-7-1"
-s=$(sky job queue | grep ${MANAGED_JOB_JOB_NAME}-7)
+sky jobs cancel -y -n ${MANAGED_JOB_JOB_NAME}-7-0
+sky jobs logs -n "${MANAGED_JOB_JOB_NAME}-7-1"
+s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
 echo "$s"
 echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
 echo "$s" | grep "CANCELLED" | wc -l | grep 1 || exit 1
 fi
 
 sky down ${CLUSTER_NAME}* -y
-sky job cancel -n ${MANAGED_JOB_JOB_NAME}* -y
+sky jobs cancel -n ${MANAGED_JOB_JOB_NAME}* -y

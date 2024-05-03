@@ -63,11 +63,11 @@ def _default_ec2_resource(region: str) -> Any:
         # For backward compatibility, reload the module if the aws module was
         # imported before and stale. Used for, e.g., a live job controller
         # running an older version and a new version gets installed by
-        # `sky job launch`.
+        # `sky jobs launch`.
         #
         # Detailed explanation follows. Assume we're in this situation: an old
         # job controller running a managed job and then the code gets updated on
-        # the controller due to a new `sky job launch or `sky start`.
+        # the controller due to a new `sky jobs launch or `sky start`.
         #
         # First, controller consists of an outer process (sky.jobs.controller's
         # main) and an inner process running the controller logic (started as a
@@ -80,7 +80,7 @@ def _default_ec2_resource(region: str) -> Any:
         # loaded {old sky.adaptors.aws}.
         #
         # In controller.py's start(), the inner process may exit due to managed
-        # job exits or `sky job cancel`, entering outer process'
+        # job exits or `sky jobs cancel`, entering outer process'
         # `finally: ... _cleanup()` path. Inside _cleanup(), we eventually call
         # into `sky.provision.aws` which loads this module for the first time
         # for the outer process. At this point, outer process has loaded

@@ -65,7 +65,7 @@ _JOB_CANCELLED_MESSAGE = (
 
 # The maximum time to wait for the managed job status to transition to terminal
 # state, after the job finished. This is a safeguard to avoid the case where
-# the managed job status fails to be updated and keep the `sky job logs`
+# the managed job status fails to be updated and keep the `sky jobs logs`
 # blocking for a long time.
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 20
 
@@ -151,7 +151,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
                 FAILED_CONTROLLER,
                 failure_reason=
                 'Controller process has exited abnormally. For more details,'
-                f' run: sky job logs --controller {job_id_}')
+                f' run: sky jobs logs --controller {job_id_}')
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,

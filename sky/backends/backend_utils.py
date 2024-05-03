@@ -2335,7 +2335,7 @@ def is_controller_accessible(
     elif (controller_status == status_lib.ClusterStatus.INIT or
           need_connection_check):
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
-        # status, both of which can happen when controller's status lock is held by another `sky job launch` or
+        # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
         # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
         # we can allow access to the controller.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
@@ -2545,7 +2545,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
         optionally accelerator demands.
     """
     # TODO: Custom CPU and other memory resources are not supported yet.
-    # For sky job/serve controller task, we set the CPU resource to a smaller
+    # For sky jobs/serve controller task, we set the CPU resource to a smaller
     # value to support a larger number of managed jobs and services.
     resources_dict = {
         'CPU': (constants.CONTROLLER_PROCESS_CPU_DEMAND

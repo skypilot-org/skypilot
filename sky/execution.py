@@ -164,7 +164,7 @@ def _execute(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 'Job recovery is specified in the task. To launch a '
-                'managed job, please use: sky job launch')
+                'managed job, please use: sky jobs launch')
 
     cluster_exists = False
     if cluster_name is not None:
@@ -237,7 +237,7 @@ def _execute(
                 f'{yellow}Launching an unmanaged spot task, which does not '
                 f'automatically recover from preemptions.{reset}\n{yellow}To '
                 'get automatic recovery, use managed job instead: '
-                f'{reset}{bold}sky job launch{reset} {yellow}or{reset} '
+                f'{reset}{bold}sky jobs launch{reset} {yellow}or{reset} '
                 f'{bold}sky.jobs.launch(){reset}.')
 
         if Stage.OPTIMIZE in stages:

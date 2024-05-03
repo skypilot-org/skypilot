@@ -53,7 +53,7 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # do some log rotation.
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 
-# Due to the CPU/memory usage of the controller process launched with sky job (
+# Due to the CPU/memory usage of the controller process launched with sky jobs (
 # use ray job under the hood), we need to reserve some CPU/memory for each serve
 # controller process.
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16

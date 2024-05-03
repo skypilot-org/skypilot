@@ -98,10 +98,10 @@ class Controllers(enum.Enum):
         ],
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
-            f'{colorama.Style.BRIGHT}sky job queue{colorama.Style.RESET_ALL}'),
+            f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the job controller\'s jobs is not allowed.\nTo cancel '
-            f'managed jobs, use: {colorama.Style.BRIGHT}sky job cancel <managed'
+            f'managed jobs, use: {colorama.Style.BRIGHT}sky jobs cancel <managed'
             f' job IDs> [--all]{colorama.Style.RESET_ALL}'),
         _decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the job controller while '
@@ -115,7 +115,7 @@ class Controllers(enum.Enum):
         decline_down_for_dirty_controller_hint=(
             f'{colorama.Fore.RED}In-progress managed jobs found. To avoid '
             f'resource leakage, cancel all jobs first: {colorama.Style.BRIGHT}'
-            f'sky job cancel -a{colorama.Style.RESET_ALL}\n'),
+            f'sky jobs cancel -a{colorama.Style.RESET_ALL}\n'),
         _check_cluster_name_hint=('Cluster {cluster_name} is reserved for '
                                   'managed job controller.'),
         default_hint_if_non_existent='No in-progress managed jobs.',

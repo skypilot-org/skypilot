@@ -281,7 +281,7 @@ class JobController:
                             managed_job_state.ManagedJobStatus.FAILED_SETUP)
                     failure_reason = (
                         'To see the details, run: '
-                        f'sky job logs --controller {self._job_id}')
+                        f'sky jobs logs --controller {self._job_id}')
 
                     managed_job_state.set_failed(
                         self._job_id,
@@ -528,7 +528,7 @@ def start(job_id, dag_yaml, retry_until_up):
                 failure_type=managed_job_state.ManagedJobStatus.
                 FAILED_CONTROLLER,
                 failure_reason=('Unexpected error occurred. For details, '
-                                f'run: sky job logs --controller {job_id}'))
+                                f'run: sky jobs logs --controller {job_id}'))
 
 
 if __name__ == '__main__':

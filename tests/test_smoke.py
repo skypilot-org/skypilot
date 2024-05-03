@@ -2228,8 +2228,8 @@ def test_managed_jobs(generic_cloud: str):
     test = Test(
         'managed-jobs',
         [
-            f'sky jobs launch -n {name}-1 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
-            f'sky jobs launch -n {name}-2 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
+            f'sky jobs launch -n {name}-1 --cloud {generic_cloud} examples/managed_spot.yaml -y -d',
+            f'sky jobs launch -n {name}-2 --cloud {generic_cloud} examples/managed_spot.yaml -y -d',
             'sleep 5',
             f'{_JOB_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
             f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
@@ -4709,7 +4709,7 @@ class TestYamlSpecs:
     #  We should not use `examples/storage_demo.yaml` here, since it requires
     #  users to ensure bucket names to not exist and/or be unique.
     _TEST_YAML_PATHS = [
-        'examples/minimal.yaml', 'examples/managed_job.yaml',
+        'examples/minimal.yaml', 'examples/managed_spot.yaml',
         'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
         'examples/multi_hostname.yaml'
     ]

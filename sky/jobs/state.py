@@ -101,7 +101,7 @@ _CONN.commit()
 # total_job_duration = end_at - last_recovered_at + job_duration
 #
 # Column names to be used in the jobs dict returned to the caller,
-# e.g., via sky job queue. These may not correspond to actual
+# e.g., via sky jobs queue. These may not correspond to actual
 # column names in the DB and it corresponds to the combined view
 # by joining the spot and job_info tables.
 columns = [

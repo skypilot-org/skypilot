@@ -103,7 +103,7 @@ _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
 
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
-                              '`sky job launch`. `{command}` supports a '
+                              '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
 
 
@@ -1303,12 +1303,12 @@ def _get_managed_jobs(
         controller_status = e.cluster_status
         msg = str(e)
         if controller_status is None:
-            msg += (f' (See: {colorama.Style.BRIGHT}sky job -h'
+            msg += (f' (See: {colorama.Style.BRIGHT}sky jobs -h'
                     f'{colorama.Style.RESET_ALL})')
         elif (controller_status == status_lib.ClusterStatus.STOPPED and
               is_called_by_user):
             msg += (f' (See finished managed jobs: {colorama.Style.BRIGHT}'
-                    f'sky job queue --refresh{colorama.Style.RESET_ALL})')
+                    f'sky jobs queue --refresh{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
         msg = ''
         try:
@@ -1742,7 +1742,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     managed_jobs_future)
                 if managed_jobs_query_interrupted:
                     # Set to -1, so that the controller is not considered
-                    # down, and the hint for showing sky job queue
+                    # down, and the hint for showing sky jobs queue
                     # will still be shown.
                     num_in_progress_jobs = -1
                     msg = 'KeyboardInterrupt'
@@ -2607,7 +2607,7 @@ def _hint_or_raise_for_down_job_controller(controller_name: str):
            'job controller. Please be aware of the following:'
            f'{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the managed '
-           'jobs (output of `sky job queue`) will be lost.')
+           'jobs (output of `sky jobs queue`) will be lost.')
     click.echo(msg)
     if managed_jobs_:
         job_table = managed_jobs.format_job_table(managed_jobs_, show_all=False)
@@ -2741,7 +2741,7 @@ def _down_or_stop_clusters(
                     # TODO(zhwu): This hint or raise is not transactional, which
                     # means even if it passed the check with no in-progress spot
                     # or service and prompt the confirmation for termination,
-                    # a user could still do a `sky job launch` or a
+                    # a user could still do a `sky jobs launch` or a
                     # `sky serve up` before typing the delete, causing a leaked
                     # managed job or service. We should make this check atomic
                     # with the termination.
@@ -3304,9 +3304,9 @@ def jobs_launch(
     .. code-block:: bash
 
       # You can use normal task YAMLs.
-      sky job launch task.yaml
+      sky jobs launch task.yaml
 
-      sky job launch 'echo hello!'
+      sky jobs launch 'echo hello!'
     """
     env = _merge_env_vars(env_file, env)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
@@ -3434,11 +3434,11 @@ def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
       controller.
 
     If the job failed, either due to user code or resource unavailability, the
-    error log can be found with ``sky job logs --controller``, e.g.:
+    error log can be found with ``sky jobs logs --controller``, e.g.:
 
     .. code-block:: bash
 
-      sky job logs --controller job_id
+      sky jobs logs --controller job_id
 
     This also shows the logs for provisioning and any preemption and recovery
     attempts.
@@ -3447,7 +3447,7 @@ def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
 
     .. code-block:: bash
 
-      watch -n60 sky job queue
+      watch -n60 sky jobs queue
 
     """
     click.secho('Fetching managed job statuses...', fg='yellow')
@@ -3497,10 +3497,10 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     .. code-block:: bash
 
       # Cancel managed job with name 'my-job'
-      $ sky job cancel -n my-job
+      $ sky jobs cancel -n my-job
       \b
       # Cancel managed jobs with IDs 1, 2, 3
-      $ sky job cancel 1 2 3
+      $ sky jobs cancel 1 2 3
     """
     backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.JOB_CONTROLLER,
@@ -3626,7 +3626,7 @@ def jobs_dashboard(port: Optional[int]):
 
 
 # TODO(zhwu): Backward compatibility for the old `sky spot launch` command.
-# It is now renamed to `sky job launch` and the old command is deprecated.
+# It is now renamed to `sky jobs launch` and the old command is deprecated.
 # Remove in v0.8.0.
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
@@ -3644,17 +3644,6 @@ _add_command_alias(jobs, jobs_cancel, new_group=spot)
 _add_command_alias(jobs, jobs_dashboard, new_group=spot)
 
 
-@cli.group(cls=_NaturalOrderGroup, hidden=True)
-def job():
-    """Alias for Managed Jobs CLI."""
-    pass
-
-
-_add_command_alias(jobs, jobs_launch, new_group=job, with_warning=False)
-_add_command_alias(jobs, jobs_queue, new_group=job, with_warning=False)
-_add_command_alias(jobs, jobs_logs, new_group=job, with_warning=False)
-_add_command_alias(jobs, jobs_cancel, new_group=job, with_warning=False)
-_add_command_alias(jobs, jobs_dashboard, new_group=job, with_warning=False)
 
 
 @cli.group(cls=_NaturalOrderGroup)

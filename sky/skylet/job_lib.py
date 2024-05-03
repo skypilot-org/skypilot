@@ -1,4 +1,4 @@
-"""Sky job lib, backed by a sqlite database.
+"""Utilities for jobs on a remote cluster, backed by a sqlite database.
 
 This is a remote utility module that provides job queue functionality.
 """
