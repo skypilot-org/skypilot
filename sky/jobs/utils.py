@@ -2,7 +2,7 @@
 
 
 NOTE: whenever an API change is made in this file, we need to bump the
-job.constants.MANAGED_JOB_VERSION and handle the API change in the
+jobs.constants.MANAGED_JOB_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
 import collections
