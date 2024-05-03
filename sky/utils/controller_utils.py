@@ -101,8 +101,8 @@ class Controllers(enum.Enum):
             f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the job controller\'s jobs is not allowed.\nTo cancel '
-            f'managed jobs, use: {colorama.Style.BRIGHT}sky jobs cancel <managed'
-            f' job IDs> [--all]{colorama.Style.RESET_ALL}'),
+            f'managed jobs, use: {colorama.Style.BRIGHT}sky jobs cancel '
+            f'<managed job IDs> [--all]{colorama.Style.RESET_ALL}'),
         _decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the job controller while '
             'it is in INIT state is not supported (this means a job launch '

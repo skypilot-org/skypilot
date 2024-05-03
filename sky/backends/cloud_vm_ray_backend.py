@@ -3151,9 +3151,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             managed_job_code = managed_job_codegen.set_pending(
                 job_id, managed_job_dag)
             # Set the managed job to PENDING state to make sure that this
-            # managed job appears in the `sky jobs queue`, when there are already
-            # 2x vCPU controller processes running on the controller VM, e.g.,
-            # 16 controller processes running on a controller with 8 vCPUs.
+            # managed job appears in the `sky jobs queue`, when there are
+            # already 2x vCPU controller processes running on the controller VM,
+            # e.g., 16 controller processes running on a controller with 8
+            # vCPUs.
             # The managed job should be set to PENDING state *after* the
             # controller process job has been queued, as our skylet on spot
             # controller will set the managed job in FAILED state if the

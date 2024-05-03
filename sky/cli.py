@@ -3644,8 +3644,6 @@ _add_command_alias(jobs, jobs_cancel, new_group=spot)
 _add_command_alias(jobs, jobs_dashboard, new_group=spot)
 
 
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def serve():
     """SkyServe CLI (multi-region, multi-cloud serving)."""
