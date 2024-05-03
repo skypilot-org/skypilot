@@ -121,6 +121,8 @@ class SkyServeLoadBalancer:
                         try:
                             async for chunk in response.aiter_bytes():
                                 yield chunk
+                        except Exception as e:  # pylint: disable=broad-except
+                            yield f'Error: {str(e)}'
                         finally:
                             await response.aclose()
 
