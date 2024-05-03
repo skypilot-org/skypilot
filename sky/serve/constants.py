@@ -26,6 +26,12 @@ LB_CONTROLLER_SYNC_INTERVAL_SECONDS = 20
 # TODO(tian): Expose this option to users in yaml file.
 LB_MAX_RETRY = 3
 
+# The timeout in seconds for load balancer to wait for a response from replica.
+# Large LLMs like Llama2-70b is able to process the request within ~30 seconds.
+# We set the timeout to 120s to be safe.
+# TODO(tian): Expose this option to users in yaml file.
+LB_STREAM_TIMEOUT = 120
+
 # Interval in seconds to probe replica endpoint.
 ENDPOINT_PROBE_INTERVAL_SECONDS = 10
 

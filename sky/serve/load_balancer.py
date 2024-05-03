@@ -101,13 +101,21 @@ class SkyServeLoadBalancer:
                     response body.
                 """
                 async with httpx.AsyncClient() as client:
-                    async with client.stream(method,
-                                             path,
-                                             headers=headers,
-                                             content=body) as response:
+                    async with client.stream(
+                            method,
+                            path,
+                            headers=headers,
+                            content=body,
+                            timeout=constants.LB_STREAM_TIMEOUT) as response:
                         response.raise_for_status()
-                        # TODO(tian): Hacky. Investigate a way to not directly
-                        # yielding the response status code and headers.
+                        # Hacky. We need to construct the async client within
+                        # the async generator to avoid the client being closed
+                        # before the response is consumed. However, we still
+                        # need the response status code and headers to construct
+                        # the StreamingResponse, which is only available after
+                        # the client is constructed. We yield them first here.
+                        # TODO(tian): Investigate a way to not directly yielding
+                        # the response status code and headers.
                         yield response.status_code
                         yield dict(response.headers)
                         try:
