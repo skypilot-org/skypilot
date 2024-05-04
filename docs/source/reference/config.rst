@@ -18,7 +18,7 @@ Available fields and semantics:
   #
   # These take effects only when a managed job controller does not already exist.
   #
-  # Ref: https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html##customizing-job-controller-resources
+  # Ref: https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#customizing-job-controller-resources
   jobs:
     controller:
       resources:  # same spec as 'resources' in a task YAML
