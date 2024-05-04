@@ -412,48 +412,48 @@ especially useful when there are many in-progress jobs to monitor, which the
 terminal-based CLI may need more than one page to display.
 
 
-Concept: Job Controller
+Concept: Jobs Controller
 -----------------------
 
-The job controller is a small on-demand CPU VM running in the cloud that manages all jobs of a user.
+The jobs controller is a small on-demand CPU VM running in the cloud that manages all jobs of a user.
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
 
 You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
 
-While the cost of the job controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped),
+While the cost of the jobs controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped),
 you can still tear it down manually with
 :code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status`.
 
 .. note::
-  Tearing down the job controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
+  Tearing down the jobs controllerr loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
 
 Customizing Job Controller Resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You may want to customize the resources of the job controller for several reasons:
+You may want to customize the resources of the jobs controller for several reasons:
 
 #. Changing the maximum number of jobs that can be run concurrently, which is 2x the vCPUs of the controller. (Default: 16)
 #. Use a lower-cost controller (if you have a low number of concurrent managed jobs).
-#. Enforcing the job controller to run on a specific location. (Default: cheapest location)
-#. Changing the disk_size of the job controller to store more logs. (Default: 50GB)
+#. Enforcing the jobs controller to run on a specific location. (Default: cheapest location)
+#. Changing the disk_size of the jobs controller to store more logs. (Default: 50GB)
 
 To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
 
 .. code-block:: yaml
 
   jobs:
-    # NOTE: these settings only take effect for a new job controller, not if
+    # NOTE: these settings only take effect for a new jobs controller, not if
     # you have an existing one.
     controller:
       resources:
         # All configs below are optional.
-        # Specify the location of the job controller.
+        # Specify the location of the jobs controller.
         cloud: gcp
         region: us-central1
         # Specify the maximum number of managed jobs that can be run concurrently.
         cpus: 4+  # number of vCPUs, max concurrent jobs = 2 * cpus
-        # Specify the disk_size in GB of the job controller.
+        # Specify the disk_size in GB of the jobs controller.
         disk_size: 100
 
 The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
