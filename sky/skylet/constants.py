@@ -68,7 +68,7 @@ SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky jobs dashboard`-related
 #
-# Port on the remote job controller that the dashboard is running on.
+# Port on the remote jobs controller that the dashboard is running on.
 SPOT_DASHBOARD_REMOTE_PORT = 5000
 
 # Docker default options
@@ -160,7 +160,7 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
-# will be recognized as the same user (e.g., job controller or sky serve
+# will be recognized as the same user (e.g., jobs controller or sky serve
 # controller).
 USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
 
@@ -188,7 +188,7 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
 # Due to the CPU/memory usage of the controller process launched with sky jobs (
-# use ray job under the hood), we need to reserve some CPU/memory for each job/
+# use ray job under the hood), we need to reserve some CPU/memory for each jobs/
 # serve controller process.
 # Spot: A default controller with 8 vCPU and 32 GB memory can manage up to 32
 # managed jobs.

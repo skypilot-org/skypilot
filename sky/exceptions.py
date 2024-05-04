@@ -55,7 +55,7 @@ class ProvisionPrechecksError(Exception):
     """Raised when a managed job fails prechecks before provision.
 
     Developer note: For now this should only be used by managed
-    job code path (technically, this can/should be raised by the
+    jobs code path (technically, this can/should be raised by the
     lower-level sky.launch()). Please refer to the docstring of
     `jobs.recovery_strategy._launch` for more details about when
     the error will be raised.
@@ -72,7 +72,7 @@ class ProvisionPrechecksError(Exception):
 class ManagedJobReachedMaxRetriesError(Exception):
     """Raised when a managed job fails to be launched after maximum retries.
 
-    Developer note: For now this should only be used by managed job code
+    Developer note: For now this should only be used by managed jobs code
     path. Please refer to the docstring of `jobs.recovery_strategy._launch`
     for more details about when the error will be raised.
     """

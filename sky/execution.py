@@ -225,8 +225,8 @@ def _execute(
                                               task)
 
     if not cluster_exists:
-        # If spot is launched on serve or job controller, we don't need to print
-        # out the hint.
+        # If spot is launched on serve or jobs controller, we don't need to
+        # print out the hint.
         if (Stage.PROVISION in stages and task.use_spot and
                 not _is_launched_by_job_controller and
                 not _is_launched_by_sky_serve_controller):
@@ -318,7 +318,7 @@ def _execute(
         if controller is None and not _is_launched_by_sky_serve_controller:
             # UX: print live clusters to make users aware (to save costs).
             #
-            # Don't print if this job is launched by the job controller,
+            # Don't print if this job is launched by the jobs controller,
             # because managed jobs are serverless, there can be many of them,
             # and users tend to continuously monitor managed jobs using `sky
             # job queue`. Also don't print if this job is a skyserve controller

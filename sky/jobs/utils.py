@@ -248,7 +248,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
 
         update_managed_job_status(job_id)
 
-        # Send the signal to the job controller.
+        # Send the signal to the jobs controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
         legacy_signal_file = pathlib.Path(
             LEGACY_SIGNAL_FILE_PREFIX.format(job_id))

@@ -61,13 +61,13 @@ _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 def _default_ec2_resource(region: str) -> Any:
     if not hasattr(aws, 'version'):
         # For backward compatibility, reload the module if the aws module was
-        # imported before and stale. Used for, e.g., a live job controller
+        # imported before and stale. Used for, e.g., a live jobs controller
         # running an older version and a new version gets installed by
         # `sky jobs launch`.
         #
         # Detailed explanation follows. Assume we're in this situation: an old
-        # job controller running a managed job and then the code gets updated on
-        # the controller due to a new `sky jobs launch or `sky start`.
+        # jobs controller running a managed job and then the code gets updated
+        # on the controller due to a new `sky jobs launch or `sky start`.
         #
         # First, controller consists of an outer process (sky.jobs.controller's
         # main) and an inner process running the controller logic (started as a

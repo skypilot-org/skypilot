@@ -81,9 +81,9 @@ storage_setup_commands = [
     'touch ~/.ssh/id_rsa.pub'
 ]
 
-# Wait until the job controller is not in INIT state.
+# Wait until the jobs controller is not in INIT state.
 # This is a workaround for the issue that when multiple job tests
-# are running in parallel, the job controller may be in INIT and
+# are running in parallel, the jobs controller may be in INIT and
 # the job queue/cancel command will return staled table.
 _JOB_QUEUE_WAIT = ('s=$(sky jobs queue); '
                    'until ! echo "$s" | grep "jobs will not be shown until"; '
@@ -93,10 +93,10 @@ _JOB_QUEUE_WAIT = ('s=$(sky jobs queue); '
 _JOB_CANCEL_WAIT = (
     's=$(sky jobs cancel -y -n {job_name}); '
     'until ! echo "$s" | grep "Please wait for the controller to be ready."; '
-    'do echo "Waiting for the job controller '
+    'do echo "Waiting for the jobs controller '
     'to be ready"; sleep 5; s=$(sky jobs cancel -y -n {job_name}); '
     'done; echo "$s"; echo; echo; echo "$s"')
-# TODO(zhwu): make the job controller on GCP.
+# TODO(zhwu): make the jobs controller on GCP.
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 

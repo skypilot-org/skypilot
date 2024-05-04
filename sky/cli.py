@@ -1274,7 +1274,7 @@ def _get_managed_jobs(
     """Get the in-progress managed jobs.
 
     Args:
-        refresh: Query the latest statuses, restarting the job controller if
+        refresh: Query the latest statuses, restarting the jobs controller if
             stopped.
         skip_finished: Show only in-progress jobs.
         show_all: Show all information of each job (e.g., region, price).
@@ -1751,7 +1751,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
             click.echo(msg)
             if num_in_progress_jobs is not None:
-                # job controller is UP.
+                # jobs controller is UP.
                 job_info = ''
                 if num_in_progress_jobs > 0:
                     plural_and_verb = ' is'
@@ -2461,7 +2461,7 @@ def start(
     if not to_start:
         return
 
-    # Checks for controller clusters (job controller / sky serve controller).
+    # Checks for controller clusters (jobs controller / sky serve controller).
     controllers, normal_clusters = [], []
     for name in to_start:
         if controller_utils.Controllers.from_name(name) is not None:
@@ -2596,7 +2596,8 @@ def _hint_or_raise_for_down_job_controller(controller_name: str):
                         controller.value.
                         decline_down_when_failed_to_fetch_status_hint)
             if e.cluster_status is None:
-                click.echo('Managed job controller has already been torn down.')
+                click.echo(
+                    'Managed jobs controller has already been torn down.')
                 sys.exit(0)
             # At this point, the managed jobs are failed to be fetched due to
             # the controller being STOPPED or being firstly launched, i.e.,
@@ -2604,7 +2605,7 @@ def _hint_or_raise_for_down_job_controller(controller_name: str):
             managed_jobs_ = []
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
-           'job controller. Please be aware of the following:'
+           'jobs controller. Please be aware of the following:'
            f'{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the managed '
            'jobs (output of `sky jobs queue`) will be lost.')
@@ -2670,7 +2671,7 @@ def _down_or_stop_clusters(
         idle_minutes_to_autostop: Optional[int] = None) -> None:
     """Tears down or (auto-)stops a cluster (or all clusters).
 
-    Controllers (job controller and sky serve controller) can only be
+    Controllers (jobs controller and sky serve controller) can only be
     terminated if the cluster name is explicitly and uniquely specified (not
     via glob).
     """
@@ -3261,7 +3262,7 @@ def jobs():
         'future release.) Whether to retry provisioning infinitely until the '
         'cluster is up, if unavailability errors are encountered. This '  # pylint: disable=bad-docstring-quotes
         'applies to launching all managed jobs (both the initial and '
-        'any recovery attempts), not the job controller.'))
+        'any recovery attempts), not the jobs controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3387,7 +3388,8 @@ def jobs_launch(
     default=False,
     is_flag=True,
     required=False,
-    help='Query the latest statuses, restarting the job controller if stopped.')
+    help='Query the latest statuses, restarting the jobs controller if stopped.'
+)
 @click.option('--skip-finished',
               '-s',
               default=False,
@@ -3399,12 +3401,12 @@ def jobs_launch(
 def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed jobs.
 
-    Each managed job can have one of the following statuses:
+    Each managed jobs can have one of the following statuses:
 
-    - ``PENDING``: Job is waiting for a free slot on the job controller to be
+    - ``PENDING``: Job is waiting for a free slot on the jobs controller to be
       accepted.
 
-    - ``SUBMITTED``: Job is submitted to and accepted by the job controller.
+    - ``SUBMITTED``: Job is submitted to and accepted by the jobs controller.
 
     - ``STARTING``: Job is starting (provisioning a cluster for the job).
 
@@ -3582,10 +3584,10 @@ def jobs_dashboard(port: Optional[int]):
     # see if the controller is UP first, which is slow; (2) not have to run SSH
     # port forwarding first (we'd just launch a local dashboard which would make
     # REST API calls to the controller dashboard server).
-    click.secho('Checking if job controller is up...', fg='yellow')
+    click.secho('Checking if jobs controller is up...', fg='yellow')
     hint = (
-        'Dashboard is not available if job controller is not up. Run a managed '
-        'job first.')
+        'Dashboard is not available if jobs controller is not up. Run a '
+        'managed job first.')
     backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.JOB_CONTROLLER,
         stopped_message=hint,
@@ -3619,7 +3621,7 @@ def jobs_dashboard(port: Optional[int]):
             try:
                 os.killpg(os.getpgid(ssh_process.pid), signal.SIGTERM)
             except ProcessLookupError:
-                # This happens if job controller is auto-stopped.
+                # This happens if jobs controller is auto-stopped.
                 pass
         finally:
             click.echo('Exiting.')

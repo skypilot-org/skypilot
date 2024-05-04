@@ -159,7 +159,7 @@ sky logs ${CLUSTER_NAME}-6 2
 fi
 
 # Test managed jobs to make sure existing jobs and new job can run correctly,
-# after the job controller is updated.
+# after the jobs controller is updated.
 # Get a new uuid to avoid conflict with previous back-compat tests.
 uuid=$(uuidgen)
 MANAGED_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}

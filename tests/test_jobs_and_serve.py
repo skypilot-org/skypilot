@@ -185,7 +185,7 @@ class TestJobsOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.down, [jobs.JOB_CONTROLLER_NAME],
                                    input='n')
-        assert 'WARNING: Tearing down the managed job controller.' in result.output, (
+        assert 'WARNING: Tearing down the managed jobs controller.' in result.output, (
             result.exception, result.output, result.exc_info)
         assert isinstance(result.exception,
                           SystemExit), (result.exception, result.output)
@@ -195,7 +195,7 @@ class TestJobsOperations:
             mock_get_job_table_one_job)
         result = cli_runner.invoke(cli.down, [jobs.JOB_CONTROLLER_NAME],
                                    input='n')
-        assert 'WARNING: Tearing down the managed job controller.' in result.output, (
+        assert 'WARNING: Tearing down the managed jobs controller.' in result.output, (
             result.exception, result.output, result.exc_info)
         assert isinstance(result.exception, exceptions.NotSupportedError)
 
@@ -255,7 +255,7 @@ class TestJobsOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, [jobs.JOB_CONTROLLER_NAME, '-a'])
         assert result.exit_code == 1
-        assert 'Cancelling the job controller\'s jobs is not allowed.' in str(
+        assert 'Cancelling the jobs controllerr\'s jobs is not allowed.' in str(
             result.output)
 
     @pytest.mark.timeout(60)

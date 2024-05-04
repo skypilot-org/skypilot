@@ -392,7 +392,7 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
                                                  get_ended_time: bool) -> str:
     """Get the job submitted/ended timestamp.
 
-    This function should only be called by the job controller, which is ok to
+    This function should only be called by the jobs controller, which is ok to
     use `submitted_at` instead of `start_at`, because the managed job duration
     need to include both setup and running time and the job will not stay in
     PENDING state.

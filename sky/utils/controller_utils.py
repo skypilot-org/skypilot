@@ -91,7 +91,7 @@ class Controllers(enum.Enum):
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
     JOB_CONTROLLER = _ControllerSpec(
         controller_type='jobs',
-        name='managed job controller',
+        name='managed jobs controller',
         candidate_cluster_names=[
             managed_job_utils.JOB_CONTROLLER_NAME,
             managed_job_utils.LEGACY_JOB_CONTROLLER_NAME
@@ -100,15 +100,15 @@ class Controllers(enum.Enum):
             '* {job_info}To see all managed jobs: '
             f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
-            'Cancelling the job controller\'s jobs is not allowed.\nTo cancel '
+            'Cancelling the jobs controller\'s jobs is not allowed.\nTo cancel '
             f'managed jobs, use: {colorama.Style.BRIGHT}sky jobs cancel '
             f'<managed job IDs> [--all]{colorama.Style.RESET_ALL}'),
         _decline_down_when_failed_to_fetch_status_hint=(
-            f'{colorama.Fore.RED}Tearing down the job controller while '
+            f'{colorama.Fore.RED}Tearing down the jobs controller while '
             'it is in INIT state is not supported (this means a job launch '
             'is in progress or the previous launch failed), as we cannot '
             'guarantee that all the managed jobs are finished. Please wait '
-            'until the job controller is UP or fix it with '
+            'until the jobs controller is UP or fix it with '
             f'{colorama.Style.BRIGHT}sky start '
             '{cluster_name}'
             f'{colorama.Style.RESET_ALL}.'),
@@ -117,10 +117,10 @@ class Controllers(enum.Enum):
             f'resource leakage, cancel all jobs first: {colorama.Style.BRIGHT}'
             f'sky jobs cancel -a{colorama.Style.RESET_ALL}\n'),
         _check_cluster_name_hint=('Cluster {cluster_name} is reserved for '
-                                  'managed job controller.'),
+                                  'managed jobs controller.'),
         default_hint_if_non_existent='No in-progress managed jobs.',
         connection_error_hint=(
-            'Failed to connect to job controller, please try again later.'),
+            'Failed to connect to jobs controller, please try again later.'),
         default_resources_config=managed_job_constants.CONTROLLER_RESOURCES)
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
@@ -293,7 +293,7 @@ def download_and_stream_latest_job_log(
         local_dir: str) -> Optional[str]:
     """Downloads and streams the latest job log.
 
-    This function is only used by job controller and sky serve controller.
+    This function is only used by jobs controller and sky serve controller.
     """
     os.makedirs(local_dir, exist_ok=True)
     log_file = None
@@ -379,7 +379,7 @@ def get_controller_resources(
                 custom_controller_resources_config)
         elif controller == Controllers.JOB_CONTROLLER:
             # TODO(zhwu): Backward compatibility for the old config for managed
-            # job controller.
+            # jobs controller.
             controller_resources_config_copied.update(
                 skypilot_config.get_nested(('spot', 'controller', 'resources'),
                                            {}))
@@ -667,7 +667,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Step 4: Upload storage from sources
     # Upload the local source to a bucket. The task will not be executed
     # locally, so we need to upload the files/folders to the bucket manually
-    # here before sending the task to the remote job controller.
+    # here before sending the task to the remote jobs controller.
     if task.storage_mounts:
         # There may be existing (non-translated) storage mounts, so log this
         # whenever task.storage_mounts is non-empty.

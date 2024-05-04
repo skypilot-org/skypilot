@@ -44,7 +44,7 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
 
 
 class JobController:
-    """Each job controller manages the life cycle of one managed job."""
+    """Each jobs controller manages the life cycle of one managed job."""
 
     def __init__(self, job_id: int, dag_yaml: str,
                  retry_until_up: bool) -> None:

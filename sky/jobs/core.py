@@ -122,9 +122,9 @@ def launch(
 
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
-            f'Launching managed job {dag.name!r} from job controller...'
+            f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        sky_logging.print('Launching job controller...')
+        sky_logging.print('Launching jobs controller...')
         sky.launch(task=controller_task,
                    stream_logs=stream_logs,
                    cluster_name=controller_name,
@@ -158,7 +158,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
             }
         ]
     Raises:
-        sky.exceptions.ClusterNotUpError: the job controller is not up or
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up or
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
@@ -232,7 +232,7 @@ def cancel(name: Optional[str] = None,
     Please refer to sky.cli.job_cancel for documentation.
 
     Raises:
-        sky.exceptions.ClusterNotUpError: the job controller is not up.
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
     """
     job_ids = [] if job_ids is None else job_ids
@@ -287,14 +287,14 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
 
     Raises:
         ValueError: invalid arguments.
-        sky.exceptions.ClusterNotUpError: the job controller is not up.
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
-    # TODO(zhwu): Automatically restart the job controller
+    # TODO(zhwu): Automatically restart the jobs controller
     job_controller_type = controller_utils.Controllers.JOB_CONTROLLER
     handle = backend_utils.is_controller_accessible(
         controller=job_controller_type,
         stopped_message=(
-            'Please restart the job controller with '
+            'Please restart the jobs controller with '
             f'`sky start {job_controller_type.value.cluster_name}`.'))
 
     if name is not None and job_id is not None:

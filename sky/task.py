@@ -271,7 +271,7 @@ class Task:
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
 
-        # Only set when 'self' is a job controller task: 'self.managed_job_dag'
+        # Only set when 'self' is a jobs controller task: 'self.managed_job_dag'
         # is the underlying managed job dag (sky.Dag object).
         self.managed_job_dag: Optional['sky.Dag'] = None
 
@@ -1003,7 +1003,7 @@ class Task:
         return d
 
     def is_controller_task(self) -> bool:
-        """Returns whether this task is a job/serve controller process."""
+        """Returns whether this task is a jobs/serve controller process."""
         return self.managed_job_dag is not None or self.service_name is not None
 
     def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:

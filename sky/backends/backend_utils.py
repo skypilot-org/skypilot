@@ -2244,7 +2244,7 @@ def is_controller_accessible(
     non_existent_message: Optional[str] = None,
     exit_if_not_accessible: bool = False,
 ) -> 'backends.CloudVmRayResourceHandle':
-    """Check if the job/serve controller is up.
+    """Check if the jobs/serve controller is up.
 
     The controller is accessible when it is in UP or INIT state, and the ssh
     connection is successful.
@@ -2385,7 +2385,7 @@ def get_clusters(
     of the clusters.
 
     Args:
-        include_controller: Whether to include controllers, e.g. job controller
+        include_controller: Whether to include controllers, e.g. jobs controller
             or sky serve controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)

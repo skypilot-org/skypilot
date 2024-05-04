@@ -482,7 +482,7 @@ def _post_provision_setup(
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
-        # (1) job controllers need permission to launch/down nodes of
+        # (1) jobs controllers need permission to launch/down nodes of
         #     multiple clouds
         # (2) head instances need permission for auto stop or auto down
         #     nodes for the current cloud

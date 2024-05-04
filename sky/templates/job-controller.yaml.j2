@@ -1,4 +1,4 @@
-# The template for the job controller
+# The template for the jobs controller
 
 name: {{dag_name}}
 
@@ -15,7 +15,7 @@ setup: |
   {%- endfor %}
 
   {% if is_dev %}
-  # Internal: disable logging for manually logging into the job controller for debugging.
+  # Internal: disable logging for manually logging into the jobs controller for debugging.
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   {% endif %}
 
