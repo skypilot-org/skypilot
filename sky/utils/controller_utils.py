@@ -193,8 +193,8 @@ def _get_cloud_dependencies_installation_commands(
     # characters from the previous message.
     empty_str = ' ' * 5
     aws_dependencies_installation = (
-        'pip list | grep boto3 > /dev/null 2>&1 || botocore>=1.29.10 '
-        'boto3>=1.26.1; '
+        'pip list | grep boto3 > /dev/null 2>&1 || pip install '
+        'botocore>=1.29.10 boto3>=1.26.1; '
         # Need to separate the installation of awscli from above because some
         # other clouds will install boto3 but not awscli.
         'pip list | grep awscli> /dev/null 2>&1 || pip install "urllib3<2" '
