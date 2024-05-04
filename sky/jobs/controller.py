@@ -43,7 +43,7 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
     return dag, dag_name
 
 
-class JobController:
+class JobsController:
     """Each jobs controller manages the life cycle of one managed job."""
 
     def __init__(self, job_id: int, dag_yaml: str,
@@ -400,7 +400,7 @@ def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    job_controller = JobController(job_id, dag_yaml, retry_until_up)
+    job_controller = JobsController(job_id, dag_yaml, retry_until_up)
     job_controller.run()
 
 
@@ -444,7 +444,7 @@ def _cleanup(job_id: int, dag_yaml: str):
         task is executed at a time.
     """
     # NOTE: The code to get cluster name is same as what we did in the spot
-    # controller, we should keep it in sync with JobController.__init__()
+    # controller, we should keep it in sync with JobsController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
