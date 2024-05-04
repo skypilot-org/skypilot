@@ -378,8 +378,6 @@ def get_controller_resources(
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
         elif controller == Controllers.JOBS_CONTROLLER:
-            # TODO(zhwu): Backward compatibility for the old config for managed
-            # jobs controller.
             controller_resources_config_copied.update(
                 skypilot_config.get_nested(('spot', 'controller', 'resources'),
                                            {}))

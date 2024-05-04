@@ -288,7 +288,7 @@ class TestServeOperations:
 
     @pytest.mark.timeout(60)
     def test_down_serve_controller(self, _mock_cluster_state,
-                                  _mock_serve_controller, monkeypatch):
+                                   _mock_serve_controller, monkeypatch):
 
         def mock_get_services_no_service(
                 cls, handle, code, require_outputs, stream_logs,
