@@ -89,7 +89,7 @@ class Controllers(enum.Enum):
     """Skypilot controllers."""
     # NOTE(dev): Keep this align with
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
-    JOB_CONTROLLER = _ControllerSpec(
+    JOBS_CONTROLLER = _ControllerSpec(
         controller_type='jobs',
         name='managed jobs controller',
         candidate_cluster_names=[
@@ -228,7 +228,7 @@ def _get_cloud_dependencies_installation_commands(
                 'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
                 'pip install google-cloud-storage > /dev/null 2>&1')
             commands.append(f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
-        if controller == Controllers.JOB_CONTROLLER:
+        if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 commands.append(
                     f'echo -en "\\r{prefix_str}IBM{empty_str}" '
@@ -377,7 +377,7 @@ def get_controller_resources(
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
-        elif controller == Controllers.JOB_CONTROLLER:
+        elif controller == Controllers.JOBS_CONTROLLER:
             # TODO(zhwu): Backward compatibility for the old config for managed
             # jobs controller.
             controller_resources_config_copied.update(
@@ -541,7 +541,7 @@ def replace_skypilot_config_path_in_file_mounts(
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
-                                                  path: str):
+                                                  path: str) -> None:
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
     Eagerly syncing up local->Storage ensures Storage->VM would work at task

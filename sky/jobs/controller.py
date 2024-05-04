@@ -400,8 +400,8 @@ def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    job_controller = JobsController(job_id, dag_yaml, retry_until_up)
-    job_controller.run()
+    jobs_controller = JobsController(job_id, dag_yaml, retry_until_up)
+    jobs_controller.run()
 
 
 def _handle_signal(job_id):

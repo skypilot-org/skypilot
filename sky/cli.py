@@ -1317,7 +1317,7 @@ def _get_managed_jobs(
         try:
             # Check the controller status again, as the RuntimeError is likely
             # due to the controller being autostopped when querying the jobs.
-            controller_type = controller_utils.Controllers.JOB_CONTROLLER
+            controller_type = controller_utils.Controllers.JOBS_CONTROLLER
             record = backend_utils.refresh_cluster_record(
                 controller_type.value.cluster_name,
                 cluster_status_lock_timeout=0)
@@ -1325,6 +1325,9 @@ def _get_managed_jobs(
                     record['status'] == status_lib.ClusterStatus.STOPPED):
                 msg = controller_type.value.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
+            # This is to an best effort to find the latest controller status to
+            # print more helpful message, so we can ignore any exception to
+            # print the original error.
             pass
         if not msg:
             msg = (
@@ -1392,6 +1395,9 @@ def _get_services(service_names: Optional[List[str]],
                     record['status'] == status_lib.ClusterStatus.STOPPED):
                 msg = controller_type.value.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
+            # This is to an best effort to find the latest controller status to
+            # print more helpful message, so we can ignore any exception to
+            # print the original error.
             pass
         if not msg:
             msg = ('Failed to fetch service statuses due to connection issues. '
@@ -1770,7 +1776,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                             'ones shown)')
                     job_info += '. '
                 hints.append(
-                    controller_utils.Controllers.JOB_CONTROLLER.value.
+                    controller_utils.Controllers.JOBS_CONTROLLER.value.
                     in_progress_hint.format(job_info=job_info))
 
         if show_services:
@@ -2583,7 +2589,7 @@ def down(
                            purge=purge)
 
 
-def _hint_or_raise_for_down_job_controller(controller_name: str):
+def _hint_or_raise_for_down_jobs_controller(controller_name: str):
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
@@ -2658,8 +2664,8 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
 
 
 _CONTROLLER_TO_HINT_OR_RAISE = {
-    controller_utils.Controllers.JOB_CONTROLLER:
-        (_hint_or_raise_for_down_job_controller),
+    controller_utils.Controllers.JOBS_CONTROLLER:
+        (_hint_or_raise_for_down_jobs_controller),
     controller_utils.Controllers.SKY_SERVE_CONTROLLER:
         (_hint_or_raise_for_down_sky_serve_controller),
 }
@@ -3508,7 +3514,7 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       $ sky jobs cancel 1 2 3
     """
     backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOB_CONTROLLER,
+        controller=controller_utils.Controllers.JOBS_CONTROLLER,
         stopped_message='All managed jobs should have finished.',
         exit_if_not_accessible=True)
 
@@ -3560,7 +3566,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     try:
         if controller:
             core.tail_logs(
-                controller_utils.Controllers.JOB_CONTROLLER.value.cluster_name,
+                controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name,
                 job_id=job_id,
                 follow=follow)
         else:
@@ -3591,7 +3597,7 @@ def jobs_dashboard(port: Optional[int]):
     hint = ('Dashboard is not available if jobs controller is not up. Run a '
             'managed job first.')
     backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOB_CONTROLLER,
+        controller=controller_utils.Controllers.JOBS_CONTROLLER,
         stopped_message=hint,
         non_existent_message=hint,
         exit_if_not_accessible=True)
@@ -3604,7 +3610,7 @@ def jobs_dashboard(port: Optional[int]):
         free_port = port
     ssh_command = (
         f'ssh -qNL {free_port}:localhost:{remote_port} '
-        f'{controller_utils.Controllers.JOB_CONTROLLER.value.cluster_name}')
+        f'{controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name}')
     click.echo('Forwarding port: ', nl=False)
     click.secho(f'{ssh_command}', dim=True)
 

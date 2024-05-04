@@ -1,7 +1,7 @@
 """User interfaces with managed jobs.
 
 NOTE: whenever an API change is made in this file, we need to bump the
-jobs.constants.MANAGED_JOB_VERSION and handle the API change in the
+jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
 import collections
@@ -43,10 +43,10 @@ logger = sky_logging.init_logger(__name__)
 # Add user hash so that two users don't have the same controller VM on
 # shared-account clouds such as GCP.
 JOB_CONTROLLER_NAME: str = (
-    f'sky-job-controller-{common_utils.get_user_hash()}')
+    f'sky-jobs-controller-{common_utils.get_user_hash()}')
 LEGACY_JOB_CONTROLLER_NAME: str = (
     f'sky-spot-controller-{common_utils.get_user_hash()}')
-SIGNAL_FILE_PREFIX = '/tmp/sky_job_controller_signal_{}'
+SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 LEGACY_SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
@@ -183,7 +183,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         logger.info(f'=== START: event callback for {status!r} ===')
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                 'managed_job_event',
-                                f'job-callback-{job_id}-{task_id}.log')
+                                f'jobs-callback-{job_id}-{task_id}.log')
         result = run_bash_command_with_log(
             bash_command=event_callback,
             log_path=log_path,
@@ -216,7 +216,7 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     # the underlying sky.launch, hiding the `job_id` in the cluster name.
     cluster_name = common_utils.make_cluster_name_on_cloud(
         task_name,
-        managed_job_constants.JOB_CLUSTER_NAME_PREFIX_LENGTH,
+        managed_job_constants.JOBS_CLUSTER_NAME_PREFIX_LENGTH,
         add_user_hash=False)
     return f'{cluster_name}-{job_id}'
 
@@ -717,7 +717,7 @@ class ManagedJobCodeGen:
         managed_job_version = 0
         try:
             from sky.jobs import constants, state, utils
-            managed_job_version = constants.MANAGED_JOB_VERSION
+            managed_job_version = constants.MANAGED_JOBS_VERSION
         except ImportError:
             from sky.spot import spot_state as state, spot_utils as utils
         """)

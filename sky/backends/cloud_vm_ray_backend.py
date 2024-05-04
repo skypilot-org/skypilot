@@ -3184,7 +3184,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         try:
             if not detach_run:
                 if (handle.cluster_name in controller_utils.Controllers.
-                        JOB_CONTROLLER.value.candidate_cluster_names):
+                        JOBS_CONTROLLER.value.candidate_cluster_names):
                     self.tail_managed_job_logs(handle, job_id)
                 else:
                     # Sky logs. Not using subprocess.run since it will make the
@@ -3193,7 +3193,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         finally:
             name = handle.cluster_name
             controller = controller_utils.Controllers.from_name(name)
-            if controller == controller_utils.Controllers.JOB_CONTROLLER:
+            if controller == controller_utils.Controllers.JOBS_CONTROLLER:
                 logger.info(
                     f'{fore.CYAN}Managed Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'

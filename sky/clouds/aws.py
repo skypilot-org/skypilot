@@ -541,9 +541,9 @@ class AWS(clouds.Cloud):
         elif identity_type == AWSIdentityType.IAM_ROLE:
             # When using an IAM role, the credentials may not exist in the
             # ~/.aws/credentials file. So we don't check for the existence of the
-            # file. This will happen when the user is on a VM (or job-controller)
-            # created by an SSO account, i.e. the VM will be assigned the IAM
-            # role: skypilot-v1.
+            # file. This will happen when the user is on a VM (or
+            # jobs-controller) created by an SSO account, i.e. the VM will be
+            # assigned the IAM role: skypilot-v1.
             hints = f'AWS IAM role is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on

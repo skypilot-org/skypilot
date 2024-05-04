@@ -1,10 +1,10 @@
 """Managed jobs."""
 import pathlib
 
-from sky.jobs.constants import JOB_CLUSTER_NAME_PREFIX_LENGTH
-from sky.jobs.constants import JOB_CONTROLLER_TEMPLATE
-from sky.jobs.constants import JOB_CONTROLLER_YAML_PREFIX
-from sky.jobs.constants import JOB_TASK_YAML_PREFIX
+from sky.jobs.constants import JOBS_CLUSTER_NAME_PREFIX_LENGTH
+from sky.jobs.constants import JOBS_CONTROLLER_TEMPLATE
+from sky.jobs.constants import JOBS_CONTROLLER_YAML_PREFIX
+from sky.jobs.constants import JOBS_TASK_YAML_PREFIX
 from sky.jobs.core import cancel
 from sky.jobs.core import launch
 from sky.jobs.core import queue
@@ -18,16 +18,16 @@ from sky.jobs.utils import JOB_CONTROLLER_NAME
 from sky.jobs.utils import load_managed_job_queue
 from sky.jobs.utils import ManagedJobCodeGen
 
-pathlib.Path(JOB_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
-                                                             exist_ok=True)
+pathlib.Path(JOBS_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
+                                                              exist_ok=True)
 __all__ = [
     'RECOVERY_STRATEGIES',
     'DEFAULT_RECOVERY_STRATEGY',
     'JOB_CONTROLLER_NAME',
     # Constants
-    'JOB_CONTROLLER_TEMPLATE',
-    'JOB_CONTROLLER_YAML_PREFIX',
-    'JOB_TASK_YAML_PREFIX',
+    'JOBS_CONTROLLER_TEMPLATE',
+    'JOBS_CONTROLLER_YAML_PREFIX',
+    'JOBS_TASK_YAML_PREFIX',
     # Enums
     'ManagedJobStatus',
     # Core

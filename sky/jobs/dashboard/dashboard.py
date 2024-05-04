@@ -19,7 +19,7 @@ from sky.utils import controller_utils
 app = flask.Flask(__name__)
 
 
-def _is_running_on_job_controller() -> bool:
+def _is_running_on_jobs_controller() -> bool:
     """Am I running on jobs controller?
 
     Loads ~/.sky/sky_ray.yml and check cluster_name.
@@ -29,7 +29,7 @@ def _is_running_on_job_controller() -> bool:
             pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text())
         cluster_name = config.get('cluster_name', '')
         candidate_controller_names = (
-            controller_utils.Controllers.JOB_CONTROLLER.value.
+            controller_utils.Controllers.JOBS_CONTROLLER.value.
             candidate_cluster_names)
         # We use startswith instead of exact match because the cluster name in
         # the yaml file is cluster_name_on_cloud which may have additional
@@ -42,7 +42,7 @@ def _is_running_on_job_controller() -> bool:
 
 @app.route('/')
 def home():
-    if not _is_running_on_job_controller():
+    if not _is_running_on_jobs_controller():
         # Experimental: run on laptop (refresh is very slow).
         all_managed_jobs = managed_jobs.queue(refresh=True, skip_finished=False)
     else:

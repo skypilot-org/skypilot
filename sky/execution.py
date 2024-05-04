@@ -108,7 +108,7 @@ def _execute(
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
-    _is_launched_by_job_controller: bool = False,
+    _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
@@ -228,7 +228,7 @@ def _execute(
         # If spot is launched on serve or jobs controller, we don't need to
         # print out the hint.
         if (Stage.PROVISION in stages and task.use_spot and
-                not _is_launched_by_job_controller and
+                not _is_launched_by_jobs_controller and
                 not _is_launched_by_sky_serve_controller):
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
@@ -354,7 +354,7 @@ def launch(
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
-    _is_launched_by_job_controller: bool = False,
+    _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
@@ -464,7 +464,7 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
-        _is_launched_by_job_controller=_is_launched_by_job_controller,
+        _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
     )

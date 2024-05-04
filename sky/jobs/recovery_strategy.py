@@ -293,7 +293,7 @@ class StrategyExecutor:
                            cluster_name=self.cluster_name,
                            detach_setup=True,
                            detach_run=True,
-                           _is_launched_by_job_controller=True)
+                           _is_launched_by_jobs_controller=True)
                 logger.info('Managed job cluster launched.')
             except (exceptions.InvalidClusterNameError,
                     exceptions.NoCloudAccessError,

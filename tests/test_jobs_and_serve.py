@@ -95,11 +95,11 @@ def _mock_cluster_state(_mock_db_conn):
 
 
 @pytest.fixture
-def _mock_job_controller(_mock_db_conn):
+def _mock_jobs_controller(_mock_db_conn):
     handle = backends.CloudVmRayResourceHandle(
         cluster_name=jobs.JOB_CONTROLLER_NAME,
         cluster_name_on_cloud=jobs.JOB_CONTROLLER_NAME,
-        cluster_yaml='/tmp/job_controller.yaml',
+        cluster_yaml='/tmp/jobs_controller.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(sky.AWS(),
                                          instance_type='m4.2xlarge',
@@ -145,8 +145,8 @@ class TestJobsOperations:
     """Test operations for managed jobs."""
 
     @pytest.mark.timeout(60)
-    def test_down_job_controller(self, _mock_cluster_state,
-                                 _mock_job_controller, monkeypatch):
+    def test_down_jobs_controller(self, _mock_cluster_state,
+                                  _mock_jobs_controller, monkeypatch):
 
         def mock_get_job_table_no_job(cls, handle, code, require_outputs,
                                       stream_logs,
@@ -199,11 +199,11 @@ class TestJobsOperations:
             result.exception, result.output, result.exc_info)
         assert isinstance(result.exception, exceptions.NotSupportedError)
 
-        result = cli_runner.invoke(cli.down, ['sky-job-con*'])
+        result = cli_runner.invoke(cli.down, ['sky-jobs-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
-        result = cli_runner.invoke(cli.down, ['sky-job-con*', '-p'])
+        result = cli_runner.invoke(cli.down, ['sky-jobs-con*', '-p'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
@@ -216,15 +216,15 @@ class TestJobsOperations:
         assert 'Aborted' in result.output
 
     @pytest.mark.timeout(60)
-    def test_stop_job_controller(self, _mock_cluster_state,
-                                 _mock_job_controller):
+    def test_stop_jobs_controller(self, _mock_cluster_state,
+                                  _mock_jobs_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.stop, [jobs.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
         assert (f'Stopping controller(s) \'{jobs.JOB_CONTROLLER_NAME}\' is '
                 'currently not supported' in result.output)
 
-        result = cli_runner.invoke(cli.stop, ['sky-job-con*'])
+        result = cli_runner.invoke(cli.stop, ['sky-jobs-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
@@ -233,8 +233,8 @@ class TestJobsOperations:
         assert 'Aborted' in result.output
 
     @pytest.mark.timeout(60)
-    def test_autostop_job_controller(self, _mock_cluster_state,
-                                     _mock_job_controller):
+    def test_autostop_jobs_controller(self, _mock_cluster_state,
+                                      _mock_jobs_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.autostop, [jobs.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
@@ -242,7 +242,7 @@ class TestJobsOperations:
                 f'\'{jobs.JOB_CONTROLLER_NAME}\' is currently not supported'
                 in result.output)
 
-        result = cli_runner.invoke(cli.autostop, ['sky-job-con*'])
+        result = cli_runner.invoke(cli.autostop, ['sky-jobs-con*'])
         assert not result.exception
         assert 'Cluster(s) not found' in result.output
 
@@ -250,8 +250,8 @@ class TestJobsOperations:
         assert isinstance(result.exception, SystemExit)
         assert 'Aborted' in result.output
 
-    def test_cancel_on_job_controller(self, _mock_cluster_state,
-                                      _mock_job_controller):
+    def test_cancel_on_jobs_controller(self, _mock_cluster_state,
+                                       _mock_jobs_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, [jobs.JOB_CONTROLLER_NAME, '-a'])
         assert result.exit_code == 1
@@ -263,7 +263,7 @@ class TestJobsOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.jobs_cancel, ['-a'])
         assert result.exit_code == 1
-        assert controller_utils.Controllers.JOB_CONTROLLER.value.default_hint_if_non_existent in str(
+        assert controller_utils.Controllers.JOBS_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
 
     @pytest.mark.timeout(60)
@@ -271,7 +271,7 @@ class TestJobsOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.jobs_logs, ['1'])
         assert result.exit_code == 1
-        assert controller_utils.Controllers.JOB_CONTROLLER.value.default_hint_if_non_existent in str(
+        assert controller_utils.Controllers.JOBS_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
 
     @pytest.mark.timeout(60)
@@ -279,7 +279,7 @@ class TestJobsOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.jobs_queue)
         assert result.exit_code == 0
-        assert controller_utils.Controllers.JOB_CONTROLLER.value.default_hint_if_non_existent in str(
+        assert controller_utils.Controllers.JOBS_CONTROLLER.value.default_hint_if_non_existent in str(
             result.output), (result.exception, result.output, result.exc_info)
 
 
@@ -287,8 +287,8 @@ class TestServeOperations:
     """Test operations for services."""
 
     @pytest.mark.timeout(60)
-    def test_down_job_controller(self, _mock_cluster_state,
-                                 _mock_serve_controller, monkeypatch):
+    def test_down_jobs_controller(self, _mock_cluster_state,
+                                  _mock_serve_controller, monkeypatch):
 
         def mock_get_services_no_service(
                 cls, handle, code, require_outputs, stream_logs,
