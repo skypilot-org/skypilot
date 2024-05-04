@@ -829,7 +829,10 @@ def _with_deprecation_warning(
             overrides = []
             for k, v in override_command_argument.items():
                 if isinstance(v, bool):
-                    overrides.append(f'--{k}')
+                    if v:
+                        overrides.append(f'--{k}')
+                    else:
+                        overrides.append(f'--no-{k}')
                 else:
                     overrides.append(f'--{k.replace("_", "-")}={v}')
             override_str = ' with additional arguments ' + ' '.join(overrides)
