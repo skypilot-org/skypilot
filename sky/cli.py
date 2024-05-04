@@ -865,7 +865,7 @@ def _add_command_alias(
     new_command_name: Optional[str] = None,
     override_command_argument: Optional[Dict[str, Any]] = None,
     with_warning: bool = True,
-):
+) -> None:
     """Add a alias of a command to a group."""
     if new_group is None:
         new_group = group
