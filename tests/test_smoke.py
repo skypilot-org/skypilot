@@ -61,10 +61,10 @@ from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
-# smoke test. Also required for test_managed_jobs_recovery to make sure the manual
-# termination with aws ec2 does not accidentally terminate other spot clusters
-# from the different job launch with the same cluster name but a different job
-# id.
+# smoke test. Also required for test_managed_jobs_recovery to make sure the
+# manual termination with aws ec2 does not accidentally terminate other clusters
+# for for the different managed jobs launch with the same job name but a
+# different job id.
 test_id = str(uuid.uuid4())[-2:]
 
 LAMBDA_TYPE = '--cloud lambda --gpus A10'
@@ -96,7 +96,9 @@ _JOB_CANCEL_WAIT = (
     'do echo "Waiting for the jobs controller '
     'to be ready"; sleep 5; s=$(sky jobs cancel -y -n {job_name}); '
     'done; echo "$s"; echo; echo; echo "$s"')
-# TODO(zhwu): make the jobs controller on GCP.
+# TODO(zhwu): make the jobs controller on GCP, to avoid parallel test issues
+# when the controller being on Azure, which takes a long time for launching
+# step.
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
@@ -2228,8 +2230,8 @@ def test_managed_jobs(generic_cloud: str):
     test = Test(
         'managed-jobs',
         [
-            f'sky jobs launch -n {name}-1 --cloud {generic_cloud} examples/managed_spot.yaml -y -d',
-            f'sky jobs launch -n {name}-2 --cloud {generic_cloud} examples/managed_spot.yaml -y -d',
+            f'sky jobs launch -n {name}-1 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
+            f'sky jobs launch -n {name}-2 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
             'sleep 5',
             f'{_JOB_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
             f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
@@ -4709,7 +4711,7 @@ class TestYamlSpecs:
     #  We should not use `examples/storage_demo.yaml` here, since it requires
     #  users to ensure bucket names to not exist and/or be unique.
     _TEST_YAML_PATHS = [
-        'examples/minimal.yaml', 'examples/managed_spot.yaml',
+        'examples/minimal.yaml', 'examples/managed_job.yaml',
         'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
         'examples/multi_hostname.yaml'
     ]
