@@ -255,7 +255,7 @@ class TestJobsOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, [jobs.JOB_CONTROLLER_NAME, '-a'])
         assert result.exit_code == 1
-        assert 'Cancelling the jobs controllerr\'s jobs is not allowed.' in str(
+        assert 'Cancelling the jobs controller\'s jobs is not allowed.' in str(
             result.output)
 
     @pytest.mark.timeout(60)

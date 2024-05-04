@@ -413,7 +413,7 @@ terminal-based CLI may need more than one page to display.
 
 
 Concept: Jobs Controller
------------------------
+------------------------
 
 The jobs controller is a small on-demand CPU VM running in the cloud that manages all jobs of a user.
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
@@ -426,7 +426,7 @@ you can still tear it down manually with
 :code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status`.
 
 .. note::
-  Tearing down the jobs controllerr loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
+  Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
 
 Customizing Job Controller Resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
