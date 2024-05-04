@@ -3585,9 +3585,8 @@ def jobs_dashboard(port: Optional[int]):
     # port forwarding first (we'd just launch a local dashboard which would make
     # REST API calls to the controller dashboard server).
     click.secho('Checking if jobs controller is up...', fg='yellow')
-    hint = (
-        'Dashboard is not available if jobs controller is not up. Run a '
-        'managed job first.')
+    hint = ('Dashboard is not available if jobs controller is not up. Run a '
+            'managed job first.')
     backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.JOB_CONTROLLER,
         stopped_message=hint,
