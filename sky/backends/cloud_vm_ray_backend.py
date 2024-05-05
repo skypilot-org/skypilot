@@ -35,8 +35,8 @@ from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import status_lib
 from sky import skypilot_config
+from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
