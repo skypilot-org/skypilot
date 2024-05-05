@@ -92,10 +92,21 @@ Available fields:
       # If unspecified, defaults to False (on-demand instances).
       use_spot: False
 
-      # The recovery strategy for spot jobs (optional).
-      # `use_spot` must be True for this to have any effect. For now, only
-      # `FAILOVER` strategy is supported.
-      spot_recovery: none
+      # The recovery strategy for managed jobs (optional).
+      #
+      # In effect for managed jobs. Possible values are `FAILOVER` and `EAGER_NEXT_REGION`.
+      #
+      # If `FAILOVER` is specified, the job will be restarted in the same region
+      # if the node fails, and go to the next region if no available resources
+      # are found in the same region. 
+      #
+      # If `EAGER_NEXT_REGION` is specified, the job will go to the next region
+      # directly if the node fails. This is useful for spot instances, as in
+      # practice, preemptions in a region usually indicate a shortage of resources
+      # in that region.
+      #
+      # default: EAGER_NEXT_REGION
+      job_recovery: none
 
       # Disk size in GB to allocate for OS (mounted at /). Increase this if you
       # have a large working directory or tasks that write out large outputs.

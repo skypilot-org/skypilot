@@ -42,7 +42,7 @@ class CloudImplementationFeatures(enum.Enum):
     CUSTOM_DISK_TIER = 'custom_disk_tier'
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
-    HOST_CONTROLLERS = 'host_controllers'  # Can run spot/serve controllers
+    HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -496,15 +496,16 @@ class Cloud:
                                                     zone,
                                                     clouds=self._REPR.lower())
 
-    def need_cleanup_after_preemption(
+    def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources_lib.Resources') -> bool:
-        """Returns whether a spot resource needs cleanup after preeemption.
+        """Whether a resource needs cleanup after preeemption or failure.
 
         In most cases, spot resources do not need cleanup after preemption,
         as long as the cluster can be relaunched with the same name and tag,
         no matter the preemption behavior is to terminate or stop the cluster.
-        The only exception by far is GCP's Spot TPU VM. We override this method
-        in gcp.py.
+        Similar for on-demand resources that go into maintenance mode. The
+        only exception by far is GCP's TPU VM. We override this method in
+        gcp.py.
         """
         del resources
         return False

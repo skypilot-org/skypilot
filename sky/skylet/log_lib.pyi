@@ -120,6 +120,6 @@ def run_bash_command_with_log(bash_command: str,
 
 def tail_logs(job_id: int,
               log_dir: Optional[str],
-              spot_job_id: Optional[int] = ...,
+              managed_job_id: Optional[int] = ...,
               follow: bool = ...) -> None:
     ...

@@ -37,7 +37,7 @@ logger = sky_logging.init_logger(__name__)
 # It has the following purposes:
 #   - make all nodes (any cloud) able to access private S3 buckets
 #   - make some remote nodes able to launch new nodes on AWS (i.e., makes
-#     AWS head node able to launch AWS workers, or any-cloud spot controller
+#     AWS head node able to launch AWS workers, or any-cloud jobs controller
 #     able to launch spot clusters on AWS).
 #
 # If we detect the current user identity is AWS SSO, we will not upload this
@@ -541,9 +541,9 @@ class AWS(clouds.Cloud):
         elif identity_type == AWSIdentityType.IAM_ROLE:
             # When using an IAM role, the credentials may not exist in the
             # ~/.aws/credentials file. So we don't check for the existence of the
-            # file. This will happen when the user is on a VM (or spot-controller)
-            # created by an SSO account, i.e. the VM will be assigned the IAM
-            # role: skypilot-v1.
+            # file. This will happen when the user is on a VM (or
+            # jobs-controller) created by an SSO account, i.e. the VM will be
+            # assigned the IAM role: skypilot-v1.
             hints = f'AWS IAM role is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
@@ -745,7 +745,7 @@ class AWS(clouds.Cloud):
         # credentials. We need to define a mechanism to find out the cloud
         # provider of the cluster to be launched in this function and make sure
         # the cluster will not be used for launching clusters in other clouds,
-        # e.g. spot controller.
+        # e.g. jobs controller.
         if self._current_identity_type(
         ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}

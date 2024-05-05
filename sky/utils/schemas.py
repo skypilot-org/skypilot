@@ -82,7 +82,12 @@ def _get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
+            # Deprecated: use 'job_recovery' instead. This is for backward
+            # compatibility, and can be removed in 0.8.0.
             'spot_recovery': {
+                'type': 'string',
+            },
+            'job_recovery': {
                 'type': 'string',
             },
             'disk_size': {
@@ -218,7 +223,9 @@ def get_resources_schema():
                 'type': 'array',
                 'items': multi_resources_schema,
             }
-        }
+        },
+        # Avoid job_recovery and spot_recovery being present at the same time.
+        **_check_not_both_fields_present('job_recovery', 'spot_recovery')
     }
 
 
@@ -661,8 +668,11 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
+            'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             **cloud_configs,
-        }
+        },
+        # Avoid spot and jobs being present at the same time.
+        **_check_not_both_fields_present('spot', 'jobs')
     }

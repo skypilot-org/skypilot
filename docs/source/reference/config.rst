@@ -14,12 +14,12 @@ Available fields and semantics:
 
 .. code-block:: yaml
 
-  # Custom spot controller resources (optional).
+  # Custom managed jobs controller resources (optional).
   #
-  # These take effects only when a spot controller does not already exist.
+  # These take effects only when a managed jobs controller does not already exist.
   #
-  # Ref: https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html#customizing-spot-controller-resources
-  spot:
+  # Ref: https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#customizing-job-controller-resources
+  jobs:
     controller:
       resources:  # same spec as 'resources' in a task YAML
         cloud: gcp
@@ -114,7 +114,7 @@ Available fields and semantics:
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
     # AWS instances created by SkyPilot. They are used for accessing cloud
     # resources (e.g., private buckets) or launching new instances (e.g., for
-    # spot/serve controllers).
+    # jobs/serve controllers).
     #
     # SERVICE_ACCOUNT: Local credential files are not uploaded to AWS
     # instances. SkyPilot will auto-create and reuse a service account (IAM
@@ -125,8 +125,8 @@ Available fields and semantics:
     # - This only affects AWS instances. Local AWS credentials will still be
     #   uploaded to non-AWS instances (since those instances may need to access
     #   AWS resources).
-    # - If the SkyPilot spot/serve controller is on AWS, this setting will make
-    #   non-AWS managed spot jobs / non-AWS service replicas fail to access any
+    # - If the SkyPilot jobs/serve controller is on AWS, this setting will make
+    #   non-AWS managed jobs / non-AWS service replicas fail to access any
     #   resources on AWS (since the controllers don't have AWS credential
     #   files to assign to these non-AWS instances).
     #
@@ -224,7 +224,7 @@ Available fields and semantics:
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
     # GCP instances created by SkyPilot. They are used for accessing cloud
     # resources (e.g., private buckets) or launching new instances (e.g., for
-    # spot/serve controllers).
+    # jobs/serve controllers).
     #
     # SERVICE_ACCOUNT: Local credential files are not uploaded to GCP
     # instances. SkyPilot will auto-create and reuse a service account for GCP
@@ -235,8 +235,8 @@ Available fields and semantics:
     # - This only affects GCP instances. Local GCP credentials will still be
     #   uploaded to non-GCP instances (since those instances may need to access
     #   GCP resources).
-    # - If the SkyPilot spot/serve controller is on GCP, this setting will make
-    #   non-GCP managed spot jobs / non-GCP service replicas fail to access any
+    # - If the SkyPilot jobs/serve controller is on GCP, this setting will make
+    #   non-GCP managed jobs / non-GCP service replicas fail to access any
     #   resources on GCP (since the controllers don't have GCP credential
     #   files to assign to these non-GCP instances).
     #

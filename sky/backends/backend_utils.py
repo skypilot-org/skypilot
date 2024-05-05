@@ -2239,18 +2239,18 @@ def check_cluster_available(
 
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 def is_controller_accessible(
-    controller_type: controller_utils.Controllers,
+    controller: controller_utils.Controllers,
     stopped_message: str,
     non_existent_message: Optional[str] = None,
     exit_if_not_accessible: bool = False,
 ) -> 'backends.CloudVmRayResourceHandle':
-    """Check if the spot/serve controller is up.
+    """Check if the jobs/serve controller is up.
 
     The controller is accessible when it is in UP or INIT state, and the ssh
     connection is successful.
 
     It can be used to check if the controller is accessible (since the autostop
-    is set for the controller) before the spot/serve commands interact with the
+    is set for the controller) before the jobs/serve commands interact with the
     controller.
 
     ClusterNotUpError will be raised whenever the controller cannot be accessed.
@@ -2274,10 +2274,8 @@ def is_controller_accessible(
           failed to be connected.
     """
     if non_existent_message is None:
-        non_existent_message = (
-            controller_type.value.default_hint_if_non_existent)
-    cluster_name = controller_type.value.cluster_name
-    controller_name = controller_type.value.name.replace(' controller', '')
+        non_existent_message = controller.value.default_hint_if_non_existent
+    cluster_name = controller.value.cluster_name
     need_connection_check = False
     controller_status, handle = None, None
     try:
@@ -2299,7 +2297,7 @@ def is_controller_accessible(
         # will not start the controller manually from the cloud console.
         #
         # The acquire_lock_timeout is set to 0 to avoid hanging the command when
-        # multiple spot.launch commands are running at the same time. Our later
+        # multiple jobs.launch commands are running at the same time. Our later
         # code will check if the controller is accessible by directly checking
         # the ssh connection to the controller, if it fails to get accurate
         # status of the controller.
@@ -2311,6 +2309,7 @@ def is_controller_accessible(
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
         # `backend_utils.check_cluster_available`.
+        controller_name = controller.value.name.replace(' controller', '')
         logger.warning(
             'Failed to get the status of the controller. It is not '
             f'fatal, but {controller_name} commands/calls may hang or return '
@@ -2336,7 +2335,7 @@ def is_controller_accessible(
     elif (controller_status == status_lib.ClusterStatus.INIT or
           need_connection_check):
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
-        # status, both of which can happen when controller's status lock is held by another `sky spot launch` or
+        # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
         # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
         # we can allow access to the controller.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
@@ -2347,7 +2346,7 @@ def is_controller_accessible(
                                                  **ssh_credentials,
                                                  port=handle.head_ssh_port)
         if not runner.check_connection():
-            error_msg = controller_type.value.connection_error_hint
+            error_msg = controller.value.connection_error_hint
     else:
         assert controller_status == status_lib.ClusterStatus.UP, handle
 
@@ -2386,7 +2385,7 @@ def get_clusters(
     of the clusters.
 
     Args:
-        include_controller: Whether to include controllers, e.g. spot controller
+        include_controller: Whether to include controllers, e.g. jobs controller
             or sky serve controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
@@ -2546,8 +2545,8 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
         optionally accelerator demands.
     """
     # TODO: Custom CPU and other memory resources are not supported yet.
-    # For sky spot/serve controller task, we set the CPU resource to a smaller
-    # value to support a larger number of spot jobs and services.
+    # For sky jobs/serve controller task, we set the CPU resource to a smaller
+    # value to support a larger number of managed jobs and services.
     resources_dict = {
         'CPU': (constants.CONTROLLER_PROCESS_CPU_DEMAND
                 if task.is_controller_task() else DEFAULT_TASK_CPU_DEMAND)
@@ -2564,41 +2563,58 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     return resources_dict
 
 
-def get_task_resources_str(task: 'task_lib.Task') -> str:
+def get_task_resources_str(task: 'task_lib.Task',
+                           is_managed_job: bool = False) -> str:
     """Returns the resources string of the task.
 
     The resources string is only used as a display purpose, so we only show
     the accelerator demands (if any). Otherwise, the CPU demand is shown.
     """
-    task_cpu_demand = (constants.CONTROLLER_PROCESS_CPU_DEMAND if
-                       task.is_controller_task() else DEFAULT_TASK_CPU_DEMAND)
+    spot_str = ''
+    task_cpu_demand = (str(constants.CONTROLLER_PROCESS_CPU_DEMAND)
+                       if task.is_controller_task() else
+                       str(DEFAULT_TASK_CPU_DEMAND))
     if task.best_resources is not None:
         accelerator_dict = task.best_resources.accelerators
+        if is_managed_job:
+            if task.best_resources.use_spot:
+                spot_str = '[Spot]'
+            task_cpu_demand = task.best_resources.cpus
         if accelerator_dict is None:
             resources_str = f'CPU:{task_cpu_demand}'
         else:
             resources_str = ', '.join(
                 f'{k}:{v}' for k, v in accelerator_dict.items())
-    elif len(task.resources) == 1:
-        resources_dict = list(task.resources)[0].accelerators
-        if resources_dict is None:
-            resources_str = f'CPU:{task_cpu_demand}'
-        else:
-            resources_str = ', '.join(
-                f'{k}:{v}' for k, v in resources_dict.items())
     else:
         resource_accelerators = []
+        min_cpus = float('inf')
+        spot_type: Set[str] = set()
         for resource in task.resources:
+            task_cpu_demand = '1+'
+            if resource.cpus is not None:
+                task_cpu_demand = resource.cpus
+            min_cpus = min(min_cpus, float(task_cpu_demand.strip('+ ')))
+            if resource.use_spot:
+                spot_type.add('Spot')
+            else:
+                spot_type.add('On-demand')
+
             if resource.accelerators is None:
                 continue
             for k, v in resource.accelerators.items():
                 resource_accelerators.append(f'{k}:{v}')
 
+        if is_managed_job:
+            if len(task.resources) > 1:
+                task_cpu_demand = f'{min_cpus}+'
+            if 'Spot' in spot_type:
+                spot_str = '|'.join(sorted(spot_type))
+                spot_str = f'[{spot_str}]'
         if resource_accelerators:
             resources_str = ', '.join(set(resource_accelerators))
         else:
             resources_str = f'CPU:{task_cpu_demand}'
-    resources_str = f'{task.num_nodes}x [{resources_str}]'
+    resources_str = f'{task.num_nodes}x[{resources_str}]{spot_str}'
     return resources_str
 
 

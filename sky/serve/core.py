@@ -57,9 +57,9 @@ def _validate_service_task(task: 'sky.Task') -> None:
     policy_description = ('on-demand'
                           if task.service.dynamic_ondemand_fallback else 'spot')
     for resource in list(task.resources):
-        if resource.spot_recovery is not None:
+        if resource.job_recovery is not None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('spot_recovery is disabled for SkyServe. '
+                raise ValueError('job_recovery is disabled for SkyServe. '
                                  'SkyServe will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
@@ -139,7 +139,8 @@ def up(
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
         controller_resources = controller_utils.get_controller_resources(
-            controller_type='serve', task_resources=task.resources)
+            controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+            task_resources=task.resources)
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
@@ -150,7 +151,7 @@ def up(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
-                'serve',
+                controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 remote_user_config_path=remote_config_yaml_path,
             ),
         }
@@ -304,7 +305,7 @@ def update(
     """
     _validate_service_task(task)
     handle = backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'Service controller is stopped. There is no service to update. '
         f'To spin up a new service, use {backend_utils.BOLD}'
@@ -448,7 +449,7 @@ def down(
     if isinstance(service_names, str):
         service_names = [service_names]
     handle = backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have terminated.')
 
     service_names_str = ','.join(service_names)
@@ -555,7 +556,7 @@ def status(
 
     controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
     handle = backend_utils.is_controller_accessible(
-        controller_type=controller_type,
+        controller=controller_type,
         stopped_message=controller_type.value.default_hint_if_non_existent)
 
     backend = backend_utils.get_backend_from_handle(handle)
@@ -639,7 +640,7 @@ def tail_logs(
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
     handle = backend_utils.is_controller_accessible(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
                          value.default_hint_if_non_existent))
 
