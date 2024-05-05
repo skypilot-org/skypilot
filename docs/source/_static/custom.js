@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', function () {
        script.setAttribute('data-project-name', 'SkyPilot');
        script.setAttribute('data-project-color', '#4C4C4D');
        script.setAttribute('data-project-logo', 'https://avatars.githubusercontent.com/u/109387420?s=100&v=4');
-       script.setAttribute('data-modal-disclaimer', 'Results are automatically generated and may be inaccurate or contain inappropriate information. Do not include any sensitive information in your query.');
+       script.setAttribute('data-modal-disclaimer', 'Results are automatically generated and may be inaccurate or contain inappropriate information. Do not include any sensitive information in your query.\n**To get further assistance, you can chat directly with the development team** by joining the [SkyPilot Slack](https://slack.skypilot.co/).');
        script.setAttribute('data-modal-title', 'SkyPilot Docs AI - Ask a Question.');
        script.setAttribute('data-button-position-bottom', '85px');
        script.async = true;
@@ -26,10 +26,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.caption-text', text: 'SkyServe: Model Serving' },
+        { selector: '.toctree-l1 > a', text: 'Managed Jobs' },
         { selector: '.toctree-l1 > a', text: 'Running on Kubernetes' },
         { selector: '.toctree-l1 > a', text: 'DBRX (Databricks)' },
         { selector: '.toctree-l1 > a', text: 'Ollama' },
         { selector: '.toctree-l1 > a', text: 'Llama-3 (Meta)' },
+        { selector: '.toctree-l1 > a', text: 'Qwen (Alibaba)' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

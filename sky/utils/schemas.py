@@ -5,7 +5,32 @@ https://json-schema.org/
 """
 
 
-def get_single_resources_schema():
+def _check_not_both_fields_present(field1: str, field2: str):
+    return {
+        'oneOf': [{
+            'required': [field1],
+            'not': {
+                'required': [field2]
+            }
+        }, {
+            'required': [field2],
+            'not': {
+                'required': [field1]
+            }
+        }, {
+            'not': {
+                'anyOf': [{
+                    'required': [field1]
+                }, {
+                    'required': [field2]
+                }]
+            }
+        }]
+    }
+
+
+def _get_single_resources_schema():
+    """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
@@ -57,7 +82,12 @@ def get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
+            # Deprecated: use 'job_recovery' instead. This is for backward
+            # compatibility, and can be removed in 0.8.0.
             'spot_recovery': {
+                'type': 'string',
+            },
+            'job_recovery': {
                 'type': 'string',
             },
             'disk_size': {
@@ -82,6 +112,12 @@ def get_single_resources_schema():
                     }
                 }],
             },
+            'labels': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                }
+            },
             'accelerator_args': {
                 'type': 'object',
                 'required': [],
@@ -105,45 +141,58 @@ def get_single_resources_schema():
                     'type': 'object',
                     'required': [],
                 }]
-            }
+            },
+            # The following fields are for internal use only.
+            '_docker_login_config': {
+                'type': 'object',
+                'required': ['username', 'password', 'server'],
+                'additionalProperties': False,
+                'properties': {
+                    'username': {
+                        'type': 'string',
+                    },
+                    'password': {
+                        'type': 'string',
+                    },
+                    'server': {
+                        'type': 'string',
+                    }
+                }
+            },
+            '_is_image_managed': {
+                'type': 'boolean',
+            },
+            '_requires_fuse': {
+                'type': 'boolean',
+            },
         }
     }
 
 
+def _get_multi_resources_schema():
+    multi_resources_schema = {
+        k: v
+        for k, v in _get_single_resources_schema().items()
+        # Validation may fail if $schema is included.
+        if k != '$schema'
+    }
+    return multi_resources_schema
+
+
 def get_resources_schema():
-    # To avoid circular imports, only import when needed.
-    # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
+    """Resource schema in task config."""
+    single_resources_schema = _get_single_resources_schema()['properties']
+    single_resources_schema.pop('accelerators')
+    multi_resources_schema = _get_multi_resources_schema()
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'cloud': {
-                'type': 'string',
-                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
-            },
-            'region': {
-                'type': 'string',
-            },
-            'zone': {
-                'type': 'string',
-            },
-            'cpus': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
-            'memory': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
+            **single_resources_schema,
+            # We redefine the 'accelerators' field to allow one line list or
+            # a set of accelerators.
             'accelerators': {
                 # {'V100:1', 'A100:1'} will be
                 # read as a string and converted to dict.
@@ -166,80 +215,17 @@ def get_resources_schema():
                     }
                 }]
             },
-            'instance_type': {
-                'type': 'string',
-            },
-            'use_spot': {
-                'type': 'boolean',
-            },
-            'spot_recovery': {
-                'type': 'string',
-            },
-            'disk_size': {
-                'type': 'integer',
-            },
-            'disk_tier': {
-                'type': 'string',
-            },
-            'ports': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'integer',
-                }, {
-                    'type': 'array',
-                    'items': {
-                        'anyOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'integer',
-                        }]
-                    }
-                }],
-            },
-            'accelerator_args': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'runtime_version': {
-                        'type': 'string',
-                    },
-                    'tpu_name': {
-                        'type': 'string',
-                    },
-                    'tpu_vm': {
-                        'type': 'boolean',
-                    }
-                }
-            },
-            'image_id': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'object',
-                    'required': [],
-                }]
-            },
             'any_of': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             },
             'ordered': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             }
-        }
+        },
+        # Avoid job_recovery and spot_recovery being present at the same time.
+        **_check_not_both_fields_present('job_recovery', 'spot_recovery')
     }
 
 
@@ -543,7 +529,9 @@ _NETWORK_CONFIG_SCHEMA = {
     },
 }
 
-_INSTANCE_TAGS_SCHEMA = {
+_LABELS_SCHEMA = {
+    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
+    # compatibility. Will be removed after 0.7.0.
     'instance_tags': {
         'type': 'object',
         'required': [],
@@ -551,6 +539,13 @@ _INSTANCE_TAGS_SCHEMA = {
             'type': 'string',
         },
     },
+    'labels': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': {
+            'type': 'string',
+        },
+    }
 }
 
 _REMOTE_IDENTITY_SCHEMA = {
@@ -597,9 +592,10 @@ def get_config_schema():
                     'type': 'string',
                 },
                 **_VPN_CONFIG_SCHEMA,
-                **_INSTANCE_TAGS_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
-            }
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'gcp': {
             'type': 'object',
@@ -615,9 +611,10 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                **_INSTANCE_TAGS_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
-            }
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'kubernetes': {
             'type': 'object',
@@ -698,8 +695,11 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
+            'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             **cloud_configs,
-        }
+        },
+        # Avoid spot and jobs being present at the same time.
+        **_check_not_both_fields_present('spot', 'jobs')
     }

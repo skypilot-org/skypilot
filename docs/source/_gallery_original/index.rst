@@ -37,6 +37,7 @@ Contents
    DBRX (Databricks) <llms/dbrx>
    Llama-2 (Meta) <llms/llama-2>
    Llama-3 (Meta) <llms/llama-3>
+   Qwen (Alibaba) <llms/qwen>
    CodeLlama (Meta) <llms/codellama>
    Gemma (Google) <llms/gemma>
 

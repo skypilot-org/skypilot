@@ -1,4 +1,5 @@
 """Resources: compute requirements of Tasks."""
+import dataclasses
 import functools
 import textwrap
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -8,9 +9,9 @@ import colorama
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
+from sky import jobs as managed_jobs
 from sky import sky_logging
 from sky import skypilot_config
-from sky import spot
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
 from sky.skylet import constants
@@ -43,7 +44,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 16
+    _VERSION = 18
 
     def __init__(
         self,
@@ -54,13 +55,14 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        spot_recovery: Optional[str] = None,
+        job_recovery: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
+        labels: Optional[Dict[str, str]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
@@ -104,9 +106,9 @@ class Resources:
             ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
           use_spot: whether to use spot instances. If None, defaults to
             False.
-          spot_recovery: the spot recovery strategy to use for the managed
-            spot to recover the cluster from preemption. Refer to
-            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/spot/recovery_strategy.py>`__ # pylint: disable=line-too-long
+          job_recovery: the job recovery strategy to use for the managed
+            job to recover the cluster from preemption. Refer to
+            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
           region: the region to use.
           zone: the zone to use.
@@ -129,7 +131,13 @@ class Resources:
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
           ports: the ports to open on the instance.
-          _docker_login_config: the docker configuration to use. This include
+          labels: the labels to apply to the instance. These are useful for
+            assigning metadata that may be used by external tools.
+            Implementation depends on the chosen cloud - On AWS, labels map to
+            instance tags. On GCP, labels map to instance labels. On
+            Kubernetes, labels map to pod labels. On other clouds, labels are
+            not supported and will be ignored.
+          _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
           _requires_fuse: whether the task requires FUSE mounting support. This
@@ -152,10 +160,10 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-        self._spot_recovery = None
-        if spot_recovery is not None:
-            if spot_recovery.strip().lower() != 'none':
-                self._spot_recovery = spot_recovery.upper()
+        self._job_recovery = None
+        if job_recovery is not None:
+            if job_recovery.strip().lower() != 'none':
+                self._job_recovery = job_recovery.upper()
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -204,6 +212,8 @@ class Resources:
                 ports = None
         self._ports = ports
 
+        self._labels = labels
+
         self._docker_login_config = _docker_login_config
 
         self._requires_fuse = _requires_fuse
@@ -214,10 +224,11 @@ class Resources:
 
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
-        self._try_validate_spot()
+        self._try_validate_managed_job_attributes()
         self._try_validate_image_id()
         self._try_validate_disk_tier()
         self._try_validate_ports()
+        self._try_validate_labels()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -257,8 +268,8 @@ class Resources:
                 accelerator_args = f', accelerator_args={self.accelerator_args}'
 
         cpus = ''
-        if self.cpus is not None:
-            cpus = f', cpus={self.cpus}'
+        if self._cpus is not None:
+            cpus = f', cpus={self._cpus}'
 
         memory = ''
         if self.memory is not None:
@@ -342,6 +353,7 @@ class Resources:
         return self._instance_type
 
     @property
+    @functools.lru_cache(maxsize=1)
     def cpus(self) -> Optional[str]:
         """Returns the number of vCPUs that each instance must have.
 
@@ -352,7 +364,13 @@ class Resources:
         at launch time. Thus, Resources in the backend's ResourceHandle will
         always have the cpus field set to None.)
         """
-        return self._cpus
+        if self._cpus is not None:
+            return self._cpus
+        if self.cloud is not None and self._instance_type is not None:
+            vcpus, _ = self.cloud.get_vcpus_mem_from_instance_type(
+                self._instance_type)
+            return str(vcpus)
+        return None
 
     @property
     def memory(self) -> Optional[str]:
@@ -397,8 +415,8 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def spot_recovery(self) -> Optional[str]:
-        return self._spot_recovery
+    def job_recovery(self) -> Optional[str]:
+        return self._job_recovery
 
     @property
     def disk_size(self) -> int:
@@ -415,6 +433,10 @@ class Resources:
     @property
     def ports(self) -> Optional[List[str]]:
         return self._ports
+
+    @property
+    def labels(self) -> Optional[Dict[str, str]]:
+        return self._labels
 
     @property
     def is_image_managed(self) -> Optional[bool]:
@@ -472,7 +494,7 @@ class Resources:
         if isinstance(memory, str):
             if memory.endswith(('+', 'x')):
                 # 'x' is used internally for make sure our resources used by
-                # spot controller (memory: 3x) to have enough memory based on
+                # jobs controller (memory: 3x) to have enough memory based on
                 # the vCPUs.
                 num_memory_gb = memory[:-1]
             else:
@@ -561,10 +583,10 @@ class Resources:
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
 
-    def need_cleanup_after_preemption(self) -> bool:
-        """Returns whether a spot resource needs cleanup after preemption."""
+    def need_cleanup_after_preemption_or_failure(self) -> bool:
+        """Whether a resource needs cleanup after preemption or failure."""
         assert self.is_launchable(), self
-        return self.cloud.need_cleanup_after_preemption(self)
+        return self.cloud.need_cleanup_after_preemption_or_failure(self)
 
     def _validate_and_set_region_zone(self, region: Optional[str],
                                       zone: Optional[str]) -> None:
@@ -730,30 +752,30 @@ class Resources:
         Raises:
             ValueError: if the attributes are invalid.
         """
-        if self.cpus is None and self.memory is None:
+        if self._cpus is None and self._memory is None:
             return
-        if self.instance_type is not None:
+        if self._instance_type is not None:
             # The assertion should be true because we have already executed
             # _try_validate_instance_type() before this method.
             # The _try_validate_instance_type() method infers and sets
             # self.cloud if self.instance_type is not None.
             assert self.cloud is not None
             cpus, mem = self.cloud.get_vcpus_mem_from_instance_type(
-                self.instance_type)
-            if self.cpus is not None:
-                if self.cpus.endswith('+'):
-                    if cpus < float(self.cpus[:-1]):
+                self._instance_type)
+            if self._cpus is not None:
+                if self._cpus.endswith('+'):
+                    if cpus < float(self._cpus[:-1]):
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
                                 f'{self.instance_type} does not have enough '
                                 f'vCPUs. {self.instance_type} has {cpus} '
-                                f'vCPUs, but {self.cpus} is requested.')
-                elif cpus != float(self.cpus):
+                                f'vCPUs, but {self._cpus} is requested.')
+                elif cpus != float(self._cpus):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
                             f'{self.instance_type} does not have the requested '
                             f'number of vCPUs. {self.instance_type} has {cpus} '
-                            f'vCPUs, but {self.cpus} is requested.')
+                            f'vCPUs, but {self._cpus} is requested.')
             if self.memory is not None:
                 if self.memory.endswith(('+', 'x')):
                     if mem < float(self.memory[:-1]):
@@ -769,25 +791,20 @@ class Resources:
                             f'memory. {self.instance_type} has {mem} GB '
                             f'memory, but {self.memory} is requested.')
 
-    def _try_validate_spot(self) -> None:
-        """Try to validate the spot related attributes.
+    def _try_validate_managed_job_attributes(self) -> None:
+        """Try to validate managed job related attributes.
 
         Raises:
             ValueError: if the attributes are invalid.
         """
-        if self._spot_recovery is None:
+        if self._job_recovery is None:
             return
-        if not self._use_spot:
+        if self._job_recovery not in managed_jobs.RECOVERY_STRATEGIES:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Cannot specify spot_recovery without use_spot set to True.'
-                )
-        if self._spot_recovery not in spot.SPOT_STRATEGIES:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Spot recovery strategy {self._spot_recovery} '
+                    f'Spot recovery strategy {self._job_recovery} '
                     'is not supported. The strategy should be among '
-                    f'{list(spot.SPOT_STRATEGIES.keys())}')
+                    f'{list(managed_jobs.RECOVERY_STRATEGIES.keys())}')
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
@@ -930,6 +947,34 @@ class Resources:
                         'that does support this feature.')
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
+
+    def _try_validate_labels(self) -> None:
+        """Try to validate the labels attribute.
+
+        Raises:
+            ValueError: if the attribute is invalid.
+        """
+        if not self._labels:
+            return
+
+        if self.cloud is None:
+            # Because each cloud has its own label format, we cannot validate
+            # the labels without knowing the cloud.
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cloud must be specified when labels are provided.')
+
+        # Check if the label key value pairs are valid.
+        invalid_table = log_utils.create_table(['Label', 'Reason'])
+        for key, value in self._labels.items():
+            valid, err_msg = self.cloud.is_label_valid(key, value)
+            if not valid:
+                invalid_table.add_row([f'{key}: {value}', err_msg])
+        if len(invalid_table.rows) > 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'The following labels are invalid:'
+                    '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
@@ -1126,7 +1171,7 @@ class Resources:
         return all([
             self.cloud is None,
             self._instance_type is None,
-            self.cpus is None,
+            self._cpus is None,
             self.memory is None,
             self.accelerators is None,
             self.accelerator_args is None,
@@ -1144,19 +1189,20 @@ class Resources:
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
-            cpus=override.pop('cpus', self.cpus),
+            cpus=override.pop('cpus', self._cpus),
             memory=override.pop('memory', self.memory),
             accelerators=override.pop('accelerators', self.accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
-            spot_recovery=override.pop('spot_recovery', self.spot_recovery),
+            job_recovery=override.pop('job_recovery', self.job_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
             ports=override.pop('ports', self.ports),
+            labels=override.pop('labels', self.labels),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
             _is_image_managed=override.pop('_is_image_managed',
@@ -1209,7 +1255,18 @@ class Resources:
             resources_list = []
             for override_config in override_configs:
                 new_resource_config = base_resource_config.copy()
+                # Labels are handled separately.
+                override_labels = override_config.pop('labels', None)
                 new_resource_config.update(override_config)
+
+                # Update the labels with the override labels.
+                labels = new_resource_config.get('labels', None)
+                if labels is not None and override_labels is not None:
+                    labels.update(override_labels)
+                elif override_labels is not None:
+                    labels = override_labels
+                new_resource_config['labels'] = labels
+
                 # Call from_yaml_config again instead of
                 # _from_yaml_config_single to handle the case, where both
                 # multiple accelerators and `any_of` is specified.
@@ -1289,13 +1346,22 @@ class Resources:
         resources_fields['accelerator_args'] = config.pop(
             'accelerator_args', None)
         resources_fields['use_spot'] = config.pop('use_spot', None)
-        resources_fields['spot_recovery'] = config.pop('spot_recovery', None)
+        if config.get('spot_recovery') is not None:
+            logger.warning('spot_recovery is deprecated. Use job_recovery '
+                           'instead (the system is defaulting to that for '
+                           'you).')
+            resources_fields['job_recovery'] = config.pop('spot_recovery', None)
+        else:
+            # spot_recovery and job_recovery are guaranteed to be mutually
+            # exclusive by the schema validation.
+            resources_fields['job_recovery'] = config.pop('job_recovery', None)
         resources_fields['disk_size'] = config.pop('disk_size', None)
         resources_fields['region'] = config.pop('region', None)
         resources_fields['zone'] = config.pop('zone', None)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
+        resources_fields['labels'] = config.pop('labels', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
         resources_fields['_is_image_managed'] = config.pop(
@@ -1325,14 +1391,14 @@ class Resources:
 
         add_if_not_none('cloud', str(self.cloud))
         add_if_not_none('instance_type', self.instance_type)
-        add_if_not_none('cpus', self.cpus)
+        add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self.accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
-            add_if_not_none('spot_recovery', self.spot_recovery)
+        add_if_not_none('job_recovery', self.job_recovery)
         add_if_not_none('disk_size', self.disk_size)
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
@@ -1340,6 +1406,10 @@ class Resources:
         if self.disk_tier is not None:
             config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
+        add_if_not_none('labels', self.labels)
+        if self._docker_login_config is not None:
+            config['_docker_login_config'] = dataclasses.asdict(
+                self._docker_login_config)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         if self._requires_fuse is not None:
@@ -1375,6 +1445,8 @@ class Resources:
         if version < 2:
             self._region = None
 
+        # spot_recovery is deprecated. We keep the history just for readability,
+        # it should be removed by chunk in the future.
         if version < 3:
             self._spot_recovery = None
 
@@ -1446,5 +1518,11 @@ class Resources:
             # mode and have FUSE support enabled by default. As a result, we
             # set the default to True for backward compatibility.
             state['_requires_fuse'] = state.get('_requires_fuse', True)
+
+        if version < 17:
+            state['_labels'] = state.get('_labels', None)
+
+        if version < 18:
+            self._job_recovery = state.pop('_spot_recovery', None)
 
         self.__dict__.update(state)

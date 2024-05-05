@@ -809,10 +809,12 @@ class Optimizer:
             'CLOUD', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS',
             'REGION/ZONE'
         ]
-        # Do not print Source or Sink.
-        best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
-                          for t, r in ordered_best_plan.items()]
-        if len(best_plan_rows) > 1:
+        if len(ordered_best_plan) > 1:
+            best_plan_rows = []
+            for t, r in ordered_best_plan.items():
+                assert t.name is not None, t
+                best_plan_rows.append([t.name, str(t.num_nodes)] +
+                                      _get_resources_element_list(r))
             logger.info(
                 f'{colorama.Style.BRIGHT}Best plan: {colorama.Style.RESET_ALL}')
             best_plan_table = _create_table(['TASK', '#NODES'] +
@@ -835,7 +837,7 @@ class Optimizer:
                 json.dumps(resource.to_yaml_config()): cost
                 for resource, cost in v.items()
             }
-            task_str = (f'for task {repr(task)!r} ' if num_tasks > 1 else '')
+            task_str = (f'for task {task.name!r} ' if num_tasks > 1 else '')
             plural = 's' if task.num_nodes > 1 else ''
             logger.info(
                 f'{colorama.Style.BRIGHT}Considered resources {task_str}'

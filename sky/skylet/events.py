@@ -14,10 +14,10 @@ from sky import clouds
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import cloud_registry
+from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
-from sky.spot import spot_utils
 from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -64,15 +64,15 @@ class JobSchedulerEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
-        job_lib.scheduler.schedule_step()
+        job_lib.scheduler.schedule_step(force_update_jobs=True)
 
 
-class SpotJobUpdateEvent(SkyletEvent):
-    """Skylet event for updating spot job status."""
+class ManagedJobUpdateEvent(SkyletEvent):
+    """Skylet event for updating managed job status."""
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
-        spot_utils.update_spot_job_status()
+        managed_job_utils.update_managed_job_status()
 
 
 class ServiceUpdateEvent(SkyletEvent):

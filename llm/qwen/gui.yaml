@@ -13,7 +13,8 @@
 # you can click on it to open the GUI.
 
 envs:
-  ENDPOINT: x.x.x.x:3031 # Address of the API server running qwen. 
+  ENDPOINT: x.x.x.x:3031 # Address of the API server running qwen.
+  MODEL_NAME: Qwen/Qwen1.5-72B-Chat
 
 resources:
   cpus: 2
@@ -25,8 +26,8 @@ setup: |
     conda activate qwen
   fi
 
-  pip install "fschat[model_worker,webui]"
-  pip install "openai<1"
+  # Install Gradio for web UI.
+  pip install gradio openai
 
 run: |
   conda activate qwen
@@ -35,19 +36,9 @@ run: |
   CONTROLLER_PORT=21001
   WORKER_PORT=21002
 
-  cat <<EOF > ~/model_info.json
-  {
-    "Qwen/Qwen1.5-72B-Chat": {
-      "model_name": "Qwen/Qwen1.5-72B-Chat",
-      "api_base": "http://${ENDPOINT}/v1",
-      "api_key": "empty",
-      "model_path": "Qwen/Qwen1.5-72B-Chat"
-    }
-  }
-  EOF
-
-  python3 -m fastchat.serve.controller --host 0.0.0.0 --port ${CONTROLLER_PORT} > ~/controller.log 2>&1 &
-
   echo 'Starting gradio server...'
-  python -u -m fastchat.serve.gradio_web_server --share \
-    --register ~/model_info.json | tee ~/gradio.log
+  git clone https://github.com/vllm-project/vllm.git || true
+  python vllm/examples/gradio_openai_chatbot_webserver.py \
+    -m $MODEL_NAME \
+    --port 8811 \
+    --model-url http://$ENDPOINT/v1 | tee ~/gradio.log
