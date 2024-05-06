@@ -3145,30 +3145,35 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
         if len(job_submit_cmd) > 120 * 1024:
-            # The maximum size of a command line argument is 128 KB. We use
-            # 120KB to be safe for other arguments.
+            # The maximum size of a command line arguments is 128 KB, i.e. the
+            # command executed with /bin/sh should be less than 128KB.
             # https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
-            # If the command is too long, write it to a file, rsync and execute
-            # it.
+            # If a user have very long run or setup commands, the generated
+            # command may exceed the limit, as we encode the script in base64
+            # add directly include it in the job submission command. If the
+            # command is too long, we instead write it to a file, rsync and
+            # execute it.
+            # We use 120KB as a threshold to be safe for other arguments that
+            # might be added during ssh.
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml, handle.docker_user, handle.ssh_user)
             head_ssh_port = handle.head_ssh_port
             runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                    port=head_ssh_port,
-                                                    **ssh_credentials)
+                                                     port=head_ssh_port,
+                                                     **ssh_credentials)
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
-                script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
+                script_path = os.path.join(SKY_REMOTE_APP_DIR,
+                                           f'sky_job_{job_id}')
                 # We choose to sync code + exec, because the alternative of 'ray
                 # submit' may not work as it may use system python (python2) to
                 # execute the script.  Happens for AWS.
                 runner.rsync(source=fp.name,
-                            target=script_path,
-                            up=True,
-                            stream_logs=False)
+                             target=script_path,
+                             up=True,
+                             stream_logs=False)
             job_submit_cmd = f'{mkdir_code} && {code}'
-
 
         if managed_job_dag is not None:
             # Add the managed job to job queue database.
