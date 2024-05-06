@@ -109,7 +109,7 @@ Available fields and semantics:
     # permission to create a security group.
     security_group_name: my-security-group
 
-    # Identity to use for all AWS instances (optional).
+    # Identity to use for deployed AWS instances (optional).
     #
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
     # AWS instances created by SkyPilot. They are used for accessing cloud
@@ -119,6 +119,9 @@ Available fields and semantics:
     # SERVICE_ACCOUNT: Local credential files are not uploaded to AWS
     # instances. SkyPilot will auto-create and reuse a service account (IAM
     # role) for AWS instances.
+    #
+    # User Specified SERVICE_ACCOUNT (IAM role): The name of the remote identity
+    # to give the launched resouce.
     #
     # Two caveats of SERVICE_ACCOUNT for multicloud users:
     #
@@ -131,7 +134,18 @@ Available fields and semantics:
     #   files to assign to these non-AWS instances).
     #
     # Default: 'LOCAL_CREDENTIALS'.
+    ### Format 1 ###
+    # A string; the same remote identity is applied to all launched resources.
     remote_identity: LOCAL_CREDENTIALS
+    ### Format 2 ###
+    # A dict mapping wildcard expression of cloud names to the resources to the
+    # resource identity.
+    # NOTE: If not a wildcard expression in the dict mapping does not match a
+    # cloud name for a resouce being deployed, the default remote identity is used.
+    # To specify your own default, utilize "*" as the wildcard expression.
+    remote_identity:
+      sky-serve-controller-*: my-controller-specific-value
+      "*": my-default-value
 
   # Advanced GCP configurations (optional).
   # Apply to all new instances but not existing ones.
