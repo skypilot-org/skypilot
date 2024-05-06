@@ -398,9 +398,13 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       r.instance_type)
 
+        tailscale_config = skypilot_config.get_nested(
+            ('aws', 'vpn', 'tailscale'), None)
+
         user_security_group = skypilot_config.get_nested(
             ('aws', 'security_group_name'), None)
-        if resources.ports is not None:
+        # Only open ports if VPN is not enabled.
+        if resources.ports is not None and tailscale_config is None:
             # Already checked in Resources._try_validate_ports
             assert user_security_group is None
             security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
@@ -411,7 +415,7 @@ class AWS(clouds.Cloud):
         else:
             security_group = DEFAULT_SECURITY_GROUP_NAME
 
-        return {
+        resources_vars = {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
@@ -423,6 +427,31 @@ class AWS(clouds.Cloud):
                 str(security_group != user_security_group).lower(),
             **AWS._get_disk_specs(r.disk_tier)
         }
+        resources_vars['vpn_config'] = tailscale_config
+        if tailscale_config is not None:
+            unique_id = cluster_name_on_cloud
+            resources_vars['vpn_unique_id'] = unique_id
+            resources_vars['vpn_cloud_init_commands'] = [
+                [
+                    'sh', '-c',
+                    'curl -fsSL https://tailscale.com/install.sh | sh'
+                ],
+                [
+                    'sh', '-c',
+                    ('echo \'net.ipv4.ip_forward = 1\' | '
+                     'sudo tee -a /etc/sysctl.d/99-tailscale.conf && '
+                     'echo \'net.ipv6.conf.all.forwarding = 1\' | '
+                     'sudo tee -a /etc/sysctl.d/99-tailscale.conf && '
+                     'sudo sysctl -p /etc/sysctl.d/99-tailscale.conf')
+                ],
+                [
+                    'tailscale', 'up',
+                    f'--authkey={tailscale_config["auth_key"]}',
+                    f'--hostname={unique_id}'
+                ],
+            ]
+
+        return resources_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'

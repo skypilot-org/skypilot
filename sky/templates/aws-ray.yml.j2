@@ -42,6 +42,13 @@ provider:
   vpc_name: {{vpc_name}}
 {% endif %}
   use_internal_ips: {{use_internal_ips}}
+{%- if vpn_config is not none %}
+  vpn_unique_id: {{vpn_unique_id}}
+  vpn_config:
+    {%- for key, value in vpn_config.items() %}
+    {{key}}: {{value}}
+    {%- endfor %}
+{%- endif %}
   # Disable launch config check for worker nodes as it can cause resource
   # leakage.
   # Reference: https://github.com/ray-project/ray/blob/cd1ba65e239360c8a7b130f991ed414eccc063ce/python/ray/autoscaler/_private/autoscaler.py#L1115
@@ -90,6 +97,7 @@ available_node_types:
       # The bootcmd is to disable automatic APT updates, to avoid the lock
       # when user call `apt install` on the node.
       # Reference: https://askubuntu.com/questions/1322292/how-do-i-turn-off-automatic-updates-completely-and-for-real
+      # TODO(tian): Have a class for different VPN provider and return different setup commands.
       UserData: |
         #cloud-config
         users:
@@ -109,6 +117,12 @@ available_node_types:
           - path: /etc/apt/apt.conf.d/10cloudinit-disable
             content: |
               APT::Periodic::Enable "0";
+        {%- if vpn_cloud_init_commands is not none %}
+        runcmd:
+          {%- for cmd in vpn_cloud_init_commands %}
+          - {{cmd}}
+          {%- endfor %}
+        {%- endif %}
       TagSpecifications:
         - ResourceType: instance
           Tags:

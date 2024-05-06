@@ -8,6 +8,7 @@ import json
 import math
 import os
 import pathlib
+import pprint
 import re
 import signal
 import subprocess
@@ -34,6 +35,7 @@ from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -2110,11 +2112,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Launched num nodes
     - (optional) Launched resources
     - (optional) Docker user name
+    - (optional) The cluster VPN configuration (if used)
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
     # Bump if any fields get added/removed/changed, and add backward
-    # compaitibility logic in __setstate__.
-    _VERSION = 7
+    # compatibility logic in __setstate__.
+    _VERSION = 8
 
     def __init__(
             self,
@@ -2147,12 +2150,22 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
         self.ssh_user: Optional[str] = None
+        # TODO(tian): Should we store the APIs in the config YAML?
+        self.vpn_config: Optional[Dict[str, Any]] = self._get_vpn_config()
         # Deprecated. SkyPilot new provisioner API handles the TPU node
         # creation/deletion.
         # Backward compatibility for TPU nodes created before #2943.
         # TODO (zhwu): Remove this after 0.6.0.
         self.tpu_create_script = tpu_create_script
         self.tpu_delete_script = tpu_delete_script
+
+    def _get_vpn_config(self) -> Optional[Dict[str, Any]]:
+        """Returns the VPN config used by the cluster."""
+        # Directly load the VPN config from the cluster
+        # yaml instead of `skypilot_config` as the latter
+        # can be changed after the cluster is UP.
+        return common_utils.read_yaml(self.cluster_yaml).get(
+            'provider', {}).get('vpn_config', None)
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2169,6 +2182,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
                 f'\n\tssh_user={self.ssh_user},'
+                f'\n\tvpn_config={self.vpn_config},'
                 # TODO (zhwu): Remove this after 0.6.0.
                 f'\n\ttpu_create_script={self.tpu_create_script}, '
                 f'\n\ttpu_delete_script={self.tpu_delete_script})')
@@ -2440,6 +2454,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version < 7:
             self.ssh_user = None
 
+        if version < 8:
+            self.vpn_config = None
+
         self.__dict__.update(state)
 
         # Because the update_cluster_ips and update_ssh_ports
@@ -2533,23 +2550,68 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
 
+        def _check_vpn_unchanged(
+                resource: resources_lib.Resources) -> Optional[str]:
+            """Check if the VPN configuration is unchanged.
+
+            This function should only be called after checking cloud is the
+            same. Current VPN configuration is per-cloud basis, so we could
+            only check for the same cloud.
+
+            Returns:
+                None if the VPN configuration is unchanged, otherwise a string
+                indicating the mismatch.
+            """
+            assert resource.cloud is None or resource.cloud.is_same_cloud(
+                launched_resources.cloud)
+            # Use launched_resources.cloud here when resource.cloud is None.
+            now_vpn_config = skypilot_config.get_nested(
+                (str(launched_resources.cloud).lower(), 'vpn', 'tailscale'),
+                None)
+            use_or_not_mismatch_str = (
+                '{} VPN, but current config requires the opposite')
+            if handle.vpn_config is None:
+                if now_vpn_config is None:
+                    return None
+                return use_or_not_mismatch_str.format('without')
+            if now_vpn_config is None:
+                return use_or_not_mismatch_str.format('with')
+            if now_vpn_config == handle.vpn_config:
+                return None
+            return (f'with VPN config\n{pprint.pformat(handle.vpn_config)}, '
+                    f'but current config is\n{pprint.pformat(now_vpn_config)}')
+
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
                         f'existing cluster first: sky down {cluster_name}')
         valid_resource = None
         requested_resource_list = []
+        resource_failure_reason: Dict[resources_lib.Resources, str] = {}
         for resource in task.resources:
             if (task.num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
                         launched_resources,
                         requested_num_nodes=task.num_nodes,
                         check_ports=check_ports)):
-                valid_resource = resource
-                break
+                reason = _check_vpn_unchanged(resource)
+                if reason is None:
+                    valid_resource = resource
+                    break
+                else:
+                    # TODO(tian): Maybe refactor the following into this dict
+                    resource_failure_reason[resource] = (
+                        f'Cloud {launched_resources.cloud} VPN config '
+                        f'mismatch. Cluster {handle.cluster_name} is '
+                        f'launched {reason}. Please update the VPN '
+                        'configuration in skypilot_config.')
             else:
                 requested_resource_list.append(f'{task.num_nodes}x {resource}')
 
         if valid_resource is None:
             for example_resource in task.resources:
+                if example_resource in resource_failure_reason:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesMismatchError(
+                            resource_failure_reason[example_resource])
                 if (example_resource.region is not None and
                         example_resource.region != launched_resources.region):
                     with ux_utils.print_exception_no_traceback():
@@ -2849,6 +2911,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return handle
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
+        if handle.vpn_config is not None:
+            # Skip opening any ports if VPN is used.
+            return
         cloud = handle.launched_resources.cloud
         logger.debug(
             f'Opening ports {handle.launched_resources.ports} for {cloud}')
@@ -3963,6 +4028,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Failed to delete cloned image {image_id}. Please '
                     'remove it manually to avoid image leakage. Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
+        # We don't need to explicitly skip cleanup ports if VPN is used, as it
+        # will use the default security group and automatically skip it.
         if terminate:
             cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)

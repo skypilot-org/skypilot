@@ -470,6 +470,32 @@ def get_cluster_schema():
     }
 
 
+_VPN_CONFIG_SCHEMA = {
+    'vpn': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'tailscale': {
+                'type': 'object',
+                'required': ['auth_key', 'api_key', 'tailnet'],
+                'additionalProperties': False,
+                'properties': {
+                    'auth_key': {
+                        'type': 'string',
+                    },
+                    'api_key': {
+                        'type': 'string',
+                    },
+                    'tailnet': {
+                        'type': 'string',
+                    },
+                },
+            },
+        }
+    }
+}
+
 _NETWORK_CONFIG_SCHEMA = {
     'vpc_name': {
         'oneOf': [{
@@ -565,6 +591,7 @@ def get_config_schema():
                 'security_group_name': {
                     'type': 'string',
                 },
+                **_VPN_CONFIG_SCHEMA,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },

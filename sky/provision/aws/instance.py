@@ -11,6 +11,8 @@ import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
 
+import requests
+
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
@@ -19,6 +21,7 @@ from sky.provision import common
 from sky.provision.aws import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -610,6 +613,40 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances.terminate()
+    # Cleanup VPN record.
+    vpn_config = provider_config.get('vpn_config', None)
+    if vpn_config is not None:
+        auth_headers = {'Authorization': f'Bearer {vpn_config["api_key"]}'}
+
+        def _get_node_id_from_hostname(network_name: str,
+                                       hostname: str) -> Optional[str]:
+            # TODO(tian): Refactor to a dedicated file for all
+            # VPN related functions and constants.
+            url_to_query = ('https://api.tailscale.com/api/v2/'
+                            f'tailnet/{network_name}/devices')
+            # TODO(tian): Error handling if api key is wrong.
+            resp = requests.get(url_to_query, headers=auth_headers)
+            all_devices_in_network = resp.json().get('devices', [])
+            for device_info in all_devices_in_network:
+                if device_info.get('hostname') == hostname:
+                    return device_info.get('nodeId')
+            return None
+
+        node_id_in_vpn = _get_node_id_from_hostname(
+            vpn_config['tailnet'], provider_config['vpn_unique_id'])
+        if node_id_in_vpn is None:
+            logger.warning('Cannot find node id for '
+                           f'{provider_config["vpn_unique_id"]}. '
+                           f'Skip deleting vpn record.')
+        else:
+            url_to_delete = ('https://api.tailscale.com/api/v2/'
+                             f'device/{node_id_in_vpn}')
+            resp = requests.delete(url_to_delete, headers=auth_headers)
+            if resp.status_code != 200:
+                logger.warning('Failed to delete vpn record for '
+                               f'{provider_config["vpn_unique_id"]}. '
+                               f'Status code: {resp.status_code}, '
+                               f'Response: {resp.text}')
     if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
             not managed_by_skypilot):
         # Using default AWS SG or user specified security group. We don't need
@@ -843,7 +880,7 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
-    del provider_config  # unused
+    assert provider_config is not None
     ec2 = _default_ec2_resource(region)
     filters = [
         {
@@ -863,10 +900,33 @@ def get_cluster_info(
         tags = [(t['Key'], t['Value']) for t in inst.tags]
         # sort tags by key to support deterministic unit test stubbing
         tags.sort(key=lambda x: x[0])
+        vpn_unique_id = provider_config.get('vpn_unique_id', None)
+        if vpn_unique_id is None:
+            private_ip = inst.private_ip_address
+        else:
+            # TODO(tian): Using cluster name as hostname is problematic for
+            # multi-node cluster. Should use f'{unique_id}-{node_id}'
+            # TODO(tian): max_retry=1000 ==> infinite retry.
+            # TODO(tian): Check cloud status and set a timeout after the
+            # instance is ready on the cloud.
+            query_cmd = f'tailscale ip -4 {vpn_unique_id}'
+            rc, stdout, stderr = subprocess_utils.run_with_retries(
+                query_cmd,
+                max_retry=1000,
+                retry_wait_time=5,
+                retry_stderrs=['no such host', 'server misbehaving'])
+            subprocess_utils.handle_returncode(
+                rc,
+                query_cmd,
+                error_msg=('Failed to query Private IP in VPN '
+                           f'for cluster {cluster_name_on_cloud} '
+                           f'with unique id {vpn_unique_id}'),
+                stderr=stdout + stderr)
+            private_ip = stdout.strip()
         instances[inst.id] = [
             common.InstanceInfo(
                 instance_id=inst.id,
-                internal_ip=inst.private_ip_address,
+                internal_ip=private_ip,
                 external_ip=inst.public_ip_address,
                 tags=dict(tags),
             )

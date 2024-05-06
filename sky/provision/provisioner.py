@@ -417,10 +417,18 @@ def _post_provision_setup(
         custom_resource: Optional[str]) -> provision_common.ClusterInfo:
     config_from_yaml = common_utils.read_yaml(cluster_yaml)
     provider_config = config_from_yaml.get('provider')
-    cluster_info = provision.get_cluster_info(cloud_name,
-                                              provision_record.region,
-                                              cluster_name.name_on_cloud,
-                                              provider_config=provider_config)
+    if (provider_config is not None and
+            provider_config.get('vpn_config', None) is not None):
+        get_info_status = rich_utils.safe_status(
+            '[bold cyan]Launching - Waiting for VPN setup[/]')
+    else:
+        get_info_status = rich_utils.empty_status()
+    with get_info_status:
+        cluster_info = provision.get_cluster_info(
+            cloud_name,
+            provision_record.region,
+            cluster_name.name_on_cloud,
+            provider_config=provider_config)
 
     if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
@@ -456,7 +464,7 @@ def _post_provision_setup(
         logger.debug(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
         wait_for_ssh(cluster_info, ssh_credentials)
-        logger.debug(f'SSH Conection ready for {cluster_name!r}')
+        logger.debug(f'SSH Connection ready for {cluster_name!r}')
         plural = '' if len(cluster_info.instances) == 1 else 's'
         logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
                     f'or found existing instance{plural}.'

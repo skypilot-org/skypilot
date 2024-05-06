@@ -43,6 +43,11 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     return _NoOpConsoleStatus()
 
 
+def empty_status() -> _NoOpConsoleStatus:
+    """An empty status spinner."""
+    return _NoOpConsoleStatus()
+
+
 def force_update_status(msg: str):
     """Update the status message even if sky_logging.is_silent() is true."""
     if (threading.current_thread() is threading.main_thread() and
