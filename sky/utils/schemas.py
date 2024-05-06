@@ -517,6 +517,13 @@ _LABELS_SCHEMA = {
 
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
+        'type': 'string',
+        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT']
+    }
+}
+
+_REMOTE_IDENTITY_SCHEMA_AWS = {
+    'remote_identity': {
         'oneOf': [{
             'type': 'string'
         }, {
@@ -660,8 +667,11 @@ def get_config_schema():
         },
     }
 
-    for config in cloud_configs.values():
-        config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
+    for cloud, config in cloud_configs.items():
+        if cloud == 'aws':
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
+        else:
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
