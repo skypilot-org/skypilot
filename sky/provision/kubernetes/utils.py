@@ -172,7 +172,7 @@ class GFDLabelFormatter(GPULabelFormatter):
         """
         canonical_gpu_names = [
             'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4',
-            'V100', 'A10', 'P100', 'P40', 'P4', 'L4'
+            'V100', 'A10', 'P4000', 'P100', 'P40', 'P4', 'L4'
         ]
         for canonical_name in canonical_gpu_names:
             # A100-80G accelerator is A100-SXM-80GB or A100-PCIE-80GB
