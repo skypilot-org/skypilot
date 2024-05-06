@@ -22,6 +22,9 @@ def _request_repr(request: 'fastapi.Request') -> str:
 class LoadBalancingPolicy:
     """Abstract class for load balancing policies."""
 
+    def __init__(self) -> None:
+        self.ready_replicas: List[str] = []
+
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         raise NotImplementedError
 
@@ -45,7 +48,7 @@ class RoundRobinPolicy(LoadBalancingPolicy):
     """Round-robin load balancing policy."""
 
     def __init__(self) -> None:
-        self.ready_replicas: List[str] = []
+        super().__init__()
         self.index = 0
 
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
