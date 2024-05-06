@@ -17,14 +17,15 @@ from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import cloudflare
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.jobs import constants as managed_job_constants
+from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
 from sky.skylet import constants
-from sky.spot import constants as spot_constants
-from sky.spot import spot_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -35,7 +36,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Message thrown when APIs sky.spot.launch(),sky.serve.up() received an invalid
+# Message thrown when APIs sky.jobs.launch(), sky.serve.up() received an invalid
 # controller resources spec.
 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type} controller resources is not valid, please check '
@@ -52,68 +53,92 @@ class _ControllerSpec:
     """Spec for skypilot controllers."""
     controller_type: str
     name: str
-    cluster_name: str
+    # Use a list of strings to support fallback to old names. The list is in the
+    # fallback order.
+    candidate_cluster_names: List[str]
     in_progress_hint: str
     decline_cancel_hint: str
-    decline_down_when_failed_to_fetch_status_hint: str
+    _decline_down_when_failed_to_fetch_status_hint: str
     decline_down_for_dirty_controller_hint: str
-    check_cluster_name_hint: str
+    _check_cluster_name_hint: str
     default_hint_if_non_existent: str
     connection_error_hint: str
     default_resources_config: Dict[str, Any]
+
+    @property
+    def cluster_name(self) -> str:
+        """The name in candidate_cluster_names that exists, else the first."""
+        for candidate_name in self.candidate_cluster_names:
+            record = global_user_state.get_cluster_from_name(candidate_name)
+            if record is not None:
+                return candidate_name
+        return self.candidate_cluster_names[0]
+
+    @property
+    def decline_down_when_failed_to_fetch_status_hint(self) -> str:
+        return self._decline_down_when_failed_to_fetch_status_hint.format(
+            cluster_name=self.cluster_name)
+
+    @property
+    def check_cluster_name_hint(self) -> str:
+        return self._check_cluster_name_hint.format(
+            cluster_name=self.cluster_name)
 
 
 class Controllers(enum.Enum):
     """Skypilot controllers."""
     # NOTE(dev): Keep this align with
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
-    SPOT_CONTROLLER = _ControllerSpec(
-        controller_type='spot',
-        name='managed spot controller',
-        cluster_name=spot_utils.SPOT_CONTROLLER_NAME,
+    JOBS_CONTROLLER = _ControllerSpec(
+        controller_type='jobs',
+        name='managed jobs controller',
+        candidate_cluster_names=[
+            managed_job_utils.JOB_CONTROLLER_NAME,
+            managed_job_utils.LEGACY_JOB_CONTROLLER_NAME
+        ],
         in_progress_hint=(
-            '* {job_info}To see all spot jobs: '
-            f'{colorama.Style.BRIGHT}sky spot queue{colorama.Style.RESET_ALL}'),
+            '* {job_info}To see all managed jobs: '
+            f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
-            'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
-            f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
-            f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
-        decline_down_when_failed_to_fetch_status_hint=(
-            f'{colorama.Fore.RED}Tearing down the spot controller while '
-            'it is in INIT state is not supported (this means a spot launch '
+            'Cancelling the jobs controller\'s jobs is not allowed.\nTo cancel '
+            f'managed jobs, use: {colorama.Style.BRIGHT}sky jobs cancel '
+            f'<managed job IDs> [--all]{colorama.Style.RESET_ALL}'),
+        _decline_down_when_failed_to_fetch_status_hint=(
+            f'{colorama.Fore.RED}Tearing down the jobs controller while '
+            'it is in INIT state is not supported (this means a job launch '
             'is in progress or the previous launch failed), as we cannot '
-            'guarantee that all the spot jobs are finished. Please wait '
-            'until the spot controller is UP or fix it with '
+            'guarantee that all the managed jobs are finished. Please wait '
+            'until the jobs controller is UP or fix it with '
             f'{colorama.Style.BRIGHT}sky start '
-            f'{spot_utils.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.'),
+            '{cluster_name}'
+            f'{colorama.Style.RESET_ALL}.'),
         decline_down_for_dirty_controller_hint=(
-            f'{colorama.Fore.RED}In-progress spot jobs found. To avoid '
+            f'{colorama.Fore.RED}In-progress managed jobs found. To avoid '
             f'resource leakage, cancel all jobs first: {colorama.Style.BRIGHT}'
-            f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
-        check_cluster_name_hint=(
-            f'Cluster {spot_utils.SPOT_CONTROLLER_NAME} is reserved for '
-            'managed spot controller.'),
-        default_hint_if_non_existent='No in-progress spot jobs.',
+            f'sky jobs cancel -a{colorama.Style.RESET_ALL}\n'),
+        _check_cluster_name_hint=('Cluster {cluster_name} is reserved for '
+                                  'managed jobs controller.'),
+        default_hint_if_non_existent='No in-progress managed jobs.',
         connection_error_hint=(
-            'Failed to connect to spot controller, please try again later.'),
-        default_resources_config=spot_constants.CONTROLLER_RESOURCES)
+            'Failed to connect to jobs controller, please try again later.'),
+        default_resources_config=managed_job_constants.CONTROLLER_RESOURCES)
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
-        cluster_name=serve_utils.SKY_SERVE_CONTROLLER_NAME,
+        candidate_cluster_names=[serve_utils.SKY_SERVE_CONTROLLER_NAME],
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status -a{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
-        decline_down_when_failed_to_fetch_status_hint=(
+        _decline_down_when_failed_to_fetch_status_hint=(
             f'{colorama.Fore.RED}Tearing down the sky serve controller '
             'while it is in INIT state is not supported (this means a sky '
             'serve up is in progress or the previous launch failed), as we '
             'cannot guarantee that all the services are terminated. Please '
             'wait until the sky serve controller is UP or fix it with '
             f'{colorama.Style.BRIGHT}sky start '
-            f'{serve_utils.SKY_SERVE_CONTROLLER_NAME}'
+            '{cluster_name}'
             f'{colorama.Style.RESET_ALL}.'),
         decline_down_for_dirty_controller_hint=(
             f'{colorama.Fore.RED}Tearing down the sky serve controller is not '
@@ -121,9 +146,8 @@ class Controllers(enum.Enum):
             '{service_names}. Please terminate the services first with '
             f'{colorama.Style.BRIGHT}sky serve down -a'
             f'{colorama.Style.RESET_ALL}.'),
-        check_cluster_name_hint=(
-            f'Cluster {serve_utils.SKY_SERVE_CONTROLLER_NAME} is reserved for '
-            'sky serve controller.'),
+        _check_cluster_name_hint=('Cluster {cluster_name} is reserved for '
+                                  'sky serve controller.'),
         default_hint_if_non_existent='No live services.',
         connection_error_hint=(
             'Failed to connect to serve controller, please try again later.'),
@@ -138,7 +162,7 @@ class Controllers(enum.Enum):
             Otherwise, returns None.
         """
         for controller in cls:
-            if controller.value.cluster_name == name:
+            if name in controller.value.candidate_cluster_names:
                 return controller
         return None
 
@@ -160,40 +184,83 @@ class Controllers(enum.Enum):
 # can be cleaned up by another process.
 # TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
-        controller_type: str) -> List[str]:
-    commands = [
-        # aws
-        'pip list | grep boto3 > /dev/null 2>&1 || '
-        'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
-        'boto3>=1.26.1 > /dev/null 2>&1',
-        # gcp
-        'pip list | grep google-api-python-client > /dev/null 2>&1 || '
-        'pip install google-api-python-client>=2.69.0 '
-        '> /dev/null 2>&1',
-        # Have to separate the installation of google-cloud-storage from above
-        # because for a VM launched on GCP, the VM may have
-        # google-api-python-client installed alone.
-        'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
-        'pip install google-cloud-storage > /dev/null 2>&1',
-        f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}',
-        # fluidstack does not need to install any cloud dependencies.
-    ]
-    # k8s and ibm doesn't support open port and spot instance yet, so we don't
-    # install them for either controller.
-    if controller_type == 'spot':
-        # oci doesn't support open port yet, so we don't install oci
-        # dependencies for sky serve controller.
-        commands.append('pip list | grep oci > /dev/null 2>&1 || '
-                        'pip install oci > /dev/null 2>&1')
+        controller: Controllers) -> List[str]:
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
-    if any(
-            cloud.is_same_cloud(clouds.Azure())
-            for cloud in sky_check.get_cached_enabled_clouds_or_refresh()):
-        commands.append(
-            'pip list | grep azure-cli > /dev/null 2>&1 || '
-            'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
-            'azure-mgmt-network > /dev/null 2>&1')
+    commands = []
+    prefix_str = 'Check & install cloud dependencies on controller: '
+    # This is to make sure the shorter checking message does not have junk
+    # characters from the previous message.
+    empty_str = ' ' * 5
+    aws_dependencies_installation = (
+        'pip list | grep boto3 > /dev/null 2>&1 || pip install '
+        'botocore>=1.29.10 boto3>=1.26.1; '
+        # Need to separate the installation of awscli from above because some
+        # other clouds will install boto3 but not awscli.
+        'pip list | grep awscli> /dev/null 2>&1 || pip install "urllib3<2" '
+        'awscli>=1.27.10 "colorama<0.4.5" > /dev/null 2>&1')
+    for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
+        if isinstance(
+                clouds,
+            (clouds.Lambda, clouds.SCP, clouds.Fluidstack, clouds.Paperspace)):
+            # no need to install any cloud dependencies for lambda, scp,
+            # fluidstack and paperspace
+            continue
+        if isinstance(cloud, clouds.AWS):
+            commands.append(f'echo -n "{prefix_str}AWS{empty_str}" && ' +
+                            aws_dependencies_installation)
+        elif isinstance(cloud, clouds.Azure):
+            commands.append(
+                f'echo -en "\\r{prefix_str}Azure{empty_str}" && '
+                'pip list | grep azure-cli > /dev/null 2>&1 || '
+                'pip install "azure-cli>=2.31.0" azure-core '
+                '"azure-identity>=1.13.0" azure-mgmt-network > /dev/null 2>&1')
+        elif isinstance(cloud, clouds.GCP):
+            commands.append(
+                f'echo -en "\\r{prefix_str}GCP{empty_str}" && '
+                'pip list | grep google-api-python-client > /dev/null 2>&1 || '
+                'pip install "google-api-python-client>=2.69.0" '
+                '> /dev/null 2>&1')
+            # Have to separate the installation of google-cloud-storage from
+            # above because for a VM launched on GCP, the VM may have
+            # google-api-python-client installed alone.
+            commands.append(
+                'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
+                'pip install google-cloud-storage > /dev/null 2>&1')
+            commands.append(f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
+        if controller == Controllers.JOBS_CONTROLLER:
+            if isinstance(cloud, clouds.IBM):
+                commands.append(
+                    f'echo -en "\\r{prefix_str}IBM{empty_str}" '
+                    '&& pip list | grep ibm-cloud-sdk-core > /dev/null 2>&1 || '
+                    'pip install ibm-cloud-sdk-core ibm-vpc '
+                    'ibm-platform-services ibm-cos-sdk > /dev/null 2>&1')
+            elif isinstance(cloud, clouds.OCI):
+                commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
+                                'pip list | grep oci > /dev/null 2>&1 || '
+                                'pip install oci > /dev/null 2>&1')
+            elif isinstance(cloud, clouds.Kubernetes):
+                commands.append(
+                    f'echo -en "\\r{prefix_str}Kubernetes{empty_str}" && '
+                    'pip list | grep kubernetes > /dev/null 2>&1 || '
+                    'pip install "kubernetes>=20.0.0" > /dev/null 2>&1')
+            elif isinstance(cloud, clouds.RunPod):
+                commands.append(
+                    f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
+                    'pip list | grep runpod > /dev/null 2>&1 || '
+                    'pip install "runpod>=1.5.1" > /dev/null 2>&1')
+            elif isinstance(cloud, clouds.Cudo):
+                # cudo doesn't support open port
+                commands.append(
+                    f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
+                    'pip list | grep cudo-compute > /dev/null 2>&1 || '
+                    'pip install "cudo-compute>=0.1.8" > /dev/null 2>&1')
+    if (cloudflare.NAME
+            in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
+        commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
+                        aws_dependencies_installation)
+    commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '
+                    'clouds."')
     return commands
 
 
@@ -226,7 +293,7 @@ def download_and_stream_latest_job_log(
         local_dir: str) -> Optional[str]:
     """Downloads and streams the latest job log.
 
-    This function is only used by spot controller and sky serve controller.
+    This function is only used by jobs controller and sky serve controller.
     """
     os.makedirs(local_dir, exist_ok=True)
     log_file = None
@@ -234,11 +301,11 @@ def download_and_stream_latest_job_log(
         log_dirs = backend.sync_down_logs(
             handle,
             # Download the log of the latest job.
-            # The job_id for the spot job running on the spot cluster is not
+            # The job_id for the managed job running on the cluster is not
             # necessarily 1, as it is possible that the worker node in a
-            # multi-node cluster is preempted, and we recover the spot job
+            # multi-node cluster is preempted, and we recover the managed job
             # on the existing cluster, which leads to a larger job_id. Those
-            # job_ids all represent the same logical spot job.
+            # job_ids all represent the same logical managed job.
             job_ids=None,
             local_dir=local_dir)
     except exceptions.CommandError as e:
@@ -262,10 +329,11 @@ def download_and_stream_latest_job_log(
 
 
 def shared_controller_vars_to_fill(
-        controller_type: str, remote_user_config_path: str) -> Dict[str, str]:
+        controller: Controllers,
+        remote_user_config_path: str) -> Dict[str, str]:
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
-            _get_cloud_dependencies_installation_commands(controller_type)
+            _get_cloud_dependencies_installation_commands(controller)
     }
     env_vars: Dict[str, str] = {
         env.value: '1' for env in env_options.Options if env.get()
@@ -287,7 +355,7 @@ def shared_controller_vars_to_fill(
 
 
 def get_controller_resources(
-    controller_type: str,
+    controller: Controllers,
     task_resources: Iterable['resources.Resources'],
 ) -> Set['resources.Resources']:
     """Read the skypilot config and setup the controller resources.
@@ -299,18 +367,20 @@ def get_controller_resources(
         specified, the controller will be launched on one of the clouds
         of the task resources for better connectivity.
     """
-    controller = Controllers.from_type(controller_type)
-    assert controller is not None, controller_type
     controller_resources_config_copied: Dict[str, Any] = copy.copy(
         controller.value.default_resources_config)
     if skypilot_config.loaded():
         # Override the controller resources with the ones specified in the
         # config.
         custom_controller_resources_config = skypilot_config.get_nested(
-            (controller_type, 'controller', 'resources'), None)
+            (controller.value.controller_type, 'controller', 'resources'), None)
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
+        elif controller == Controllers.JOBS_CONTROLLER:
+            controller_resources_config_copied.update(
+                skypilot_config.get_nested(('spot', 'controller', 'resources'),
+                                           {}))
 
     try:
         controller_resources = resources.Resources.from_yaml_config(
@@ -319,9 +389,9 @@ def get_controller_resources(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
-                    controller_type=controller_type,
-                    err=common_utils.format_exception(e,
-                                                      use_bracket=True))) from e
+                    controller_type=controller.value.controller_type,
+                    err=common_utils.format_exception(
+                        e, use_bracket=True)).capitalize()) from e
     # TODO(tian): Support multiple resources for the controller. One blocker
     # here is the semantic if controller resources use `ordered` and we want
     # to override it with multiple cloud from task resources.
@@ -329,10 +399,10 @@ def get_controller_resources(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
-                    controller_type=controller_type,
+                    controller_type=controller.value.controller_type,
                     err=f'Expected exactly one resource, got '
                     f'{len(controller_resources)} resources: '
-                    f'{controller_resources}'))
+                    f'{controller_resources}').capitalize())
     controller_resources_to_use: resources.Resources = list(
         controller_resources)[0]
 
@@ -404,18 +474,18 @@ def _setup_proxy_command_on_controller(
     # to this scenario.)
     #
     # This file will be uploaded to the controller node and will be
-    # used throughout the spot job's / service's recovery attempts
+    # used throughout the managed job's / service's recovery attempts
     # (i.e., if it relaunches due to preemption, we make sure the
     # same config is used).
     #
     # NOTE: suppose that we have a controller in old VPC, then user
-    # changes 'vpc_name' in the config and does a 'spot launch' /
+    # changes 'vpc_name' in the config and does a 'job launch' /
     # 'serve up'. In general, the old controller may not successfully
     # launch the job in the new VPC. This happens if the two VPCs don’t
     # have peering set up. Like other places in the code, we assume
     # properly setting up networking is user's responsibilities.
     # TODO(zongheng): consider adding a basic check that checks
-    # controller VPC (or name) == the spot job's / service's VPC
+    # controller VPC (or name) == the managed job's / service's VPC
     # (or name). It may not be a sufficient check (as it's always
     # possible that peering is not set up), but it may catch some
     # obvious errors.
@@ -469,7 +539,7 @@ def replace_skypilot_config_path_in_file_mounts(
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
-                                                  path: str):
+                                                  path: str) -> None:
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
     Eagerly syncing up local->Storage ensures Storage->VM would work at task
@@ -595,7 +665,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Step 4: Upload storage from sources
     # Upload the local source to a bucket. The task will not be executed
     # locally, so we need to upload the files/folders to the bucket manually
-    # here before sending the task to the remote spot controller.
+    # here before sending the task to the remote jobs controller.
     if task.storage_mounts:
         # There may be existing (non-translated) storage mounts, so log this
         # whenever task.storage_mounts is non-empty.

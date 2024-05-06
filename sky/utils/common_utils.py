@@ -636,8 +636,12 @@ def fill_template(template_name: str, variables: Dict,
         fout.write(content)
 
 
-def deprecated_function(func: Callable, name: str, deprecated_name: str,
-                        removing_version: str) -> Callable:
+def deprecated_function(
+        func: Callable,
+        name: str,
+        deprecated_name: str,
+        removing_version: str,
+        override_argument: Optional[Dict[str, Any]] = None) -> Callable:
     """Decorator for creating deprecated functions, for backward compatibility.
 
     It will result in a warning being emitted when the function is used.
@@ -645,9 +649,14 @@ def deprecated_function(func: Callable, name: str, deprecated_name: str,
 
     @functools.wraps(func)
     def new_func(*args, **kwargs):
+        override_argument_str = ''
+        if override_argument:
+            override_argument_str = ', '.join(
+                f'{k}={v}' for k, v in override_argument.items())
         logger.warning(
             f'Call to deprecated function {deprecated_name}, which will be '
-            f'removed in {removing_version}. Please use {name}() instead.')
+            f'removed in {removing_version}. Please use '
+            f'{name}({override_argument_str}) instead.')
         return func(*args, **kwargs)
 
     return new_func

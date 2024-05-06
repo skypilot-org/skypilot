@@ -10,7 +10,7 @@ resources:
   any_of:
     - cloud: aws
     - cloud: gcp
-   
+    
 
 setup: |
   echo setup for train
@@ -27,7 +27,7 @@ resources:
   any_of:
     - cloud: aws
     - cloud: gcp
-  
+    
 
 setup: |
   exit 1
