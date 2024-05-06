@@ -43,6 +43,7 @@ class SkyServeLoadBalancer:
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
         self._client_pool: Dict[str, httpx.AsyncClient] = dict()
+        self._lock = threading.Lock()
 
     def _sync_with_controller(self):
         """Sync with controller periodically.
@@ -76,20 +77,22 @@ class SkyServeLoadBalancer:
                     logger.error(f'An error occurred: {e}')
                 else:
                     logger.info(f'Available Replica URLs: {ready_replica_urls}')
-                    self._load_balancing_policy.set_ready_replicas(
-                        ready_replica_urls)
-                    for replica_url in ready_replica_urls:
-                        if replica_url not in self._client_pool:
-                            # TODO(tian): Support HTTPS.
-                            self._client_pool[replica_url] = httpx.AsyncClient(
-                                base_url=f'http://{replica_url}')
-                    closed_urls = []
-                    for replica_url, client in self._client_pool.items():
-                        if replica_url not in ready_replica_urls:
-                            asyncio.run(client.aclose())
-                            closed_urls.append(replica_url)
-                    for replica_url in closed_urls:
-                        del self._client_pool[replica_url]
+                    with self._lock:
+                        self._load_balancing_policy.set_ready_replicas(
+                            ready_replica_urls)
+                        for replica_url in ready_replica_urls:
+                            if replica_url not in self._client_pool:
+                                # TODO(tian): Support HTTPS.
+                                self._client_pool[
+                                    replica_url] = httpx.AsyncClient(
+                                        base_url=f'http://{replica_url}')
+                        closed_urls = []
+                        for replica_url, client in self._client_pool.items():
+                            if replica_url not in ready_replica_urls:
+                                asyncio.run(client.aclose())
+                                closed_urls.append(replica_url)
+                        for replica_url in closed_urls:
+                            del self._client_pool[replica_url]
             time.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
 
     async def _proxy_request_to(
@@ -103,7 +106,13 @@ class SkyServeLoadBalancer:
         """
         logger.info(f'Proxy request to {url}')
         try:
-            client = self._client_pool[url]
+            # We defer the get of the client here on purpose, for case when the
+            # replica is ready in `_proxy_with_retries` but refreshed before
+            # entering this function. In that case we will return an error here
+            # and retry to find next ready replica.
+            client = self._client_pool.get(url, None)
+            if client is None:
+                return RuntimeError(f'Client for {url} not found.')
             worker_url = httpx.URL(path=request.url.path,
                                    query=request.url.query.encode('utf-8'))
             proxy_request = client.build_request(
@@ -134,8 +143,9 @@ class SkyServeLoadBalancer:
         retry_cnt = 0
         while True:
             retry_cnt += 1
-            ready_replica_url = self._load_balancing_policy.select_replica(
-                request)
+            with self._lock:
+                ready_replica_url = self._load_balancing_policy.select_replica(
+                    request)
             if ready_replica_url is None:
                 raise fastapi.HTTPException(
                     # 503 means that the server is currently
