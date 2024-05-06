@@ -144,8 +144,8 @@ Available fields and semantics:
     # cloud name for a resouce being deployed, the default remote identity is used.
     # To specify your own default, utilize "*" as the wildcard expression.
     remote_identity:
-      sky-serve-controller-*: my-controller-specific-value
-      "*": my-default-value
+      sky-serve-controller-*: my-controller-specific-identity
+      "*": SERVICE_ACCOUNT
 
   # Advanced GCP configurations (optional).
   # Apply to all new instances but not existing ones.
