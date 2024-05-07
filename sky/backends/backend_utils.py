@@ -801,8 +801,8 @@ def write_cluster_config(
         (str(cloud).lower(), 'remote_identity'), 'LOCAL_CREDENTIALS')
     if remote_identity is not None and not isinstance(remote_identity, str):
         for profile in remote_identity:
-            if fnmatch.fnmatchcase(cluster_name, profile):
-                remote_identity = remote_identity[profile]
+            if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
+                remote_identity = list(profile.values())[0]
                 break
     if remote_identity != 'LOCAL_CREDENTIALS':
         if not cloud.supports_service_account_on_remote():

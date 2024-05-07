@@ -152,7 +152,9 @@ def _try_load_config() -> None:
             common_utils.validate_schema(
                 _dict,
                 schemas.get_config_schema(),
-                f'Invalid config YAML ({config_path}): ',
+                f'Invalid config YAML ({config_path}). See: '
+                'https://skypilot.readthedocs.io/en/latest/reference/config.html. ' # pylint: disable=line-too-long
+                'Error: ',
                 skip_none=False)
 
         logger.debug('Config syntax check passed.')

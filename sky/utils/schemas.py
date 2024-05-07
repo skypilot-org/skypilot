@@ -533,11 +533,22 @@ _REMOTE_IDENTITY_SCHEMA_AWS = {
     'remote_identity': {
         'oneOf': [{
             'type': 'string'
-        }, {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': {
-                'type': 'string',
+        },
+        {
+            # A list of single-element dict to pretain the order.
+            # Example:
+            #  remote_identity:
+            #    - my-cluster1-*: my-iam-role-1
+            #    - my-cluster2-*: my-iam-role-2
+            #    - *: my-iam-role-3
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                },
+                'maxProperties': 1,
+                'minProperties': 1,
             },
         }]
     }

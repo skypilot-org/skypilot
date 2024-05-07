@@ -120,18 +120,19 @@ Available fields and semantics:
     # instances. SkyPilot will auto-create and reuse a service account (IAM
     # role) for AWS instances.
     #
-    # Customized service account (IAM role): <string> or <dict>
+    # Customized service account (IAM role): <string> or <list of single-element dict>
     # - <string>: apply the service account with the specified name to all instances.
     #    Example:
     #       remote_identity: my-service-account-name
-    # - <dict>: A dict mapping from the cluster name (pattern) to the service account name to use.
-    #    NOTE: If none of the wildcard expressions in the dict match the cluster name, LOCAL_CREDENTIALS will be used.
-    #    To specify your default, use "*" as the wildcard expression.
-    #    Example:
+    # - <list of single-element dict>: A list single-element dict mapping from the cluster name (pattern)
+    #   to the service account name to use.
+    #   NOTE: If none of the wildcard expressions in the dict match the cluster name, LOCAL_CREDENTIALS will be used.
+    #   To specify your default, use "*" as the wildcard expression.
+    #   Example:
     #       remote_identity:
-    #         my-cluster-name: my-service-account-1
-    #         sky-serve-controller-*: my-service-account-2
-    #         "*": my-default-service-account
+    #         - my-cluster-name: my-service-account-1
+    #         - sky-serve-controller-*: my-service-account-2
+    #         - "*": my-default-service-account
     #
     # Two caveats of SERVICE_ACCOUNT for multicloud users:
     #
