@@ -3044,13 +3044,15 @@ def show_gpus(
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
-                if (cloud_is_kubernetes or cloud is None) and kubernetes_autoscaling:
+                if (cloud_is_kubernetes or
+                        cloud is None) and kubernetes_autoscaling:
                     yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                     yield '\n\n'
             else:
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
-                if (cloud_is_kubernetes or cloud is None) and kubernetes_autoscaling:
+                if (cloud_is_kubernetes or
+                        cloud is None) and kubernetes_autoscaling:
                     yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                 return
         else:

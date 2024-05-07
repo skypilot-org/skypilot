@@ -388,7 +388,8 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # node provisioning.
             return '', ''
         formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
-        assert formatter is not None, f'Unsupported autoscaler type: {autoscaler_type}'
+        assert formatter is not None, ('Unsupported autoscaler type:'
+                                       f' {autoscaler_type}')
         return formatter.get_label_key(), formatter.get_label_value(acc_type)
 
     has_gpus, cluster_resources = detect_gpu_resource()
@@ -1357,5 +1358,6 @@ def get_autoscaler_type(
     autoscaler_type = skypilot_config.get_nested(['kubernetes', 'autoscaler'],
                                                  None)
     if autoscaler_type is not None:
-        autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(autoscaler_type)
+        autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
+            autoscaler_type)
     return autoscaler_type
