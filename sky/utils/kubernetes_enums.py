@@ -43,19 +43,3 @@ class KubernetesAutoscalerType(enum.Enum):
     GKE = 'gke'
     KARPENTER = 'karpenter'
     GENERIC = 'generic'
-
-    @classmethod
-    def from_str(cls, autoscaler: str) -> 'KubernetesAutoscalerType':
-        """Returns the enum value for the given string."""
-        if autoscaler.lower() == cls.GKE.value:
-            return cls.GKE
-        elif autoscaler.lower() == cls.KARPENTER.value:
-            return cls.KARPENTER
-        elif autoscaler.lower() == cls.GENERIC.value:
-            return cls.GENERIC
-        else:
-            raise ValueError(f'Unsupported kubernetes autoscaler type: '
-                             f'{autoscaler}. The autoscaler must be either '
-                             f'\'{cls.GKE.value}\', '
-                             f'\'{cls.KARPENTER.value}\', or '
-                             f'\'{cls.GENERIC.value}\'. ')

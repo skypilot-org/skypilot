@@ -2999,8 +2999,7 @@ def show_gpus(
         name, quantity = None, None
 
         # Kubernetes specific bools
-        cloud_is_kubernetes = (cloud_obj is not None and
-                               cloud_obj.is_same_cloud(clouds.Kubernetes()))
+        cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
         kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type(
         ) is not None
 
@@ -3045,10 +3044,13 @@ def show_gpus(
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
+                if (cloud_is_kubernetes or cloud is None) and kubernetes_autoscaling:
+                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
+                    yield '\n\n'
             else:
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
-                if cloud_is_kubernetes and kubernetes_autoscaling:
+                if (cloud_is_kubernetes or cloud is None) and kubernetes_autoscaling:
                     yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                 return
         else:

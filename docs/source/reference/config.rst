@@ -326,8 +326,10 @@ Available fields and semantics:
     #   gke: uses cloud.google.com/gke-accelerator label to identify GPUs on nodes
     #   karpenter: uses karpenter.k8s.aws/instance-gpu-name label to identify GPUs on nodes
     #   generic: uses skypilot.co/accelerator labels to identify GPUs on nodes
+    # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#setting-up-gpu-support
+    # for more details on setting up labels for GPU support.
     #
-    # Default: not set (no autoscaler, autodetect label format for GPU nodes)
+    # Default: null (no autoscaler, autodetect label format for GPU nodes)
     autoscaler: gke
 
     # Additional fields to override the pod fields used by SkyPilot (optional)
