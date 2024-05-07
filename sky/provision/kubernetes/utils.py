@@ -372,13 +372,16 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
     # Check if the cluster has GPU resources
     # TODO(romilb): This assumes the accelerator is a nvidia GPU. We
     #  need to support TPUs and other accelerators as well.
-    # TODO(romilb): This will fail early for autoscaling clusters.
-    #  For AS clusters, we may need a way for users to specify GPU node pools
-    #  to use since the cluster may be scaling up from zero nodes and may not
-    #  have any GPU nodes yet.
+    # TODO(romilb): Currently, we broadly disable all GPU checks if autoscaling
+    #  is configured in config.yaml since the cluster may be scaling up from
+    #  zero nodes and may not have any GPU nodes yet. In the future, we should
+    #  support pollingthe clusters for autoscaling information, such as the
+    #  node pools configured etc.
 
     autoscaler_type = get_autoscaler_type()
     if autoscaler_type is not None:
+        # If autoscaler is set in config.yaml, override the label key and value
+        # to the autoscaler's format and bypass the GPU checks.
         if check_mode:
             # If check mode is enabled and autoscaler is set, we can return
             # early since we assume the cluster autoscaler will handle GPU
