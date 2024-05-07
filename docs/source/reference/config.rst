@@ -14,12 +14,12 @@ Available fields and semantics:
 
 .. code-block:: yaml
 
-  # Custom spot controller resources (optional).
+  # Custom managed jobs controller resources (optional).
   #
-  # These take effects only when a spot controller does not already exist.
+  # These take effects only when a managed jobs controller does not already exist.
   #
-  # Ref: https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html#customizing-spot-controller-resources
-  spot:
+  # Ref: https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#customizing-job-controller-resources
+  jobs:
     controller:
       resources:  # same spec as 'resources' in a task YAML
         cloud: gcp
@@ -36,7 +36,7 @@ Available fields and semantics:
     #
     # Users should guarantee that these key-values are valid AWS tags, otherwise
     # errors from the cloud provider will be surfaced.
-    instance_tags:
+    labels:
       # (Example) AWS Migration Acceleration Program (MAP). This tag enables the
       # program's discounts.
       # Ref: https://docs.aws.amazon.com/mgn/latest/ug/map-program-tagging.html
@@ -109,24 +109,39 @@ Available fields and semantics:
     # permission to create a security group.
     security_group_name: my-security-group
 
-    # Identity to use for all AWS instances (optional).
+    # Identity to use for AWS instances (optional).
     #
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
     # AWS instances created by SkyPilot. They are used for accessing cloud
     # resources (e.g., private buckets) or launching new instances (e.g., for
-    # spot/serve controllers).
+    # jobs/serve controllers).
     #
     # SERVICE_ACCOUNT: Local credential files are not uploaded to AWS
     # instances. SkyPilot will auto-create and reuse a service account (IAM
     # role) for AWS instances.
+    #
+    # Customized service account (IAM role): <string> or <list of single-element dict>
+    # - <string>: apply the service account with the specified name to all instances.
+    #    Example:
+    #       remote_identity: my-service-account-name
+    # - <list of single-element dict>: A list of single-element dict mapping from the cluster name (pattern)
+    #   to the service account name to use. The matching of the cluster name is done in the same order
+    #   as the list.
+    #   NOTE: If none of the wildcard expressions in the dict match the cluster name, LOCAL_CREDENTIALS will be used.
+    #   To specify your default, use "*" as the wildcard expression.
+    #   Example:
+    #       remote_identity:
+    #         - my-cluster-name: my-service-account-1
+    #         - sky-serve-controller-*: my-service-account-2
+    #         - "*": my-default-service-account
     #
     # Two caveats of SERVICE_ACCOUNT for multicloud users:
     #
     # - This only affects AWS instances. Local AWS credentials will still be
     #   uploaded to non-AWS instances (since those instances may need to access
     #   AWS resources).
-    # - If the SkyPilot spot/serve controller is on AWS, this setting will make
-    #   non-AWS managed spot jobs / non-AWS service replicas fail to access any
+    # - If the SkyPilot jobs/serve controller is on AWS, this setting will make
+    #   non-AWS managed jobs / non-AWS service replicas fail to access any
     #   resources on AWS (since the controllers don't have AWS credential
     #   files to assign to these non-AWS instances).
     #
@@ -142,9 +157,9 @@ Available fields and semantics:
     #
     # Users should guarantee that these key-values are valid GCP labels, otherwise
     # errors from the cloud provider will be surfaced.
-    instance_tags:
+    labels:
       Owner: user-unique-name
-      my-tag: my-value
+      my-label: my-value
 
     # VPC to use (optional).
     #
@@ -224,7 +239,7 @@ Available fields and semantics:
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
     # GCP instances created by SkyPilot. They are used for accessing cloud
     # resources (e.g., private buckets) or launching new instances (e.g., for
-    # spot/serve controllers).
+    # jobs/serve controllers).
     #
     # SERVICE_ACCOUNT: Local credential files are not uploaded to GCP
     # instances. SkyPilot will auto-create and reuse a service account for GCP
@@ -235,8 +250,8 @@ Available fields and semantics:
     # - This only affects GCP instances. Local GCP credentials will still be
     #   uploaded to non-GCP instances (since those instances may need to access
     #   GCP resources).
-    # - If the SkyPilot spot/serve controller is on GCP, this setting will make
-    #   non-GCP managed spot jobs / non-GCP service replicas fail to access any
+    # - If the SkyPilot jobs/serve controller is on GCP, this setting will make
+    #   non-GCP managed jobs / non-GCP service replicas fail to access any
     #   resources on GCP (since the controllers don't have GCP credential
     #   files to assign to these non-GCP instances).
     #
@@ -262,8 +277,7 @@ Available fields and semantics:
 
     # The mode to use for opening ports on Kubernetes
     #
-    # This must be either: 'ingress' or 'loadbalancer'. If not specified,
-    # defaults to 'loadbalancer'.
+    # This must be either: 'loadbalancer', 'ingress' or 'podip'.
     #
     # loadbalancer: Creates services of type `LoadBalancer` to expose ports.
     # See https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#loadbalancer-service.
@@ -274,6 +288,14 @@ Available fields and semantics:
     # Requires an Nginx ingress controller to be configured on the Kubernetes cluster.
     # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#nginx-ingress
     # for details on deploying the NGINX ingress controller.
+    #
+    # podip: Directly returns the IP address of the pod. This mode does not
+    # create any Kubernetes services and is a lightweight way to expose ports.
+    # NOTE - ports exposed with podip mode are not accessible from outside the
+    # Kubernetes cluster. This mode is useful for hosting internal services
+    # that need to be accessed only by other pods in the same cluster.
+    #
+    # Default: loadbalancer
     ports: loadbalancer
 
     # Identity to use for all Kubernetes pods (optional).
@@ -329,6 +351,25 @@ Available fields and semantics:
     #
     # Default: 10 seconds
     provision_timeout: 10
+
+    # Autoscaler configured in the Kubernetes cluster (optional)
+    #
+    # This field informs SkyPilot about the cluster autoscaler used in the
+    # Kubernetes cluster. Setting this field disables pre-launch checks for
+    # GPU capacity in the cluster and SkyPilot relies on the autoscaler to
+    # provision nodes with the required GPU capacity.
+    #
+    # Remember to set provision_timeout accordingly when using an autoscaler.
+    #
+    # Supported values: gke, karpenter, generic
+    #   gke: uses cloud.google.com/gke-accelerator label to identify GPUs on nodes
+    #   karpenter: uses karpenter.k8s.aws/instance-gpu-name label to identify GPUs on nodes
+    #   generic: uses skypilot.co/accelerator labels to identify GPUs on nodes
+    # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#setting-up-gpu-support
+    # for more details on setting up labels for GPU support.
+    #
+    # Default: null (no autoscaler, autodetect label format for GPU nodes)
+    autoscaler: gke
 
     # Additional fields to override the pod fields used by SkyPilot (optional)
     #

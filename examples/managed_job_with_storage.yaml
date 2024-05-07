@@ -3,13 +3,13 @@
 # Runs a task that uses cloud buckets for uploading and accessing files.
 #
 # Usage:
-#   sky spot launch -c spot-storage examples/managed_spot_with_storage.yaml
+#   sky spot launch -c spot-storage examples/managed_job_with_storage.yaml
 #   sky down spot-storage
 
 resources:
   cloud: aws
   use_spot: true
-  spot_recovery: failover
+  job_recovery: failover
 
 workdir: ./examples
 
@@ -41,8 +41,8 @@ file_mounts:
 
 run: |
   set -ex
-  ls ~/sky_workdir/managed_spot_with_storage.yaml
-  ls ~/bucket_workdir/managed_spot_with_storage.yaml
+  ls ~/sky_workdir/managed_job_with_storage.yaml
+  ls ~/bucket_workdir/managed_job_with_storage.yaml
   ls -l /imagenet-image/datasets
   
 

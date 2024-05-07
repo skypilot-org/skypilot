@@ -496,18 +496,25 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # "nodes".
             pod_spec['spec']['affinity'] = {
                 'podAntiAffinity': {
-                    'requiredDuringSchedulingIgnoredDuringExecution': [{
-                        'labelSelector': {
-                            'matchExpressions': [{
-                                'key': TAG_SKYPILOT_CLUSTER_NAME,
-                                'operator': 'In',
-                                'values': [cluster_name_on_cloud]
-                            }]
-                        },
-                        'topologyKey': 'kubernetes.io/hostname'
+                    # Set as a soft constraint
+                    'preferredDuringSchedulingIgnoredDuringExecution': [{
+                        # Max weight to avoid scheduling on the
+                        # same physical node unless necessary.
+                        'weight': 100,
+                        'podAffinityTerm': {
+                            'labelSelector': {
+                                'matchExpressions': [{
+                                    'key': TAG_SKYPILOT_CLUSTER_NAME,
+                                    'operator': 'In',
+                                    'values': [cluster_name_on_cloud]
+                                }]
+                            },
+                            'topologyKey': 'kubernetes.io/hostname'
+                        }
                     }]
                 }
             }
+
         pod = kubernetes.core_api().create_namespaced_pod(namespace, pod_spec)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:

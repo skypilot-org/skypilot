@@ -1,6 +1,7 @@
 """Kubernetes."""
 import json
 import os
+import re
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -361,14 +362,20 @@ class Kubernetes(clouds.Cloud):
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
 
         # Check if requested instance type will fit in the cluster.
-        # TODO(romilb): This will fail early for autoscaling clusters.
-        fits, reason = kubernetes_utils.check_instance_fits(
-            chosen_instance_type)
-        if not fits:
-            logger.debug(f'Instance type {chosen_instance_type} does '
-                         'not fit in the Kubernetes cluster. '
-                         f'Reason: {reason}')
-            return [], []
+        autoscaler_type = kubernetes_utils.get_autoscaler_type()
+        if autoscaler_type is None:
+            # If autoscaler is not set, check if the instance type fits in the
+            # cluster. Else, rely on the autoscaler to provision the right
+            # instance type without running checks. Worst case, if autoscaling
+            # fails, the pod will be stuck in pending state until
+            # provision_timeout, after which failover will be triggered.
+            fits, reason = kubernetes_utils.check_instance_fits(
+                chosen_instance_type)
+            if not fits:
+                logger.debug(f'Instance type {chosen_instance_type} does '
+                             'not fit in the Kubernetes cluster. '
+                             f'Reason: {reason}')
+                return [], []
 
         # No fuzzy lists for Kubernetes
         return _make([chosen_instance_type]), []
@@ -419,3 +426,33 @@ class Kubernetes(clouds.Cloud):
             return [f'{cluster}_{user}_{namespace}']
         except k8s.config.config_exception.ConfigException:
             return None
+
+    @classmethod
+    def is_label_valid(cls, label_key: str,
+                       label_value: str) -> Tuple[bool, Optional[str]]:
+        # Kubernetes labels can be of the format <domain>/<key>: <value>
+        key_regex = re.compile(
+            # Look-ahead to ensure proper domain formatting up to a slash
+            r'^(?:(?=[a-z0-9]([-a-z0-9.]*[a-z0-9])?\/)'
+            # Match domain: starts and ends with alphanum up to 253 chars
+            # including a slash in the domain.
+            r'[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?\/)?'
+            # Match key: starts and ends with alphanum, upto to 63 chars.
+            r'[a-z0-9]([-a-z0-9_.]{0,61}[a-z0-9])?$')
+        value_regex = re.compile(
+            r'^([a-zA-Z0-9]([-a-zA-Z0-9_.]{0,61}[a-zA-Z0-9])?)?$')
+        key_valid = bool(key_regex.match(label_key))
+        value_valid = bool(value_regex.match(label_value))
+        error_msg = None
+        condition_msg = ('Value must consist of alphanumeric characters or '
+                         '\'-\', \'_\', \'.\', and must be no more than 63 '
+                         'characters in length.')
+        if not key_valid:
+            error_msg = (f'Invalid label key {label_key} for Kubernetes. '
+                         f'{condition_msg}')
+        if not value_valid:
+            error_msg = (f'Invalid label value {label_value} for Kubernetes. '
+                         f'{condition_msg}')
+        if not key_valid or not value_valid:
+            return False, error_msg
+        return True, None

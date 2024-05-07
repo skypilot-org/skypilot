@@ -42,7 +42,7 @@ class CloudImplementationFeatures(enum.Enum):
     CUSTOM_DISK_TIER = 'custom_disk_tier'
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
-    HOST_CONTROLLERS = 'host_controllers'  # Can run spot/serve controllers
+    HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -320,6 +320,25 @@ class Cloud:
                                                   region,
                                                   clouds=cls._REPR.lower())
 
+    @classmethod
+    def is_label_valid(cls, label_key: str,
+                       label_value: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the label key and value are valid for this cloud.
+
+        Labels can be implemented in different ways across clouds. For example,
+        on AWS we use instance tags, on GCP we use labels, and on Kubernetes we
+        use labels. This method should be implemented to validate the label
+        format for the cloud.
+
+        Returns:
+            A tuple of a boolean indicating whether the label is valid and an
+            optional string describing the reason if the label is invalid.
+        """
+        # If a cloud does not support labels, they are ignored. Only clouds
+        # that support labels implement this method.
+        del label_key, label_value
+        return True, None
+
     def get_feasible_launchable_resources(
         self,
         resources: 'resources_lib.Resources',
@@ -477,15 +496,16 @@ class Cloud:
                                                     zone,
                                                     clouds=self._REPR.lower())
 
-    def need_cleanup_after_preemption(
+    def need_cleanup_after_preemption_or_failure(
             self, resources: 'resources_lib.Resources') -> bool:
-        """Returns whether a spot resource needs cleanup after preeemption.
+        """Whether a resource needs cleanup after preeemption or failure.
 
         In most cases, spot resources do not need cleanup after preemption,
         as long as the cluster can be relaunched with the same name and tag,
         no matter the preemption behavior is to terminate or stop the cluster.
-        The only exception by far is GCP's Spot TPU VM. We override this method
-        in gcp.py.
+        Similar for on-demand resources that go into maintenance mode. The
+        only exception by far is GCP's TPU VM. We override this method in
+        gcp.py.
         """
         del resources
         return False

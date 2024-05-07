@@ -219,6 +219,10 @@ available_node_types:
             skypilot-cluster: {{cluster_name_on_cloud}}
             # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
             skypilot-ssh-jump: {{k8s_ssh_jump_name}}
+            # Custom tags for the pods
+            {%- for label_key, label_value in labels.items() %}
+            {{ label_key }}: {{ label_value }}
+            {%- endfor %}
         {% if k8s_fuse_device_required %}
         annotations:
             # Required for FUSE mounting to access /dev/fuse

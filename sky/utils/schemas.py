@@ -5,6 +5,30 @@ https://json-schema.org/
 """
 
 
+def _check_not_both_fields_present(field1: str, field2: str):
+    return {
+        'oneOf': [{
+            'required': [field1],
+            'not': {
+                'required': [field2]
+            }
+        }, {
+            'required': [field2],
+            'not': {
+                'required': [field1]
+            }
+        }, {
+            'not': {
+                'anyOf': [{
+                    'required': [field1]
+                }, {
+                    'required': [field2]
+                }]
+            }
+        }]
+    }
+
+
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
@@ -58,7 +82,12 @@ def _get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
+            # Deprecated: use 'job_recovery' instead. This is for backward
+            # compatibility, and can be removed in 0.8.0.
             'spot_recovery': {
+                'type': 'string',
+            },
+            'job_recovery': {
                 'type': 'string',
             },
             'disk_size': {
@@ -82,6 +111,12 @@ def _get_single_resources_schema():
                         }]
                     }
                 }],
+            },
+            'labels': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                }
             },
             'accelerator_args': {
                 'type': 'object',
@@ -134,10 +169,21 @@ def _get_single_resources_schema():
     }
 
 
+def _get_multi_resources_schema():
+    multi_resources_schema = {
+        k: v
+        for k, v in _get_single_resources_schema().items()
+        # Validation may fail if $schema is included.
+        if k != '$schema'
+    }
+    return multi_resources_schema
+
+
 def get_resources_schema():
     """Resource schema in task config."""
     single_resources_schema = _get_single_resources_schema()['properties']
     single_resources_schema.pop('accelerators')
+    multi_resources_schema = _get_multi_resources_schema()
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
@@ -171,23 +217,15 @@ def get_resources_schema():
             },
             'any_of': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in _get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             },
             'ordered': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in _get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             }
-        }
+        },
+        # Avoid job_recovery and spot_recovery being present at the same time.
+        **_check_not_both_fields_present('job_recovery', 'spot_recovery')
     }
 
 
@@ -465,7 +503,9 @@ _NETWORK_CONFIG_SCHEMA = {
     },
 }
 
-_INSTANCE_TAGS_SCHEMA = {
+_LABELS_SCHEMA = {
+    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
+    # compatibility. Will be removed after 0.7.0.
     'instance_tags': {
         'type': 'object',
         'required': [],
@@ -473,13 +513,53 @@ _INSTANCE_TAGS_SCHEMA = {
             'type': 'string',
         },
     },
+    'labels': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': {
+            'type': 'string',
+        },
+    }
 }
 
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
-        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'],
+        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT']
     }
+}
+
+_REMOTE_IDENTITY_SCHEMA_AWS = {
+    'remote_identity': {
+        'oneOf': [
+            {
+                'type': 'string'
+            },
+            {
+                # A list of single-element dict to pretain the order.
+                # Example:
+                #  remote_identity:
+                #    - my-cluster1-*: my-iam-role-1
+                #    - my-cluster2-*: my-iam-role-2
+                #    - "*"": my-iam-role-3
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'additionalProperties': {
+                        'type': 'string'
+                    },
+                    'maxProperties': 1,
+                    'minProperties': 1,
+                },
+            }
+        ]
+    }
+}
+
+_REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
+    'remote_identity': {
+        'type': 'string'
+    },
 }
 
 REMOTE_IDENTITY_DEFAULT = 'LOCAL_CREDENTIALS'
@@ -518,11 +598,12 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'security_group_name': {
-                    'type': 'string',
+                    'type': 'string'
                 },
-                **_INSTANCE_TAGS_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
-            }
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'gcp': {
             'type': 'object',
@@ -538,9 +619,10 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                **_INSTANCE_TAGS_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
-            }
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'kubernetes': {
             'type': 'object',
@@ -584,9 +666,13 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
-                'remote_identity': {
-                    'type': 'string'
-                }
+                'autoscaler': {
+                    'type': 'string',
+                    'case_insensitive_enum': [
+                        type.value
+                        for type in kubernetes_enums.KubernetesAutoscalerType
+                    ]
+                },
             }
         },
         'oci': {
@@ -616,19 +702,24 @@ def get_config_schema():
         },
     }
 
-    for config in cloud_configs.values():
-        for key in _REMOTE_IDENTITY_SCHEMA:
-            if key not in config['properties']:  # Add if not already present
-                config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
-                break
+    for cloud, config in cloud_configs.items():
+        if cloud == 'aws':
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
+        elif cloud == 'kubernetes':
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
+        else:
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
+            'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             **cloud_configs,
-        }
+        },
+        # Avoid spot and jobs being present at the same time.
+        **_check_not_both_fields_present('spot', 'jobs')
     }

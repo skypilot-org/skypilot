@@ -4,19 +4,19 @@ from typing import Any, Dict
 import pytest
 
 import sky
+from sky.jobs import constants as managed_job_constants
 from sky.serve import constants as serve_constants
-from sky.spot import constants as spot_constants
 from sky.utils import controller_utils
 
 
 @pytest.mark.parametrize(
     ('controller_type', 'custom_controller_resources_config', 'expected'), [
-        ('spot', {}, {
+        ('jobs', {}, {
             'cpus': '8+',
             'memory': '3x',
             'disk_size': 50
         }),
-        ('spot', {
+        ('jobs', {
             'cpus': '4+',
             'disk_size': 100
         }, {
@@ -56,7 +56,8 @@ def test_get_controller_resources(
 
     controller_resources = list(
         controller_utils.get_controller_resources(
-            controller_type=controller_type, task_resources=[]))[0]
+            controller=controller_utils.Controllers.from_type(controller_type),
+            task_resources=[]))[0]
     controller_resources_config = controller_resources.to_yaml_config()
     for k, v in expected.items():
         assert controller_resources_config[k] == v, (
@@ -65,7 +66,7 @@ def test_get_controller_resources(
 
 
 @pytest.mark.parametrize(('controller_type', 'default_controller_resources'), [
-    ('spot', spot_constants.CONTROLLER_RESOURCES),
+    ('jobs', managed_job_constants.CONTROLLER_RESOURCES),
     ('serve', serve_constants.CONTROLLER_RESOURCES),
 ])
 def test_get_controller_resources_with_task_resources(
@@ -80,7 +81,7 @@ def test_get_controller_resources_with_task_resources(
     all_clouds = {sky.AWS(), sky.GCP(), sky.Azure()}
     all_cloud_names = {str(c) for c in all_clouds}
     controller_resources = controller_utils.get_controller_resources(
-        controller_type=controller_type,
+        controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[sky.Resources(cloud=c) for c in all_clouds])
     for r in controller_resources:
         config = r.to_yaml_config()
@@ -116,7 +117,7 @@ def test_get_controller_resources_with_task_resources(
         str(c) for c in all_clouds if _could_host_controllers(c)
     }
     controller_resources = controller_utils.get_controller_resources(
-        controller_type=controller_type,
+        controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[sky.Resources(cloud=c) for c in all_clouds])
     for r in controller_resources:
         config = r.to_yaml_config()
@@ -129,7 +130,7 @@ def test_get_controller_resources_with_task_resources(
     # 3. Some resources does not have cloud specified.
     # Return the default resources.
     controller_resources = controller_utils.get_controller_resources(
-        controller_type=controller_type,
+        controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
             sky.Resources(accelerators='L4'),
             sky.Resources(cloud=sky.RunPod(), accelerators='A40'),

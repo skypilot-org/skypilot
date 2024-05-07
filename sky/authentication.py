@@ -15,7 +15,7 @@ in ray yaml config as input,
 The local machine's public key should not be uploaded to the
 `~/.ssh/sky-key.pub` on the remote VM, because it will cause private/public
 key pair mismatch when the user tries to launch new VM from that remote VM
-using SkyPilot, e.g., the node is used as a spot controller. (Lambda cloud
+using SkyPilot, e.g., the node is used as a jobs controller. (Lambda cloud
 is an exception, due to the limitation of the cloud provider. See the
 comments in setup_lambda_authentication)
 """
