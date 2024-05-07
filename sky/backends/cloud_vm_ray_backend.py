@@ -3242,12 +3242,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # execute it.
             # We use 120KB as a threshold to be safe for other arguments that
             # might be added during ssh.
-            ssh_credentials = backend_utils.ssh_credential_from_yaml(
-                handle.cluster_yaml, handle.docker_user, handle.ssh_user)
-            head_ssh_port = handle.head_ssh_port
-            runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                     port=head_ssh_port,
-                                                     **ssh_credentials)
+            runners = handle.get_command_runners()
+            head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
@@ -3256,10 +3252,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # We choose to sync code + exec, because the alternative of 'ray
                 # submit' may not work as it may use system python (python2) to
                 # execute the script. Happens for AWS.
-                runner.rsync(source=fp.name,
-                             target=script_path,
-                             up=True,
-                             stream_logs=False)
+                head_runner.rsync(source=fp.name,
+                                  target=script_path,
+                                  up=True,
+                                  stream_logs=False)
             job_submit_cmd = f'{mkdir_code} && {code}'
 
         if managed_job_dag is not None:
