@@ -3168,7 +3168,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            f'sky_job_{job_id}')
                 # We choose to sync code + exec, because the alternative of 'ray
                 # submit' may not work as it may use system python (python2) to
-                # execute the script.  Happens for AWS.
+                # execute the script. Happens for AWS.
                 runner.rsync(source=fp.name,
                              target=script_path,
                              up=True,
