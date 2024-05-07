@@ -35,6 +35,12 @@ If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on
 (e.g., skypilot.co/accelerator) are setup correctly. \
 To further debug, run: sky check.'
 
+KUBERNETES_AUTOSCALER_NOTE = (
+    'Note: Kubernetes cluster autoscaling is enabled. '
+    'All GPUs that can be provisioned may not be listed '
+    'here. Refer to your autoscaler\'s node pool '
+    'configuration to see the list of supported GPUs.')
+
 # TODO(romilb): Add links to docs for configuration instructions when ready.
 ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
                            'is configured correctly. '
@@ -178,12 +184,30 @@ class GKELabelFormatter(GPULabelFormatter):
                 f'Invalid accelerator name in GKE cluster: {value}')
 
 
+class KarpenterLabelFormatter(SkyPilotLabelFormatter):
+    """Karpeneter label formatter
+    Karpenter uses the label `karpenter.k8s.aws/instance-gpu-name` to identify
+    the GPU type. Details: https://karpenter.sh/docs/reference/instance-types/
+    The naming scheme is same as the SkyPilot formatter, so we inherit from it.
+    """
+    LABEL_KEY = 'karpenter.k8s.aws/instance-gpu-name'
+
+
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
-# it will be used to determine the priority of the label formats.
+# it will be used to determine the priority of the label formats when
+# auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
-    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter
+    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter,
+    KarpenterLabelFormatter
 ]
+
+# Mapping of autoscaler type to label formatter
+AUTOSCALER_TO_LABEL_FORMATTER = {
+    kubernetes_enums.KubernetesAutoscalerType.GKE: GKELabelFormatter,
+    kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterLabelFormatter,  # pylint: disable=line-too-long
+    kubernetes_enums.KubernetesAutoscalerType.GENERIC: SkyPilotLabelFormatter,
+}
 
 
 def detect_gpu_label_formatter(
@@ -348,10 +372,26 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
     # Check if the cluster has GPU resources
     # TODO(romilb): This assumes the accelerator is a nvidia GPU. We
     #  need to support TPUs and other accelerators as well.
-    # TODO(romilb): This will fail early for autoscaling clusters.
-    #  For AS clusters, we may need a way for users to specify GPU node pools
-    #  to use since the cluster may be scaling up from zero nodes and may not
-    #  have any GPU nodes yet.
+    # TODO(romilb): Currently, we broadly disable all GPU checks if autoscaling
+    #  is configured in config.yaml since the cluster may be scaling up from
+    #  zero nodes and may not have any GPU nodes yet. In the future, we should
+    #  support pollingthe clusters for autoscaling information, such as the
+    #  node pools configured etc.
+
+    autoscaler_type = get_autoscaler_type()
+    if autoscaler_type is not None:
+        # If autoscaler is set in config.yaml, override the label key and value
+        # to the autoscaler's format and bypass the GPU checks.
+        if check_mode:
+            # If check mode is enabled and autoscaler is set, we can return
+            # early since we assume the cluster autoscaler will handle GPU
+            # node provisioning.
+            return '', ''
+        formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
+        assert formatter is not None, ('Unsupported autoscaler type:'
+                                       f' {autoscaler_type}')
+        return formatter.get_label_key(), formatter.get_label_value(acc_type)
+
     has_gpus, cluster_resources = detect_gpu_resource()
     if has_gpus:
         # Check if the cluster has GPU labels setup correctly
@@ -1303,3 +1343,14 @@ def get_head_pod_name(cluster_name_on_cloud: str):
     # label, but since we know the naming convention, we can directly return the
     # head pod name.
     return f'{cluster_name_on_cloud}-head'
+
+
+def get_autoscaler_type(
+) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
+    """Returns the autoscaler type by reading from config"""
+    autoscaler_type = skypilot_config.get_nested(['kubernetes', 'autoscaler'],
+                                                 None)
+    if autoscaler_type is not None:
+        autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
+            autoscaler_type)
+    return autoscaler_type

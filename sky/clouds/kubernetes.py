@@ -337,14 +337,20 @@ class Kubernetes(clouds.Cloud):
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
 
         # Check if requested instance type will fit in the cluster.
-        # TODO(romilb): This will fail early for autoscaling clusters.
-        fits, reason = kubernetes_utils.check_instance_fits(
-            chosen_instance_type)
-        if not fits:
-            logger.debug(f'Instance type {chosen_instance_type} does '
-                         'not fit in the Kubernetes cluster. '
-                         f'Reason: {reason}')
-            return [], []
+        autoscaler_type = kubernetes_utils.get_autoscaler_type()
+        if autoscaler_type is None:
+            # If autoscaler is not set, check if the instance type fits in the
+            # cluster. Else, rely on the autoscaler to provision the right
+            # instance type without running checks. Worst case, if autoscaling
+            # fails, the pod will be stuck in pending state until
+            # provision_timeout, after which failover will be triggered.
+            fits, reason = kubernetes_utils.check_instance_fits(
+                chosen_instance_type)
+            if not fits:
+                logger.debug(f'Instance type {chosen_instance_type} does '
+                             'not fit in the Kubernetes cluster. '
+                             f'Reason: {reason}')
+                return [], []
 
         # No fuzzy lists for Kubernetes
         return _make([chosen_instance_type]), []

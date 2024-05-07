@@ -60,6 +60,10 @@ available_node_types:
   ray.head.default:
     resources: {}
     node_config:
+      {% if remote_identity not in ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'] %}
+      IamInstanceProfile:
+        Name: {{remote_identity}}
+      {% endif %}
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
       # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances

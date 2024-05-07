@@ -525,7 +525,34 @@ _LABELS_SCHEMA = {
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
-        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'],
+        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT']
+    }
+}
+
+_REMOTE_IDENTITY_SCHEMA_AWS = {
+    'remote_identity': {
+        'oneOf': [
+            {
+                'type': 'string'
+            },
+            {
+                # A list of single-element dict to pretain the order.
+                # Example:
+                #  remote_identity:
+                #    - my-cluster1-*: my-iam-role-1
+                #    - my-cluster2-*: my-iam-role-2
+                #    - "*"": my-iam-role-3
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'additionalProperties': {
+                        'type': 'string'
+                    },
+                    'maxProperties': 1,
+                    'minProperties': 1,
+                },
+            }
+        ]
     }
 }
 
@@ -563,7 +590,7 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'security_group_name': {
-                    'type': 'string',
+                    'type': 'string'
                 },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
@@ -631,6 +658,13 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'autoscaler': {
+                    'type': 'string',
+                    'case_insensitive_enum': [
+                        type.value
+                        for type in kubernetes_enums.KubernetesAutoscalerType
+                    ]
+                },
             }
         },
         'oci': {
@@ -660,8 +694,11 @@ def get_config_schema():
         },
     }
 
-    for config in cloud_configs.values():
-        config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
+    for cloud, config in cloud_configs.items():
+        if cloud == 'aws':
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
+        else:
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
