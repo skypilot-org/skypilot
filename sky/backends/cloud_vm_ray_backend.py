@@ -2936,10 +2936,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '[bold cyan]Preparing SkyPilot runtime'):
                 # We need to source bashrc for skylet to make sure the autostop
                 # event can access the path to the cloud CLIs.
-                self.run_on_head(
-                    handle,
-                    instance_setup.MAYBE_SKYLET_RESTART_CMD,
-                    source_bashrc=True)
+                self.run_on_head(handle,
+                                 instance_setup.MAYBE_SKYLET_RESTART_CMD,
+                                 source_bashrc=True)
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
