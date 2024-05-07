@@ -106,7 +106,9 @@ def get_user_hash(force_fresh_hash: bool = False) -> str:
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
     if not force_fresh_hash:
         # Do not cache to file if force_fresh_hash is True since the file may
-        # be intentionally using a different hash.
+        # be intentionally using a different hash, e.g. we want to keep the
+        # user_hash for usage collection the same on the jobs/serve controller
+        # as users' local client.
         with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
             f.write(user_hash)
     return user_hash
