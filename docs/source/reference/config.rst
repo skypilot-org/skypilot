@@ -125,7 +125,8 @@ Available fields and semantics:
     #    Example:
     #       remote_identity: my-service-account-name
     # - <list of single-element dict>: A list single-element dict mapping from the cluster name (pattern)
-    #   to the service account name to use.
+    #   to the service account name to use. The matching of the cluster name is done in the same order
+    #   as the list.
     #   NOTE: If none of the wildcard expressions in the dict match the cluster name, LOCAL_CREDENTIALS will be used.
     #   To specify your default, use "*" as the wildcard expression.
     #   Example:
