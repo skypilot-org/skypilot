@@ -193,11 +193,14 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
     @_auto_retry
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         for cmd in setup_commands:
-            returncode, stdout, stderr = runner.run(cmd,
-                                                    stream_logs=False,
-                                                    log_path=log_path,
-                                                    require_outputs=True,
-                                                    source_bashrc=True)
+            returncode, stdout, stderr = runner.run(
+                cmd,
+                stream_logs=False,
+                log_path=log_path,
+                require_outputs=True,
+                # Installing depencies requires source bashrc to access the PATH
+                # in bashrc.
+                source_bashrc=True)
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could

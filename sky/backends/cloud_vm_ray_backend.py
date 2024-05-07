@@ -2936,9 +2936,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '[bold cyan]Preparing SkyPilot runtime'):
                 # We need to source bashrc for skylet to make sure the autostop
                 # event can access the path to the cloud CLIs.
-                self.run_on_head(handle,
-                                 instance_setup.MAYBE_SKYLET_RESTART_CMD,
-                                 source_bashrc=True)
+                self.run_on_head(
+                    handle,
+                    instance_setup.MAYBE_SKYLET_RESTART_CMD,
+                    # skylet should be started with bashrc sourced,
+                    # because the autostop by skylet needs the
+                    # access to cloud CLI/SDK which may require the
+                    # PATH.
+                    source_bashrc=True)
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
@@ -4443,6 +4448,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 action_message='Syncing',
                 log_path=log_path,
                 stream_logs=False,
+                # Need to source bashrc, as the cloud specific CLI or SDK may
+                # require PATH in bashrc.
                 source_bashrc=True,
             )
         # (2) Run the commands to create symlinks on all the nodes.
@@ -4526,6 +4533,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     run_rsync=False,
                     action_message='Mounting',
                     log_path=log_path,
+                    # Need to source bashrc, as the cloud specific CLI or SDK
+                    # may require PATH in bashrc.
                     source_bashrc=True,
                 )
             except exceptions.CommandError as e:

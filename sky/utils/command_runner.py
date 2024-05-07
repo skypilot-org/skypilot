@@ -173,6 +173,7 @@ class CommandRunner:
         if source_bashrc:
             command += [
                 # Need this `-i` option to make sure `source ~/.bashrc` work.
+                # Sourcing bashrc may take a few seconds causing overheads.
                 '-i',
                 shlex.quote(
                     f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
