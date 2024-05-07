@@ -3150,7 +3150,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
             # If a user have very long run or setup commands, the generated
             # command may exceed the limit, as we encode the script in base64
-            # add directly include it in the job submission command. If the
+            # and directly include it in the job submission command. If the
             # command is too long, we instead write it to a file, rsync and
             # execute it.
             # We use 120KB as a threshold to be safe for other arguments that
