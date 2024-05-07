@@ -2998,6 +2998,11 @@ def show_gpus(
 
         name, quantity = None, None
 
+        # Kubernetes specific bools
+        cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
+        kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type(
+        ) is not None
+
         if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
@@ -3005,16 +3010,17 @@ def show_gpus(
                 region_filter=region,
             )
 
-            if (len(result) == 0 and cloud_obj is not None and
-                    cloud_obj.is_same_cloud(clouds.Kubernetes())):
+            if len(result) == 0 and cloud_is_kubernetes:
                 yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+                if kubernetes_autoscaling:
+                    yield '\n'
+                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                 return
 
             # "Common" GPUs
             # If cloud is kubernetes, we want to show all GPUs here, even if
             # they are not listed as common in SkyPilot.
-            if (cloud_obj is not None and
-                    cloud_obj.is_same_cloud(clouds.Kubernetes())):
+            if cloud_is_kubernetes:
                 for gpu, _ in sorted(result.items()):
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             else:
@@ -3038,9 +3044,16 @@ def show_gpus(
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
+                if (cloud_is_kubernetes or
+                        cloud is None) and kubernetes_autoscaling:
+                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
+                    yield '\n\n'
             else:
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
+                if (cloud_is_kubernetes or
+                        cloud is None) and kubernetes_autoscaling:
+                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                 return
         else:
             # Parse accelerator string
