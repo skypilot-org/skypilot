@@ -109,7 +109,7 @@ Available fields and semantics:
     # permission to create a security group.
     security_group_name: my-security-group
 
-    # Identity to use for deployed AWS instances (optional).
+    # Identity to use for AWS instances (optional).
     #
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
     # AWS instances created by SkyPilot. They are used for accessing cloud
