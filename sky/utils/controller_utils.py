@@ -228,6 +228,24 @@ def _get_cloud_dependencies_installation_commands(
                 'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
                 'pip install google-cloud-storage > /dev/null 2>&1')
             commands.append(f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
+        elif isinstance(cloud, clouds.Kubernetes):
+            commands.append(
+                f'echo -en "\\r{prefix_str}Kubernetes{empty_str}" && '
+                'pip list | grep kubernetes > /dev/null 2>&1 || '
+                'pip install "kubernetes>=20.0.0" > /dev/null 2>&1 &&'
+                # Install k8s + skypilot dependencies
+                'sudo bash -c "if '
+                '! command -v curl &> /dev/null || '
+                '! command -v socat &> /dev/null || '
+                '! command -v netcat &> /dev/null; '
+                'then apt update && apt install curl socat netcat -y; '
+                'fi" && '
+                # Install kubectl
+                '(command -v kubectl &>/dev/null || '
+                '(curl -LO "https://dl.k8s.io/release/$(curl -L -s '
+                'https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && '
+                'sudo install -o root -g root -m 0755 '
+                'kubectl /usr/local/bin/kubectl))')
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 commands.append(
@@ -239,24 +257,6 @@ def _get_cloud_dependencies_installation_commands(
                 commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
                                 'pip list | grep oci > /dev/null 2>&1 || '
                                 'pip install oci > /dev/null 2>&1')
-            elif isinstance(cloud, clouds.Kubernetes):
-                commands.append(
-                    f'echo -en "\\r{prefix_str}Kubernetes{empty_str}" && '
-                    'pip list | grep kubernetes > /dev/null 2>&1 || '
-                    'pip install "kubernetes>=20.0.0" > /dev/null 2>&1 &&'
-                    # Install k8s + skypilot dependencies
-                    'sudo bash -c "if '
-                    '! command -v curl &> /dev/null || '
-                    '! command -v socat &> /dev/null || '
-                    '! command -v netcat &> /dev/null; '
-                    'then apt update && apt install curl socat netcat -y; '
-                    'fi" && '
-                    # Install kubectl
-                    '(command -v kubectl &>/dev/null || '
-                    '(curl -LO "https://dl.k8s.io/release/$(curl -L -s '
-                    'https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && '
-                    'sudo install -o root -g root -m 0755 '
-                    'kubectl /usr/local/bin/kubectl)) && ')
             elif isinstance(cloud, clouds.RunPod):
                 commands.append(
                     f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '

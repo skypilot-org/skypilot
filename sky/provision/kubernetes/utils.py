@@ -640,7 +640,7 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
         ctx_name = current_context['name']
         exec_msg = ('exec-based authentication is used for '
                     f'Kubernetes context {ctx_name!r}.'
-                    ' This may cause issues when running Managed Spot '
+                    ' This may cause issues when running Managed Jobs '
                     'or SkyServe controller on Kubernetes. To fix, configure '
                     'SkyPilot to create a service account for running pods by '
                     'adding the following in ~/.sky/config.yaml:\n'
