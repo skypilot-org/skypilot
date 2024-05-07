@@ -35,10 +35,11 @@ If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on
 (e.g., skypilot.co/accelerator) are setup correctly. \
 To further debug, run: sky check.'
 
-KUBERNETES_AUTOSCALER_NOTE = ('Note: Kubernetes cluster autoscaling is enabled. '
-                   'All GPUs that can be provisioned may not be listed '
-                   'here. Refer to your autoscaler\'s node pool '
-                   'configuration to see the list of supported GPUs.')
+KUBERNETES_AUTOSCALER_NOTE = (
+    'Note: Kubernetes cluster autoscaling is enabled. '
+    'All GPUs that can be provisioned may not be listed '
+    'here. Refer to your autoscaler\'s node pool '
+    'configuration to see the list of supported GPUs.')
 
 # TODO(romilb): Add links to docs for configuration instructions when ready.
 ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
@@ -203,10 +204,14 @@ LABEL_FORMATTER_REGISTRY = [
 
 # Mapping of autoscaler type to label formatter
 AUTOSCALER_TO_LABEL_FORMATTER = {
-    kubernetes_enums.KubernetesAutoscalerType.GKE: GKELabelFormatter,
-    kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterLabelFormatter,
-    kubernetes_enums.KubernetesAutoscalerType.GENERIC: SkyPilotLabelFormatter,
+    kubernetes_enums.KubernetesAutoscalerType.GKE:
+        GKELabelFormatter,
+    kubernetes_enums.KubernetesAutoscalerType.KARPENTER:
+        KarpenterLabelFormatter,
+    kubernetes_enums.KubernetesAutoscalerType.GENERIC:
+        SkyPilotLabelFormatter,
 }
+
 
 def detect_gpu_label_formatter(
 ) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
@@ -382,16 +387,14 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # early since we assume the cluster autoscaler will handle GPU
             # node provisioning.
             return '', ''
-        label_formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
-        if label_formatter is None:
+        formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
+        if formatter is None:
             # This should never be reached unless schema checks fail or
             # AUTOSCALER_TO_LABEL_FORMATTER dict is not up to date.
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Unsupported autoscaler type: {autoscaler_type}')
-        return label_formatter.get_label_key(), label_formatter.get_label_value(
-            acc_type)
-
+        return formatter.get_label_key(), formatter.get_label_value(acc_type)
 
     has_gpus, cluster_resources = detect_gpu_resource()
     if has_gpus:
@@ -1353,9 +1356,12 @@ def get_head_pod_name(cluster_name_on_cloud: str):
     return f'{cluster_name_on_cloud}-head'
 
 
-def get_autoscaler_type() -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
+def get_autoscaler_type(
+) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
     """Returns the autoscaler type by reading from config"""
-    autoscaler_type = skypilot_config.get_nested(['kubernetes', 'autoscaler'],None)
+    autoscaler_type = skypilot_config.get_nested(['kubernetes', 'autoscaler'],
+                                                 None)
     if autoscaler_type is not None:
-        autoscaler_type = kubernetes_enums.KubernetesAutoscalerType.from_str(autoscaler_type)
+        autoscaler_type = kubernetes_enums.KubernetesAutoscalerType.from_str(
+            autoscaler_type)
     return autoscaler_type

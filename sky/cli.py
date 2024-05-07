@@ -3000,8 +3000,9 @@ def show_gpus(
 
         # Kubernetes specific bools
         cloud_is_kubernetes = (cloud_obj is not None and
-         cloud_obj.is_same_cloud(clouds.Kubernetes()))
-        kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
+                               cloud_obj.is_same_cloud(clouds.Kubernetes()))
+        kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type(
+        ) is not None
 
         if accelerator_str is None:
             result = service_catalog.list_accelerator_counts(
