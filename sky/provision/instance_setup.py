@@ -412,10 +412,13 @@ def start_skylet_on_head_node(cluster_name: str,
     assert cluster_info.head_instance_id is not None, cluster_info
     log_path_abs = str(provision_logging.get_log_path())
     logger.info(f'Running command on head node: {MAYBE_SKYLET_RESTART_CMD}')
+    # We need to source bashrc for skylet to make sure the autostop event can
+    # access the path to the cloud CLIs.
     returncode, stdout, stderr = head_runner.run(MAYBE_SKYLET_RESTART_CMD,
                                                  stream_logs=False,
                                                  require_outputs=True,
-                                                 log_path=log_path_abs)
+                                                 log_path=log_path_abs,
+                                                 source_bashrc=True)
     if returncode:
         raise RuntimeError('Failed to start skylet on the head node '
                            f'(exit code {returncode}). Error: '

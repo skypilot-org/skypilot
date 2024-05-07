@@ -2939,10 +2939,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self.run_on_head(
                     handle,
                     instance_setup.MAYBE_SKYLET_RESTART_CMD,
-                    # skylet should be started with bashrc sourced,
-                    # because the autostop by skylet needs the
-                    # access to cloud CLI/SDK which may require the
-                    # PATH.
                     source_bashrc=True)
 
             self._update_after_cluster_provisioned(
