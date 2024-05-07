@@ -2,6 +2,7 @@ Interactive Development
 =======================
 
 SkyPilot makes the interactive development very easy on clouds. It helps you:
+
 #. Launch: a cluster with GPU or any specific requirement with a single command.
 #. Connect: Quickly connect to the cluster with the cluster name.
 #. Autostop: Automatically stop the cluster after a period of time for cost savings.
