@@ -52,7 +52,6 @@ from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
-from sky import provision as provision_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import status_lib

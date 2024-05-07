@@ -242,8 +242,9 @@ def _get_cloud_dependencies_installation_commands(
                 'fi" && '
                 # Install kubectl
                 '(command -v kubectl &>/dev/null || '
-                '(curl -LO "https://dl.k8s.io/release/$(curl -L -s '
-                'https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && '
+                '(curl -LO "https://dl.k8s.io/release/'
+                '$(curl -L -s https://dl.k8s.io/release/stable.txt)'
+                '/bin/linux/amd64/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
         if controller == Controllers.JOBS_CONTROLLER:
