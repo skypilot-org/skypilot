@@ -14,6 +14,7 @@ import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
                     Optional, TextIO, Type, TypeVar)
 import uuid
+import sys
 
 import colorama
 import filelock
@@ -41,8 +42,9 @@ if typing.TYPE_CHECKING:
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
-NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
-                         constants.CONTROLLER_MEMORY_USAGE_GB)
+NUM_SERVICE_THRESHOLD = sys.maxsize
+# NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
+#                          constants.CONTROLLER_MEMORY_USAGE_GB)
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'

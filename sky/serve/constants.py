@@ -1,5 +1,6 @@
 """Constants used for SkyServe."""
 from sky.constants import SKY_HOME
+import os
 
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
@@ -11,7 +12,7 @@ SKYSERVE_METADATA_DIR = f'{SKY_HOME}/serve'
 PORT_SELECTION_FILE_LOCK_PATH = f'{SKYSERVE_METADATA_DIR}/port_selection.lock'
 
 # Signal file path for controller to handle signals.
-SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
+SIGNAL_FILE_PATH = os.path.join(SKY_HOME, 'serve', 'sky_serve_controller_signal_{}')
 
 # Time to wait in seconds for service to register on the controller.
 SERVICE_REGISTER_TIMEOUT_SECONDS = 60
@@ -68,7 +69,7 @@ DEFAULT_MIN_REPLICAS = 1
 
 # Default port range start for controller and load balancer. Ports will be
 # automatically generated from this start port.
-CONTROLLER_PORT_START = 20001
+CONTROLLER_PORT_START = 8000
 LOAD_BALANCER_PORT_START = 30001
 LOAD_BALANCER_PORT_RANGE = '30001-30100'
 
