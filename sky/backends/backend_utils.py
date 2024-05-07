@@ -810,7 +810,7 @@ def write_cluster_config(
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
                 break
-    if remote_identity != 'LOCAL_CREDENTIALS':
+    if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
         if not cloud.supports_service_account_on_remote():
             raise exceptions.InvalidCloudConfigs(
                 'remote_identity: SERVICE_ACCOUNT is specified in '
