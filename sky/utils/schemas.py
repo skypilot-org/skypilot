@@ -537,13 +537,12 @@ class RemoteIdentityOptions(enum.Enum):
 
 REMOTE_IDENTITY_DEFAULT = RemoteIdentityOptions.LOCAL_CREDENTIALS.value
 
-
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
         'case_insensitive_enum': [
-                        option.value for option in RemoteIdentityOptions
-                    ]
+            option.value for option in RemoteIdentityOptions
+        ]
     }
 }
 

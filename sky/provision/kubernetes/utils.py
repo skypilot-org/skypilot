@@ -635,8 +635,8 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
 
     remote_identity = skypilot_config.get_nested(
         ('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
-    if ('exec' in user_details.get('user', {}) and
-            remote_identity == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
+    if ('exec' in user_details.get('user', {}) and remote_identity
+            == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
         ctx_name = current_context['name']
         exec_msg = ('exec-based authentication is used for '
                     f'Kubernetes context {ctx_name!r}.'

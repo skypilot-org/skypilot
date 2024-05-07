@@ -271,11 +271,13 @@ class Kubernetes(clouds.Cloud):
 
         remote_identity = skypilot_config.get_nested(
             ('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
-        if remote_identity == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
+        if (remote_identity ==
+                schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
             # SA name doesn't matter since automounting credentials is disabled
             k8s_service_account_name = 'default'
             k8s_automount_sa_token = 'false'
-        elif remote_identity == schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value:
+        elif (remote_identity ==
+              schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
             # Use the default service account
             k8s_service_account_name = self.SKY_DEFAULT_SERVICE_ACCOUNT_NAME
             k8s_automount_sa_token = 'true'
