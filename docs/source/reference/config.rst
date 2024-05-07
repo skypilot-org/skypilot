@@ -313,6 +313,23 @@ Available fields and semantics:
     # Default: 10 seconds
     provision_timeout: 10
 
+    # Autoscaler configured in the Kubernetes cluster (optional)
+    #
+    # This field informs SkyPilot about the cluster autoscaler used in the
+    # Kubernetes cluster. Setting this field disables pre-launch checks for
+    # GPU capacity in the cluster and SkyPilot relies on the autoscaler to
+    # provision nodes with the required GPU capacity.
+    #
+    # Remember to set provision_timeout accordingly when using an autoscaler.
+    #
+    # Supported values: gke, karpenter, generic
+    #   gke: uses cloud.google.com/gke-accelerator label to identify GPUs on nodes
+    #   karpenter: uses karpenter.k8s.aws/instance-gpu-name label to identify GPUs on nodes
+    #   generic: uses skypilot.co/accelerator labels to identify GPUs on nodes
+    #
+    # Default: not set (no autoscaler)
+    autoscaler: gke
+
     # Additional fields to override the pod fields used by SkyPilot (optional)
     #
     # Any key:value pairs added here would get added to the pod spec used to

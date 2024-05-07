@@ -631,6 +631,13 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'autoscaler': {
+                    'type': 'string',
+                    'case_insensitive_enum': [
+                        type.value
+                        for type in kubernetes_enums.KubernetesAutoscalerType
+                    ]
+                },
             }
         },
         'oci': {
