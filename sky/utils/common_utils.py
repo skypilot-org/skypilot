@@ -456,8 +456,7 @@ def class_fullname(cls, skip_builtins: bool = True):
 
 
 def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
-                     use_bracket: bool = False,
-                     brighten_error_class: bool = True) -> str:
+                     use_bracket: bool = False) -> str:
     """Format an exception to a string.
 
     Args:
@@ -468,8 +467,6 @@ def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
     """
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
-    if not brighten_error_class:
-        bright, reset = '', ''
     if use_bracket:
         return f'{bright}[{class_fullname(e.__class__)}]{reset} {e}'
     return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
