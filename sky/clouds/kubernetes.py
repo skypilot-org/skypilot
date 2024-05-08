@@ -274,7 +274,8 @@ class Kubernetes(clouds.Cloud):
         port_mode = network_utils.get_port_mode(None)
 
         remote_identity = skypilot_config.get_nested(
-            ('kubernetes', 'remote_identity'), schemas.get_default_remote_identity('kubernetes'))
+            ('kubernetes', 'remote_identity'),
+            schemas.get_default_remote_identity('kubernetes'))
         if (remote_identity ==
                 schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
             # SA name doesn't matter since automounting credentials is disabled
