@@ -1991,9 +1991,21 @@ class RetryingVmProvisioner(object):
                     cloud_user = None
                 else:
                     cloud_user = to_provision.cloud.get_current_user_identity()
+
+                requested_features = self._requested_features.copy()
+                # Skip stop feature for Kubernetes jobs controller.
+                if isinstance(to_provision.cloud, clouds.Kubernetes
+                             ) and controller_utils.Controllers.from_name(
+                                 cluster_name
+                             ) == controller_utils.Controllers.JOBS_CONTROLLER:
+                    assert (clouds.CloudImplementationFeatures.STOP
+                            in requested_features), requested_features
+                    requested_features.remove(
+                        clouds.CloudImplementationFeatures.STOP)
+
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
-                    to_provision, self._requested_features)
+                    to_provision, requested_features)
 
                 config_dict = self._retry_zones(
                     to_provision,
@@ -4053,6 +4065,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
+            # Skip auto-stop for Kubernetes clusters.
+            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+                # We should hit this code path only for the jobs controller on
+                # Kubernetes clusters.
+                assert (controller_utils.Controllers.from_name(
+                    handle.cluster_name) == controller_utils.Controllers.
+                        JOBS_CONTROLLER), handle.cluster_name
+                logger.info('Auto-stop is not supported for Kubernetes '
+                            'clusters. Skipping.')
+                return
 
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
