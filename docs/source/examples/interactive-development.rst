@@ -10,7 +10,7 @@ SkyPilot makes interactive development easy on Kubernetes or cloud VMs. It helps
 Launch
 ------
 
-To launch a cluster with a cheap GPU for developemnt:
+To launch a cluster with a cheap GPU for development:
 
 .. code-block:: bash
 
@@ -80,14 +80,13 @@ Jupyter Notebooks
 Jupyter notebooks are a useful tool for interactive development, debugging, and
 visualization.
 
-To get a machine with a GPU attached, use:
+Connect to the machine and forward the port used by jupyter notebook:
 
 .. code-block:: bash
 
    ssh -L 8888:localhost:8888 dev
 
-Use ``ssh dev`` to SSH into the cluster. Inside the cluster, you can run the
-following commands to start a Jupyter session:
+Inside the cluster, you can run the following commands to start a Jupyter session:
 
 .. code-block:: bash
 
