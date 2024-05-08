@@ -73,7 +73,8 @@ s=$(sky launch --cloud ${CLOUD} -d -c ${CLUSTER_NAME} examples/minimal.yaml)
 sky logs ${CLUSTER_NAME} 2 --status | grep RUNNING || exit 1
 # remove color and find the job id
 echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 4" || exit 1
-sleep 45
+# wait for ready
+sky logs ${CLUSTER_NAME} 2
 q=$(sky queue ${CLUSTER_NAME})
 echo "$q"
 echo "$q" | grep "SUCCEEDED" | wc -l | grep 4 || exit 1

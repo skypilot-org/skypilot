@@ -452,9 +452,9 @@ def class_fullname(cls, skip_builtins: bool = True):
     """Get the full name of a class.
 
     Example:
-        >>> e = sky.exceptions.FetchIPError()
+        >>> e = sky.exceptions.FetchClusterInfoError()
         >>> class_fullname(e.__class__)
-        'sky.exceptions.FetchIPError'
+        'sky.exceptions.FetchClusterInfoError'
 
     Args:
         cls: The class to get the full name.
