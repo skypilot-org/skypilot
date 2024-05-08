@@ -165,6 +165,8 @@ class SkyServeLoadBalancer:
                 ready_replica_url, request)
             if not isinstance(response_or_exception, Exception):
                 return response_or_exception
+            # When the user aborts the request during streaming, the request will be disconnected.
+            # We do not need to retry for this case.
             if await request.is_disconnected():
                 # 499 means a client terminates the connection
                 # before the server is able to respond.
