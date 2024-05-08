@@ -3287,8 +3287,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
                                                       stream_logs=False,
-                                                      require_outputs=True,
-                                                      source_bashrc=True)
+                                                      require_outputs=True)
 
         # Happens when someone calls `sky exec` but remote is outdated
         # necessitating calling `sky launch`.

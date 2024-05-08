@@ -295,10 +295,14 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
            _RAY_PRLIMIT + _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
-    returncode, stdout, stderr = head_runner.run(cmd,
-                                                 stream_logs=False,
-                                                 log_path=log_path_abs,
-                                                 require_outputs=True)
+    returncode, stdout, stderr = head_runner.run(
+        cmd,
+        stream_logs=False,
+        log_path=log_path_abs,
+        require_outputs=True,
+        # Source bashrc for starting ray cluster to make sure actors started by
+        # ray will have the correct PATH.
+        source_bashrc=True)
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
                            f'(exit code {returncode}). Error: \n'
@@ -382,10 +386,14 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         runner, instance_id = runner_and_id
         log_dir = metadata_utils.get_instance_log_dir(cluster_name, instance_id)
         log_path_abs = str(log_dir / ('ray_cluster' + '.log'))
-        return runner.run(cmd,
-                          stream_logs=False,
-                          require_outputs=True,
-                          log_path=log_path_abs)
+        return runner.run(
+            cmd,
+            stream_logs=False,
+            require_outputs=True,
+            log_path=log_path_abs,
+            # Source bashrc for starting ray cluster to make sure actors started
+            # by ray will have the correct PATH.
+            source_bashrc=True)
 
     results = subprocess_utils.run_in_parallel(
         _setup_ray_worker, list(zip(worker_runners, cache_ids)))
