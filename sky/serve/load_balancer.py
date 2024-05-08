@@ -90,8 +90,7 @@ class SkyServeLoadBalancer:
                             if replica_url not in self._client_pool:
                                 # TODO(tian): Support HTTPS.
                                 self._client_pool[replica_url] = (
-                                    httpx.AsyncClient(
-                                        base_url=replica_url))
+                                    httpx.AsyncClient(base_url=replica_url))
                         urls_to_close = set(
                             self._client_pool.keys()) - set(ready_replica_urls)
                         client_to_close = []
