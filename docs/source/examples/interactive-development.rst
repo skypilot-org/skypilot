@@ -1,5 +1,5 @@
-Interactive Development
-=======================
+Start a Development Cluster
+===========================
 
 SkyPilot makes the interactive development very easy on clouds. It helps you:
 
