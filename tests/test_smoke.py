@@ -285,7 +285,7 @@ def test_minimal(generic_cloud: str):
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             # Check the cluster info
-            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cluster_name | grep {name}\'',
+            f'sky exec {name} \'sudo apt install -y jq; echo "$SKYPILOT_CLUSTER_INFO" | jq .cluster_name | grep {name}\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
