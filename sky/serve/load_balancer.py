@@ -79,7 +79,7 @@ class SkyServeLoadBalancer:
                     ready_replica_urls = response.json().get(
                         'ready_replica_urls')
                 except requests.RequestException as e:
-                    logger.error(f'An error occurred: {e}')
+                    logger.error(f'An error occurred when syncing with the controller: {e}')
                 else:
                     logger.info(f'Available Replica URLs: {ready_replica_urls}')
                     with self._client_pool_lock:
