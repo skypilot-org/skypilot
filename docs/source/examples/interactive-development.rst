@@ -14,8 +14,8 @@ To launch a cluster with a cheap GPU for developemnt:
 
 .. code-block:: bash
 
-  # Launch a cluster with 1 NVIDIA GPU and syncing the local working directory to the
-  # cluster.
+  # Launch a cluster with 1 NVIDIA GPU and sync the local working directory to the
+  # cluster. This can be launched as a pod in your Kubernetes cluster or a cloud VM.
   sky launch -c dev --gpus T4 --workdir .
 
 
