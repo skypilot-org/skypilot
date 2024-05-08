@@ -79,7 +79,8 @@ class SkyServeLoadBalancer:
                     ready_replica_urls = response.json().get(
                         'ready_replica_urls')
                 except requests.RequestException as e:
-                    logger.error(f'An error occurred when syncing with the controller: {e}')
+                    logger.error('An error occurred when syncing with '
+                                 f'the controller: {e}')
                 else:
                     logger.info(f'Available Replica URLs: {ready_replica_urls}')
                     with self._client_pool_lock:
@@ -91,10 +92,12 @@ class SkyServeLoadBalancer:
                                 self._client_pool[replica_url] = (
                                     httpx.AsyncClient(
                                         base_url=f'http://{replica_url}'))
-                        urls_to_close = set(self._client_pool.keys()) - set(ready_replica_urls)
+                        urls_to_close = set(
+                            self._client_pool.keys()) - set(ready_replica_urls)
                         client_to_close = []
                         for replica_url in urls_to_close:
-                            client_to_close.append(self._client_pool.pop(replica_url))
+                            client_to_close.append(
+                                self._client_pool.pop(replica_url))
                     for client in client_to_close:
                         asyncio.run(client.aclose())
 
@@ -165,8 +168,8 @@ class SkyServeLoadBalancer:
                 ready_replica_url, request)
             if not isinstance(response_or_exception, Exception):
                 return response_or_exception
-            # When the user aborts the request during streaming, the request will be disconnected.
-            # We do not need to retry for this case.
+            # When the user aborts the request during streaming, the request
+            # will be disconnected. We do not need to retry for this case.
             if await request.is_disconnected():
                 # 499 means a client terminates the connection
                 # before the server is able to respond.
