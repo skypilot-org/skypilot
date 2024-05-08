@@ -24,6 +24,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import status_lib
+from sky.backends import backend_utils
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
@@ -725,12 +726,21 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     handle = global_user_state.get_handle_from_cluster_name(
         SKY_SERVE_CONTROLLER_NAME)
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    if handle is None or handle.head_ip is None:
+    if handle is None:
         return '-'
     load_balancer_port = service_record['load_balancer_port']
     if load_balancer_port is None:
         return '-'
-    return f'{handle.head_ip}:{load_balancer_port}'
+    try:
+        endpoint = backend_utils.get_endpoints(handle.cluster_name,
+                                               load_balancer_port).get(
+                                                   load_balancer_port, None)
+    except exceptions.ClusterNotUpError:
+        return '-'
+    if endpoint is None:
+        return '-'
+    assert isinstance(endpoint, str), endpoint
+    return endpoint
 
 
 def format_service_table(service_records: List[Dict[str, Any]],
@@ -794,7 +804,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         return 'No existing replicas.'
 
     replica_columns = [
-        'SERVICE_NAME', 'ID', 'VERSION', 'IP', 'LAUNCHED', 'RESOURCES',
+        'SERVICE_NAME', 'ID', 'VERSION', 'ENDPOINT', 'LAUNCHED', 'RESOURCES',
         'STATUS', 'REGION'
     ]
     if show_all:
@@ -808,10 +818,11 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         replica_records = replica_records[:_REPLICA_TRUNC_NUM]
 
     for record in replica_records:
+        endpoint = record.get('endpoint', '-')
         service_name = record['service_name']
         replica_id = record['replica_id']
         version = (record['version'] if 'version' in record else '-')
-        replica_ip = '-'
+        replica_endpoint = endpoint if endpoint else '-'
         launched_at = log_utils.readable_time_duration(record['launched_at'])
         resources_str = '-'
         replica_status = record['status']
@@ -821,8 +832,6 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
 
         replica_handle: 'backends.CloudVmRayResourceHandle' = record['handle']
         if replica_handle is not None:
-            if replica_handle.head_ip is not None:
-                replica_ip = replica_handle.head_ip
             resources_str = resources_utils.get_readable_resources_repr(
                 replica_handle, simplify=not show_all)
             if replica_handle.launched_resources.region is not None:
@@ -834,7 +843,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
             service_name,
             replica_id,
             version,
-            replica_ip,
+            replica_endpoint,
             launched_at,
             resources_str,
             status_str,

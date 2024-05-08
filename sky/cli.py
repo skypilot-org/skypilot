@@ -52,7 +52,6 @@ from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
-from sky import provision as provision_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import status_lib
@@ -1650,71 +1649,28 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
             head_ip = handle.external_ips()[0]
             if show_endpoints:
-                launched_resources = handle.launched_resources
-                cloud = launched_resources.cloud
-                try:
-                    cloud.check_features_are_supported(
-                        launched_resources,
-                        {clouds.CloudImplementationFeatures.OPEN_PORTS})
-                except exceptions.NotSupportedError:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError('Querying endpoints is not supported '
-                                         f'for {cloud}.') from None
-
-                config = common_utils.read_yaml(handle.cluster_yaml)
-                port_details = provision_lib.query_ports(
-                    repr(cloud), handle.cluster_name_on_cloud,
-                    handle.launched_resources.ports, config['provider'])
-
-                if endpoint is not None:
-                    # If cluster had no ports to be exposed
-                    ports_set = resources_utils.port_ranges_to_set(
-                        handle.launched_resources.ports)
-                    if endpoint not in ports_set:
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(f'Port {endpoint} is not exposed '
-                                             'on cluster '
-                                             f'{cluster_record["name"]!r}.')
-                    # If the user requested a specific port endpoint
-                    if endpoint not in port_details:
-                        error_msg = (f'Port {endpoint} not exposed yet. '
-                                     f'{_ENDPOINTS_RETRY_MESSAGE} ')
-                        if handle.launched_resources.cloud.is_same_cloud(
-                                clouds.Kubernetes()):
-                            # Add Kubernetes specific debugging info
-                            error_msg += (
-                                kubernetes_utils.get_endpoint_debug_message())
-                        with ux_utils.print_exception_no_traceback():
-                            raise RuntimeError(error_msg)
-                    click.echo(port_details[endpoint][0].url(ip=head_ip))
-                    return
-
-                if not port_details:
-                    # If cluster had no ports to be exposed
-                    if handle.launched_resources.ports is None:
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError('Cluster does not have any ports '
-                                             'to be exposed.')
-                    # Else wait for the ports to be exposed
-                    else:
-                        error_msg = (f'No endpoints exposed yet. '
-                                     f'{_ENDPOINTS_RETRY_MESSAGE} ')
-                        if handle.launched_resources.cloud.is_same_cloud(
-                                clouds.Kubernetes()):
-                            # Add Kubernetes specific debugging info
-                            error_msg += \
-                                kubernetes_utils.get_endpoint_debug_message()
-                        with ux_utils.print_exception_no_traceback():
-                            raise RuntimeError(error_msg)
-
-                for port, urls in port_details.items():
-                    click.echo(
-                        f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
-                        f'{colorama.Style.RESET_ALL}: '
-                        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                        f'{urls[0].url(ip=head_ip)}{colorama.Style.RESET_ALL}')
+                if endpoint:
+                    cluster_endpoint = core.endpoints(cluster_record['name'],
+                                                      endpoint).get(
+                                                          endpoint, None)
+                    if not cluster_endpoint:
+                        raise click.Abort(
+                            f'Endpoint {endpoint} not found for cluster '
+                            f'{cluster_record["name"]!r}.')
+                    click.echo(cluster_endpoint)
+                else:
+                    cluster_endpoints = core.endpoints(cluster_record['name'])
+                    assert isinstance(cluster_endpoints, dict)
+                    if not cluster_endpoints:
+                        raise click.Abort(f'No endpoint found for cluster '
+                                          f'{cluster_record["name"]!r}.')
+                    for port, port_endpoint in cluster_endpoints.items():
+                        click.echo(
+                            f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
+                            f'{colorama.Style.RESET_ALL}: '
+                            f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                            f'{port_endpoint}{colorama.Style.RESET_ALL}')
                 return
-
             click.echo(head_ip)
             return
         hints = []
@@ -2590,6 +2546,17 @@ def down(
 
 
 def _hint_or_raise_for_down_jobs_controller(controller_name: str):
+    """Helper function to check job controller status before tearing it down.
+
+    Raises helpful exceptions and errors if the controller is not in a safe
+    state to be torn down.
+
+    Raises:
+        RuntimeError: if failed to get the job queue.
+        exceptions.NotSupportedError: if the controller is not in a safe state
+            to be torn down (e.g., because it has jobs running or
+            it is in init state)
+    """
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
@@ -2633,6 +2600,17 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
+    """Helper function to check serve controller status before tearing it down.
+
+    Raises helpful exceptions and errors if the controller is not in a safe
+    state to be torn down.
+
+    Raises:
+        RuntimeError: if failed to get the service status.
+        exceptions.NotSupportedError: if the controller is not in a safe state
+            to be torn down (e.g., because it has services running or
+            it is in init state)
+    """
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
     with rich_utils.safe_status('[bold cyan]Checking for live services[/]'):
@@ -2756,7 +2734,8 @@ def _down_or_stop_clusters(
                     # managed job or service. We should make this check atomic
                     # with the termination.
                     hint_or_raise(controller_name)
-                except exceptions.ClusterOwnerIdentityMismatchError as e:
+                except (exceptions.ClusterOwnerIdentityMismatchError,
+                        RuntimeError) as e:
                     if purge:
                         click.echo(common_utils.format_exception(e))
                     else:

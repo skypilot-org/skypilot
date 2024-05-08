@@ -18,6 +18,7 @@ from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
+from sky.utils import schemas
 from sky.utils import ux_utils
 
 DEFAULT_NAMESPACE = 'default'
@@ -549,20 +550,106 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     except Exception as e:  # pylint: disable=broad-except
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
-    # If we reach here, the credentials are valid and Kubernetes cluster is up
+
+    # If we reach here, the credentials are valid and Kubernetes cluster is up.
+    # We now do softer checks to check if exec based auth is used and to
+    # see if the cluster is GPU-enabled.
+
+    _, exec_msg = is_kubeconfig_exec_auth()
+
     # We now check if GPUs are available and labels are set correctly on the
     # cluster, and if not we return hints that may help debug any issues.
     # This early check avoids later surprises for user when they try to run
     # `sky launch --gpus <gpu>` and the optimizer does not list Kubernetes as a
     # provider if their cluster GPUs are not setup correctly.
+    gpu_msg = ''
     try:
         _, _ = get_gpu_label_key_value(acc_type='', check_mode=True)
     except exceptions.ResourcesUnavailableError as e:
         # If GPUs are not available, we return cluster as enabled (since it can
         # be a CPU-only cluster) but we also return the exception message which
         # serves as a hint for how to enable GPU access.
-        return True, f'{e}'
-    return True, None
+        gpu_msg = str(e)
+    if exec_msg and gpu_msg:
+        return True, f'{gpu_msg}\n    Additionally, {exec_msg}'
+    elif gpu_msg:
+        return True, gpu_msg
+    elif exec_msg:
+        return True, exec_msg
+    else:
+        return True, None
+
+
+def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
+    """Checks if the kubeconfig file uses exec-based authentication
+
+    Exec-based auth is commonly used for authenticating with cloud hosted
+    Kubernetes services, such as GKE. Here is an example snippet from a
+    kubeconfig using exec-based authentication for a GKE cluster:
+    - name: mycluster
+      user:
+        exec:
+          apiVersion: client.authentication.k8s.io/v1beta1
+          command: /Users/romilb/google-cloud-sdk/bin/gke-gcloud-auth-plugin
+          installHint: Install gke-gcloud-auth-plugin ...
+          provideClusterInfo: true
+
+
+    Using exec-based authentication is problematic when used in conjunction
+    with kubernetes.remote_identity = LOCAL_CREDENTIAL in ~/.sky/config.yaml.
+    This is because the exec-based authentication may not have the relevant
+    dependencies installed on the remote cluster or may have hardcoded paths
+    that are not available on the remote cluster.
+
+    Returns:
+        bool: True if exec-based authentication is used and LOCAL_CREDENTIAL
+            mode is used for remote_identity in ~/.sky/config.yaml.
+        str: Error message if exec-based authentication is used, None otherwise
+    """
+    k8s = kubernetes.kubernetes
+    try:
+        k8s.config.load_kube_config()
+    except kubernetes.config_exception():
+        # Using service account token or other auth methods, continue
+        return False, None
+
+    # Get active context and user from kubeconfig using k8s api
+    _, current_context = k8s.config.list_kube_config_contexts()
+    target_username = current_context['context']['user']
+
+    # K8s api does not provide a mechanism to get the user details from the
+    # context. We need to load the kubeconfig file and parse it to get the
+    # user details.
+    kubeconfig_path = os.path.expanduser(
+        os.getenv('KUBECONFIG',
+                  k8s.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION))
+    # Load the kubeconfig file as a dictionary
+    with open(kubeconfig_path, 'r', encoding='utf-8') as f:
+        kubeconfig = yaml.safe_load(f)
+
+    user_details = kubeconfig['users']
+
+    # Find user matching the target username
+    user_details = next(
+        user for user in user_details if user['name'] == target_username)
+
+    remote_identity = skypilot_config.get_nested(
+        ('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+    if ('exec' in user_details.get('user', {}) and remote_identity
+            == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
+        ctx_name = current_context['name']
+        exec_msg = ('exec-based authentication is used for '
+                    f'Kubernetes context {ctx_name!r}.'
+                    ' This may cause issues when running Managed Jobs '
+                    'or SkyServe controller on Kubernetes. To fix, configure '
+                    'SkyPilot to create a service account for running pods by '
+                    'adding the following in ~/.sky/config.yaml:\n'
+                    '    kubernetes:\n'
+                    '      remote_identity: SERVICE_ACCOUNT\n'
+                    '    More: https://skypilot.readthedocs.io/en/latest/'
+                    'reference/config.html')
+        return True, exec_msg
+    return False, None
 
 
 def get_current_kube_config_context_name() -> Optional[str]:

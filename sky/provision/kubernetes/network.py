@@ -73,7 +73,7 @@ def _open_ports_using_ingress(
             'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
         )
 
-    # Prepare service names, ports,  for template rendering
+    # Prepare service names, ports, for template rendering
     service_details = [
         (f'{cluster_name_on_cloud}-skypilot-service--{port}', port,
          _PATH_PREFIX.format(cluster_name_on_cloud=cluster_name_on_cloud,
@@ -177,9 +177,11 @@ def _cleanup_ports_for_ingress(
 def query_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
+    head_ip: Optional[str] = None,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
+    del head_ip  # unused
     assert provider_config is not None, 'provider_config is required'
     port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None))
