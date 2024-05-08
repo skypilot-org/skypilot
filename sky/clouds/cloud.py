@@ -43,6 +43,7 @@ class CloudImplementationFeatures(enum.Enum):
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
+    AUTODOWN = 'autodown'
 
 
 class Region(collections.namedtuple('Region', ['name'])):

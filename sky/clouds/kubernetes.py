@@ -97,8 +97,12 @@ class Kubernetes(clouds.Cloud):
         is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
         if is_exec_auth:
             assert isinstance(message, str), message
+            # Controllers cannot spin up new pods with exec auth.
             unsupported_features[
                 clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
+            # Pod does not have permissions to terminate itself with exec auth.
+            unsupported_features[
+                clouds.CloudImplementationFeatures.AUTODOWN] = message
         return unsupported_features
 
     @classmethod
@@ -270,7 +274,7 @@ class Kubernetes(clouds.Cloud):
         port_mode = network_utils.get_port_mode(None)
 
         remote_identity = skypilot_config.get_nested(
-            ('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+            ('kubernetes', 'remote_identity'), schemas.get_default_remote_identity('kubernetes'))
         if (remote_identity ==
                 schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
             # SA name doesn't matter since automounting credentials is disabled

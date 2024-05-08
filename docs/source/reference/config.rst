@@ -319,7 +319,7 @@ Available fields and semantics:
     # instances (e.g., a serve controller on GCP or AWS may need to provision
     # Kubernetes resources).
     #
-    # Default: 'LOCAL_CREDENTIALS'.
+    # Default: 'SERVICE_ACCOUNT'.
     remote_identity: my-k8s-service-account
 
     # Attach custom metadata to Kubernetes objects created by SkyPilot
