@@ -186,13 +186,14 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
+        idle_minutes_to_autodown = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
         controller_job_id, controller_handle = sky.launch(
             task=controller_task,
             stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
-            idle_minutes_to_autostop=constants.
-            CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            idle_minutes_to_autostop=idle_minutes_to_autodown,
+            down=True,
             retry_until_up=True,
             _disable_controller_check=True,
         )
@@ -253,7 +254,10 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            endpoint = f'{controller_handle.head_ip}:{lb_port}'
+            endpoint = backend_utils.get_endpoints(
+                controller_handle.cluster_name, lb_port,
+                skip_status_check=True).get(lb_port)
+            assert endpoint is not None, 'Did not get endpoint for controller.'
 
         sky_logging.print(
             f'{fore.CYAN}Service name: '

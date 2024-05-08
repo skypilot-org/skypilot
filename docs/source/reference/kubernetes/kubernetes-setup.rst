@@ -382,7 +382,7 @@ To use this mode:
     # ingress-nginx-controller         LoadBalancer        10.24.4.254   35.202.58.117   80:31253/TCP,443:32699/TCP
 
 .. note::
-    If the ``EXTERNAL-IP`` field is ``<none>``, you must manually assign an External IP.
+    If the ``EXTERNAL-IP`` field is ``<none>``, you may manually assign it an External IP.
     This can be done by patching the service with an IP that can be accessed from outside the cluster.
     If the service type is ``NodePort``, you can set the ``EXTERNAL-IP`` to any node's IP address:
 
@@ -394,6 +394,22 @@ To use this mode:
 
     If the ``EXTERNAL-IP`` field is left as ``<none>``, SkyPilot will use ``localhost`` as the external IP for the Ingress,
     and the endpoint may not be accessible from outside the cluster.
+
+.. note::
+    If you cannot update the ``EXTERNAL-IP`` field of the service, you can also
+    specify the Ingress IP or hostname through the ``skypilot.co/external-ip``
+    annotation on the ``ingress-nginx-controller`` service. In this case,
+    having a valid ``EXTERNAL-IP`` field is not required.
+
+    For example, if your ``ingress-nginx-controller`` service is ``NodePort``:
+
+    .. code-block:: bash
+
+      # Add skypilot.co/external-ip annotation to the  nginx ingress service.
+      # Replace <IP> in the following command with the IP you select.
+      # Can be any node's IP if using NodePort service type.
+      $ kubectl annotate service ingress-nginx-controller skypilot.co/external-ip=<IP> -n ingress-nginx
+
 
 3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
 

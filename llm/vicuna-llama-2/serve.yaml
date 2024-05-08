@@ -27,11 +27,12 @@ run: |
   conda activate chatbot
   
   echo 'Starting controller...'
-  python -u -m fastchat.serve.controller > ~/controller.log 2>&1 &
+  python -u -m fastchat.serve.controller --host 127.0.0.1 > ~/controller.log 2>&1 &
   sleep 10
   echo 'Starting model worker...'
   python -u -m fastchat.serve.model_worker \
             --model-path /skypilot-vicuna 2>&1 \
+            --host 127.0.0.1 \
             | tee model_worker.log &
 
   echo 'Waiting for model worker to start...'

@@ -3243,8 +3243,16 @@ def test_skyserve_azure_http():
     run_one_test(test)
 
 
+@pytest.mark.kubernetes
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
+def test_skyserve_kubernetes_http():
+    """Test skyserve on Kubernetes"""
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'kubernetes', 30)
+    run_one_test(test)
+
+
+@pytest.mark.serve
 def test_skyserve_llm(generic_cloud: str):
     """Test skyserve with real LLM usecase"""
     name = _get_service_name()
@@ -3272,7 +3280,7 @@ def test_skyserve_llm(generic_cloud: str):
             ],
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        timeout=25 * 60,
+        timeout=40 * 60,
     )
     run_one_test(test)
 
@@ -3366,7 +3374,6 @@ def test_skyserve_dynamic_ondemand_fallback():
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -3400,7 +3407,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
+@pytest.mark.no_kubernetes  # Replicas on k8s may be running on the same node and have the same public IP
 def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
@@ -3466,7 +3473,6 @@ def test_skyserve_auto_restart():
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
@@ -3492,7 +3498,6 @@ def test_skyserve_cancel(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
@@ -3521,7 +3526,6 @@ def test_skyserve_update(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
     name = _get_service_name()
@@ -3558,7 +3562,6 @@ def test_skyserve_rolling_update(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
@@ -3571,7 +3574,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
-            'sleep 120',
+            'sleep 30',
             # 2 on-deamnd (ready) + 1 on-demand (provisioning).
             (
                 _check_replica_in_status(
@@ -3585,7 +3588,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             # Test rolling update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
             # sleep to wait for update to be registered.
-            'sleep 30',
+            'sleep 15',
             # 2 on-deamnd (ready) + 1 on-demand (shutting down).
             _check_replica_in_status(name, [(2, False, 'READY'),
                                             (1, False, 'SHUTTING_DOWN')]),
@@ -3600,7 +3603,6 @@ def test_skyserve_fast_update(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.no_kubernetes
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     name = _get_service_name()
@@ -3637,8 +3639,8 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
-@pytest.mark.no_kubernetes
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
     name = _get_service_name() + mode
