@@ -2,7 +2,6 @@ name: min
 
 setup: |
   echo "running setup"
-  sudo apt-get install -y jq
 
 run: |
   conda env list
