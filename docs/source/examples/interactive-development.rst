@@ -3,9 +3,9 @@ Start a Development Cluster
 
 SkyPilot makes interactive development easy on Kubernetes or cloud VMs. It helps you:
 
-#. Launch: a cluster with GPU or any specific requirement with a single command.
-#. Connect: Quickly connect to the cluster with the cluster name.
-#. Autostop: Automatically stop the cluster after a period of time for cost savings.
+#. Launch: Quickly get a cluster with GPU or other resource requirement with a single command.
+#. Connect: Easily connect to the cluster using the cluster name (e.g., ``ssh dev``).
+#. Autostop: Automatically stop the cluster after some idle time for cost savings.
 
 Launch
 ------
