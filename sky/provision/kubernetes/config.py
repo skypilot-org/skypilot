@@ -30,12 +30,47 @@ def bootstrap_instances(
     if config.provider_config.get('fuse_device_required', False):
         _configure_fuse_mounting(config.provider_config)
 
-    if not config.provider_config.get('_operator'):
-        # These steps are unecessary when using the Operator.
+    requested_service_account = config.node_config['spec']['serviceAccountName']
+    if requested_service_account == 'skypilot-service-account':
+        # If the user has requested a different service account (via pod_config
+        # in ~/.sky/config.yaml), we assume they have already set up the
+        # necessary roles and role bindings.
+        # If not, set up the roles and bindings for skypilot-service-account
+        # here.
         _configure_autoscaler_service_account(namespace, config.provider_config)
-        _configure_autoscaler_role(namespace, config.provider_config)
-        _configure_autoscaler_role_binding(namespace, config.provider_config)
+        _configure_autoscaler_role(namespace,
+                                   config.provider_config,
+                                   role_field='autoscaler_role')
+        _configure_autoscaler_role_binding(
+            namespace,
+            config.provider_config,
+            binding_field='autoscaler_role_binding')
+        _configure_autoscaler_cluster_role(namespace, config.provider_config)
+        _configure_autoscaler_cluster_role_binding(namespace,
+                                                   config.provider_config)
+        if config.provider_config.get('port_mode', 'loadbalancer') == 'ingress':
+            logger.info('Port mode is set to ingress, setting up ingress role '
+                        'and role binding.')
+            try:
+                _configure_autoscaler_role(namespace,
+                                           config.provider_config,
+                                           role_field='autoscaler_ingress_role')
+                _configure_autoscaler_role_binding(
+                    namespace,
+                    config.provider_config,
+                    binding_field='autoscaler_ingress_role_binding')
+            except kubernetes.api_exception() as e:
+                # If namespace is not found, we will ignore the error
+                if e.status == 404:
+                    logger.info(
+                        'Namespace not found - is your nginx ingress installed?'
+                        ' Skipping ingress role and role binding setup.')
+                else:
+                    raise e
 
+    elif requested_service_account != 'default':
+        logger.info(f'Using service account {requested_service_account!r}, '
+                    'skipping role and role binding setup.')
     return config
 
 
@@ -214,9 +249,16 @@ def _configure_autoscaler_service_account(
                 f'{created_msg(account_field, name)}')
 
 
-def _configure_autoscaler_role(namespace: str,
-                               provider_config: Dict[str, Any]) -> None:
-    role_field = 'autoscaler_role'
+def _configure_autoscaler_role(namespace: str, provider_config: Dict[str, Any],
+                               role_field: str) -> None:
+    """ Reads the role from the provider config, creates if it does not exist.
+
+    Args:
+        namespace: The namespace to create the role in.
+        provider_config: The provider config.
+        role_field: The field in the provider config that contains the role.
+    """
+
     if role_field not in provider_config:
         logger.info('_configure_autoscaler_role: '
                     f'{not_provided_msg(role_field)}')
@@ -225,8 +267,8 @@ def _configure_autoscaler_role(namespace: str,
     role = provider_config[role_field]
     if 'namespace' not in role['metadata']:
         role['metadata']['namespace'] = namespace
-    elif role['metadata']['namespace'] != namespace:
-        raise InvalidNamespaceError(role_field, namespace)
+    else:
+        namespace = role['metadata']['namespace']
 
     name = role['metadata']['name']
     field_selector = f'metadata.name={name}'
@@ -245,10 +287,89 @@ def _configure_autoscaler_role(namespace: str,
 
 
 def _configure_autoscaler_role_binding(namespace: str,
-                                       provider_config: Dict[str, Any]) -> None:
-    binding_field = 'autoscaler_role_binding'
+                                       provider_config: Dict[str, Any],
+                                       binding_field: str) -> None:
+    """ Reads the role binding from the config, creates if it does not exist.
+
+    Args:
+        namespace: The namespace to create the role binding in.
+        provider_config: The provider config.
+        binding_field: The field in the provider config that contains the role
+    """
+
     if binding_field not in provider_config:
         logger.info('_configure_autoscaler_role_binding: '
+                    f'{not_provided_msg(binding_field)}')
+        return
+
+    binding = provider_config[binding_field]
+    if 'namespace' not in binding['metadata']:
+        binding['metadata']['namespace'] = namespace
+        rb_namespace = namespace
+    else:
+        rb_namespace = binding['metadata']['namespace']
+
+    for subject in binding['subjects']:
+        if 'namespace' not in subject:
+            subject['namespace'] = namespace
+        elif subject['namespace'] != namespace:
+            subject_name = subject['name']
+            raise InvalidNamespaceError(
+                binding_field + f' subject {subject_name}', namespace)
+
+    name = binding['metadata']['name']
+    field_selector = f'metadata.name={name}'
+    accounts = (kubernetes.auth_api().list_namespaced_role_binding(
+        rb_namespace, field_selector=field_selector).items)
+    if len(accounts) > 0:
+        assert len(accounts) == 1
+        logger.info('_configure_autoscaler_role_binding: '
+                    f'{using_existing_msg(binding_field, name)}')
+        return
+
+    logger.info('_configure_autoscaler_role_binding: '
+                f'{not_found_msg(binding_field, name)}')
+    kubernetes.auth_api().create_namespaced_role_binding(rb_namespace, binding)
+    logger.info('_configure_autoscaler_role_binding: '
+                f'{created_msg(binding_field, name)}')
+
+
+def _configure_autoscaler_cluster_role(namespace,
+                                       provider_config: Dict[str, Any]) -> None:
+    role_field = 'autoscaler_cluster_role'
+    if role_field not in provider_config:
+        logger.info('_configure_autoscaler_cluster_role: '
+                    f'{not_provided_msg(role_field)}')
+        return
+
+    role = provider_config[role_field]
+    if 'namespace' not in role['metadata']:
+        role['metadata']['namespace'] = namespace
+    elif role['metadata']['namespace'] != namespace:
+        raise InvalidNamespaceError(role_field, namespace)
+
+    name = role['metadata']['name']
+    field_selector = f'metadata.name={name}'
+    accounts = (kubernetes.auth_api().list_cluster_role(
+        field_selector=field_selector).items)
+    if len(accounts) > 0:
+        assert len(accounts) == 1
+        logger.info('_configure_autoscaler_cluster_role: '
+                    f'{using_existing_msg(role_field, name)}')
+        return
+
+    logger.info('_configure_autoscaler_cluster_role: '
+                f'{not_found_msg(role_field, name)}')
+    kubernetes.auth_api().create_cluster_role(role)
+    logger.info(
+        f'_configure_autoscaler_cluster_role: {created_msg(role_field, name)}')
+
+
+def _configure_autoscaler_cluster_role_binding(
+        namespace, provider_config: Dict[str, Any]) -> None:
+    binding_field = 'autoscaler_cluster_role_binding'
+    if binding_field not in provider_config:
+        logger.info('_configure_autoscaler_cluster_role_binding: '
                     f'{not_provided_msg(binding_field)}')
         return
 
@@ -267,18 +388,18 @@ def _configure_autoscaler_role_binding(namespace: str,
 
     name = binding['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_namespaced_role_binding(
-        namespace, field_selector=field_selector).items)
+    accounts = (kubernetes.auth_api().list_cluster_role_binding(
+        field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
-        logger.info('_configure_autoscaler_role_binding: '
+        logger.info('_configure_autoscaler_cluster_role_binding: '
                     f'{using_existing_msg(binding_field, name)}')
         return
 
-    logger.info('_configure_autoscaler_role_binding: '
+    logger.info('_configure_autoscaler_cluster_role_binding: '
                 f'{not_found_msg(binding_field, name)}')
-    kubernetes.auth_api().create_namespaced_role_binding(namespace, binding)
-    logger.info('_configure_autoscaler_role_binding: '
+    kubernetes.auth_api().create_cluster_role_binding(binding)
+    logger.info('_configure_autoscaler_cluster_role_binding: '
                 f'{created_msg(binding_field, name)}')
 
 

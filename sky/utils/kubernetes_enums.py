@@ -36,3 +36,10 @@ class KubernetesPortMode(enum.Enum):
     INGRESS = 'ingress'
     LOADBALANCER = 'loadbalancer'
     PODIP = 'podip'
+
+
+class KubernetesAutoscalerType(enum.Enum):
+    """Enum for the different types of cluster autoscalers for Kubernetes."""
+    GKE = 'gke'
+    KARPENTER = 'karpenter'
+    GENERIC = 'generic'
