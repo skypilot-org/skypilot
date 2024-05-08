@@ -41,8 +41,9 @@ Or add an additional flag :code:`-i` during the launch:
   # Launch a cluster with auto stop after 5 hours
   sky launch -c dev --gpus T4 --workdir . -i 300
 
-For more details of auto stopping, check out: :ref:`auto-stop`. It helps you avoid idle machines from costing you a fortune, when you want a
-machine to stop automatically after you go to bed or forget to stop it.
+For more details of auto stopping, check out: :ref:`auto-stop`. This feature is designed
+to prevent idle clusters from incurring unnecessary costs, ensuring your cluster
+stops automatically, whether it's overnight or throughout the weekend.
 
 
 Connect
