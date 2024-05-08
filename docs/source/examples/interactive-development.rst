@@ -48,7 +48,7 @@ machine to stop automatically after you go to bed or forget to stop it.
 Connect
 -------
 
-A user can easily connect to the cluster with the following ways:
+A user can easily connect to the cluster using your method of choice:
 
 SSH
 ~~~
