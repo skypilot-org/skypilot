@@ -27,7 +27,7 @@ To launch a cluster with a cheap GPU for developemnt:
 Autostop
 --------
 
-SkyPilot allows you to automatically stop the cluster after a period of time to save costs. You can set the autostop time with a single command.
+SkyPilot allows you to automatically stop the cluster after a period of idle time to save costs. You can set the autostop time with a single command:
 
 .. code-block:: bash
 
