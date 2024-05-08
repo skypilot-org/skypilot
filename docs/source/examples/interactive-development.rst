@@ -63,8 +63,8 @@ SkyPilot will automatically configure the SSH setting for a cluster, so that use
 VSCode
 ~~~~~~
 
-A common usecase for interactive developement is to connect an IDE directly to the cluster and edit code directly on the cluster. It
-can also simply done by connecting VSCode to the cluster with the cluster name:
+A common use case for interactive development is to connect a local IDE to a remote cluster and directly edit code that lives on the cluster. 
+This is supported by simply connecting VSCode to the cluster with the cluster name:
 
 #. Click on the top bar, type: :code:`> remote-ssh`, and select :code:`Remote-SSH: Connect Current Window to Host...`
 #. Select the cluster name (e.g., ``dev``) from the list of hosts.
