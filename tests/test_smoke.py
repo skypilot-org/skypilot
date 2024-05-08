@@ -284,11 +284,13 @@ def test_minimal(generic_cloud: str):
             # Ensure the raylet process has the correct file descriptor limit.
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            # Install jq for the next test.
+            f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',
             # Check the cluster info
             f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cluster_name | grep {name}\'',
-            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
-            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
+            f'sky logs {name} 5 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
         _get_timeout(generic_cloud),
