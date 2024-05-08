@@ -53,7 +53,7 @@ A user can easily connect to the cluster with the following ways:
 SSH
 ~~~
 
-SkyPilot will automatically configure the SSH setting for a user to connect to the cluster with the cluster name after it is launched.
+SkyPilot will automatically configure the SSH setting for a cluster, so that users can connect to the cluster with the cluster name:
 
 .. code-block:: bash
   
