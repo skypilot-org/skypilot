@@ -167,14 +167,14 @@ class SkyServeLoadBalancer:
             else:
                 response_or_exception = await self._proxy_request_to(
                     ready_replica_url, request)
-                if not isinstance(response_or_exception, Exception):
-                    return response_or_exception
-                # When the user aborts the request during streaming, the request
-                # will be disconnected. We do not need to retry for this case.
-                if await request.is_disconnected():
-                    # 499 means a client terminates the connection
-                    # before the server is able to respond.
-                    return fastapi.responses.Response(status_code=499)
+            if not isinstance(response_or_exception, Exception):
+                return response_or_exception
+            # When the user aborts the request during streaming, the request
+            # will be disconnected. We do not need to retry for this case.
+            if await request.is_disconnected():
+                # 499 means a client terminates the connection
+                # before the server is able to respond.
+                return fastapi.responses.Response(status_code=499)
             # TODO(tian): Fail fast for errors like 404 not found.
             if retry_cnt == constants.LB_MAX_RETRY:
                 if isinstance(response_or_exception, fastapi.HTTPException):
