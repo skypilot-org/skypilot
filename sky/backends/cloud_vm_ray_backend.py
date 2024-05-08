@@ -4063,6 +4063,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if idle_minutes_to_autostop is not None:
             # Skip auto-stop for Kubernetes clusters.
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+                # We should hit this code path only for the jobs controller on
+                # Kubernetes clusters.
+                assert (controller_utils.Controllers.from_name(
+                    handle.cluster_name) ==
+                        controller_utils.Controllers.JOBS_CONTROLLER)
                 logger.info('Auto-stop is not supported for Kubernetes '
                             'clusters. Skipping.')
                 return
