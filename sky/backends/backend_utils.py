@@ -1,6 +1,7 @@
 """Util constants/functions for the backends."""
 from datetime import datetime
 import enum
+import fnmatch
 import functools
 import os
 import pathlib
@@ -47,7 +48,9 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -107,6 +110,9 @@ CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
+
+_ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
+                            'please retry after a while.')
 
 # Include the fields that will be used for generating tags that distinguishes
 # the cluster in ray, to avoid the stopped cluster being discarded due to
@@ -327,7 +333,7 @@ class FileMountHelper(object):
     def make_safe_symlink_command(cls, *, source: str, target: str) -> str:
         """Returns a command that safely symlinks 'source' to 'target'.
 
-        All intermediate directories of 'source' will be owned by $USER,
+        All intermediate directories of 'source' will be owned by $(whoami),
         excluding the root directory (/).
 
         'source' must be an absolute path; both 'source' and 'target' must not
@@ -354,17 +360,17 @@ class FileMountHelper(object):
                                                                        target)
         # Below, use sudo in case the symlink needs sudo access to create.
         # Prepare to create the symlink:
-        #  1. make sure its dir(s) exist & are owned by $USER.
+        #  1. make sure its dir(s) exist & are owned by $(whoami).
         dir_of_symlink = os.path.dirname(source)
         commands = [
             # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
-            # chown $USER on it so user can use these intermediate dirs
+            # chown $(whoami) on it so user can use these intermediate dirs
             # (excluding /).
             f'sudo mkdir -p {dir_of_symlink}',
             # p: path so far
             ('(p=""; '
              f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
-             'p=${p}/${w}; sudo chown $USER $p; done)')
+             'p=${p}/${w}; sudo chown $(whoami) $p; done)')
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a
@@ -380,7 +386,7 @@ class FileMountHelper(object):
             # Link.
             f'sudo ln -s {target} {source}',
             # chown.  -h to affect symlinks only.
-            f'sudo chown -h $USER {source}',
+            f'sudo chown -h $(whoami) {source}',
         ]
         return ' && '.join(commands)
 
@@ -797,8 +803,14 @@ def write_cluster_config(
     assert cluster_name is not None
     excluded_clouds = []
     remote_identity = skypilot_config.get_nested(
-        (str(cloud).lower(), 'remote_identity'), 'LOCAL_CREDENTIALS')
-    if remote_identity == 'SERVICE_ACCOUNT':
+        (str(cloud).lower(), 'remote_identity'),
+        schemas.REMOTE_IDENTITY_DEFAULT)
+    if remote_identity is not None and not isinstance(remote_identity, str):
+        for profile in remote_identity:
+            if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
+                remote_identity = list(profile.values())[0]
+                break
+    if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
         if not cloud.supports_service_account_on_remote():
             raise exceptions.InvalidCloudConfigs(
                 'remote_identity: SERVICE_ACCOUNT is specified in '
@@ -888,6 +900,8 @@ def write_cluster_config(
 
                 # User-supplied labels.
                 'labels': labels,
+                # User-supplied remote_identity
+                'remote_identity': remote_identity,
                 # The reservation pools that specified by the user. This is
                 # currently only used by GCP.
                 'specific_reservations': specific_reservations,
@@ -1066,7 +1080,7 @@ def _count_healthy_nodes_from_ray(output: str,
 def get_docker_user(ip: str, cluster_config_file: str) -> str:
     """Find docker container username."""
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
-    runner = command_runner.SSHCommandRunner(ip, port=22, **ssh_credentials)
+    runner = command_runner.SSHCommandRunner(node=(ip, 22), **ssh_credentials)
     container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
     whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
         f'sudo docker exec {container_name} whoami',
@@ -1099,7 +1113,7 @@ def wait_until_ray_cluster_ready(
     try:
         head_ip = _query_head_ip_with_retries(
             cluster_config_file, max_attempts=WAIT_HEAD_NODE_IP_MAX_ATTEMPTS)
-    except exceptions.FetchIPError as e:
+    except exceptions.FetchClusterInfoError as e:
         logger.error(common_utils.format_exception(e))
         return False, None  # failed
 
@@ -1115,8 +1129,7 @@ def wait_until_ray_cluster_ready(
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file, docker_user)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip,
-                                             port=22,
+    runner = command_runner.SSHCommandRunner(node=(head_ip, 22),
                                              **ssh_credentials)
     with rich_utils.safe_status(
             '[bold cyan]Waiting for workers...') as worker_status:
@@ -1222,7 +1235,7 @@ def ssh_credential_from_yaml(
 
 
 def parallel_data_transfer_to_nodes(
-    runners: List[command_runner.SSHCommandRunner],
+    runners: List[command_runner.CommandRunner],
     source: Optional[str],
     target: str,
     cmd: Optional[str],
@@ -1232,32 +1245,36 @@ def parallel_data_transfer_to_nodes(
     # Advanced options.
     log_path: str = os.devnull,
     stream_logs: bool = False,
+    source_bashrc: bool = False,
 ):
     """Runs a command on all nodes and optionally runs rsync from src->dst.
 
     Args:
-        runners: A list of SSHCommandRunner objects that represent multiple nodes.
+        runners: A list of CommandRunner objects that represent multiple nodes.
         source: Optional[str]; Source for rsync on local node
         target: str; Destination on remote node for rsync
         cmd: str; Command to be executed on all nodes
         action_message: str; Message to be printed while the command runs
         log_path: str; Path to the log file
         stream_logs: bool; Whether to stream logs to stdout
+        source_bashrc: bool; Source bashrc before running the command.
     """
     fore = colorama.Fore
     style = colorama.Style
 
     origin_source = source
 
-    def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
+    def _sync_node(runner: 'command_runner.CommandRunner') -> None:
         if cmd is not None:
             rc, stdout, stderr = runner.run(cmd,
                                             log_path=log_path,
                                             stream_logs=stream_logs,
-                                            require_outputs=True)
+                                            require_outputs=True,
+                                            source_bashrc=source_bashrc)
             err_msg = ('Failed to run command before rsync '
                        f'{origin_source} -> {target}. '
-                       'Ensure that the network is stable, then retry.')
+                       'Ensure that the network is stable, then retry. '
+                       f'{cmd}')
             if log_path != os.devnull:
                 err_msg += f' See logs in {log_path}'
             subprocess_utils.handle_returncode(rc,
@@ -1322,7 +1339,7 @@ def _query_head_ip_with_retries(cluster_yaml: str,
     """Returns the IP of the head node by querying the cloud.
 
     Raises:
-      exceptions.FetchIPError: if we failed to get the head IP.
+      exceptions.FetchClusterInfoError: if we failed to get the head IP.
     """
     backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
@@ -1351,8 +1368,8 @@ def _query_head_ip_with_retries(cluster_yaml: str,
             break
         except subprocess.CalledProcessError as e:
             if i == max_attempts - 1:
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD) from e
+                raise exceptions.FetchClusterInfoError(
+                    reason=exceptions.FetchClusterInfoError.Reason.HEAD) from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
             time.sleep(backoff.current_backoff())
@@ -1377,7 +1394,7 @@ def get_node_ips(cluster_yaml: str,
             IPs.
 
     Raises:
-        exceptions.FetchIPError: if we failed to get the IPs. e.reason is
+        exceptions.FetchClusterInfoError: if we failed to get the IPs. e.reason is
             HEAD or WORKER.
     """
     ray_config = common_utils.read_yaml(cluster_yaml)
@@ -1398,11 +1415,12 @@ def get_node_ips(cluster_yaml: str,
                 'Failed to get cluster info for '
                 f'{ray_config["cluster_name"]} from the new provisioner '
                 f'with {common_utils.format_exception(e)}.')
-            raise exceptions.FetchIPError(
-                exceptions.FetchIPError.Reason.HEAD) from e
+            raise exceptions.FetchClusterInfoError(
+                exceptions.FetchClusterInfoError.Reason.HEAD) from e
         if len(metadata.instances) < expected_num_nodes:
             # Simulate the exception when Ray head node is not up.
-            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+            raise exceptions.FetchClusterInfoError(
+                exceptions.FetchClusterInfoError.Reason.HEAD)
         return metadata.get_feasible_ips(get_internal_ips)
 
     if get_internal_ips:
@@ -1432,8 +1450,8 @@ def get_node_ips(cluster_yaml: str,
                 break
             except subprocess.CalledProcessError as e:
                 if retry_cnt == worker_ip_max_attempts - 1:
-                    raise exceptions.FetchIPError(
-                        exceptions.FetchIPError.Reason.WORKER) from e
+                    raise exceptions.FetchClusterInfoError(
+                        exceptions.FetchClusterInfoError.Reason.WORKER) from e
                 # Retry if the ssh is not ready for the workers yet.
                 backoff_time = backoff.current_backoff()
                 logger.debug('Retrying to get worker ip '
@@ -1458,8 +1476,8 @@ def get_node_ips(cluster_yaml: str,
                                f'detected IP(s): {worker_ips[-n:]}.')
                 worker_ips = worker_ips[-n:]
             else:
-                raise exceptions.FetchIPError(
-                    exceptions.FetchIPError.Reason.WORKER)
+                raise exceptions.FetchClusterInfoError(
+                    exceptions.FetchClusterInfoError.Reason.WORKER)
     else:
         worker_ips = []
     return head_ip_list + worker_ips
@@ -1523,7 +1541,7 @@ def check_owner_identity(cluster_name: str) -> None:
         for i, (owner,
                 current) in enumerate(zip(owner_identity,
                                           current_user_identity)):
-            # Clean up the owner identiy for the backslash and newlines, caused
+            # Clean up the owner identity for the backslash and newlines, caused
             # by the cloud CLI output, e.g. gcloud.
             owner = owner.replace('\n', '').replace('\\', '')
             if owner == current:
@@ -1746,14 +1764,11 @@ def _update_cluster_status_no_lock(
 
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
         try:
-            # TODO(zhwu): This function cannot distinguish transient network
-            # error in ray's get IPs vs. ray runtime failing.
-
             # NOTE: fetching the IPs is very slow as it calls into
             # `ray get head-ip/worker-ips`. Using cached IPs is safe because
             # in the worst case we time out in the `ray status` SSH command
             # below.
-            external_ips = handle.cached_external_ips
+            runners = handle.get_command_runners(force_cached=True)
             # This happens when user interrupt the `sky launch` process before
             # the first time resources handle is written back to local database.
             # This is helpful when user interrupt after the provision is done
@@ -1761,27 +1776,13 @@ def _update_cluster_status_no_lock(
             # helps keep the cluster status to INIT after `sky status -r`, so
             # user will be notified that any auto stop/down might not be
             # triggered.
-            if external_ips is None or len(external_ips) == 0:
+            if not runners:
                 logger.debug(f'Refreshing status ({cluster_name!r}): No cached '
                              f'IPs found. Handle: {handle}')
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD)
-
-            # Potentially refresh the external SSH ports, in case the existing
-            # cluster before #2491 was launched without external SSH ports
-            # cached.
-            external_ssh_ports = handle.external_ssh_ports()
-            head_ssh_port = external_ssh_ports[0]
-
-            # Check if ray cluster status is healthy.
-            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
-                                                       handle.docker_user,
-                                                       handle.ssh_user)
-
-            runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     **ssh_credentials,
-                                                     port=head_ssh_port)
-            rc, output, stderr = runner.run(
+                raise exceptions.FetchClusterInfoError(
+                    reason=exceptions.FetchClusterInfoError.Reason.HEAD)
+            head_runner = runners[0]
+            rc, output, stderr = head_runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
                 require_outputs=True,
@@ -1801,7 +1802,7 @@ def _update_cluster_status_no_lock(
                 f'Refreshing status ({cluster_name!r}): ray status not showing '
                 f'all nodes ({ready_head + ready_workers}/'
                 f'{total_nodes}); output: {output}; stderr: {stderr}')
-        except exceptions.FetchIPError:
+        except exceptions.FetchClusterInfoError:
             logger.debug(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         except RuntimeError as e:
@@ -2342,9 +2343,9 @@ def is_controller_accessible(
                                                    handle.docker_user,
                                                    handle.ssh_user)
 
-        runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                 **ssh_credentials,
-                                                 port=handle.head_ssh_port)
+        runner = command_runner.SSHCommandRunner(node=(handle.head_ip,
+                                                       handle.head_ssh_port),
+                                                 **ssh_credentials)
         if not runner.check_connection():
             error_msg = controller.value.connection_error_hint
     else:
@@ -2704,3 +2705,115 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
                     f'not interrupted): {colorama.Style.BRIGHT}sky start -f -y '
                     f'{cluster_name}{colorama.Style.RESET_ALL}'
                     f'\n--- Details ---\n{stderr.strip()}\n')
+
+
+def get_endpoints(cluster: str,
+                  port: Optional[Union[int, str]] = None,
+                  skip_status_check: bool = False) -> Dict[int, str]:
+    """Gets the endpoint for a given cluster and port number (endpoint).
+
+    Args:
+        cluster: The name of the cluster.
+        port: The port number to get the endpoint for. If None, endpoints
+            for all ports are returned.
+        skip_status_check: Whether to skip the status check for the cluster.
+            This is useful when the cluster is known to be in a INIT state
+            and the caller wants to query the endpoints. Used by serve
+            controller to query endpoints during cluster launch when multiple
+            services may be getting launched in parallel (and as a result,
+            the controller may be in INIT status due to a concurrent launch).
+
+    Returns: A dictionary of port numbers to endpoints. If endpoint is None,
+        the dictionary will contain all ports:endpoints exposed on the cluster.
+        If the endpoint is not exposed yet (e.g., during cluster launch or
+        waiting for cloud provider to expose the endpoint), an empty dictionary
+        is returned.
+
+    Raises:
+        ValueError: if the port is invalid or the cloud provider does not
+            support querying endpoints.
+        exceptions.ClusterNotUpError: if the cluster is not in UP status.
+    """
+    # Cast endpoint to int if it is not None
+    if port is not None:
+        try:
+            port = int(port)
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid endpoint {port!r}.') from None
+    cluster_records = get_clusters(include_controller=True,
+                                   refresh=False,
+                                   cluster_names=[cluster])
+    cluster_record = cluster_records[0]
+    if (not skip_status_check and
+            cluster_record['status'] != status_lib.ClusterStatus.UP):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'Cluster {cluster_record["name"]!r} '
+                'is not in UP status.', cluster_record['status'])
+    handle = cluster_record['handle']
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Querying IP address is not supported '
+                             f'for cluster {cluster!r} with backend '
+                             f'{get_backend_from_handle(handle).NAME}.')
+
+    launched_resources = handle.launched_resources
+    cloud = launched_resources.cloud
+    try:
+        cloud.check_features_are_supported(
+            launched_resources, {clouds.CloudImplementationFeatures.OPEN_PORTS})
+    except exceptions.NotSupportedError:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Querying endpoints is not supported '
+                             f'for cluster {cluster!r} on {cloud}.') from None
+
+    config = common_utils.read_yaml(handle.cluster_yaml)
+    port_details = provision_lib.query_ports(repr(cloud),
+                                             handle.cluster_name_on_cloud,
+                                             handle.launched_resources.ports,
+                                             head_ip=handle.head_ip,
+                                             provider_config=config['provider'])
+
+    # Validation before returning the endpoints
+    if port is not None:
+        # If the requested endpoint was not to be exposed
+        port_set = resources_utils.port_ranges_to_set(
+            handle.launched_resources.ports)
+        if port not in port_set:
+            logger.warning(f'Port {port} is not exposed on '
+                           f'cluster {cluster!r}.')
+            return {}
+        # If the user requested a specific port endpoint, check if it is exposed
+        if port not in port_details:
+            error_msg = (f'Port {port} not exposed yet. '
+                         f'{_ENDPOINTS_RETRY_MESSAGE} ')
+            if handle.launched_resources.cloud.is_same_cloud(
+                    clouds.Kubernetes()):
+                # Add Kubernetes specific debugging info
+                error_msg += (kubernetes_utils.get_endpoint_debug_message())
+            logger.warning(error_msg)
+            return {}
+        return {port: port_details[port][0].url()}
+    else:
+        if not port_details:
+            # If cluster had no ports to be exposed
+            if handle.launched_resources.ports is None:
+                logger.warning(f'Cluster {cluster!r} does not have any '
+                               'ports to be exposed.')
+                return {}
+            # Else ports have not been exposed even though they exist.
+            # In this case, ask the user to retry.
+            else:
+                error_msg = (f'No endpoints exposed yet. '
+                             f'{_ENDPOINTS_RETRY_MESSAGE} ')
+                if handle.launched_resources.cloud.is_same_cloud(
+                        clouds.Kubernetes()):
+                    # Add Kubernetes specific debugging info
+                    error_msg += \
+                        kubernetes_utils.get_endpoint_debug_message()
+                logger.warning(error_msg)
+                return {}
+        return {
+            port_num: urls[0].url() for port_num, urls in port_details.items()
+        }

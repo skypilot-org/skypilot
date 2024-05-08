@@ -172,7 +172,7 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
         raise_if_no_cloud_access=True)
     # Already checked by raise_if_no_cloud_access=True.
     assert enabled_clouds
-    bucket_type = data.StoreType.from_cloud(enabled_clouds[0])
+    bucket_type = data.StoreType.from_cloud(enabled_clouds[0]).value
 
     # Create a benchmark bucket.
     logger.info(f'Creating a bucket {bucket_name} to save the benchmark logs.')

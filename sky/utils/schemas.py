@@ -3,6 +3,7 @@
 Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
+import enum
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -522,11 +523,60 @@ _LABELS_SCHEMA = {
     }
 }
 
+
+class RemoteIdentityOptions(enum.Enum):
+    """Enum for remote identity types.
+
+    Some clouds (e.g., AWS, Kubernetes) also allow string values for remote
+    identity, which map to the service account/role to use. Those are not
+    included in this enum.
+    """
+    LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
+    SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
+
+
+REMOTE_IDENTITY_DEFAULT = RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
-        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'],
+        'case_insensitive_enum': [
+            option.value for option in RemoteIdentityOptions
+        ]
     }
+}
+
+_REMOTE_IDENTITY_SCHEMA_AWS = {
+    'remote_identity': {
+        'oneOf': [
+            {
+                'type': 'string'
+            },
+            {
+                # A list of single-element dict to pretain the order.
+                # Example:
+                #  remote_identity:
+                #    - my-cluster1-*: my-iam-role-1
+                #    - my-cluster2-*: my-iam-role-2
+                #    - "*"": my-iam-role-3
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'additionalProperties': {
+                        'type': 'string'
+                    },
+                    'maxProperties': 1,
+                    'minProperties': 1,
+                },
+            }
+        ]
+    }
+}
+
+_REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
+    'remote_identity': {
+        'type': 'string'
+    },
 }
 
 
@@ -563,7 +613,7 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'security_group_name': {
-                    'type': 'string',
+                    'type': 'string'
                 },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
@@ -631,6 +681,13 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'autoscaler': {
+                    'type': 'string',
+                    'case_insensitive_enum': [
+                        type.value
+                        for type in kubernetes_enums.KubernetesAutoscalerType
+                    ]
+                },
             }
         },
         'oci': {
@@ -660,8 +717,13 @@ def get_config_schema():
         },
     }
 
-    for config in cloud_configs.values():
-        config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
+    for cloud, config in cloud_configs.items():
+        if cloud == 'aws':
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
+        elif cloud == 'kubernetes':
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
+        else:
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
