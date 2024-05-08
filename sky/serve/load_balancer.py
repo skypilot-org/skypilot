@@ -91,13 +91,13 @@ class SkyServeLoadBalancer:
                                 self._client_pool[replica_url] = (
                                     httpx.AsyncClient(
                                         base_url=f'http://{replica_url}'))
-                        closed_urls = []
-                        for replica_url, client in self._client_pool.items():
-                            if replica_url not in ready_replica_urls:
-                                asyncio.run(client.aclose())
-                                closed_urls.append(replica_url)
-                        for replica_url in closed_urls:
-                            del self._client_pool[replica_url]
+                        urls_to_close = set(self._client_pool.keys()) - set(ready_replica_urls)
+                        client_to_close = []
+                        for replica_url in urls_to_close:
+                            client_to_close.append(self._client_pool.pop(replica_url))
+                    for client in client_to_close:
+                        asyncio.run(client.aclose())
+
             time.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
 
     async def _proxy_request_to(
