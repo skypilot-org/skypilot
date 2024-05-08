@@ -157,25 +157,28 @@ class SkyServeLoadBalancer:
                 ready_replica_url = self._load_balancing_policy.select_replica(
                     request)
             if ready_replica_url is None:
-                raise fastapi.HTTPException(
+                response_or_exception = fastapi.HTTPException(
                     # 503 means that the server is currently
                     # unable to handle the incoming requests.
                     status_code=503,
                     detail='No ready replicas. '
                     'Use "sky serve status [SERVICE_NAME]" '
                     'to check the replica status.')
-            response_or_exception = await self._proxy_request_to(
-                ready_replica_url, request)
-            if not isinstance(response_or_exception, Exception):
-                return response_or_exception
-            # When the user aborts the request during streaming, the request
-            # will be disconnected. We do not need to retry for this case.
-            if await request.is_disconnected():
-                # 499 means a client terminates the connection
-                # before the server is able to respond.
-                return fastapi.responses.Response(status_code=499)
+            else:
+                response_or_exception = await self._proxy_request_to(
+                    ready_replica_url, request)
+                if not isinstance(response_or_exception, Exception):
+                    return response_or_exception
+                # When the user aborts the request during streaming, the request
+                # will be disconnected. We do not need to retry for this case.
+                if await request.is_disconnected():
+                    # 499 means a client terminates the connection
+                    # before the server is able to respond.
+                    return fastapi.responses.Response(status_code=499)
             # TODO(tian): Fail fast for errors like 404 not found.
             if retry_cnt == constants.LB_MAX_RETRY:
+                if isinstance(response_or_exception, fastapi.HTTPException):
+                    raise response_or_exception
                 exception = common_utils.remove_color(
                     common_utils.format_exception(response_or_exception,
                                                   use_bracket=True))
