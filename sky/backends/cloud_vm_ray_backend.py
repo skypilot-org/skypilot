@@ -3287,7 +3287,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
                                                       stream_logs=False,
-                                                      require_outputs=True)
+                                                      require_outputs=True,
+                                                      source_bashrc=True)
 
         # Happens when someone calls `sky exec` but remote is outdated
         # necessitating calling `sky launch`.
@@ -4233,6 +4234,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream: Whether to post-process the stdout/stderr of the
                 command, such as replacing or skipping lines on the fly. If
                 enabled, lines are printed only when '\r' or '\n' is found.
+            source_bashrc: Whether to source bashrc when running on the command
+                on the VM. If it is a user-related commands, it would always be
+                good to source bashrc to make sure the env vars are set.
 
         Returns:
             returncode
