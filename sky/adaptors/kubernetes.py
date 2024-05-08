@@ -55,9 +55,9 @@ def _load_config():
                            '    If you were running a local Kubernetes '
                            'cluster, run `sky local up` to start the cluster.')
             else:
-                err_str = (
-                    'Failed to load Kubernetes configuration. '
-                    f'Please check if your kubeconfig file is valid.{suffix}')
+                err_str = ('Failed to load Kubernetes configuration. '
+                           'Please check if your kubeconfig file exists at '
+                           f'~/.kube/config and is valid.{suffix}')
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
