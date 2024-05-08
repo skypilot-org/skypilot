@@ -67,7 +67,7 @@ A common usecase for interactive developement is to connect an IDE directly to t
 can also simply done by connecting VSCode to the cluster with the cluster name:
 
 #. Click on the top bar, type: :code:`> remote-ssh`, and select :code:`Remote-SSH: Connect Current Window to Host...`
-#. Select the cluster name from the list of hosts.
+#. Select the cluster name (e.g., ``dev``) from the list of hosts.
 #. Open folder: :code:`sky_workdir` and find your code.
 
 .. image:: https://imgur.com/8mKfsET.gif
