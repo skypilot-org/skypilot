@@ -1,11 +1,18 @@
 Start a Development Cluster
 ===========================
 
+
 SkyPilot makes interactive development easy on Kubernetes or cloud VMs. It helps you:
 
-#. Launch: Quickly get a cluster with GPU or other resource requirement with a single command.
-#. Autostop: Automatically stop the cluster after some idle time for cost savings.
-#. Connect: Easily connect to the cluster using the cluster name (e.g., ``ssh dev``).
+#. :ref:`Launch <dev-launch>`: Quickly get a cluster with GPU or other resource requirement with a single command.
+#. :ref:`Autostop <dev-autostop>`: Automatically stop the cluster after some idle time for cost savings.
+#. :ref:`Connect <dev-connect>`: Easily connect to the cluster using the cluster name:
+
+   - :ref:`SSH <dev-ssh>`
+   - :ref:`VSCode <dev-vscode>`
+   - :ref:`Jupyter Notebooks <dev-notebooks>`
+
+.. _dev-launch:
 
 Launch
 ------
@@ -15,14 +22,19 @@ To launch a cluster with a cheap GPU for development:
 .. code-block:: bash
 
   # Launch a cluster with 1 NVIDIA GPU and sync the local working directory to the
-  # cluster. This can be launched as a pod in your Kubernetes cluster or a cloud VM.
+  # cluster.
   sky launch -c dev --gpus T4 --workdir .
+
+This can be launched as a pod in your Kubernetes cluster or a cloud VM.
+
+
 
 
 .. note::
 
   View the supported GPUs with the :code:`sky show-gpus` command.
 
+.. _dev-autostop:
 
 Autostop
 --------
@@ -46,10 +58,14 @@ to prevent idle clusters from incurring unnecessary costs, ensuring your cluster
 stops automatically, whether it's overnight or throughout the weekend.
 
 
+.. _dev-connect:
+
 Connect
 -------
 
 A user can easily connect to the cluster using your method of choice:
+
+.. _dev-ssh:
 
 SSH
 ~~~
@@ -60,6 +76,8 @@ SkyPilot will automatically configure the SSH setting for a cluster, so that use
   
   ssh dev
 
+
+.. _dev-vscode:
 
 VSCode
 ~~~~~~
@@ -74,6 +92,8 @@ This is supported by simply connecting VSCode to the cluster with the cluster na
 .. image:: https://imgur.com/8mKfsET.gif
   :align: center
   :alt: Connect to the cluster with VSCode
+
+.. _dev-notebooks:
 
 Jupyter Notebooks
 ~~~~~~~~~~~~~~~~~
