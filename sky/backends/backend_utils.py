@@ -2721,13 +2721,20 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
 
 
 def get_endpoints(cluster: str,
-                  port: Optional[Union[int, str]] = None) -> Dict[int, str]:
+                  port: Optional[Union[int, str]] = None,
+                  skip_status_check: bool = False) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
         cluster: The name of the cluster.
         port: The port number to get the endpoint for. If None, endpoints
             for all ports are returned.
+        skip_status_check: Whether to skip the status check for the cluster.
+            This is useful when the cluster is known to be in a INIT state
+            and the caller wants to query the endpoints. Used by serve
+            controller to query endpoints during cluster launch when multiple
+            services may be getting launched in parallel (and as a result,
+            the controller may be in INIT status due to a concurrent launch).
 
     Returns: A dictionary of port numbers to endpoints. If endpoint is None,
         the dictionary will contain all ports:endpoints exposed on the cluster.
@@ -2751,7 +2758,8 @@ def get_endpoints(cluster: str,
                                    refresh=False,
                                    cluster_names=[cluster])
     cluster_record = cluster_records[0]
-    if cluster_record['status'] != status_lib.ClusterStatus.UP:
+    if (not skip_status_check and
+            cluster_record['status'] != status_lib.ClusterStatus.UP):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'Cluster {cluster_record["name"]!r} '

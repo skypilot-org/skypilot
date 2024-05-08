@@ -255,7 +255,9 @@ def up(
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
             endpoint = backend_utils.get_endpoints(
-                controller_handle.cluster_name, lb_port)[lb_port]
+                controller_handle.cluster_name, lb_port,
+                skip_status_check=True).get(lb_port)
+            assert endpoint is not None, 'Did not get endpoint for controller.'
 
         sky_logging.print(
             f'{fore.CYAN}Service name: '
