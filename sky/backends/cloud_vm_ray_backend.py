@@ -1998,8 +1998,8 @@ class RetryingVmProvisioner(object):
                              ) and controller_utils.Controllers.from_name(
                                  cluster_name
                              ) == controller_utils.Controllers.JOBS_CONTROLLER:
-                    assert (clouds.CloudImplementationFeatures.STOP in
-                            requested_features), requested_features
+                    assert (clouds.CloudImplementationFeatures.STOP
+                            in requested_features), requested_features
                     requested_features.remove(
                         clouds.CloudImplementationFeatures.STOP)
 
