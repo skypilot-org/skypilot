@@ -612,11 +612,13 @@ def get_cleaned_username(username: str = '') -> str:
 
     Clean up includes:
      1. Making all characters lowercase
-     2. Removing any non-alphanumeric characters (excluding hyphens and underscores)
+     2. Removing any non-alphanumeric characters (excluding hyphens and
+        underscores)
      3. Removing any numbers and/or hyphens at the start of the username.
      4. Removing any hyphens at the end of the username
+     5. Truncate the username to 63 characters, as requested by GCP labels
 
-    Dots are removed due to: https://cloud.google.com/compute/docs/labeling-resources#requirements
+    Dots are removed due to: https://cloud.google.com/compute/docs/labeling-resources#requirements # pylint: disable=line-too-long
 
     e.g. 1SkY-PiLot2- becomes sky-pilot2
 
@@ -628,6 +630,7 @@ def get_cleaned_username(username: str = '') -> str:
     username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)
     username = re.sub(r'-$', '', username)
+    username = username[:63]
     return username
 
 
