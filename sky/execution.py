@@ -208,10 +208,9 @@ def _execute(
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
             if idle_minutes_to_autostop >= 0:
-                if down:
-                    requested_features.add(
+                requested_features.add(
                         clouds.CloudImplementationFeatures.AUTO_TERMINATE)
-                else:
+                if not down:
                     requested_features.add(
                         clouds.CloudImplementationFeatures.STOP)
         # NOTE: in general we may not have sufficiently specified info
