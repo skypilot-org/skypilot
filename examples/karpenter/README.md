@@ -87,6 +87,7 @@ You can provision a pod for interactive development with SSH on your Kubernetes 
 2. Connect with ssh and use as a regular development machine:
     ```bash
     ssh dev
+    # Your workdir data will be available at ~/sky_workdir
     ```
 
 3. Integrate with VSCode:
