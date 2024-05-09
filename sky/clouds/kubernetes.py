@@ -102,7 +102,7 @@ class Kubernetes(clouds.Cloud):
                 clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
             # Pod does not have permissions to terminate itself with exec auth.
             unsupported_features[
-                clouds.CloudImplementationFeatures.AUTODOWN] = message
+                clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
         return unsupported_features
 
     @classmethod
