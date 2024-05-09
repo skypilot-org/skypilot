@@ -73,7 +73,7 @@ Setup your EKS cluster to work with SkyPilot by following the [SkyPilot on Kuber
     Note: Kubernetes cluster autoscaling is enabled. All GPUs that can be provisioned may not be listed here. Refer to your autoscaler's node pool configuration to see the list of supported GPUs.
     ``` 
 
-## Running pods for development with SkyPilot
+## Quickstart: Launch a development pod
 
 You can provision a pod for interactive development with SSH on your Kubernetes cluster using SkyPilot. Our [docs explain this in detail](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html), but we will show some examples here.
 
