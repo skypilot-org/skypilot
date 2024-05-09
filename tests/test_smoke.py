@@ -2749,7 +2749,6 @@ def test_managed_jobs_cancellation_gcp():
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
-@pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
@@ -2776,6 +2775,9 @@ def test_managed_jobs_storage(generic_cloud: str):
         region_cmd = TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.GCS, storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
+    elif generic_cloud == 'kubernetes':
+        region_flag = ''
+        region_validation_cmd = 'true'  # Skip region validation for k8s
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
