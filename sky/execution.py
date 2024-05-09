@@ -207,8 +207,12 @@ def _execute(
                             f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
-            if not down:
-                requested_features.add(clouds.CloudImplementationFeatures.STOP)
+            if idle_minutes_to_autostop >= 0:
+                requested_features.add(
+                    clouds.CloudImplementationFeatures.AUTO_TERMINATE)
+                if not down:
+                    requested_features.add(
+                        clouds.CloudImplementationFeatures.STOP)
         # NOTE: in general we may not have sufficiently specified info
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.

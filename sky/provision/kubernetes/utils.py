@@ -634,16 +634,18 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
         user for user in user_details if user['name'] == target_username)
 
     remote_identity = skypilot_config.get_nested(
-        ('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+        ('kubernetes', 'remote_identity'),
+        schemas.get_default_remote_identity('kubernetes'))
     if ('exec' in user_details.get('user', {}) and remote_identity
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
         ctx_name = current_context['name']
         exec_msg = ('exec-based authentication is used for '
                     f'Kubernetes context {ctx_name!r}.'
-                    ' This may cause issues when running Managed Jobs '
-                    'or SkyServe controller on Kubernetes. To fix, configure '
-                    'SkyPilot to create a service account for running pods by '
-                    'adding the following in ~/.sky/config.yaml:\n'
+                    ' This may cause issues with autodown or when running '
+                    'Managed Jobs or SkyServe controller on Kubernetes. '
+                    'To fix, configure SkyPilot to create a service account '
+                    'for running pods by setting the following in '
+                    '~/.sky/config.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
                     '    More: https://skypilot.readthedocs.io/en/latest/'
