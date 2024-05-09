@@ -499,8 +499,7 @@ def autostop(
                 f'{colorama.Fore.YELLOW}{operation} on cluster '
                 f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
                 f'  Auto{option_str} is not supported on {cloud!r} - '
-                f'see reason above.'
-            ) from e
+                f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.set_autostop(handle, idle_minutes, down)

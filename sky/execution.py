@@ -212,7 +212,8 @@ def _execute(
                     requested_features.add(
                         clouds.CloudImplementationFeatures.AUTO_TERMINATE)
                 else:
-                    requested_features.add(clouds.CloudImplementationFeatures.STOP)
+                    requested_features.add(
+                        clouds.CloudImplementationFeatures.STOP)
         # NOTE: in general we may not have sufficiently specified info
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.
