@@ -25,10 +25,21 @@ To launch a cluster with a cheap GPU for development:
   # cluster.
   sky launch -c dev --gpus T4 --workdir .
 
-This can be launched as a pod in your Kubernetes cluster or a cloud VM.
+This can be launched as a pod in your Kubernetes cluster or a VM on any cloud.
 
+.. figure:: ../images/k8s-pod.png
+  :align: center
+  :width: 80%
+  :alt: Launch a cluster as a pod in Kubernetes
 
+  Launch a cluster as a pod in Kubernetes
 
+.. figure:: ../images/gcp-vm.png
+  :align: center
+  :width: 80%
+  :alt: Launch a cluster as a VM on GCP
+
+  Launch a cluster as a VM on GCP
 
 .. note::
 
@@ -88,6 +99,8 @@ This is supported by simply connecting VSCode to the cluster with the cluster na
 #. Click on the top bar, type: :code:`> remote-ssh`, and select :code:`Remote-SSH: Connect Current Window to Host...`
 #. Select the cluster name (e.g., ``dev``) from the list of hosts.
 #. Open folder: :code:`sky_workdir` and find your code.
+
+For more details, please refer to the `VSCode documentation <https://code.visualstudio.com/docs/remote/ssh-tutorial>`__.
 
 .. image:: https://imgur.com/8mKfsET.gif
   :align: center

@@ -2125,7 +2125,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
     # Bump if any fields get added/removed/changed, and add backward
-    # compaitibility logic in __setstate__.
+    # compatibility logic in __setstate__.
     _VERSION = 7
 
     def __init__(
