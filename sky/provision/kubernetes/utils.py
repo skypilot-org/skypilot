@@ -715,23 +715,18 @@ def parse_memory_resource(resource_qty_str: str,
 
 class KubernetesInstanceType:
     """Class to represent the "Instance Type" in a Kubernetes.
-
     Since Kubernetes does not have a notion of instances, we generate
     virtual instance types that represent the resources requested by a
     pod ("node").
-
     This name captures the following resource requests:
         - CPU
         - Memory
         - Accelerators
-
     The name format is "{n}CPU--{k}GB" where n is the number of vCPUs and
     k is the amount of memory in GB. Accelerators can be specified by
     appending "--{a}{type}" where a is the number of accelerators and
     type is the accelerator type.
-
     CPU and memory can be specified as floats. Accelerator count must be int.
-
     Examples:
         - 4CPU--16GB
         - 0.5CPU--1.5GB
@@ -770,7 +765,6 @@ class KubernetesInstanceType:
             cls,
             name: str) -> Tuple[float, float, Optional[int], Optional[str]]:
         """Parses and returns resources from the given InstanceType name
-
         Returns:
             cpus | float: Number of CPUs
             memory | float: Amount of memory in GB
@@ -815,7 +809,6 @@ class KubernetesInstanceType:
                        accelerator_count: Union[float, int] = 0,
                        accelerator_type: str = '') -> 'KubernetesInstanceType':
         """Returns an instance name object from the given resources.
-
         If accelerator_count is not an int, it will be rounded up since GPU
         requests in Kubernetes must be int.
         """

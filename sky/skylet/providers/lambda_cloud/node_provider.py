@@ -155,9 +155,10 @@ class LambdaNodeProvider(NodeProvider):
             if node['external_ip'] is None or node['status'] != 'active':
                 node['internal_ip'] = None
                 return
-            runner = command_runner.SSHCommandRunner(node['external_ip'],
-                                                     'ubuntu',
-                                                     self.ssh_key_path)
+            runner = command_runner.SSHCommandRunner(
+                node=(node['external_ip'], 22),
+                ssh_user='ubuntu',
+                ssh_private_key=self.ssh_key_path)
             rc, stdout, stderr = runner.run(_GET_INTERNAL_IP_CMD,
                                             require_outputs=True,
                                             stream_logs=False)
