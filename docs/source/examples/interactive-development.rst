@@ -27,19 +27,25 @@ To launch a cluster with a cheap GPU for development:
 
 This can be launched as a pod in your Kubernetes cluster or a VM on any cloud.
 
-.. figure:: ../images/k8s-pod.png
-  :align: center
-  :width: 80%
-  :alt: Launch a cluster as a pod in Kubernetes
+.. tab-set::
 
-  Launch a cluster as a pod in Kubernetes
+  .. tab-item:: Kubernetes
 
-.. figure:: ../images/gcp-vm.png
-  :align: center
-  :width: 80%
-  :alt: Launch a cluster as a VM on GCP
+    .. figure:: ../images/k8s-pod.png
+      :align: center
+      :width: 80%
+      :alt: Launch a cluster as a pod in Kubernetes
 
-  Launch a cluster as a VM on GCP
+      Launch a cluster as a pod in Kubernetes
+
+  .. tab-item:: Cloud
+
+    .. figure:: ../images/gcp-vm.png
+      :align: center
+      :width: 80%
+      :alt: Launch a cluster as a VM on GCP
+
+      Launch a cluster as a VM on GCP
 
 .. note::
 
