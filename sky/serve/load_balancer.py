@@ -2,12 +2,11 @@
 import asyncio
 import logging
 import threading
-import time
 from typing import Dict, Union
 
+import aiohttp
 import fastapi
 import httpx
-import requests
 from starlette import background
 import uvicorn
 
@@ -36,8 +35,8 @@ class SkyServeLoadBalancer:
             load_balancer_port: The port where the load balancer listens to.
         """
         self._app = fastapi.FastAPI()
-        self._controller_url = controller_url
-        self._load_balancer_port = load_balancer_port
+        self._controller_url: str = controller_url
+        self._load_balancer_port: int = load_balancer_port
         self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
             lb_policies.RoundRobinPolicy())
         self._request_aggregator: serve_utils.RequestsAggregator = (
@@ -48,9 +47,9 @@ class SkyServeLoadBalancer:
         self._client_pool: Dict[str, httpx.AsyncClient] = dict()
         # We need this lock to avoid getting from the client pool while
         # updating it from _sync_with_controller.
-        self._client_pool_lock = threading.Lock()
+        self._client_pool_lock: threading.Lock = threading.Lock()
 
-    def _sync_with_controller(self):
+    async def _sync_with_controller(self):
         """Sync with controller periodically.
 
         Every `constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS` seconds, the
@@ -60,25 +59,29 @@ class SkyServeLoadBalancer:
         autoscaling decisions.
         """
         # Sleep for a while to wait the controller bootstrap.
-        time.sleep(5)
+        await asyncio.sleep(5)
 
         while True:
-            with requests.Session() as session:
+            close_client_tasks = []
+            async with aiohttp.ClientSession() as session:
                 try:
                     # Send request information
-                    response = session.post(
-                        self._controller_url + '/controller/load_balancer_sync',
-                        json={
-                            'request_aggregator':
-                                self._request_aggregator.to_dict()
-                        },
-                        timeout=5)
-                    # Clean up after reporting request information to avoid OOM.
-                    self._request_aggregator.clear()
-                    response.raise_for_status()
-                    ready_replica_urls = response.json().get(
-                        'ready_replica_urls')
-                except requests.RequestException as e:
+                    async with session.post(
+                            self._controller_url +
+                            '/controller/load_balancer_sync',
+                            json={
+                                'request_aggregator':
+                                    self._request_aggregator.to_dict()
+                            },
+                            timeout=5,
+                    ) as response:
+                        # Clean up after reporting request info to avoid OOM.
+                        self._request_aggregator.clear()
+                        response.raise_for_status()
+                        response_json = await response.json()
+                        ready_replica_urls = response_json.get(
+                            'ready_replica_urls', [])
+                except aiohttp.ClientError as e:
                     logger.error('An error occurred when syncing with '
                                  f'the controller: {e}')
                 else:
@@ -97,9 +100,11 @@ class SkyServeLoadBalancer:
                             client_to_close.append(
                                 self._client_pool.pop(replica_url))
                     for client in client_to_close:
-                        asyncio.run(client.aclose())
+                        close_client_tasks.append(client.aclose())
 
-            time.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
+            await asyncio.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
+            # Await those tasks after the interval to avoid blocking.
+            await asyncio.gather(*close_client_tasks)
 
     async def _proxy_request_to(
         self, url: str, request: fastapi.Request
@@ -197,12 +202,14 @@ class SkyServeLoadBalancer:
                                 methods=['GET', 'POST', 'PUT', 'DELETE'])
 
         @self._app.on_event('startup')
-        def configure_logger():
+        def startup():
+            # Configure logger
             uvicorn_access_logger = logging.getLogger('uvicorn.access')
             for handler in uvicorn_access_logger.handlers:
                 handler.setFormatter(sky_logging.FORMATTER)
 
-        threading.Thread(target=self._sync_with_controller, daemon=True).start()
+            # Register controller synchronization task
+            asyncio.create_task(self._sync_with_controller())
 
         logger.info('SkyServe Load Balancer started on '
                     f'http://0.0.0.0:{self._load_balancer_port}')
