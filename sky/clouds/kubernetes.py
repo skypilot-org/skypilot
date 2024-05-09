@@ -29,7 +29,7 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 # Namespace for SkyPilot resources shared across multiple tenants on the
 # same cluster (even if they might be running in different namespaces).
 # E.g., FUSE device manager daemonset is run in this namespace.
-_SKY_SYSTEM_NAMESPACE = 'skypilot-system'
+_SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -308,7 +308,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_automount_sa_token': k8s_automount_sa_token,
             'k8s_fuse_device_required': fuse_device_required,
             # Namespace to run the FUSE device manager in
-            'k8s_fuse_device_manager_namespace': _SKY_SYSTEM_NAMESPACE,
+            'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'image_id': image_id,
         }
 
