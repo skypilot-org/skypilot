@@ -483,7 +483,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 for label, value in label_list:
                     if (label == k8s_acc_label_key and
                             label_formatter.get_accelerator_from_label_value(
-                                value) == acc_type):
+                                value).lower() == acc_type.lower()):
                         return label, value
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
