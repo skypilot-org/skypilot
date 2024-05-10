@@ -69,8 +69,19 @@ def bootstrap_instances(
         logger.info(f'Using service account {requested_service_account!r}, '
                     'skipping role and role binding setup.')
 
-    # SkyPilot system namespace is currently required only for FUSE mounting
-    # but it must be created
+    # SkyPilot system namespace is required for FUSE mounting. Here we just
+    # create the namespace and set up the necessary permissions.
+    #
+    # We need to setup the namespace outside the if block below because if
+    # we put in the if block, the following happens:
+    # 1. User launches job controller on Kubernetes with SERVICE_ACCOUNT. No
+    #    namespace is created at this point since the controller does not
+    #    require FUSE.
+    # 2. User submits a job requiring FUSE.
+    # 3. The namespace is created here, but since the job controller is using
+    #    SERVICE_ACCOUNT, it does not have the necessary permissions to create
+    #    a role for itself to create the FUSE device manager.
+    # 4. The job fails to launch.
     _configure_skypilot_system_namespace(config.provider_config,
                                          requested_service_account)
 

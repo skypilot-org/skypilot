@@ -88,9 +88,8 @@ provider:
             name: skypilot-service-account-role
             apiGroup: rbac.authorization.k8s.io
 
-    # Role created by the autoscaler for the head node pod that it runs in.
-    # If this field isn't provided, the role referenced in
-    # autoscaler_role_binding must exist and have at least these permissions.
+    # Role for the skypilot-system namespace to create FUSE device manager and
+    # any other system components.
     autoscaler_skypilot_system_role:
         kind: Role
         apiVersion: rbac.authorization.k8s.io/v1
@@ -104,9 +103,7 @@ provider:
           resources: ["*"]
           verbs: ["*"]
 
-    # RoleBinding created by the autoscaler for the head node pod that it runs
-    # in. If this field isn't provided, the head pod config below must contain
-    # a user-created service account with the proper permissions.
+    # RoleBinding for skypilot-system namespace role
     autoscaler_skypilot_system_role_binding:
         apiVersion: rbac.authorization.k8s.io/v1
         kind: RoleBinding
