@@ -2243,6 +2243,9 @@ def test_managed_jobs(generic_cloud: str):
             f'{_JOB_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 200',
             f'{_JOB_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
+            # Test the functionality for logging.
+            f'sky jobs logs -n {name}-2 --no-follow | grep "start counting"'
+            f'sky jobs logs --controller -n {name}-2 --no-follow | grep "Successfully provisioned cluster:"'
             f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         # TODO(zhwu): Change to _JOB_CANCEL_WAIT.format(job_name=f'{name}-1 -n {name}-2') when
