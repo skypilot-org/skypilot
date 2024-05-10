@@ -28,7 +28,8 @@ def bootstrap_instances(
     config = _configure_ssh_jump(namespace, config)
 
     requested_service_account = config.node_config['spec']['serviceAccountName']
-    if requested_service_account == kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME:
+    if (requested_service_account ==
+            kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME):
         # If the user has requested a different service account (via pod_config
         # in ~/.sky/config.yaml), we assume they have already set up the
         # necessary roles and role bindings.
@@ -363,7 +364,7 @@ def _configure_autoscaler_role_binding(
         existing_binding = role_bindings[0]
         new_rb = kubernetes_utils.dict_to_k8s_object(binding, 'V1RoleBinding')
         if (new_rb.role_ref == existing_binding.role_ref and
-            new_rb.subjects == existing_binding.subjects):
+                new_rb.subjects == existing_binding.subjects):
             logger.info('_configure_autoscaler_role_binding: '
                         f'{using_existing_msg(binding_field, name)}')
             return
@@ -449,7 +450,7 @@ def _configure_autoscaler_cluster_role_binding(
         new_binding = kubernetes_utils.dict_to_k8s_object(
             binding, 'V1ClusterRoleBinding')
         if (new_binding.role_ref == existing_binding.role_ref and
-            new_binding.subjects == existing_binding.subjects):
+                new_binding.subjects == existing_binding.subjects):
             logger.info('_configure_autoscaler_cluster_role_binding: '
                         f'{using_existing_msg(binding_field, name)}')
             return

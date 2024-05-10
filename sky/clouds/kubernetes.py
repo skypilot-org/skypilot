@@ -283,7 +283,8 @@ class Kubernetes(clouds.Cloud):
         elif (remote_identity ==
               schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
             # Use the default service account
-            k8s_service_account_name = kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME
+            k8s_service_account_name = (
+                kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
             k8s_automount_sa_token = 'true'
         else:
             # User specified a custom service account

@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+import json
 import math
 import os
 import re
@@ -1458,9 +1459,10 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
         object_dict: Dictionary representing the Kubernetes object
         object_type: Type of the Kubernetes object. E.g., 'V1Pod', 'V1Service'.
     """
+
     class FakeKubeResponse:
+
         def __init__(self, obj):
-            import json
             self.data = json.dumps(obj)
 
     fake_kube_response = FakeKubeResponse(object_dict)
