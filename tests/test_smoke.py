@@ -2762,6 +2762,7 @@ def test_managed_jobs_storage(generic_cloud: str):
     # supported object storage providers in SkyPilot.
     region_flag = ''
     region_validation_cmd = 'true'
+    use_spot = ' --use-spot'
     if generic_cloud == 'aws':
         region = 'eu-central-1'
         region_flag = f' --region {region}'
@@ -2775,8 +2776,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             storage_lib.StoreType.GCS, storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
     elif generic_cloud == 'kubernetes':
-        region_flag = ''
-        region_validation_cmd = 'true'  # Skip region validation for k8s
+        use_spot = ' --no-use-spot'
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -2787,7 +2787,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             'managed_jobs_storage',
             [
                 *storage_setup_commands,
-                f'sky jobs launch -n {name} --use-spot --cloud {generic_cloud}{region_flag} {file_path} -y',
+                f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 'sleep 60',  # Wait the spot queue to be updated
                 f'{_JOB_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
