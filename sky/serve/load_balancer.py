@@ -202,7 +202,7 @@ class SkyServeLoadBalancer:
                                 methods=['GET', 'POST', 'PUT', 'DELETE'])
 
         @self._app.on_event('startup')
-        def startup():
+        async def startup():
             # Configure logger
             uvicorn_access_logger = logging.getLogger('uvicorn.access')
             for handler in uvicorn_access_logger.handlers:
