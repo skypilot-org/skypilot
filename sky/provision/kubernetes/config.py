@@ -524,7 +524,7 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     We create this daemonset in the skypilot_system_namespace, which is
     configurable in the provider config. This allows the FUSE mounting sidecar
     to be shared across multiple tenants. The default namespace is
-    'sky-system' (populated in clouds.Kubernetes).
+    'skypilot-system' (populated in clouds.Kubernetes).
     """
 
     logger.info('_configure_fuse_mounting: Setting up FUSE device manager.')
