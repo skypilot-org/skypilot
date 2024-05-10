@@ -2,7 +2,6 @@
 
 from sky.provision.kubernetes.config import bootstrap_instances
 from sky.provision.kubernetes.instance import get_cluster_info
-from sky.provision.kubernetes.instance import get_command_runner_type
 from sky.provision.kubernetes.instance import get_command_runners
 from sky.provision.kubernetes.instance import query_instances
 from sky.provision.kubernetes.instance import run_instances

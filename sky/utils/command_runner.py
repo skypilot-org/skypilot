@@ -575,7 +575,7 @@ class KubernetesCommandRunner(CommandRunner):
         node: Tuple[str, str],
         **kwargs,
     ):
-        """Initialize SSHCommandRunner.
+        """Initialize KubernetesCommandRunner.
 
         Example Usage:
             runner = KubernetesCommandRunner((namespace, pod_name))
@@ -654,10 +654,10 @@ class KubernetesCommandRunner(CommandRunner):
             cmd,
             process_stream,
             separate_stderr,
-            # A hack to remove the following bash warnings:
-            #  Unable to use a TTY - input is not a terminal or the right kind of file # pylint: disable=line-too-long
+            # A hack to remove the following bash warnings (twice):
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
+            # and another WARNING for connection with SSH
             skip_lines=4 if source_bashrc else 0,
             source_bashrc=source_bashrc)
         command = kubectl_base_command + [command_str]
