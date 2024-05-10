@@ -31,6 +31,9 @@ def open_ports(
         _open_ports_using_ingress(cluster_name_on_cloud=cluster_name_on_cloud,
                                   ports=ports,
                                   provider_config=provider_config)
+    elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
+        # Do nothing, as PodIP mode does not require opening ports
+        pass
 
 
 def _open_ports_using_loadbalancer(
@@ -70,7 +73,7 @@ def _open_ports_using_ingress(
             'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
         )
 
-    # Prepare service names, ports,  for template rendering
+    # Prepare service names, ports, for template rendering
     service_details = [
         (f'{cluster_name_on_cloud}-skypilot-service--{port}', port,
          _PATH_PREFIX.format(cluster_name_on_cloud=cluster_name_on_cloud,
@@ -133,6 +136,9 @@ def cleanup_ports(
         _cleanup_ports_for_ingress(cluster_name_on_cloud=cluster_name_on_cloud,
                                    ports=ports,
                                    provider_config=provider_config)
+    elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
+        # Do nothing, as PodIP mode does not require opening ports
+        pass
 
 
 def _cleanup_ports_for_loadbalancer(
@@ -171,9 +177,11 @@ def _cleanup_ports_for_ingress(
 def query_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
+    head_ip: Optional[str] = None,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
+    del head_ip  # unused
     assert provider_config is not None, 'provider_config is required'
     port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None))
@@ -188,6 +196,11 @@ def query_ports(
             )
         elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
             return _query_ports_for_ingress(
+                cluster_name_on_cloud=cluster_name_on_cloud,
+                ports=ports,
+            )
+        elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
+            return _query_ports_for_podip(
                 cluster_name_on_cloud=cluster_name_on_cloud,
                 ports=ports,
             )
@@ -244,5 +257,23 @@ def _query_ports_for_ingress(
                                  port=https_port,
                                  path=path_prefix.lstrip('/')),
         ]
+
+    return result
+
+
+def _query_ports_for_podip(
+    cluster_name_on_cloud: str,
+    ports: List[int],
+) -> Dict[int, List[common.Endpoint]]:
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    pod_name = kubernetes_utils.get_head_pod_name(cluster_name_on_cloud)
+    pod_ip = network_utils.get_pod_ip(namespace, pod_name)
+
+    result: Dict[int, List[common.Endpoint]] = {}
+    if pod_ip is None:
+        return {}
+
+    for port in ports:
+        result[port] = [common.SocketEndpoint(host=pod_ip, port=port)]
 
     return result

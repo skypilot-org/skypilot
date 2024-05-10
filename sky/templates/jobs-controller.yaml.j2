@@ -1,4 +1,4 @@
-# The template for the spot controller
+# The template for the jobs controller
 
 name: {{dag_name}}
 
@@ -15,17 +15,18 @@ setup: |
   {%- endfor %}
 
   {% if is_dev %}
-  # Internal: disable logging for manually logging into the spot controller for debugging.
+  # Internal: disable logging for manually logging into the jobs controller for debugging.
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   {% endif %}
 
   # Dashboard.
+  ps aux | grep -v nohup | grep -v grep | grep -- "-m sky.spot.dashboard" | awk '{print $2}' | xargs kill > /dev/null 2>&1 || true
   pip list | grep flask  > /dev/null 2>&1 || pip install flask 2>&1 > /dev/null
-  ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.spot.dashboard.dashboard") || (nohup {{ sky_python_cmd }} -m sky.spot.dashboard.dashboard >> ~/.sky/spot-dashboard.log 2>&1 &));
+  ((ps aux | grep -v nohup | grep -v grep | grep -q -- "-m sky.jobs.dashboard.dashboard") || (nohup {{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard >> ~/.sky/job-dashboard.log 2>&1 &));
 
 run: |
-  # Start the controller for the current spot job.
-  python -u -m sky.spot.controller {{remote_user_yaml_path}} \
+  # Start the controller for the current managed job.
+  python -u -m sky.jobs.controller {{remote_user_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
 
 envs:

@@ -108,7 +108,7 @@ def _execute(
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
-    _is_launched_by_spot_controller: bool = False,
+    _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
@@ -160,11 +160,11 @@ def _execute(
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
-    if task.need_spot_recovery:
+    if any(r.job_recovery is not None for r in task.resources):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                'Spot recovery is specified in the task. To launch the '
-                'managed spot job, please use: sky spot launch')
+                'Job recovery is specified in the task. To launch a '
+                'managed job, please use: sky jobs launch')
 
     cluster_exists = False
     if cluster_name is not None:
@@ -207,8 +207,12 @@ def _execute(
                             f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
-            if not down:
-                requested_features.add(clouds.CloudImplementationFeatures.STOP)
+            if idle_minutes_to_autostop >= 0:
+                requested_features.add(
+                    clouds.CloudImplementationFeatures.AUTO_TERMINATE)
+                if not down:
+                    requested_features.add(
+                        clouds.CloudImplementationFeatures.STOP)
         # NOTE: in general we may not have sufficiently specified info
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.
@@ -225,10 +229,10 @@ def _execute(
                                               task)
 
     if not cluster_exists:
-        # If spot is launched by skyserve controller or managed spot controller,
-        # We don't need to print out the logger info.
+        # If spot is launched on serve or jobs controller, we don't need to
+        # print out the hint.
         if (Stage.PROVISION in stages and task.use_spot and
-                not _is_launched_by_spot_controller and
+                not _is_launched_by_jobs_controller and
                 not _is_launched_by_sky_serve_controller):
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
@@ -236,9 +240,9 @@ def _execute(
             logger.info(
                 f'{yellow}Launching an unmanaged spot task, which does not '
                 f'automatically recover from preemptions.{reset}\n{yellow}To '
-                'get automatic recovery, use managed spot instead: '
-                f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
-                f'{bold}sky.spot.launch(){reset}.')
+                'get automatic recovery, use managed job instead: '
+                f'{reset}{bold}sky jobs launch{reset} {yellow}or{reset} '
+                f'{bold}sky.jobs.launch(){reset}.')
 
         if Stage.OPTIMIZE in stages:
             if task.best_resources is None:
@@ -318,10 +322,10 @@ def _execute(
         if controller is None and not _is_launched_by_sky_serve_controller:
             # UX: print live clusters to make users aware (to save costs).
             #
-            # Don't print if this job is launched by the spot controller,
-            # because spot jobs are serverless, there can be many of them, and
-            # users tend to continuously monitor spot jobs using `sky spot
-            # status`. Also don't print if this job is a skyserve controller
+            # Don't print if this job is launched by the jobs controller,
+            # because managed jobs are serverless, there can be many of them,
+            # and users tend to continuously monitor managed jobs using `sky
+            # job queue`. Also don't print if this job is a skyserve controller
             # job or launched by a skyserve controller job, because the
             # redirect for this subprocess.run won't success and it will
             # pollute the controller logs.
@@ -330,7 +334,7 @@ def _execute(
             env = dict(os.environ,
                        **{env_options.Options.DISABLE_LOGGING.value: '1'})
             subprocess_utils.run(
-                'sky status --no-show-spot-jobs --no-show-services', env=env)
+                'sky status --no-show-managed-jobs --no-show-services', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
     return job_id, handle
@@ -354,7 +358,7 @@ def launch(
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
-    _is_launched_by_spot_controller: bool = False,
+    _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
@@ -464,7 +468,7 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
-        _is_launched_by_spot_controller=_is_launched_by_spot_controller,
+        _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
     )

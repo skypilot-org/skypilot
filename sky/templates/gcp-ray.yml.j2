@@ -76,8 +76,8 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
-      {%- for tag_key, tag_value in instance_tags.items() %}
-        {{ tag_key }}: {{ tag_value }}
+      {%- for label_key, label_value in labels.items() %}
+        {{ label_key }}: {{ label_value|tojson }}
       {%- endfor %}
       {%- if specific_reservations %}
       reservationAffinity:

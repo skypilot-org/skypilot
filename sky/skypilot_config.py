@@ -63,7 +63,7 @@ from sky.utils import ux_utils
 # 2 in the list.
 
 # (Used internally) An env var holding the path to the local config file. This
-# is only used by spot controller tasks to ensure recoveries of the same job
+# is only used by jobs controller tasks to ensure recoveries of the same job
 # use the same config file.
 ENV_VAR_SKYPILOT_CONFIG = 'SKYPILOT_CONFIG'
 
@@ -152,7 +152,9 @@ def _try_load_config() -> None:
             common_utils.validate_schema(
                 _dict,
                 schemas.get_config_schema(),
-                f'Invalid config YAML ({config_path}): ',
+                f'Invalid config YAML ({config_path}). See: '
+                'https://skypilot.readthedocs.io/en/latest/reference/config.html. '  # pylint: disable=line-too-long
+                'Error: ',
                 skip_none=False)
 
         logger.debug('Config syntax check passed.')
