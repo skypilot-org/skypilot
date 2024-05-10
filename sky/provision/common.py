@@ -104,6 +104,10 @@ class ClusterInfo:
     # The unique identifier of the head instance, i.e., the
     # `instance_info.instance_id` of the head node.
     head_instance_id: Optional[InstanceId]
+    # Provider related information.
+    provider_name: str
+    provider_config: Optional[Dict[str, Any]] = None
+
     docker_user: Optional[str] = None
     # Override the ssh_user from the cluster config.
     ssh_user: Optional[str] = None
@@ -151,6 +155,19 @@ class ClusterInfo:
             other_ips.append(pair)
         return head_instance_ip + other_ips
 
+    def instance_ids(self) -> List[str]:
+        """Return the instance ids in the same order of ip_tuples."""
+        id_list = []
+        if self.head_instance_id is not None:
+            id_list.append(self.head_instance_id + '-0')
+        for inst_id, instances in self.instances.items():
+            start_idx = 0
+            if inst_id == self.head_instance_id:
+                start_idx = 1
+            id_list.extend(
+                [f'{inst_id}-{i}' for i in range(start_idx, len(instances))])
+        return id_list
+
     def has_external_ips(self) -> bool:
         """True if the cluster has external IP."""
         ip_tuples = self.ip_tuples()
@@ -186,8 +203,10 @@ class ClusterInfo:
     def get_ssh_ports(self) -> List[int]:
         """Get the SSH port of all the instances."""
         head_instance = self.get_head_instance()
-        assert head_instance is not None, self
-        head_instance_port = [head_instance.ssh_port]
+
+        head_instance_port = []
+        if head_instance is not None:
+            head_instance_port = [head_instance.ssh_port]
 
         worker_instances = self.get_worker_instances()
         worker_instance_ports = [

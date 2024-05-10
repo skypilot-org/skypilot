@@ -634,16 +634,18 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
         user for user in user_details if user['name'] == target_username)
 
     remote_identity = skypilot_config.get_nested(
-        ('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+        ('kubernetes', 'remote_identity'),
+        schemas.get_default_remote_identity('kubernetes'))
     if ('exec' in user_details.get('user', {}) and remote_identity
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
         ctx_name = current_context['name']
         exec_msg = ('exec-based authentication is used for '
                     f'Kubernetes context {ctx_name!r}.'
-                    ' This may cause issues when running Managed Jobs '
-                    'or SkyServe controller on Kubernetes. To fix, configure '
-                    'SkyPilot to create a service account for running pods by '
-                    'adding the following in ~/.sky/config.yaml:\n'
+                    ' This may cause issues with autodown or when running '
+                    'Managed Jobs or SkyServe controller on Kubernetes. '
+                    'To fix, configure SkyPilot to create a service account '
+                    'for running pods by setting the following in '
+                    '~/.sky/config.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
                     '    More: https://skypilot.readthedocs.io/en/latest/'
@@ -715,23 +717,18 @@ def parse_memory_resource(resource_qty_str: str,
 
 class KubernetesInstanceType:
     """Class to represent the "Instance Type" in a Kubernetes.
-
     Since Kubernetes does not have a notion of instances, we generate
     virtual instance types that represent the resources requested by a
     pod ("node").
-
     This name captures the following resource requests:
         - CPU
         - Memory
         - Accelerators
-
     The name format is "{n}CPU--{k}GB" where n is the number of vCPUs and
     k is the amount of memory in GB. Accelerators can be specified by
     appending "--{a}{type}" where a is the number of accelerators and
     type is the accelerator type.
-
     CPU and memory can be specified as floats. Accelerator count must be int.
-
     Examples:
         - 4CPU--16GB
         - 0.5CPU--1.5GB
@@ -770,7 +767,6 @@ class KubernetesInstanceType:
             cls,
             name: str) -> Tuple[float, float, Optional[int], Optional[str]]:
         """Parses and returns resources from the given InstanceType name
-
         Returns:
             cpus | float: Number of CPUs
             memory | float: Amount of memory in GB
@@ -815,7 +811,6 @@ class KubernetesInstanceType:
                        accelerator_count: Union[float, int] = 0,
                        accelerator_type: str = '') -> 'KubernetesInstanceType':
         """Returns an instance name object from the given resources.
-
         If accelerator_count is not an int, it will be rounded up since GPU
         requests in Kubernetes must be int.
         """

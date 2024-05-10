@@ -488,6 +488,19 @@ def autostop(
                 f'  {_stop_not_supported_message(handle.launched_resources)}.'
             ) from e
 
+    # Check if autodown is required and supported
+    if not is_cancel:
+        try:
+            cloud.check_features_are_supported(
+                handle.launched_resources,
+                {clouds.CloudImplementationFeatures.AUTO_TERMINATE})
+        except exceptions.NotSupportedError as e:
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.YELLOW}{operation} on cluster '
+                f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
+                f'  Auto{option_str} is not supported on {cloud!r} - '
+                f'see reason above.') from e
+
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.set_autostop(handle, idle_minutes, down)
 

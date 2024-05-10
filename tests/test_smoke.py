@@ -1920,8 +1920,9 @@ def test_azure_start_stop():
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
-            'sleep 200',
+            'sleep 260',
             f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep "INIT\|STOPPED"'
+            f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
@@ -2935,9 +2936,12 @@ def test_azure_start_stop_two_nodes():
             f'sky exec --num-nodes=2 {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
-            f'sky start -y {name}',
+            f'sky start -y {name} -i 1',
             f'sky exec --num-nodes=2 {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            'sleep 200',
+            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep "INIT\|STOPPED"'
+            f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins  (it takes around ~23 mins)
