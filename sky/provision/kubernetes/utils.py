@@ -14,7 +14,6 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
-from sky.provision import utils as provision_utils
 from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -51,8 +50,6 @@ ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
 KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 
 logger = sky_logging.init_logger(__name__)
-
-KubernetesInstanceType = provision_utils.VirtualInstanceType
 
 
 class GPULabelFormatter:

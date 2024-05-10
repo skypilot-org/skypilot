@@ -586,8 +586,8 @@ class KubernetesCommandRunner(CommandRunner):
             node: The namespace and pod_name of the remote machine.
         """
         del kwargs
+        super().__init__(node)
         self.namespace, self.pod_name = node
-        super().__init__(self.pod_name, node)
 
     @timeline.event
     def run(
