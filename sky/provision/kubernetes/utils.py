@@ -1446,3 +1446,22 @@ def get_autoscaler_type(
         autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
             autoscaler_type)
     return autoscaler_type
+
+
+def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
+    """Converts a dictionary to a Kubernetes object.
+
+    Useful for comparing two Kubernetes objects. Adapted from
+    https://github.com/kubernetes-client/python/issues/977#issuecomment-592030030  # pylint: disable=line-too-long
+
+    Args:
+        object_dict: Dictionary representing the Kubernetes object
+        object_type: Type of the Kubernetes object. E.g., 'V1Pod', 'V1Service'.
+    """
+    class FakeKubeResponse:
+        def __init__(self, obj):
+            import json
+            self.data = json.dumps(obj)
+
+    fake_kube_response = FakeKubeResponse(object_dict)
+    return kubernetes.api_client().deserialize(fake_kube_response, object_type)

@@ -255,10 +255,11 @@ def _configure_autoscaler_service_account(
         namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
+        # Nothing to check for equality and patch here,
+        # since the service_account.metadata.name is the only important
+        # attribute, which is already filtered for above.
         logger.info('_configure_autoscaler_service_account: '
-                    f'{updating_existing_msg(account_field, name)}')
-        kubernetes.core_api().patch_namespaced_service_account(
-            name, namespace, account)
+                    f'{using_existing_msg(account_field, name)}')
         return
 
     logger.info('_configure_autoscaler_service_account: '
@@ -291,10 +292,17 @@ def _configure_autoscaler_role(namespace: str, provider_config: Dict[str, Any],
 
     name = role['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_namespaced_role(
+    roles = (kubernetes.auth_api().list_namespaced_role(
         namespace, field_selector=field_selector).items)
-    if len(accounts) > 0:
-        assert len(accounts) == 1
+    if len(roles) > 0:
+        assert len(roles) == 1
+        existing_role = roles[0]
+        # Convert to k8s object to compare
+        new_role = kubernetes_utils.dict_to_k8s_object(role, 'V1Role')
+        if new_role.rules == existing_role.rules:
+            logger.info('_configure_autoscaler_role: '
+                        f'{using_existing_msg(role_field, name)}')
+            return
         logger.info('_configure_autoscaler_role: '
                     f'{updating_existing_msg(role_field, name)}')
         kubernetes.auth_api().patch_namespaced_role(name, namespace, role)
@@ -348,10 +356,17 @@ def _configure_autoscaler_role_binding(
     name = binding['metadata']['name']
 
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_namespaced_role_binding(
+    role_bindings = (kubernetes.auth_api().list_namespaced_role_binding(
         rb_namespace, field_selector=field_selector).items)
-    if len(accounts) > 0:
-        assert len(accounts) == 1
+    if len(role_bindings) > 0:
+        assert len(role_bindings) == 1
+        existing_binding = role_bindings[0]
+        new_rb = kubernetes_utils.dict_to_k8s_object(binding, 'V1RoleBinding')
+        if (new_rb.role_ref == existing_binding.role_ref and
+            new_rb.subjects == existing_binding.subjects):
+            logger.info('_configure_autoscaler_role_binding: '
+                        f'{using_existing_msg(binding_field, name)}')
+            return
         logger.info('_configure_autoscaler_role_binding: '
                     f'{updating_existing_msg(binding_field, name)}')
         kubernetes.auth_api().patch_namespaced_role_binding(
@@ -381,10 +396,16 @@ def _configure_autoscaler_cluster_role(namespace,
 
     name = role['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_cluster_role(
+    cluster_roles = (kubernetes.auth_api().list_cluster_role(
         field_selector=field_selector).items)
-    if len(accounts) > 0:
-        assert len(accounts) == 1
+    if len(cluster_roles) > 0:
+        assert len(cluster_roles) == 1
+        existing_cr = cluster_roles[0]
+        new_cr = kubernetes_utils.dict_to_k8s_object(role, 'V1ClusterRole')
+        if new_cr.rules == existing_cr.rules:
+            logger.info('_configure_autoscaler_cluster_role: '
+                        f'{using_existing_msg(role_field, name)}')
+            return
         logger.info('_configure_autoscaler_cluster_role: '
                     f'{updating_existing_msg(role_field, name)}')
         kubernetes.auth_api().patch_cluster_role(name, role)
@@ -420,10 +441,18 @@ def _configure_autoscaler_cluster_role_binding(
 
     name = binding['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_cluster_role_binding(
+    cr_bindings = (kubernetes.auth_api().list_cluster_role_binding(
         field_selector=field_selector).items)
-    if len(accounts) > 0:
-        assert len(accounts) == 1
+    if len(cr_bindings) > 0:
+        assert len(cr_bindings) == 1
+        existing_binding = cr_bindings[0]
+        new_binding = kubernetes_utils.dict_to_k8s_object(
+            binding, 'V1ClusterRoleBinding')
+        if (new_binding.role_ref == existing_binding.role_ref and
+            new_binding.subjects == existing_binding.subjects):
+            logger.info('_configure_autoscaler_cluster_role_binding: '
+                        f'{using_existing_msg(binding_field, name)}')
+            return
         logger.info('_configure_autoscaler_cluster_role_binding: '
                     f'{updating_existing_msg(binding_field, name)}')
         kubernetes.auth_api().patch_cluster_role_binding(name, binding)
@@ -599,7 +628,9 @@ def _configure_services(namespace: str, provider_config: Dict[str,
         if len(services) > 0:
             assert len(services) == 1
             existing_service = services[0]
-            if service == existing_service:
+            # Convert to k8s object to compare
+            new_svc = kubernetes_utils.dict_to_k8s_object(service, 'V1Service')
+            if new_svc.spec.ports == existing_service.spec.ports:
                 logger.info('_configure_services: '
                             f'{using_existing_msg("service", name)}')
                 return
