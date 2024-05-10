@@ -38,7 +38,6 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-    SKY_DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
         'kubernetes-port-forward-proxy-command.sh.j2'
     PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
@@ -284,7 +283,7 @@ class Kubernetes(clouds.Cloud):
         elif (remote_identity ==
               schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
             # Use the default service account
-            k8s_service_account_name = self.SKY_DEFAULT_SERVICE_ACCOUNT_NAME
+            k8s_service_account_name = kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME
             k8s_automount_sa_token = 'true'
         else:
             # User specified a custom service account

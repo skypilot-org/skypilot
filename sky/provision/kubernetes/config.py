@@ -28,7 +28,7 @@ def bootstrap_instances(
     config = _configure_ssh_jump(namespace, config)
 
     requested_service_account = config.node_config['spec']['serviceAccountName']
-    if requested_service_account == 'skypilot-service-account':
+    if requested_service_account == kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME:
         # If the user has requested a different service account (via pod_config
         # in ~/.sky/config.yaml), we assume they have already set up the
         # necessary roles and role bindings.
@@ -487,7 +487,7 @@ def _configure_skypilot_system_namespace(
     # If the user has requested a different service account (via
     # remote_identity in ~/.sky/config.yaml), we assume they have already set
     # up the necessary roles and role bindings.
-    if service_account == 'skypilot-service-account':
+    if service_account == kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME:
         # Note - this must be run only after the service account has been
         # created in the cluster (in bootstrap_instances).
         # Create the role in the skypilot-system namespace if it does not exist.

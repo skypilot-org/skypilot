@@ -21,7 +21,10 @@ from sky.utils import kubernetes_enums
 from sky.utils import schemas
 from sky.utils import ux_utils
 
+# TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
+
+DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
 
 MEMORY_SIZE_UNITS = {
     'B': 1,
