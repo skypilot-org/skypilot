@@ -2984,7 +2984,9 @@ def show_gpus(
                                                    case_sensitive=False,
                                                    all_regions=all_regions)
         # Import here to save module load speed.
-        from sky.clouds.service_catalog import common  # pylint: disable=import-outside-toplevel,line-too-long
+        # pylint: disable=import-outside-toplevel,line-too-long
+        from sky.clouds.service_catalog import common
+
         # For each gpu name (count not included):
         #   - Group by cloud
         #   - Sort within each group by prices
