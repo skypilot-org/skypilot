@@ -3749,6 +3749,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream=False,
             ssh_mode=command_runner.SshMode.INTERACTIVE,
             stdin=subprocess.DEVNULL,
+            source_bashrc=True,
         )
 
     def teardown_no_lock(self,
