@@ -474,7 +474,7 @@ def down(
                                                     code,
                                                     require_outputs=True,
                                                     stream_logs=False)
-    except exceptions.FetchIPError as e:
+    except exceptions.FetchClusterInfoError as e:
         raise RuntimeError(
             'Failed to fetch controller IP. Please refresh controller status '
             f'by `sky status -r {serve_utils.SKY_SERVE_CONTROLLER_NAME}` '

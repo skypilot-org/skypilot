@@ -17,6 +17,7 @@ from sky.clouds import cloud_registry
 from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
@@ -197,16 +198,19 @@ class AutostopEvent(SkyletEvent):
                 logger.info('Running ray down.')
                 # Stop the workers first to avoid orphan workers.
                 subprocess.run(
-                    ['ray', 'down', '-y', '--workers-only', config_path],
+                    f'{constants.SKY_RAY_CMD} down -y --workers-only '
+                    f'{config_path}',
                     check=True,
+                    shell=True,
                     # We pass env inherited from os.environ due to calling `ray
                     # <cmd>`.
                     env=env)
 
             logger.info('Running final ray down.')
             subprocess.run(
-                ['ray', 'down', '-y', config_path],
+                f'{constants.SKY_RAY_CMD} down -y {config_path}',
                 check=True,
+                shell=True,
                 # We pass env inherited from os.environ due to calling `ray
                 # <cmd>`.
                 env=env)
@@ -228,7 +232,7 @@ class AutostopEvent(SkyletEvent):
         # Stop the ray autoscaler to avoid scaling up, during
         # stopping/terminating of the cluster.
         logger.info('Stopping the ray cluster.')
-        subprocess.run('ray stop', shell=True, check=True)
+        subprocess.run(f'{constants.SKY_RAY_CMD} stop', shell=True, check=True)
 
         operation_fn = provision_lib.stop_instances
         if autostop_config.down:

@@ -4,6 +4,7 @@ import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky.utils import command_runner
 
 # Values used to construct mounting commands
 _STAT_CACHE_TTL = '5s'
@@ -129,6 +130,8 @@ def get_mounting_script(
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
+                             
+        {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
         MOUNT_PATH={mount_path}
         MOUNT_BINARY={mount_binary}
