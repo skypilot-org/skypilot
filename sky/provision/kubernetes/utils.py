@@ -66,6 +66,11 @@ class GPULabelFormatter:
         raise NotImplementedError
 
     @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        """Given a GPU type, returns the label value to be used"""
+        raise NotImplementedError
+
+    @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         """Given a label value, returns the GPU type"""
         raise NotImplementedError
@@ -85,6 +90,19 @@ class GPULabelFormatter:
         return True, ''
 
 
+def get_gke_accelerator_name(accelerator: str) -> str:
+    """Returns the accelerator name for GKE clusters
+
+    Uses the format - nvidia-tesla-<accelerator>.
+    A100-80GB, H100-80GB and L4 are an exception. They use nvidia-<accelerator>.
+    """
+    if accelerator in ('A100-80GB', 'L4', 'H100-80GB'):
+        # A100-80GB, L4 and H100-80GB have a different name pattern.
+        return 'nvidia-{}'.format(accelerator.lower())
+    else:
+        return 'nvidia-tesla-{}'.format(accelerator.lower())
+
+
 class SkyPilotLabelFormatter(GPULabelFormatter):
     """Custom label formatter for SkyPilot
 
@@ -97,6 +115,12 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
     @classmethod
     def get_label_key(cls) -> str:
         return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        # For SkyPilot formatter, we use the accelerator str directly.
+        # See sky.utils.kubernetes.gpu_labeler.
+        return accelerator.lower()
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
@@ -125,6 +149,10 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
         return cls.LABEL_KEY
 
     @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        return accelerator.upper()
+
+    @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         return value
 
@@ -141,6 +169,10 @@ class GKELabelFormatter(GPULabelFormatter):
     @classmethod
     def get_label_key(cls) -> str:
         return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        return get_gke_accelerator_name(accelerator)
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
@@ -193,7 +225,8 @@ class GFDLabelFormatter(GPULabelFormatter):
         # 1. remove 'NVIDIA-' (e.g., 'NVIDIA-RTX-A6000' -> 'RTX-A6000')
         # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
         return value.replace('NVIDIA-', '').replace('GEFORCE-', '')
-    
+
+
 class KarpenterLabelFormatter(SkyPilotLabelFormatter):
     """Karpeneter label formatter
     Karpenter uses the label `karpenter.k8s.aws/instance-gpu-name` to identify
@@ -209,7 +242,7 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
 # auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
     SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter,
-    GFDLabelFormatter, KarpenterLabelFormatter
+    KarpenterLabelFormatter, GFDLabelFormatter
 ]
 
 # Mapping of autoscaler type to label formatter
