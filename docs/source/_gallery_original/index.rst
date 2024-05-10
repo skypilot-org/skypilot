@@ -19,10 +19,11 @@ Contents
 
 .. toctree::
    :maxdepth: 1
-   :caption: Inference Engines
+   :caption: Inference Frameworks
 
    vLLM <frameworks/vllm>
    Hugging Face TGI <frameworks/tgi>
+   Ollama <frameworks/ollama>
    SGLang <frameworks/sglang>
    LoRAX <frameworks/lorax>
 
@@ -35,6 +36,8 @@ Contents
    Mistral 7B (Mistral AI) <https://docs.mistral.ai/self-deployment/skypilot/>
    DBRX (Databricks) <llms/dbrx>
    Llama-2 (Meta) <llms/llama-2>
+   Llama-3 (Meta) <llms/llama-3>
+   Qwen (Alibaba) <llms/qwen>
    CodeLlama (Meta) <llms/codellama>
    Gemma (Google) <llms/gemma>
 

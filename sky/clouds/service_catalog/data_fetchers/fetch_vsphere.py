@@ -4,7 +4,7 @@ import logging
 import os
 import typing
 
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
 from sky.clouds.service_catalog.common import get_catalog_path
 from sky.provision.vsphere.common.cls_api_client import ClsApiClient
@@ -12,7 +12,7 @@ from sky.provision.vsphere.common.cls_api_client import ClsApiClient
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -18,6 +18,7 @@ GIT_EXCLUDE: str
 RSYNC_DISPLAY_OPTION: str
 RSYNC_FILTER_OPTION: str
 RSYNC_EXCLUDE_OPTION: str
+ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD: str
 
 
 def ssh_options_list(
@@ -44,7 +45,6 @@ class CommandRunner:
 
     def __init__(
         self,
-        node_id: str,
         node: Tuple[Any, ...],
         **kwargs,
     ) -> None:

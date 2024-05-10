@@ -126,8 +126,10 @@ def _parallel_ssh_with_cache(func,
         results = []
         runners = provision.get_command_runners(cluster_info.provider_name,
                                                 cluster_info, **ssh_credentials)
+        # instance_ids is guaranteed to be in the same order as runners.
+        instance_ids = cluster_info.instance_ids()
         for i, runner in enumerate(runners):
-            cache_id = str(i)
+            cache_id = instance_ids[i]
             wrapper = metadata_utils.cache_func(cluster_name, cache_id,
                                                 stage_name, digest)
             if i == 0:
@@ -191,11 +193,14 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
     @_auto_retry
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         for cmd in setup_commands:
-            returncode, stdout, stderr = runner.run(cmd,
-                                                    stream_logs=False,
-                                                    log_path=log_path,
-                                                    require_outputs=True,
-                                                    source_bashrc=True)
+            returncode, stdout, stderr = runner.run(
+                cmd,
+                stream_logs=False,
+                log_path=log_path,
+                require_outputs=True,
+                # Installing depencies requires source bashrc to access the PATH
+                # in bashrc.
+                source_bashrc=True)
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could
@@ -290,10 +295,14 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
            _RAY_PRLIMIT + _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
-    returncode, stdout, stderr = head_runner.run(cmd,
-                                                 stream_logs=False,
-                                                 log_path=log_path_abs,
-                                                 require_outputs=True)
+    returncode, stdout, stderr = head_runner.run(
+        cmd,
+        stream_logs=False,
+        log_path=log_path_abs,
+        require_outputs=True,
+        # Source bashrc for starting ray cluster to make sure actors started by
+        # ray will have the correct PATH.
+        source_bashrc=True)
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
                            f'(exit code {returncode}). Error: \n'
@@ -365,7 +374,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                f'grep "gcs-address={head_ip}:${{RAY_PORT}}" || '
                f'{{ {cmd} }}')
     else:
-        cmd = 'ray stop; ' + cmd
+        cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
 
     logger.info(f'Running command on worker nodes: {cmd}')
 
@@ -377,10 +386,14 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         runner, instance_id = runner_and_id
         log_dir = metadata_utils.get_instance_log_dir(cluster_name, instance_id)
         log_path_abs = str(log_dir / ('ray_cluster' + '.log'))
-        return runner.run(cmd,
-                          stream_logs=False,
-                          require_outputs=True,
-                          log_path=log_path_abs)
+        return runner.run(
+            cmd,
+            stream_logs=False,
+            require_outputs=True,
+            log_path=log_path_abs,
+            # Source bashrc for starting ray cluster to make sure actors started
+            # by ray will have the correct PATH.
+            source_bashrc=True)
 
     results = subprocess_utils.run_in_parallel(
         _setup_ray_worker, list(zip(worker_runners, cache_ids)))
@@ -407,10 +420,13 @@ def start_skylet_on_head_node(cluster_name: str,
     assert cluster_info.head_instance_id is not None, cluster_info
     log_path_abs = str(provision_logging.get_log_path())
     logger.info(f'Running command on head node: {MAYBE_SKYLET_RESTART_CMD}')
+    # We need to source bashrc for skylet to make sure the autostop event can
+    # access the path to the cloud CLIs.
     returncode, stdout, stderr = head_runner.run(MAYBE_SKYLET_RESTART_CMD,
                                                  stream_logs=False,
                                                  require_outputs=True,
-                                                 log_path=log_path_abs)
+                                                 log_path=log_path_abs,
+                                                 source_bashrc=True)
     if returncode:
         raise RuntimeError('Failed to start skylet on the head node '
                            f'(exit code {returncode}). Error: '

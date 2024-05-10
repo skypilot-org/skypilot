@@ -14,7 +14,7 @@ import colorama
 
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.clouds import aws
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
@@ -27,7 +27,7 @@ if typing.TYPE_CHECKING:
 
     from sky.clouds import cloud
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -101,7 +101,7 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
     return az_mappings
 
 
-def _fetch_and_apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
+def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
     The upper-level functions that use the availability zone information

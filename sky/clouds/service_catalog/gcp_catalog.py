@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.clouds.service_catalog import common
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -18,7 +18,7 @@ if typing.TYPE_CHECKING:
 
     from sky.clouds import cloud
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 logger = sky_logging.init_logger(__name__)
 

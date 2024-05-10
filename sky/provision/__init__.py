@@ -43,9 +43,11 @@ def _route_to_cloud_impl(func):
         assert module is not None, f'Unknown provider: {module_name}'
 
         impl = getattr(module, func.__name__, None)
-        if impl is None:
-            return func(provider_name, *args, **kwargs)
-        return impl(*args, **kwargs)
+        if impl is not None:
+            return impl(*args, **kwargs)
+
+        # If implementation does not exist, fall back to default implementation
+        return func(provider_name, *args, **kwargs)
 
     return _wrapper
 
@@ -144,13 +146,19 @@ def query_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
     ports: List[str],
+    head_ip: Optional[str] = None,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
     """Query details about ports on a cluster.
 
+    If head_ip is provided, it may be used by the cloud implementation to
+    return the endpoint without querying the cloud provider. If head_ip is not
+    provided, the cloud provider will be queried to get the endpoint info.
+
     Returns a dict with port as the key and a list of common.Endpoint.
     """
-    raise NotImplementedError
+    del provider_name, provider_config, cluster_name_on_cloud  # unused
+    return common.query_ports_passthrough(ports, head_ip)
 
 
 @_route_to_cloud_impl
@@ -171,13 +179,6 @@ def get_cluster_info(
 
 
 @_route_to_cloud_impl
-def get_command_runner_type(
-        provider_name: str) -> Type[command_runner.CommandRunner]:
-    """Get the command runner type for the given provider."""
-    return command_runner.SSHCommandRunner
-
-
-@_route_to_cloud_impl
 def get_command_runners(
     provider_name: str,
     cluster_info: common.ClusterInfo,
@@ -186,6 +187,7 @@ def get_command_runners(
     """Get a command runner for the given cluster."""
     ip_list = cluster_info.get_feasible_ips()
     port_list = cluster_info.get_ssh_ports()
-    return command_runner.SSHCommandRunner.make_runner_list(node_list=zip(
-        ip_list, port_list),
-                                                            **crednetials)
+    return command_runner.SSHCommandRunner.make_runner_list(
+        node_list=zip(ip_list, port_list),
+        **crednetials,
+    )

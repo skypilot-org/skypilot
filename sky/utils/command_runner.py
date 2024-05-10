@@ -42,6 +42,12 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
+# Disable sudo for root user. This is useful when the command is running in a
+# docker container, i.e. image_id is a docker image.
+ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD = (
+    '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }')
+
+
 def ssh_options_list(
     ssh_private_key: Optional[str],
     ssh_control_name: Optional[str],
@@ -138,9 +144,13 @@ class SshMode(enum.Enum):
 class CommandRunner:
     """Runner for commands to be executed on the cluster."""
 
-    def __init__(self, node_id: str, node: Any, **kwargs):
-        del node, kwargs
-        self.node_id = node_id
+    def __init__(self, node: Tuple[Any, Any], **kwargs):
+        del kwargs  # Unused.
+        self.node = node
+
+    @property
+    def node_id(self) -> str:
+        return '-'.join(str(x) for x in self.node)
 
     def _get_command_to_run(
         self,
@@ -163,14 +173,20 @@ class CommandRunner:
         if source_bashrc:
             command += [
                 # Need this `-i` option to make sure `source ~/.bashrc` work.
+                # Sourcing bashrc may take a few seconds causing overheads.
                 '-i',
-                shlex.quote(cmd),
+                shlex.quote(
+                    f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                    f'PYTHONWARNINGS=ignore && ({cmd})'),
             ]
         else:
             # Optimization: this reduces the time for connecting to the remote
             # cluster by 1 second.
             # sourcing ~/.bashrc is not required for internal executions
-            command += [shlex.quote(cmd)]
+            command += [
+                'true && export OMP_NUM_THREADS=1 PYTHONWARNINGS=ignore'
+                f' && ({cmd})'
+            ]
         if not separate_stderr:
             command.append('2>&1')
         if not process_stream and skip_lines:
@@ -261,9 +277,7 @@ class CommandRunner:
     def check_connection(self) -> bool:
         """Check if the connection to the remote machine is successful."""
         returncode = self.run('true', connect_timeout=5, stream_logs=False)
-        if returncode:
-            return False
-        return True
+        return returncode == 0
 
 
 class SSHCommandRunner(CommandRunner):
@@ -305,8 +319,8 @@ class SSHCommandRunner(CommandRunner):
                 command will utilize ControlMaster. We currently disable
                 it for k8s instance.
         """
+        super().__init__(node)
         ip, port = node
-        super().__init__(ip, node)
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
@@ -420,7 +434,7 @@ class SSHCommandRunner(CommandRunner):
             # A hack to remove the following bash warnings (twice):
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
-            skip_lines=4 if source_bashrc else 0,
+            skip_lines=5 if source_bashrc else 0,
             source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
@@ -532,7 +546,7 @@ class SSHCommandRunner(CommandRunner):
 
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         while max_retry >= 0:
-            returncode, _, stderr = log_lib.run_with_log(
+            returncode, stdout, stderr = log_lib.run_with_log(
                 command,
                 log_path=log_path,
                 stream_logs=stream_logs,
@@ -549,7 +563,7 @@ class SSHCommandRunner(CommandRunner):
         subprocess_utils.handle_returncode(returncode,
                                            command,
                                            error_msg,
-                                           stderr=stderr,
+                                           stderr=stdout + stderr,
                                            stream_logs=stream_logs)
 
 

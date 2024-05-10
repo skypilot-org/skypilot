@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
 from sky.clouds.service_catalog.common import get_catalog_path
 from sky.provision import common
@@ -22,7 +22,7 @@ from sky.provision.vsphere.vsphere_utils import VsphereClient
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 logger = sky_logging.init_logger(__name__)
 

@@ -19,14 +19,14 @@ import numpy as np
 
 from sky import exceptions
 from sky.adaptors import aws
-from sky.adaptors import common as adaptor_common
+from sky.adaptors import common as adaptors_common
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
-    pd = adaptor_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport('pandas')
 
 # Enable most of the regions. Each user's account may have a subset of these
 # enabled; this is ok because we take the intersection of the list here with

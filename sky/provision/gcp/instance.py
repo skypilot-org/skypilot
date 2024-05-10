@@ -617,13 +617,3 @@ def cleanup_ports(
         firewall_rule_name = provider_config['firewall_rule']
         instance_utils.GCPComputeInstance.delete_firewall_rule(
             project_id, firewall_rule_name)
-
-
-def query_ports(
-    cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
-) -> Dict[int, List[common.Endpoint]]:
-    """See sky/provision/__init__.py"""
-    return common.query_ports_passthrough(cluster_name_on_cloud, ports,
-                                          provider_config)

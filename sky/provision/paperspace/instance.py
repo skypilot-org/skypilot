@@ -185,7 +185,7 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    del provider_config, worker_only  # unused
+    del provider_config  # unused
     client = utils.PaperspaceCloudClient()
     all_instances = _filter_instances(cluster_name_on_cloud, [
         'ready', 'serviceready', 'upgrading', 'provisioning', 'starting',
@@ -251,7 +251,7 @@ def get_cluster_info(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> common.ClusterInfo:
-    del region, provider_config  # unused
+    del region  # unused
     running_instances = _filter_instances(cluster_name_on_cloud, ['ready'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
@@ -271,6 +271,8 @@ def get_cluster_info(
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
+        provider_name='paperspace',
+        provider_config=provider_config,
     )
 
 

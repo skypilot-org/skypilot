@@ -30,21 +30,23 @@ SKY_REMOTE_RAY_VERSION = '2.9.3'
 # used for installing SkyPilot runtime (ray and skypilot).
 SKY_PYTHON_PATH_FILE = '~/.sky/python_path'
 SKY_RAY_PATH_FILE = '~/.sky/ray_path'
-SKY_GET_PYTHON_PATH_CMD = (f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
+SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
+                           f'cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || '
                            'which python3')
 # Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # Ray executable, e.g., /opt/conda/bin/ray
-SKY_RAY_CMD = f'$(cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)'
+SKY_RAY_CMD = (f'$([ -s {SKY_RAY_PATH_FILE} ] && '
+               f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
-# same spot task.
+# same managed task.
 TASK_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
 # This environment variable stores a '\n'-separated list of task IDs that
-# are within the same spot job (DAG). This can be used by the user to
-# retrieve the task IDs of any tasks that are within the same spot job.
+# are within the same managed job (DAG). This can be used by the user to
+# retrieve the task IDs of any tasks that are within the same managed job.
 # This environment variable is pre-assigned before any task starts
 # running within the same job, and will remain constant throughout the
 # lifetime of the job.
@@ -64,9 +66,9 @@ SKYLET_VERSION = '8'
 SKYLET_LIB_VERSION = 1
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
-# `sky spot dashboard`-related
+# `sky jobs dashboard`-related
 #
-# Port on the remote spot controller that the dashboard is running on.
+# Port on the remote jobs controller that the dashboard is running on.
 SPOT_DASHBOARD_REMOTE_PORT = 5000
 
 # Docker default options
@@ -108,6 +110,8 @@ RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 # backend_utils.write_cluster_config.
 RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
+    # Print the PATH in provision.log to help debug PATH issues.
+    'echo PATH=$PATH; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -124,9 +128,18 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'{SKY_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
-    f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION};'  # pylint: disable=line-too-long
+    f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    # In some envs, e.g. pip does not have permission to write under /opt/conda
+    # ray package will be installed under ~/.local/bin. If the user's PATH does
+    # not include ~/.local/bin (the pip install will have the output: `WARNING:
+    # The scripts ray, rllib, serve and tune are installed in '~/.local/bin'
+    # which is not on PATH.`), causing an empty SKY_RAY_PATH_FILE later.
+    #
+    # Here, we add ~/.local/bin to the end of the PATH to make sure the issues
+    # mentioned above are resolved.
+    'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
-    f'[ -s {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE};'
+    f'[ -s {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE}; '
     # END ray package check and installation
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
@@ -147,7 +160,7 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
-# will be recognized as the same user (e.g., spot controller or sky serve
+# will be recognized as the same user (e.g., jobs controller or sky serve
 # controller).
 USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
 
@@ -174,11 +187,11 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
-# Due to the CPU/memory usage of the controller process launched with sky job (
-# use ray job under the hood), we need to reserve some CPU/memory for each spot/
+# Due to the CPU/memory usage of the controller process launched with sky jobs (
+# use ray job under the hood), we need to reserve some CPU/memory for each jobs/
 # serve controller process.
-# Spot: A default controller with 8 vCPU and 32 GB memory can manage up to 32
-# spot jobs.
+# Jobs: A default controller with 8 vCPU and 32 GB memory can manage up to 32
+# managed jobs.
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
 CONTROLLER_PROCESS_CPU_DEMAND = 0.25

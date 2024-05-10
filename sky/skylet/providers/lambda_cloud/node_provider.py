@@ -152,7 +152,7 @@ class LambdaNodeProvider(NodeProvider):
         def _get_internal_ip(node: Dict[str, Any]):
             # TODO(ewzeng): cache internal ips in metadata file to reduce
             # ssh overhead.
-            if node['external_ip'] is None:
+            if node['external_ip'] is None or node['status'] != 'active':
                 node['internal_ip'] = None
                 return
             runner = command_runner.SSHCommandRunner(
@@ -173,6 +173,10 @@ class LambdaNodeProvider(NodeProvider):
         self.metadata.refresh([node['id'] for node in vms])
         self._guess_and_add_missing_tags(vms)
         nodes = [_extract_metadata(vm) for vm in filter(_match_tags, vms)]
+        nodes = [
+            node for node in nodes
+            if node['status'] not in ['terminating', 'terminated']
+        ]
         subprocess_utils.run_in_parallel(_get_internal_ip, nodes)
         self.cached_nodes = {node['id']: node for node in nodes}
         return self.cached_nodes
