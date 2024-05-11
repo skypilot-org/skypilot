@@ -44,6 +44,9 @@ class SkyServeLoadBalancer:
         # TODO(tian): httpx.Client has a resource limits of 100 max connections
         # for each client. Expose this configuration or optimize it later.
         # Reference: https://www.python-httpx.org/advanced/resource-limits/
+        # If more than 100 request is sent to the same replica, the client
+        # will queue the requests and send them when a connection is available.
+        # Reference: https://github.com/encode/httpcore/blob/a8f80980daaca98d556baea1783c5568775daadc/httpcore/_async/connection_pool.py#L69-L71 # pylint: disable=line-too-long
         self._client_pool: Dict[str, httpx.AsyncClient] = dict()
         # We need this lock to avoid getting from the client pool while
         # updating it from _sync_with_controller.
