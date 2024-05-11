@@ -39,3 +39,16 @@ metadata:
   name: "user-queue"
 spec:
   clusterQueue: "cluster-queue"
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: WorkloadPriorityClass
+metadata:
+  name: low-priority
+value: 100  # Higher value means higher priority
+description: "Low priority experiments"
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: WorkloadPriorityClass
+metadata:
+  name: high-priority
+value: 1000
+description: "High priority production workloads"
