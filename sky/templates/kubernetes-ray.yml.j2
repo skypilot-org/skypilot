@@ -259,11 +259,22 @@ available_node_types:
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value }}
+            # support for kueue
+            {% if label_key == "kueue.x-k8s.io/queue-name" %}
+            kueue.x-k8s.io/pod-group-name: {{ cluster_name_on_cloud }}
+            {% endif %}
             {%- endfor %}
-        {% if k8s_fuse_device_required %}
+
+        {% if k8s_fuse_device_required or "kueue.x-k8s.io/queue-name" in labels %}
         annotations:
             # Required for FUSE mounting to access /dev/fuse
+            {% if k8s_fuse_device_required %}
             container.apparmor.security.beta.kubernetes.io/ray-node: unconfined
+            {% endif %}
+            # support for kueue
+            {% if "kueue.x-k8s.io/queue-name" in labels %}
+            kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes }}"
+            {% endif %}
         {% endif %}
       spec:
         # serviceAccountName: skypilot-service-account
