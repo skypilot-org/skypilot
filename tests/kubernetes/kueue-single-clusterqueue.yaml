@@ -1,0 +1,41 @@
+# create a single cluster queue and a local queue user-queue
+# `kubectl apply -f kueue-single-clusterqueue.yaml`
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: "default-flavor"
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: "cluster-queue"
+spec:
+  preemption:
+    reclaimWithinCohort: Any
+    borrowWithinCohort:
+      policy: LowerPriority
+      maxPriorityThreshold: 100
+    withinClusterQueue: LowerPriority
+  namespaceSelector: {} # match all.
+  resourceGroups:
+  - coveredResources: ["cpu", "memory", "nvidia.com/gpu", "smarter-devices/fuse"]
+    flavors:
+    - name: "default-flavor"
+      resources:
+      - name: "cpu"
+        nominalQuota: 10000
+      - name: "memory"
+        nominalQuota: 10000Gi
+      - name: "nvidia.com/gpu"
+        nominalQuota: 16
+      # this is a skypilot specific resource
+      - name: "smarter-devices/fuse"
+        nominalQuota: 10000000
+---
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  namespace: "default"
+  name: "user-queue"
+spec:
+  clusterQueue: "cluster-queue"
