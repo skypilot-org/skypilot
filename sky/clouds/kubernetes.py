@@ -468,16 +468,15 @@ class Kubernetes(clouds.Cloud):
                 'kueue.x-k8s.io', 'v1beta1', current_ns, 'localqueues')
             local_queues = [queue['metadata']['name'] for queue in local_queues['items']]
             if not label_value in local_queues:
-                error_msg = (f'{label_key} {label_value} does not exist. '
-                             f'These are the available {label_key} `{local_queues}`')
+                error_msg = (f'queue {label_value} does not exist. '
+                             f'These are the available queues {local_queues}')
                 return False, error_msg
         if label_key == 'kueue.x-k8s.io/priority-class':
-            current_ns = kubernetes_utils.get_current_kube_config_context_namespace()
-            priorities = kubernetes.custom_objects_api().list_namespaced_custom_object(
-                'kueue.x-k8s.io', 'v1beta1', current_ns, 'workloadpriorityclasses')
+            priorities = kubernetes.custom_objects_api().list_cluster_custom_object(
+                'kueue.x-k8s.io', 'v1beta1', 'workloadpriorityclasses')
             priorities = [priority['metadata']['name'] for priority in priorities['items']]
             if not label_value in priorities:
-                error_msg = (f'{label_key} {label_value} does not exist. '
-                             f'These are the available {label_key} `{priorities}`')
+                error_msg = (f'priority class {label_value} does not exist. '
+                             f'These are the available priorities {priorities}')
                 return False, error_msg
         return True, None
