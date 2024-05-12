@@ -462,4 +462,13 @@ class Kubernetes(clouds.Cloud):
                          f'{condition_msg}')
         if not key_valid or not value_valid:
             return False, error_msg
+        if label_key == 'kueue.x-k8s.io/queue-name':
+            current_ns = kubernetes_utils.get_current_kube_config_context_namespace()
+            local_queues = kubernetes.custom_objects_api().list_namespaced_custom_object(
+                'kueue.x-k8s.io', 'v1beta1', current_ns, 'localqueues')
+            local_queues = [queue['metadata']['name'] for queue in local_queues['items']]
+            if not label_value in local_queues:
+                error_msg = (f'Invalid kueue.x-k8s.io/queue-name {label_value} specified. '
+                             f'These are the available queues `{local_queues}`')
+                return False, error_msg
         return True, None
