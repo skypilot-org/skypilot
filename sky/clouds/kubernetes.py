@@ -462,9 +462,12 @@ class Kubernetes(clouds.Cloud):
                          f'{condition_msg}')
         if not key_valid or not value_valid:
             return False, error_msg
+
+        k8s = kubernetes.kubernetes
         try:
             if label_key == 'kueue.x-k8s.io/queue-name':
-                ns = kubernetes_utils.get_current_kube_config_context_namespace()
+                ns = kubernetes_utils.get_current_kube_config_context_namespace(
+                )
                 local_queues = kubernetes.custom_objects_api(
                 ).list_namespaced_custom_object('kueue.x-k8s.io', 'v1beta1', ns,
                                                 'localqueues')
@@ -472,22 +475,25 @@ class Kubernetes(clouds.Cloud):
                     queue['metadata']['name'] for queue in local_queues['items']
                 ]
                 if not label_value in local_queues:
-                    error_msg = (f'queue {label_value} does not exist. '
-                                f'These are the available queues {local_queues}')
+                    error_msg = (
+                        f'queue {label_value} does not exist. '
+                        f'These are the available queues {local_queues}')
                     return False, error_msg
             if label_key == 'kueue.x-k8s.io/priority-class':
                 priorities = kubernetes.custom_objects_api(
                 ).list_cluster_custom_object('kueue.x-k8s.io', 'v1beta1',
-                                            'workloadpriorityclasses')
+                                             'workloadpriorityclasses')
                 priorities = [
-                    priority['metadata']['name'] for priority in priorities['items']
+                    priority['metadata']['name']
+                    for priority in priorities['items']
                 ]
                 if not label_value in priorities:
-                    error_msg = (f'priority class {label_value} does not exist. '
-                                f'These are the available priorities {priorities}')
+                    error_msg = (
+                        f'priority class {label_value} does not exist. '
+                        f'These are the available priorities {priorities}')
                     return False, error_msg
-        except kubernetes.client.exceptions.ApiException:
-            error_msg = (f'kueue custom resources not found. Check kueue'
+        except k8s.client.exceptions.ApiException:
+            error_msg = ('kueue custom resources not found. Check kueue '
                          'components are installed with. '
                          '`kubectl get crds | grep kueue.x-k8s.io`')
         return True, None
