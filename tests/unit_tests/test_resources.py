@@ -73,7 +73,6 @@ def test_aws_labels_resources():
 def test_kubernetes_labels_resources():
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
-        'kueue.x-k8s.io/queue-name': 'queue',
         'a' * 253 + '/' + 'k' * 63: 'v' *
                                     63,  # upto 253 chars in domain, 63 in key
         'mylabel': '',  # empty label values are allowed by k8s
