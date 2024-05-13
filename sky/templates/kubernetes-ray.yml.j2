@@ -274,6 +274,7 @@ available_node_types:
             # support for kueue
             {% if "kueue.x-k8s.io/queue-name" in labels %}
             kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes }}"
+            kueue.x-k8s.io/retriable-in-group: "false"
             {% endif %}
         {% endif %}
       spec:
