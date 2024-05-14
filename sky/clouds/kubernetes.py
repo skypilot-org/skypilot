@@ -29,7 +29,7 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 # Namespace for SkyPilot resources shared across multiple tenants on the
 # same cluster (even if they might be running in different namespaces).
 # E.g., FUSE device manager daemonset is run in this namespace.
-_SKY_SYSTEM_NAMESPACE = 'skypilot-system'
+_SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -38,7 +38,6 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-    SKY_DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
         'kubernetes-port-forward-proxy-command.sh.j2'
     PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
@@ -97,8 +96,12 @@ class Kubernetes(clouds.Cloud):
         is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
         if is_exec_auth:
             assert isinstance(message, str), message
+            # Controllers cannot spin up new pods with exec auth.
             unsupported_features[
                 clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
+            # Pod does not have permissions to terminate itself with exec auth.
+            unsupported_features[
+                clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
         return unsupported_features
 
     @classmethod
@@ -270,7 +273,8 @@ class Kubernetes(clouds.Cloud):
         port_mode = network_utils.get_port_mode(None)
 
         remote_identity = skypilot_config.get_nested(
-            ('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+            ('kubernetes', 'remote_identity'),
+            schemas.get_default_remote_identity('kubernetes'))
         if (remote_identity ==
                 schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
             # SA name doesn't matter since automounting credentials is disabled
@@ -279,7 +283,8 @@ class Kubernetes(clouds.Cloud):
         elif (remote_identity ==
               schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
             # Use the default service account
-            k8s_service_account_name = self.SKY_DEFAULT_SERVICE_ACCOUNT_NAME
+            k8s_service_account_name = (
+                kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
             k8s_automount_sa_token = 'true'
         else:
             # User specified a custom service account
@@ -308,7 +313,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_automount_sa_token': k8s_automount_sa_token,
             'k8s_fuse_device_required': fuse_device_required,
             # Namespace to run the FUSE device manager in
-            'k8s_fuse_device_manager_namespace': _SKY_SYSTEM_NAMESPACE,
+            'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'image_id': image_id,
         }
 

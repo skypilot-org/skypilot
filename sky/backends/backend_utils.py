@@ -804,7 +804,7 @@ def write_cluster_config(
     excluded_clouds = []
     remote_identity = skypilot_config.get_nested(
         (str(cloud).lower(), 'remote_identity'),
-        schemas.REMOTE_IDENTITY_DEFAULT)
+        schemas.get_default_remote_identity(str(cloud).lower()))
     if remote_identity is not None and not isinstance(remote_identity, str):
         for profile in remote_identity:
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):

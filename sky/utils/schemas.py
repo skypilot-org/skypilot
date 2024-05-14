@@ -535,7 +535,12 @@ class RemoteIdentityOptions(enum.Enum):
     SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
 
 
-REMOTE_IDENTITY_DEFAULT = RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+def get_default_remote_identity(cloud: str) -> str:
+    """Get the default remote identity for the specified cloud."""
+    if cloud == 'kubernetes':
+        return RemoteIdentityOptions.SERVICE_ACCOUNT.value
+    return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+
 
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {

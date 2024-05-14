@@ -114,7 +114,7 @@ Contents
    ../getting-started/installation
    ../getting-started/quickstart
    ../getting-started/tutorial
-   ../examples/gpu-jupyter
+   ../examples/interactive-development
 
 
 .. toctree::

@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+import json
 import math
 import os
 import re
@@ -21,7 +22,10 @@ from sky.utils import kubernetes_enums
 from sky.utils import schemas
 from sky.utils import ux_utils
 
+# TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
+
+DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
 
 MEMORY_SIZE_UNITS = {
     'B': 1,
@@ -634,16 +638,18 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
         user for user in user_details if user['name'] == target_username)
 
     remote_identity = skypilot_config.get_nested(
-        ('kubernetes', 'remote_identity'), schemas.REMOTE_IDENTITY_DEFAULT)
+        ('kubernetes', 'remote_identity'),
+        schemas.get_default_remote_identity('kubernetes'))
     if ('exec' in user_details.get('user', {}) and remote_identity
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
         ctx_name = current_context['name']
         exec_msg = ('exec-based authentication is used for '
                     f'Kubernetes context {ctx_name!r}.'
-                    ' This may cause issues when running Managed Jobs '
-                    'or SkyServe controller on Kubernetes. To fix, configure '
-                    'SkyPilot to create a service account for running pods by '
-                    'adding the following in ~/.sky/config.yaml:\n'
+                    ' This may cause issues with autodown or when running '
+                    'Managed Jobs or SkyServe controller on Kubernetes. '
+                    'To fix, configure SkyPilot to create a service account '
+                    'for running pods by setting the following in '
+                    '~/.sky/config.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
                     '    More: https://skypilot.readthedocs.io/en/latest/'
@@ -1441,3 +1447,23 @@ def get_autoscaler_type(
         autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
             autoscaler_type)
     return autoscaler_type
+
+
+def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
+    """Converts a dictionary to a Kubernetes object.
+
+    Useful for comparing two Kubernetes objects. Adapted from
+    https://github.com/kubernetes-client/python/issues/977#issuecomment-592030030  # pylint: disable=line-too-long
+
+    Args:
+        object_dict: Dictionary representing the Kubernetes object
+        object_type: Type of the Kubernetes object. E.g., 'V1Pod', 'V1Service'.
+    """
+
+    class FakeKubeResponse:
+
+        def __init__(self, obj):
+            self.data = json.dumps(obj)
+
+    fake_kube_response = FakeKubeResponse(object_dict)
+    return kubernetes.api_client().deserialize(fake_kube_response, object_type)

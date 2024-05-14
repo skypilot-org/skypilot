@@ -136,6 +136,19 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     pathlib.Path(sky.__file__).resolve().parent / 'backends' /
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
+# The maximum size of a command line arguments is 128 KB, i.e. the command
+# executed with /bin/sh should be less than 128KB.
+# https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
+#
+# If a user have very long run or setup commands, the generated command may
+# exceed the limit, as we encode the script in base64 and directly include it in
+# the job submission command. If the command is too long, we instead write it to
+# a file, rsync and execute it.
+#
+# We use 120KB as a threshold to be safe for other arguments that
+# might be added during ssh.
+_MAX_INLINE_SCRIPT_LENGTH = 120 * 1024
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -3136,20 +3149,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             runner = runners[node_id]
             setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
-            with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
-                f.write(setup_script)
-                f.flush()
-                setup_sh_path = f.name
-                runner.rsync(source=setup_sh_path,
-                             target=remote_setup_file_name,
-                             up=True,
-                             stream_logs=False)
+            encoded_script = base64.b64encode(
+                setup_script.encode('utf-8')).decode('utf-8')
+            if (detach_setup or
+                    len(encoded_script) > _MAX_INLINE_SCRIPT_LENGTH):
+                with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
+                    f.write(setup_script)
+                    f.flush()
+                    setup_sh_path = f.name
+                    runner.rsync(source=setup_sh_path,
+                                 target=remote_setup_file_name,
+                                 up=True,
+                                 stream_logs=False)
+                create_script_code = 'true'
+            else:
+                create_script_code = (
+                    f'{{ echo "{encoded_script}" | base64 --decode > '
+                    f'{remote_setup_file_name}; }}')
+
             if detach_setup:
                 return
             setup_log_path = os.path.join(self.log_dir,
                                           f'setup-{runner.node_id}.log')
             returncode = runner.run(
-                setup_cmd,
+                f'{create_script_code} && {setup_cmd}',
                 log_path=setup_log_path,
                 process_stream=False,
                 source_bashrc=True,
@@ -3237,17 +3260,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
-        if len(job_submit_cmd) > 120 * 1024:
-            # The maximum size of a command line arguments is 128 KB, i.e. the
-            # command executed with /bin/sh should be less than 128KB.
-            # https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
-            # If a user have very long run or setup commands, the generated
-            # command may exceed the limit, as we encode the script in base64
-            # and directly include it in the job submission command. If the
-            # command is too long, we instead write it to a file, rsync and
-            # execute it.
-            # We use 120KB as a threshold to be safe for other arguments that
-            # might be added during ssh.
+        if len(job_submit_cmd) > _MAX_INLINE_SCRIPT_LENGTH:
             runners = handle.get_command_runners()
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
@@ -3711,6 +3724,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream=False,
             ssh_mode=command_runner.SshMode.INTERACTIVE,
             stdin=subprocess.DEVNULL,
+            source_bashrc=True,
         )
 
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
@@ -3748,6 +3762,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream=False,
             ssh_mode=command_runner.SshMode.INTERACTIVE,
             stdin=subprocess.DEVNULL,
+            source_bashrc=True,
         )
 
     def teardown_no_lock(self,
