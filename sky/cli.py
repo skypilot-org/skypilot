@@ -1349,6 +1349,7 @@ def _get_managed_jobs(
 def _get_services(service_names: Optional[List[str]],
                   show_all: bool,
                   show_endpoint: bool,
+                  show_failed_replicas: bool = True,
                   is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get service statuses.
 
@@ -1372,7 +1373,8 @@ def _get_services(service_names: Optional[List[str]],
             if not service_names:
                 # Change empty list to None
                 service_names = None
-            service_records = serve_lib.status(service_names)
+            service_records = serve_lib.status(service_names,
+                                               show_failed_replicas)
             num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -4006,10 +4008,17 @@ def serve_update(
               is_flag=True,
               required=False,
               help='Show service endpoint.')
+@click.option('--skip-failed',
+              '-s',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Skip failed service replica.')
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(all: bool, endpoint: bool, service_names: List[str]):
+def serve_status(all: bool, endpoint: bool, skip_failed: bool,
+                 service_names: List[str]):
     """Show statuses of SkyServe services.
 
     Show detailed statuses of one or more services. If SERVICE_NAME is not
@@ -4100,12 +4109,16 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       \b
       # Only show status of my-service
       sky serve status my-service
+      \b
+      # Skip failed service replicas
+      sky serve status -s
     """
     # This won't pollute the output of --endpoint.
     with rich_utils.safe_status('[cyan]Checking services[/]'):
         _, msg = _get_services(service_names,
                                show_all=all,
                                show_endpoint=endpoint,
+                               show_failed_replicas=not skip_failed,
                                is_called_by_user=True)
 
     if not endpoint:

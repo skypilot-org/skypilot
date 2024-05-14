@@ -492,12 +492,14 @@ def down(
 
 @usage_lib.entrypoint
 def status(
-    service_names: Optional[Union[str,
-                                  List[str]]] = None) -> List[Dict[str, Any]]:
+    service_names: Optional[Union[str, List[str]]] = None,
+    show_failed_replicas: bool = True,
+) -> List[Dict[str, Any]]:
     """Get service statuses.
 
     If service_names is given, return those services. Otherwise, return all
-    services.
+    services. Set show_failed_replicas to False to hide failed replicas for
+    a cleaner output.
 
     Each returned value has the following fields:
 
@@ -583,7 +585,15 @@ def status(
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    return serve_utils.load_service_status(serve_status_payload)
+    service_status = serve_utils.load_service_status(serve_status_payload)
+    if not show_failed_replicas:
+        for service in service_status:
+            service['replica_info'] = [
+                replica for replica in service['replica_info']
+                if replica['status'] not in
+                serve_state.ReplicaStatus.failed_statuses()
+            ]
+    return service_status
 
 
 @usage_lib.entrypoint
