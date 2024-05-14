@@ -41,10 +41,12 @@ class SkyServeLoadBalancer:
             lb_policies.RoundRobinPolicy())
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
-        # TODO(tian): httpx.Client has a resource limits of 100 max connections
-        # for each client. Expose this configuration or optimize it later.
+        # TODO(tian): httpx.Client has a resource limit of 100 max connections
+        # for each client. We should wait for feedback on the best max
+        # connections.
         # Reference: https://www.python-httpx.org/advanced/resource-limits/
-        # If more than 100 request is sent to the same replica, the client
+        #
+        # If more than 100 requests are sent to the same replica, the httpx client
         # will queue the requests and send them when a connection is available.
         # Reference: https://github.com/encode/httpcore/blob/a8f80980daaca98d556baea1783c5568775daadc/httpcore/_async/connection_pool.py#L69-L71 # pylint: disable=line-too-long
         self._client_pool: Dict[str, httpx.AsyncClient] = dict()
