@@ -94,7 +94,7 @@ def _validate_service_task(task: 'sky.Task') -> None:
 def up(
     task: 'sky.Task',
     service_name: Optional[str] = None,
-) -> None:
+) -> Tuple[str, str]:
     """Spin up a service.
 
     Please refer to the sky.cli.serve_up for the document.
