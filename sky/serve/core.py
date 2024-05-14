@@ -1,4 +1,4 @@
-"#""SkyServe core APIs."""
+"""SkyServe core APIs."""
 import re
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
