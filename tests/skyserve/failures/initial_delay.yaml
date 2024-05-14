@@ -2,7 +2,7 @@ service:
   readiness_probe:
     path: /health
     initial_delay_seconds: 10
-  replicas: 2
+  replicas: 1
 
 resources:
   cpus: 2
