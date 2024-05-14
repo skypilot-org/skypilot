@@ -189,6 +189,8 @@ def up(
         # for the first time; otherwise it is a name conflict.
         idle_minutes_to_autostop: Optional[int] = (
             constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+        # Kubernetes does not support autostop. For k8s controller, we skip
+        # the autostop and let it running indefinitely for now.
         controller_record = global_user_state.get_cluster_from_name(
             controller_name)
         if controller_record is not None:
