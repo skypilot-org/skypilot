@@ -3,7 +3,7 @@ import copy
 import logging
 import math
 import os
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 
 import yaml
 
@@ -27,11 +27,9 @@ def bootstrap_instances(
 
     config = _configure_ssh_jump(namespace, config)
 
-    if config.provider_config.get('fuse_device_required', False):
-        _configure_fuse_mounting(config.provider_config)
-
     requested_service_account = config.node_config['spec']['serviceAccountName']
-    if requested_service_account == 'skypilot-service-account':
+    if (requested_service_account ==
+            kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME):
         # If the user has requested a different service account (via pod_config
         # in ~/.sky/config.yaml), we assume they have already set up the
         # necessary roles and role bindings.
@@ -71,6 +69,26 @@ def bootstrap_instances(
     elif requested_service_account != 'default':
         logger.info(f'Using service account {requested_service_account!r}, '
                     'skipping role and role binding setup.')
+
+    # SkyPilot system namespace is required for FUSE mounting. Here we just
+    # create the namespace and set up the necessary permissions.
+    #
+    # We need to setup the namespace outside the if block below because if
+    # we put in the if block, the following happens:
+    # 1. User launches job controller on Kubernetes with SERVICE_ACCOUNT. No
+    #    namespace is created at this point since the controller does not
+    #    require FUSE.
+    # 2. User submits a job requiring FUSE.
+    # 3. The namespace is created here, but since the job controller is using
+    #    SERVICE_ACCOUNT, it does not have the necessary permissions to create
+    #    a role for itself to create the FUSE device manager.
+    # 4. The job fails to launch.
+    _configure_skypilot_system_namespace(config.provider_config,
+                                         requested_service_account)
+
+    if config.provider_config.get('fuse_device_required', False):
+        _configure_fuse_mounting(config.provider_config)
+
     return config
 
 
@@ -238,6 +256,9 @@ def _configure_autoscaler_service_account(
         namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
+        # Nothing to check for equality and patch here,
+        # since the service_account.metadata.name is the only important
+        # attribute, which is already filtered for above.
         logger.info('_configure_autoscaler_service_account: '
                     f'{using_existing_msg(account_field, name)}')
         return
@@ -272,12 +293,20 @@ def _configure_autoscaler_role(namespace: str, provider_config: Dict[str, Any],
 
     name = role['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_namespaced_role(
+    roles = (kubernetes.auth_api().list_namespaced_role(
         namespace, field_selector=field_selector).items)
-    if len(accounts) > 0:
-        assert len(accounts) == 1
+    if len(roles) > 0:
+        assert len(roles) == 1
+        existing_role = roles[0]
+        # Convert to k8s object to compare
+        new_role = kubernetes_utils.dict_to_k8s_object(role, 'V1Role')
+        if new_role.rules == existing_role.rules:
+            logger.info('_configure_autoscaler_role: '
+                        f'{using_existing_msg(role_field, name)}')
+            return
         logger.info('_configure_autoscaler_role: '
-                    f'{using_existing_msg(role_field, name)}')
+                    f'{updating_existing_msg(role_field, name)}')
+        kubernetes.auth_api().patch_namespaced_role(name, namespace, role)
         return
 
     logger.info('_configure_autoscaler_role: '
@@ -286,9 +315,12 @@ def _configure_autoscaler_role(namespace: str, provider_config: Dict[str, Any],
     logger.info(f'_configure_autoscaler_role: {created_msg(role_field, name)}')
 
 
-def _configure_autoscaler_role_binding(namespace: str,
-                                       provider_config: Dict[str, Any],
-                                       binding_field: str) -> None:
+def _configure_autoscaler_role_binding(
+        namespace: str,
+        provider_config: Dict[str, Any],
+        binding_field: str,
+        override_name: Optional[str] = None,
+        override_subject_namespace: Optional[str] = None) -> None:
     """ Reads the role binding from the config, creates if it does not exist.
 
     Args:
@@ -309,22 +341,37 @@ def _configure_autoscaler_role_binding(namespace: str,
     else:
         rb_namespace = binding['metadata']['namespace']
 
+    # If override_subject_namespace is provided, we will use that
+    # namespace for the subject. Otherwise, we will raise an error.
+    subject_namespace = override_subject_namespace or namespace
     for subject in binding['subjects']:
         if 'namespace' not in subject:
-            subject['namespace'] = namespace
-        elif subject['namespace'] != namespace:
+            subject['namespace'] = subject_namespace
+        elif subject['namespace'] != subject_namespace:
             subject_name = subject['name']
             raise InvalidNamespaceError(
                 binding_field + f' subject {subject_name}', namespace)
 
+    # Override name if provided
+    binding['metadata']['name'] = override_name or binding['metadata']['name']
     name = binding['metadata']['name']
+
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_namespaced_role_binding(
+    role_bindings = (kubernetes.auth_api().list_namespaced_role_binding(
         rb_namespace, field_selector=field_selector).items)
-    if len(accounts) > 0:
-        assert len(accounts) == 1
+    if len(role_bindings) > 0:
+        assert len(role_bindings) == 1
+        existing_binding = role_bindings[0]
+        new_rb = kubernetes_utils.dict_to_k8s_object(binding, 'V1RoleBinding')
+        if (new_rb.role_ref == existing_binding.role_ref and
+                new_rb.subjects == existing_binding.subjects):
+            logger.info('_configure_autoscaler_role_binding: '
+                        f'{using_existing_msg(binding_field, name)}')
+            return
         logger.info('_configure_autoscaler_role_binding: '
-                    f'{using_existing_msg(binding_field, name)}')
+                    f'{updating_existing_msg(binding_field, name)}')
+        kubernetes.auth_api().patch_namespaced_role_binding(
+            name, rb_namespace, binding)
         return
 
     logger.info('_configure_autoscaler_role_binding: '
@@ -350,12 +397,19 @@ def _configure_autoscaler_cluster_role(namespace,
 
     name = role['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_cluster_role(
+    cluster_roles = (kubernetes.auth_api().list_cluster_role(
         field_selector=field_selector).items)
-    if len(accounts) > 0:
-        assert len(accounts) == 1
+    if len(cluster_roles) > 0:
+        assert len(cluster_roles) == 1
+        existing_cr = cluster_roles[0]
+        new_cr = kubernetes_utils.dict_to_k8s_object(role, 'V1ClusterRole')
+        if new_cr.rules == existing_cr.rules:
+            logger.info('_configure_autoscaler_cluster_role: '
+                        f'{using_existing_msg(role_field, name)}')
+            return
         logger.info('_configure_autoscaler_cluster_role: '
-                    f'{using_existing_msg(role_field, name)}')
+                    f'{updating_existing_msg(role_field, name)}')
+        kubernetes.auth_api().patch_cluster_role(name, role)
         return
 
     logger.info('_configure_autoscaler_cluster_role: '
@@ -388,12 +442,21 @@ def _configure_autoscaler_cluster_role_binding(
 
     name = binding['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_cluster_role_binding(
+    cr_bindings = (kubernetes.auth_api().list_cluster_role_binding(
         field_selector=field_selector).items)
-    if len(accounts) > 0:
-        assert len(accounts) == 1
+    if len(cr_bindings) > 0:
+        assert len(cr_bindings) == 1
+        existing_binding = cr_bindings[0]
+        new_binding = kubernetes_utils.dict_to_k8s_object(
+            binding, 'V1ClusterRoleBinding')
+        if (new_binding.role_ref == existing_binding.role_ref and
+                new_binding.subjects == existing_binding.subjects):
+            logger.info('_configure_autoscaler_cluster_role_binding: '
+                        f'{using_existing_msg(binding_field, name)}')
+            return
         logger.info('_configure_autoscaler_cluster_role_binding: '
-                    f'{using_existing_msg(binding_field, name)}')
+                    f'{updating_existing_msg(binding_field, name)}')
+        kubernetes.auth_api().patch_cluster_role_binding(name, binding)
         return
 
     logger.info('_configure_autoscaler_cluster_role_binding: '
@@ -438,6 +501,48 @@ def _configure_ssh_jump(namespace, config: common.ProvisionConfig):
     return config
 
 
+def _configure_skypilot_system_namespace(
+        provider_config: Dict[str,
+                              Any], service_account: Optional[str]) -> None:
+    """Creates the namespace for skypilot-system mounting if it does not exist.
+
+    Also patches the SkyPilot service account to have the necessary permissions
+    to manage resources in the namespace.
+    """
+    svc_account_namespace = provider_config['namespace']
+    skypilot_system_namespace = provider_config['skypilot_system_namespace']
+    kubernetes_utils.create_namespace(skypilot_system_namespace)
+
+    # Setup permissions if using the default service account.
+    # If the user has requested a different service account (via
+    # remote_identity in ~/.sky/config.yaml), we assume they have already set
+    # up the necessary roles and role bindings.
+    if service_account == kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME:
+        # Note - this must be run only after the service account has been
+        # created in the cluster (in bootstrap_instances).
+        # Create the role in the skypilot-system namespace if it does not exist.
+        _configure_autoscaler_role(skypilot_system_namespace,
+                                   provider_config,
+                                   role_field='autoscaler_skypilot_system_role')
+        # We must create a unique role binding per-namespace that SkyPilot is
+        # running in, so we override the name with a unique name identifying
+        # the namespace. This is required for multi-tenant setups where
+        # different SkyPilot instances may be running in different namespaces.
+        override_name = provider_config[
+            'autoscaler_skypilot_system_role_binding']['metadata'][
+                'name'] + '-' + svc_account_namespace
+
+        # Create the role binding in the skypilot-system namespace, and have
+        # the subject namespace be the namespace that the SkyPilot service
+        # account is created in.
+        _configure_autoscaler_role_binding(
+            skypilot_system_namespace,
+            provider_config,
+            binding_field='autoscaler_skypilot_system_role_binding',
+            override_name=override_name,
+            override_subject_namespace=svc_account_namespace)
+
+
 def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     """Creates sidecars required for FUSE mounting.
 
@@ -446,17 +551,15 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     which exposes the host /dev/fuse device as a Kubernetes resource. The
     SkyPilot pod requests this resource to mount the FUSE filesystem.
 
-    We create this daemonset in a common namespace, which is configurable in the
-    provider config. This allows the FUSE mounting sidecar to be shared across
-    multiple tenants. The default namespace is 'sky-system' (populated in
-    clouds.Kubernetes)
+    We create this daemonset in the skypilot_system_namespace, which is
+    configurable in the provider config. This allows the FUSE mounting sidecar
+    to be shared across multiple tenants. The default namespace is
+    'skypilot-system' (populated in clouds.Kubernetes).
     """
 
     logger.info('_configure_fuse_mounting: Setting up FUSE device manager.')
 
-    fuse_device_manager_namespace = provider_config.get(
-        'fuse_device_manager_namespace', 'default')
-    kubernetes_utils.create_namespace(fuse_device_manager_namespace)
+    fuse_device_manager_namespace = provider_config['skypilot_system_namespace']
 
     # Read the device manager YAMLs from the manifests directory
     root_dir = os.path.dirname(os.path.dirname(__file__))
@@ -526,7 +629,9 @@ def _configure_services(namespace: str, provider_config: Dict[str,
         if len(services) > 0:
             assert len(services) == 1
             existing_service = services[0]
-            if service == existing_service:
+            # Convert to k8s object to compare
+            new_svc = kubernetes_utils.dict_to_k8s_object(service, 'V1Service')
+            if new_svc.spec.ports == existing_service.spec.ports:
                 logger.info('_configure_services: '
                             f'{using_existing_msg("service", name)}')
                 return

@@ -33,10 +33,13 @@ provider:
 
     ssh_jump_image: {{k8s_ssh_jump_image}}
 
+    # Namespace used to host SkyPilot system components, such as fuse device
+    # manager.
+    skypilot_system_namespace: {{k8s_skypilot_system_namespace}}
+
     # Boolean flag to indicate if the cluster requires FUSE mounting.
     # Used to set up the necessary permissions and sidecars.
     fuse_device_required: {{k8s_fuse_device_required}}
-    fuse_device_manager_namespace: {{k8s_fuse_device_manager_namespace}}
 
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
@@ -85,6 +88,37 @@ provider:
             name: skypilot-service-account-role
             apiGroup: rbac.authorization.k8s.io
 
+    # Role for the skypilot-system namespace to create FUSE device manager and
+    # any other system components.
+    autoscaler_skypilot_system_role:
+        kind: Role
+        apiVersion: rbac.authorization.k8s.io/v1
+        metadata:
+            namespace: {{k8s_skypilot_system_namespace}}
+            labels:
+                parent: skypilot
+            name: skypilot-system-service-account-role
+        rules:
+        - apiGroups: ["*"]
+          resources: ["*"]
+          verbs: ["*"]
+
+    # RoleBinding for skypilot-system namespace role
+    autoscaler_skypilot_system_role_binding:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+            namespace: {{k8s_skypilot_system_namespace}}
+            labels:
+                parent: skypilot
+            name: skypilot-system-service-account-role-binding
+        subjects:
+        - kind: ServiceAccount
+          name: skypilot-service-account
+        roleRef:
+            kind: Role
+            name: skypilot-system-service-account-role
+            apiGroup: rbac.authorization.k8s.io
 
     # Role to access ingress services for fetching IP
     autoscaler_ingress_role:
@@ -101,7 +135,7 @@ provider:
               verbs: [ "list", "get", "watch" ]
             - apiGroups: [ "rbac.authorization.k8s.io" ]
               resources: [ "roles", "rolebindings" ]
-              verbs: [ "get", "list", "watch" ]
+              verbs: [ "get", "list", "watch", "patch" ]
 
     # RoleBinding to access ingress services for fetching IP
     autoscaler_ingress_role_binding:
@@ -134,9 +168,12 @@ provider:
         - apiGroups: [ "" ]
           resources: [ "nodes" ]  # Required for getting node resources.
           verbs: [ "get", "list", "watch" ]
+        - apiGroups: [ "" ]
+          resources: [ "namespaces" ]  # Required for creating skypilot-system namespace, which hosts fuse device manager.
+          verbs: [ "get", "list", "watch", "create" ]
         - apiGroups: [ "rbac.authorization.k8s.io" ]
           resources: [ "clusterroles", "clusterrolebindings" ]  # Required for launching more SkyPilot clusters from within the pod.
-          verbs: [ "get", "list", "watch" ]
+          verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
         - apiGroups: [ "node.k8s.io" ]
           resources: [ "runtimeclasses" ]   # Required for autodetecting the runtime class of the nodes.
           verbs: [ "get", "list", "watch" ]

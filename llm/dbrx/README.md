@@ -256,7 +256,7 @@ ENDPOINT=$(sky serve status --endpoint dbrx)
 
 To curl the endpoint:
 ```console
-curl -L $ENDPOINT/v1/chat/completions \
+curl $ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "databricks/dbrx-instruct",
