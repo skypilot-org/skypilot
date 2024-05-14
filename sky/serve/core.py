@@ -1,7 +1,7 @@
-"""SkyServe core APIs."""
+"#""SkyServe core APIs."""
 import re
 import tempfile
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -292,6 +292,7 @@ def up(
             f'{style.RESET_ALL}'
             f'\n{fore.GREEN}The replicas should be ready within a '
             f'short time.{style.RESET_ALL}')
+        return service_name, endpoint
 
 
 @usage_lib.entrypoint
