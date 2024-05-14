@@ -285,7 +285,7 @@ def up(
             f'{backend_utils.BOLD}watch -n10 sky serve status {service_name}'
             f'{backend_utils.RESET_BOLD}'
             '\nTo send a test request:\t\t'
-            f'{backend_utils.BOLD}curl -L {endpoint}'
+            f'{backend_utils.BOLD}curl {endpoint}'
             f'{backend_utils.RESET_BOLD}'
             '\n'
             f'\n{fore.GREEN}SkyServe is spinning up your service now.'

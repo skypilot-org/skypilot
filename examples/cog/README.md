@@ -28,7 +28,7 @@ After the service is launched, access the deployment with the following:
 ```console
 ENDPOINT=$(sky serve status --endpoint cog)
 
-curl -L http://$ENDPOINT/predictions -X POST \
+curl http://$ENDPOINT/predictions -X POST \
   -H 'Content-Type: application/json' \
   -d '{"input": {"image": "https://blog.skypilot.co/introducing-sky-serve/images/sky-serve-thumbnail.png"}}' \
   | jq -r '.output | split(",")[1]' | base64 --decode > output.png
