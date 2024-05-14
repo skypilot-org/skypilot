@@ -2011,10 +2011,10 @@ class RetryingVmProvisioner(object):
                     cloud_user = to_provision.cloud.get_current_user_identity()
 
                 requested_features = self._requested_features.copy()
-                # Skip stop feature for Kubernetes jobs controller.
+                # Skip stop feature for Kubernetes controllers.
                 if (isinstance(to_provision.cloud, clouds.Kubernetes) and
                         controller_utils.Controllers.from_name(cluster_name)
-                        == controller_utils.Controllers.JOBS_CONTROLLER):
+                        is not None):
                     assert (clouds.CloudImplementationFeatures.STOP
                             in requested_features), requested_features
                     requested_features.remove(

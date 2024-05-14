@@ -8,7 +8,6 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
-from sky import global_user_state
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -187,19 +186,7 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
-        idle_minutes_to_autostop: Optional[int] = (
-            constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
-        # Kubernetes does not support autostop. For k8s controller, we skip
-        # the autostop and let it running indefinitely for now.
-        controller_record = global_user_state.get_cluster_from_name(
-            controller_name)
-        if controller_record is not None:
-            current_controller_resources: sky.Resources = (
-                controller_record['handle'].launched_resources)
-            if (current_controller_resources is not None and
-                    current_controller_resources.cloud.is_same_cloud(
-                        sky.Kubernetes())):
-                idle_minutes_to_autostop = None
+        idle_minutes_to_autostop = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
         controller_job_id, controller_handle = sky.launch(
             task=controller_task,
             stream_logs=False,
