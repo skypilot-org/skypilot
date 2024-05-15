@@ -722,6 +722,14 @@ def get_config_schema():
         },
     }
 
+    candidate_clouds = {
+        # A list of cloud names that should be used for execution
+        'type': 'array',
+        'items': {
+            'type': 'string',
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
@@ -738,6 +746,7 @@ def get_config_schema():
             'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
+            'candidate_clouds': candidate_clouds,
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.

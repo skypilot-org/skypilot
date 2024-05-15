@@ -7,6 +7,7 @@ import colorama
 import rich
 
 from sky import clouds
+from sky import skypilot_config
 from sky import exceptions
 from sky import global_user_state
 from sky.adaptors import cloudflare
@@ -45,10 +46,20 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         else:
             echo(f'    Reason: {reason}')
 
-    clouds_to_check = [
-        (repr(cloud), cloud) for cloud in clouds.CLOUD_REGISTRY.values()
-    ]
-    clouds_to_check.append(('Cloudflare, for R2 object store', cloudflare))
+    # Use candidate_clouds from config if it exists, otherwise check all clouds.
+    config_candidate_clouds = skypilot_config.get_nested(['candidate_clouds'],
+                                                         None)
+    if config_candidate_clouds:
+        # TODO: Handle cloudflare here since it is not in CLOUD_REGISTRY.
+        clouds_to_check = [
+            (cloud_name, clouds.CLOUD_REGISTRY.from_str(cloud_name))
+            for cloud_name in config_candidate_clouds
+        ]
+    else:
+        clouds_to_check = [
+            (repr(cloud), cloud) for cloud in clouds.CLOUD_REGISTRY.values()
+        ]
+        clouds_to_check.append(('Cloudflare, for R2 object store', cloudflare))
 
     for cloud_tuple in sorted(clouds_to_check):
         check_one_cloud(cloud_tuple)
