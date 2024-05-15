@@ -104,7 +104,8 @@ def up(
         service_name: Name of the service.
 
     Returns:
-        A tuple with two values: the service name and the endpoint.
+        service_name: str; The name of the service.  Same if passed in as an argument.
+        endpoint: str; The service endpoint.
     """
     if service_name is None:
         service_name = serve_utils.generate_service_name()
