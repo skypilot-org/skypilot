@@ -1,0 +1,10 @@
+service:
+  readiness_probe: /
+  auth_key: sky-authkey-3d2105b9-a9ba-4f13
+  replicas: 1
+
+resources:
+  cpus: 2+
+  ports: 8080
+
+run: python -m http.server 8080

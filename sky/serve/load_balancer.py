@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 import aiohttp
 import fastapi
@@ -27,16 +27,19 @@ class SkyServeLoadBalancer:
     policy.
     """
 
-    def __init__(self, controller_url: str, load_balancer_port: int) -> None:
+    def __init__(self, controller_url: str, load_balancer_port: int,
+                 api_key: Optional[str]) -> None:
         """Initialize the load balancer.
 
         Args:
             controller_url: The URL of the controller.
             load_balancer_port: The port where the load balancer listens to.
+            api_key: The API key to authorize to use load balancer.
         """
         self._app = fastapi.FastAPI()
         self._controller_url: str = controller_url
         self._load_balancer_port: int = load_balancer_port
+        self._api_key: Optional[str] = api_key
         self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
             lb_policies.RoundRobinPolicy())
         self._request_aggregator: serve_utils.RequestsAggregator = (
@@ -217,15 +220,28 @@ class SkyServeLoadBalancer:
             # Register controller synchronization task
             asyncio.create_task(self._sync_with_controller())
 
+        if self._api_key is not None:
+
+            @self._app.middleware('http')
+            async def authorization(request: fastapi.Request, call_next):
+                assert self._api_key is not None
+                if (request.headers.get('Authorization') !=
+                        common_utils.format_authorization_key(self._api_key)):
+                    return fastapi.responses.JSONResponse(
+                        content={'error': 'Unauthorized'}, status_code=401)
+                return await call_next(request)
+
         logger.info('SkyServe Load Balancer started on '
                     f'http://0.0.0.0:{self._load_balancer_port}')
 
         uvicorn.run(self._app, host='0.0.0.0', port=self._load_balancer_port)
 
 
-def run_load_balancer(controller_addr: str, load_balancer_port: int):
+def run_load_balancer(controller_addr: str, load_balancer_port: int,
+                      api_key: Optional[str]) -> None:
     load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
-                                         load_balancer_port=load_balancer_port)
+                                         load_balancer_port=load_balancer_port,
+                                         api_key=api_key)
     load_balancer.run()
 
 
@@ -241,5 +257,11 @@ if __name__ == '__main__':
                         required=True,
                         default=8890,
                         help='The port where the load balancer listens to.')
+    parser.add_argument('--api-key',
+                        type=str,
+                        required=False,
+                        default=None,
+                        help='The API key to authorization.')
     args = parser.parse_args()
-    run_load_balancer(args.controller_addr, args.load_balancer_port)
+    run_load_balancer(args.controller_addr, args.load_balancer_port,
+                      args.api_key)
