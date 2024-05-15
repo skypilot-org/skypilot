@@ -303,7 +303,13 @@ def get_service_schema():
                             }, {
                                 'type': 'object',
                             }]
-                        }
+                        },
+                        'headers': {
+                            'type': 'object',
+                            'additionalProperties': {
+                                'type': 'string'
+                            }
+                        },
                     }
                 }]
             },
