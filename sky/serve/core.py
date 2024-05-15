@@ -102,6 +102,9 @@ def up(
     Args:
         task: sky.Task to serve up.
         service_name: Name of the service.
+
+    Returns:
+        A tuple with two values: the service name and the endpoint.
     """
     if service_name is None:
         service_name = serve_utils.generate_service_name()
