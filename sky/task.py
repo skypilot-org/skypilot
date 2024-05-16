@@ -354,7 +354,7 @@ class Task:
         envs = config.get('envs')
         if envs is not None and isinstance(envs, dict):
             for k, v in envs.items():
-                new_envs = {}
+                new_envs: Dict[str, Optional[str]] = {}
                 if v is not None:
                     new_envs[str(k)] = str(v)
                 else:
