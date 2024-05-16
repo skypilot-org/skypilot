@@ -2862,7 +2862,7 @@ def _down_or_stop_clusters(
         progress.refresh()
 
 
-@cli.command()
+@cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clouds', required=False, type=str, nargs=-1)
 @click.option('--verbose',
               '-v',
@@ -2881,6 +2881,16 @@ def check(clouds: Tuple[str], verbose: bool):
 
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Check credentials for all supported clouds.
+      sky check
+      \b
+      # Check only specific clouds - AWS and GCP.
+      sky check aws gcp
     """
     clouds_arg = clouds if len(clouds) > 0 else None
     sky_check.check(verbose=verbose, clouds=clouds_arg)
