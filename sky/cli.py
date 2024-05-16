@@ -543,7 +543,6 @@ def _launch_with_confirm(
     retry_until_up: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
-    auto_exec: bool = False,
 ):
     """Launch a cluster with a Task."""
     if cluster is None:
@@ -554,20 +553,6 @@ def _launch_with_confirm(
         clone_source_str = f' from the disk of {clone_disk_from!r}'
         task, _ = backend_utils.check_can_clone_disk_and_override_task(
             clone_disk_from, cluster, task)
-
-    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
-    if maybe_status == status_lib.ClusterStatus.UP and auto_exec:
-        # If the cluster is already up, we can just execute the task.
-        click.secho(
-            f'Cluster {cluster} is UP, skip provisioning and setup '
-            'due to `--auto-exec`.',
-            fg='green')
-        click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
-        sky.exec(task,
-                 backend=backend,
-                 cluster_name=cluster,
-                 detach_run=detach_run)
-        return
 
     with sky.Dag() as dag:
         dag.add(task)
@@ -1041,15 +1026,6 @@ def cli():
     help=('[Experimental] Clone disk from an existing cluster to launch '
           'a new one. This is useful when the new cluster needs to have '
           'the same data on the boot disk as an existing cluster.'))
-@click.option(
-    '--auto-exec',
-    '--auto',
-    is_flag=True,
-    default=False,
-    required=False,
-    help=('Automatically switch to `sky exec` if the cluster is UP. '
-          'If the cluster is UP, the provisioning/setup stages will be '
-          'skipped. Arguments unrelated to `sky exec` will be ignored.'))
 @usage_lib.entrypoint
 def launch(
         entrypoint: List[str],
@@ -1080,8 +1056,7 @@ def launch(
         retry_until_up: bool,
         yes: bool,
         no_setup: bool,
-        clone_disk_from: Optional[str],
-        auto_exec: bool):
+        clone_disk_from: Optional[str]):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1149,8 +1124,7 @@ def launch(
                          down=down,
                          retry_until_up=retry_until_up,
                          no_setup=no_setup,
-                         clone_disk_from=clone_disk_from,
-                         auto_exec=auto_exec)
+                         clone_disk_from=clone_disk_from)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
