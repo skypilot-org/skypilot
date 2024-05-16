@@ -18,12 +18,6 @@ def check(
     verbose: bool = False,
     clouds: Optional[Tuple[str]] = None,
 ) -> None:
-    clouds_set = set()
-    if clouds is not None:
-        for cloud in clouds:
-            sky_clouds.CLOUD_REGISTRY.from_str(cloud)  # verify cloud
-            clouds_set.add(cloud.lower())
-
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
     enabled_clouds = []
@@ -55,15 +49,22 @@ def check(
             disabled_clouds.append(cloud_repr)
             echo(f'    Reason: {reason}')
 
-    clouds_to_check = [
-        (repr(cloud), cloud) for cloud in sky_clouds.CLOUD_REGISTRY.values()
-    ]
-    clouds_to_check.append(('Cloudflare, for R2 object store', cloudflare))
+    if clouds is not None:
+        clouds_to_check = []
+        for cloud in clouds:
+            if cloud.lower() == 'cloudflare':
+                clouds_to_check.append(
+                    ('Cloudflare, for R2 object store', cloudflare))
+            else:
+                clouds_to_check.append(
+                    (cloud.lower(), sky_clouds.CLOUD_REGISTRY.from_str(cloud)))
+    else:
+        clouds_to_check = [(repr(cloud), cloud)
+                           for cloud in sky_clouds.CLOUD_REGISTRY.values()]
+        clouds_to_check.append(('Cloudflare, for R2 object store', cloudflare))
 
     for cloud_tuple in sorted(clouds_to_check):
-        cloud_repr = cloud_tuple[0].lower()
-        if clouds is None or cloud_repr in clouds_set:
-            check_one_cloud(cloud_tuple)
+        check_one_cloud(cloud_tuple)
 
     # Cloudflare is not a real cloud in sky_clouds.CLOUD_REGISTRY, and should
     # not be inserted into the DB (otherwise `sky launch` and other code would
