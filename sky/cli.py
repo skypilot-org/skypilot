@@ -687,7 +687,7 @@ def _pop_and_ignore_fields_in_override_params(
 
 
 def _make_task_or_dag_from_entrypoint_with_overrides(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     *,
     entrypoint_name: str = 'Task',
     name: Optional[str] = None,
@@ -1028,7 +1028,7 @@ def cli():
           'the same data on the boot disk as an existing cluster.'))
 @usage_lib.entrypoint
 def launch(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     cluster: Optional[str],
     dryrun: bool,
     detach_setup: bool,
@@ -1130,11 +1130,19 @@ def launch(
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('cluster',
-                required=True,
+                required=False,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
+@click.option(
+    '--cluster',
+    '-c',
+    'cluster_option',
+    hidden=True,
+    type=str,
+    help='This is the same as the positional argument, just for consistency.',
+    **_get_shell_complete_args(_complete_cluster_name))
 @click.argument('entrypoint',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
@@ -1149,8 +1157,9 @@ def launch(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(
-    cluster: str,
-    entrypoint: List[str],
+    cluster: Optional[str],
+    cluster_option: Optional[str],
+    entrypoint: Tuple[str, ...],
     detach_run: bool,
     name: Optional[str],
     cloud: Optional[str],
@@ -1228,6 +1237,17 @@ def exec(
       sky exec mycluster --env WANDB_API_KEY python train_gpu.py
 
     """
+    if cluster_option is None and cluster is None:
+        raise click.UsageError('Missing argument \'[CLUSTER]\' and '
+                               '\'[ENTRYPOINT]...\'')
+    if cluster_option is not None:
+        if cluster is not None:
+            entrypoint = (cluster,) + entrypoint
+        cluster = cluster_option
+    if not entrypoint:
+        raise click.UsageError('Missing argument \'[ENTRYPOINT]...\'')
+    assert cluster is not None, (cluster, cluster_option, entrypoint)
+
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
@@ -3284,6 +3304,12 @@ def jobs():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              hidden=True,
+              help=('Alias for --name, the name of the spot job.'))
 @click.option('--job-recovery',
               default=None,
               type=str,
@@ -3316,8 +3342,9 @@ def jobs():
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     name: Optional[str],
+    cluster: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -3353,6 +3380,11 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
+    if cluster is not None:
+        if name is not None and name != cluster:
+            raise click.UsageError('Cannot specify both --name and --cluster. '
+                                   'Use one of the flags as they are alias.')
+        name = cluster
     env = _merge_env_vars(env_file, env)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
@@ -3697,7 +3729,7 @@ def serve():
 
 def _generate_task_with_service(
     service_name: str,
-    service_yaml_args: List[str],
+    service_yaml_args: Tuple[str, ...],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -3802,7 +3834,7 @@ def _generate_task_with_service(
 @timeline.event
 @usage_lib.entrypoint
 def serve_up(
-    service_yaml: List[str],
+    service_yaml: Tuple[str, ...],
     service_name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
@@ -3920,7 +3952,7 @@ def serve_up(
 @usage_lib.entrypoint
 def serve_update(
     service_name: str,
-    service_yaml: List[str],
+    service_yaml: Tuple[str, ...],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
