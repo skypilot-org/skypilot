@@ -380,7 +380,7 @@ class Task:
                         f'Environment variable {k!r} is None. Please set a '
                         'value for it in task YAML or with --env flag. '
                         f'To set it to be empty, use an empty string ({k}: "" '
-                        f'or --env {k}="").')
+                        f'in task YAML or --env {k}="" in CLI).')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
