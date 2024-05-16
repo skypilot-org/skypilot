@@ -1,6 +1,7 @@
 """Credential checks: check cloud credentials and enable clouds."""
 import traceback
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from types import ModuleType
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import click
 import colorama
@@ -23,7 +24,9 @@ def check(
     enabled_clouds = []
     disabled_clouds = []
 
-    def check_one_cloud(cloud_tuple: Tuple[str, Any]) -> None:
+    def check_one_cloud(
+            cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
+                                          ModuleType]]) -> None:
         cloud_repr, cloud = cloud_tuple
         echo(f'  Checking {cloud_repr}...', nl=False)
         try:
@@ -56,11 +59,12 @@ def check(
                 clouds_to_check.append(
                     ('Cloudflare, for R2 object store', cloudflare))
             else:
-                clouds_to_check.append(
-                    (cloud.lower(), sky_clouds.CLOUD_REGISTRY.from_str(cloud)))
+                cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
+                assert cloud_obj is not None, f'Cloud {cloud!r} not found'
+                clouds_to_check.append((repr(cloud_obj), cloud_obj))
     else:
-        clouds_to_check = [(repr(cloud), cloud)
-                           for cloud in sky_clouds.CLOUD_REGISTRY.values()]
+        clouds_to_check = [(repr(cloud_obj), cloud_obj)
+                           for cloud_obj in sky_clouds.CLOUD_REGISTRY.values()]
         clouds_to_check.append(('Cloudflare, for R2 object store', cloudflare))
 
     for cloud_tuple in sorted(clouds_to_check):
@@ -69,23 +73,23 @@ def check(
     # Cloudflare is not a real cloud in sky_clouds.CLOUD_REGISTRY, and should
     # not be inserted into the DB (otherwise `sky launch` and other code would
     # error out when it's trying to look it up in the registry).
-    enabled_clouds = [
+    enabled_clouds_set = {
         cloud for cloud in enabled_clouds if not cloud.startswith('Cloudflare')
-    ]
-    disabled_clouds = [
+    }
+    disabled_clouds_set = {
         cloud for cloud in disabled_clouds if not cloud.startswith('Cloudflare')
-    ]
-    previously_enabled_clouds = [
+    }
+    previously_enabled_clouds_set = {
         repr(cloud) for cloud in global_user_state.get_cached_enabled_clouds()
-    ]
-    for cloud in previously_enabled_clouds:
-        is_not_duplicate = cloud not in enabled_clouds
-        is_not_disabled = cloud not in disabled_clouds
-        if is_not_duplicate and is_not_disabled:
-            enabled_clouds.append(cloud)
-    global_user_state.set_enabled_clouds(enabled_clouds)
+    }
 
-    if len(enabled_clouds) == 0:
+    # Determine the set of enabled clouds: previously enabled clouds + newly
+    # enabled clouds - newly disabled clouds.
+    all_enabled_clouds = ((previously_enabled_clouds_set | enabled_clouds_set) -
+                          disabled_clouds_set)
+    global_user_state.set_enabled_clouds(list(all_enabled_clouds))
+
+    if len(all_enabled_clouds) == 0:
         echo(
             click.style(
                 'No cloud is enabled. SkyPilot will not be able to run any '
@@ -94,11 +98,13 @@ def check(
                 bold=True))
         raise SystemExit()
     else:
+        clouds_arg = (' ' +
+                      ' '.join(disabled_clouds) if clouds is not None else '')
         echo(
             click.style(
                 '\nTo enable a cloud, follow the hints above and rerun: ',
-                dim=True) + click.style('sky check', bold=True) + '\n' +
-            click.style(
+                dim=True) + click.style(f'sky check{clouds_arg}', bold=True) +
+            '\n' + click.style(
                 'If any problems remain, refer to detailed docs at: '
                 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
                 dim=True))
@@ -106,7 +112,7 @@ def check(
         # Pretty print for UX.
         if not quiet:
             enabled_clouds_str = '\n  :heavy_check_mark: '.join(
-                [''] + sorted(enabled_clouds))
+                [''] + sorted(all_enabled_clouds))
             rich.print('\n[green]:tada: Enabled clouds :tada:'
                        f'{enabled_clouds_str}[/green]')
 
