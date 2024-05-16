@@ -291,6 +291,11 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
             f'sky logs {name} 5 --status',  # Ensure the job succeeded.
+            # Test '-c' for exec
+            f'sky exec -c {name} echo',
+            f'sky logs {name} 6 --status',
+            f'sky exec -c {name} echo hi test',
+            f'sky logs {name} 7 | grep "hi test"',
         ],
         f'sky down -y {name}',
         _get_timeout(generic_cloud),
