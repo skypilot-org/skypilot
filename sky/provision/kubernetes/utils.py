@@ -206,8 +206,7 @@ class GFDLabelFormatter(GPULabelFormatter):
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         """Searches against a canonical list of NVIDIA GPUs and pattern
-        matches the canonical GPU name against the GFD label. Taken from
-        sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
+        matches the canonical GPU name against the GFD label.
         """
         canonical_gpu_names = [
             'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4',
@@ -224,7 +223,10 @@ class GFDLabelFormatter(GPULabelFormatter):
         # If we didn't find a canonical name:
         # 1. remove 'NVIDIA-' (e.g., 'NVIDIA-RTX-A6000' -> 'RTX-A6000')
         # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
-        return value.upper().replace('NVIDIA-', '').replace('GEFORCE-', '')
+        # 3. remove 'RTX-' (e.g. 'RTX-6000' -> 'RTX6000')
+        # Same logic, but uppercased, as the Skypilot labeler job found in
+        # sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
+        return value.upper().replace('NVIDIA-', '').replace('GEFORCE-', '').replace('RTX-', 'RTX')
 
 
 class KarpenterLabelFormatter(SkyPilotLabelFormatter):
