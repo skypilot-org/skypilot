@@ -378,7 +378,9 @@ class Task:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Environment variable {k!r} is None. Please set a '
-                        'value for it in task YAML or with --env flag.')
+                        'value for it in task YAML or with --env flag. '
+                        f'To set it to be empty, use an empty string ({k}: "" '
+                        f'or --env {k}="").')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
