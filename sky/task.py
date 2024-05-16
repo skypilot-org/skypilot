@@ -354,10 +354,12 @@ class Task:
         envs = config.get('envs')
         if envs is not None and isinstance(envs, dict):
             for k, v in envs.items():
+                new_envs = {}
                 if v is not None:
-                    envs[str(k)] = str(v)
+                    new_envs[str(k)] = str(v)
                 else:
-                    envs[str(k)] = None
+                    new_envs[str(k)] = None
+            config['envs'] = new_envs
         common_utils.validate_schema(config, schemas.get_task_schema(),
                                      'Invalid task YAML: ')
         if env_overrides is not None:
