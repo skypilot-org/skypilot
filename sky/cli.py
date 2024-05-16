@@ -47,7 +47,7 @@ import yaml
 import sky
 from sky import backends
 from sky import check as sky_check
-from sky import clouds
+from sky import clouds as sky_clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
@@ -479,7 +479,7 @@ def _parse_override_params(
         if cloud.lower() == 'none':
             override_params['cloud'] = None
         else:
-            override_params['cloud'] = clouds.CLOUD_REGISTRY.from_str(cloud)
+            override_params['cloud'] = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
         if region.lower() == 'none':
             override_params['region'] = None
@@ -687,7 +687,7 @@ def _pop_and_ignore_fields_in_override_params(
 
 
 def _make_task_or_dag_from_entrypoint_with_overrides(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     *,
     entrypoint_name: str = 'Task',
     name: Optional[str] = None,
@@ -1028,7 +1028,7 @@ def cli():
           'the same data on the boot disk as an existing cluster.'))
 @usage_lib.entrypoint
 def launch(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     cluster: Optional[str],
     dryrun: bool,
     detach_setup: bool,
@@ -1130,11 +1130,19 @@ def launch(
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('cluster',
-                required=True,
+                required=False,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
+@click.option(
+    '--cluster',
+    '-c',
+    'cluster_option',
+    hidden=True,
+    type=str,
+    help='This is the same as the positional argument, just for consistency.',
+    **_get_shell_complete_args(_complete_cluster_name))
 @click.argument('entrypoint',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
@@ -1149,8 +1157,9 @@ def launch(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(
-    cluster: str,
-    entrypoint: List[str],
+    cluster: Optional[str],
+    cluster_option: Optional[str],
+    entrypoint: Tuple[str, ...],
     detach_run: bool,
     name: Optional[str],
     cloud: Optional[str],
@@ -1228,6 +1237,17 @@ def exec(
       sky exec mycluster --env WANDB_API_KEY python train_gpu.py
 
     """
+    if cluster_option is None and cluster is None:
+        raise click.UsageError('Missing argument \'[CLUSTER]\' and '
+                               '\'[ENTRYPOINT]...\'')
+    if cluster_option is not None:
+        if cluster is not None:
+            entrypoint = (cluster,) + entrypoint
+        cluster = cluster_option
+    if not entrypoint:
+        raise click.UsageError('Missing argument \'[ENTRYPOINT]...\'')
+    assert cluster is not None, (cluster, cluster_option, entrypoint)
+
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
@@ -2862,24 +2882,38 @@ def _down_or_stop_clusters(
         progress.refresh()
 
 
-@cli.command()
+@cli.command(cls=_DocumentedCodeCommand)
+@click.argument('clouds', required=False, type=str, nargs=-1)
 @click.option('--verbose',
               '-v',
               is_flag=True,
               default=False,
               help='Show the activated account for each cloud.')
 @usage_lib.entrypoint
-def check(verbose: bool):
+def check(clouds: Tuple[str], verbose: bool):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
     cloud is detected to be inaccessible, the reason and correction steps will
     be shown.
 
+    If CLOUDS are specified, checks credentials for only those clouds.
+
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Check credentials for all supported clouds.
+      sky check
+      \b
+      # Check only specific clouds - AWS and GCP.
+      sky check aws gcp
     """
-    sky_check.check(verbose=verbose)
+    clouds_arg = clouds if len(clouds) > 0 else None
+    sky_check.check(verbose=verbose, clouds=clouds_arg)
 
 
 @cli.command()
@@ -2958,7 +2992,7 @@ def show_gpus(
             '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
-    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and accelerator_str is not None:
@@ -2978,7 +3012,7 @@ def show_gpus(
         name, quantity = None, None
 
         # Kubernetes specific bools
-        cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
+        cloud_is_kubernetes = isinstance(cloud_obj, sky_clouds.Kubernetes)
         kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type(
         ) is not None
 
@@ -3270,6 +3304,12 @@ def jobs():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              hidden=True,
+              help=('Alias for --name, the name of the spot job.'))
 @click.option('--job-recovery',
               default=None,
               type=str,
@@ -3302,8 +3342,9 @@ def jobs():
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     name: Optional[str],
+    cluster: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -3339,6 +3380,11 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
+    if cluster is not None:
+        if name is not None and name != cluster:
+            raise click.UsageError('Cannot specify both --name and --cluster. '
+                                   'Use one of the flags as they are alias.')
+        name = cluster
     env = _merge_env_vars(env_file, env)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
@@ -3683,7 +3729,7 @@ def serve():
 
 def _generate_task_with_service(
     service_name: str,
-    service_yaml_args: List[str],
+    service_yaml_args: Tuple[str, ...],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -3788,7 +3834,7 @@ def _generate_task_with_service(
 @timeline.event
 @usage_lib.entrypoint
 def serve_up(
-    service_yaml: List[str],
+    service_yaml: Tuple[str, ...],
     service_name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
@@ -3906,7 +3952,7 @@ def serve_up(
 @usage_lib.entrypoint
 def serve_update(
     service_name: str,
-    service_yaml: List[str],
+    service_yaml: Tuple[str, ...],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
