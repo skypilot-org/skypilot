@@ -1,6 +1,6 @@
 """Credential checks: check cloud credentials and enable clouds."""
 import traceback
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import click
 import colorama
@@ -23,7 +23,7 @@ def check(
     enabled_clouds = []
     disabled_clouds = []
 
-    def check_one_cloud(cloud_tuple: Tuple[str, sky_clouds.Cloud]) -> None:
+    def check_one_cloud(cloud_tuple: Tuple[str, Any]) -> None:
         cloud_repr, cloud = cloud_tuple
         echo(f'  Checking {cloud_repr}...', nl=False)
         try:
@@ -50,7 +50,7 @@ def check(
             echo(f'    Reason: {reason}')
 
     if clouds is not None:
-        clouds_to_check = []
+        clouds_to_check: List[Tuple[str, Any]] = []
         for cloud in clouds:
             if cloud.lower() == 'cloudflare':
                 clouds_to_check.append(
