@@ -1056,7 +1056,7 @@ def launch(
         retry_until_up: bool,
         yes: bool,
         no_setup: bool,
-        clone_disk_from: Optional[str]):
+        clone_disk_from: Optional[str],):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
