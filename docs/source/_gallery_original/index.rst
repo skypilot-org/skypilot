@@ -19,10 +19,11 @@ Contents
 
 .. toctree::
    :maxdepth: 1
-   :caption: Inference Engines
+   :caption: Inference Frameworks
 
    vLLM <frameworks/vllm>
    Hugging Face TGI <frameworks/tgi>
+   Ollama <frameworks/ollama>
    SGLang <frameworks/sglang>
    LoRAX <frameworks/lorax>
 
@@ -30,10 +31,13 @@ Contents
 .. toctree::
    :maxdepth: 1
    :caption: LLM Models
-   
+
    Mixtral (Mistral AI) <llms/mixtral>
    Mistral 7B (Mistral AI) <https://docs.mistral.ai/self-deployment/skypilot/>
+   DBRX (Databricks) <llms/dbrx>
    Llama-2 (Meta) <llms/llama-2>
+   Llama-3 (Meta) <llms/llama-3>
+   Qwen (Alibaba) <llms/qwen>
    CodeLlama (Meta) <llms/codellama>
    Gemma (Google) <llms/gemma>
 
@@ -59,7 +63,7 @@ We welcome contributions from the community. If you would like to contribute, pl
 1. Fork the `SkyPilot repository <https://github.com/skypilot-org/skypilot>`__ on GitHub.
 2. Create a new folder for your own framework, LLM model, or tutorial under `llm/ <https://github.com/skypilot-org/skypilot/tree/master/llm>`__.
 3. Add a README.md, a SkyPilot YAML, and other necessary files to run the AI project.
-4. Create a soft link in `docs/source/_gallery_original <https://github.com/skypilot-org/skypilot/blob/master/docs/source/_gallery_original>`__ to the README file in one of the subfolders (frameworks, llms, tutorials), e.g., :code:`cd docs/source/_gallery_original/llms; ln -s ../../llm/mixtral/README.md mixtral.md`.
+4. Create a soft link to your README in `docs/source/_gallery_original <https://github.com/skypilot-org/skypilot/blob/master/docs/source/_gallery_original>`__ to the README file in one of the subfolders (frameworks, llms, tutorials), e.g., :code:`cd docs/source/_gallery_original/llms; ln -s ../../../../llm/mixtral/README.md mixtral.md`.
 5. Add the file path to the ``toctree`` above on this page.
 6. Create a pull request to the `SkyPilot repository <https://github.com/skypilot-org/skypilot/compare>`__.
 

@@ -68,7 +68,7 @@ ENDPOINT=$(sky serve status --endpoint sglang-llava)
 </figure>
 
 ```bash
-curl -L $ENDPOINT/v1/chat/completions \
+curl $ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "liuhaotian/llava-v1.6-vicuna-7b",
@@ -149,7 +149,7 @@ ENDPOINT=$(sky serve status --endpoint sglang-llama2)
 4. Once it status is `READY`, you can use the endpoint to interact with the model:
 
 ```bash
-curl -L $ENDPOINT/v1/chat/completions \
+curl $ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-2-7b-chat-hf",

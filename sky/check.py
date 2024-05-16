@@ -1,4 +1,5 @@
 """Credential checks: check cloud credentials and enable clouds."""
+import traceback
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import click
@@ -31,7 +32,12 @@ def check(
     def check_one_cloud(cloud_tuple: Tuple[str, sky_clouds.Cloud]) -> None:
         cloud_repr, cloud = cloud_tuple
         echo(f'  Checking {cloud_repr}...', nl=False)
-        ok, reason = cloud.check_credentials()
+        try:
+            ok, reason = cloud.check_credentials()
+        except Exception:  # pylint: disable=broad-except
+            # Catch all exceptions to prevent a single cloud from blocking the
+            # check for other clouds.
+            ok, reason = False, traceback.format_exc()
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
@@ -148,7 +154,7 @@ def get_cloud_credential_file_mounts(
     file_mounts = {}
     for cloud in enabled_clouds:
         if (excluded_clouds is not None and
-                sky_clouds.cloud_in_list(cloud, excluded_clouds)):
+                sky_clouds.cloud_in_iterable(cloud, excluded_clouds)):
             continue
         cloud_file_mounts = cloud.get_credential_file_mounts()
         file_mounts.update(cloud_file_mounts)

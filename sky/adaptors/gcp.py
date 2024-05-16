@@ -1,33 +1,19 @@
 """GCP cloud adaptors"""
 
 # pylint: disable=import-outside-toplevel
-import functools
 import json
 
-googleapiclient = None
-google = None
+from sky.adaptors import common
+
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '
+                         'Try pip install "skypilot[gcp]"')
+googleapiclient = common.LazyImport('googleapiclient',
+                                    import_error_message=_IMPORT_ERROR_MESSAGE)
+google = common.LazyImport('google', import_error_message=_IMPORT_ERROR_MESSAGE)
+_LAZY_MODULES = (google, googleapiclient)
 
 
-def import_package(func):
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        global googleapiclient, google
-        if googleapiclient is None or google is None:
-            try:
-                import google as _google
-                import googleapiclient as _googleapiclient
-                googleapiclient = _googleapiclient
-                google = _google
-            except ImportError:
-                raise ImportError('Failed to import dependencies for GCP. '
-                                  'Try: pip install "skypilot[gcp]"') from None
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def build(service_name: str, version: str, *args, **kwargs):
     """Build a GCP service.
 
@@ -39,53 +25,49 @@ def build(service_name: str, version: str, *args, **kwargs):
     return discovery.build(service_name, version, *args, **kwargs)
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def storage_client():
-    """Helper method that connects to GCS Storage Client for
-    GCS Bucket
-    """
+    """Helper that connects to GCS Storage Client for GCS Bucket"""
     from google.cloud import storage
     return storage.Client()
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def anonymous_storage_client():
-    """Helper method that connects to GCS Storage Client for
-    Public GCS Buckets
-    """
+    """Helper that connects to GCS Storage Client for Public GCS Buckets"""
     from google.cloud import storage
     return storage.Client.create_anonymous_client()
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def not_found_exception():
     """NotFound exception."""
     from google.api_core import exceptions as gcs_exceptions
     return gcs_exceptions.NotFound
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def forbidden_exception():
     """Forbidden exception."""
     from google.api_core import exceptions as gcs_exceptions
     return gcs_exceptions.Forbidden
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def http_error_exception():
     """HttpError exception."""
     from googleapiclient import errors
     return errors.HttpError
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def credential_error_exception():
     """CredentialError exception."""
     from google.auth import exceptions
     return exceptions.DefaultCredentialsError
 
 
-@import_package
+@common.load_lazy_modules(_LAZY_MODULES)
 def get_credentials(cred_type: str, credentials_field: str):
     """Get GCP credentials."""
     from google.oauth2 import service_account

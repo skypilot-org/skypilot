@@ -164,9 +164,18 @@ def _wait_for_pods_to_schedule(namespace, new_nodes, timeout: int):
     exceeds the timeout, raise an exception. If pod's container
     is ContainerCreating, then we can assume that resources have been
     allocated and we can exit.
+
+    If timeout is set to a negative value, this method will wait indefinitely.
     """
     start_time = time.time()
-    while time.time() - start_time < timeout:
+
+    def _evaluate_timeout() -> bool:
+        # If timeout is negative, retry indefinitely.
+        if timeout < 0:
+            return True
+        return time.time() - start_time < timeout
+
+    while _evaluate_timeout():
         all_pods_scheduled = True
         for node in new_nodes:
             # Iterate over each pod to check their status
@@ -209,7 +218,7 @@ def _wait_for_pods_to_run(namespace, new_nodes):
                 node.metadata.name, namespace)
 
             # Continue if pod and all the containers within the
-            # pod are succesfully created and running.
+            # pod are successfully created and running.
             if pod.status.phase == 'Running' and all(
                     container.state.running
                     for container in pod.status.container_statuses):
@@ -453,7 +462,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     nvidia_runtime_exists = False
     try:
         nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class()
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         logger.warning('run_instances: Error occurred while checking for '
                        f'nvidia RuntimeClass - '
                        f'{common_utils.format_exception(e)}'
@@ -487,18 +496,25 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # "nodes".
             pod_spec['spec']['affinity'] = {
                 'podAntiAffinity': {
-                    'requiredDuringSchedulingIgnoredDuringExecution': [{
-                        'labelSelector': {
-                            'matchExpressions': [{
-                                'key': TAG_SKYPILOT_CLUSTER_NAME,
-                                'operator': 'In',
-                                'values': [cluster_name_on_cloud]
-                            }]
-                        },
-                        'topologyKey': 'kubernetes.io/hostname'
+                    # Set as a soft constraint
+                    'preferredDuringSchedulingIgnoredDuringExecution': [{
+                        # Max weight to avoid scheduling on the
+                        # same physical node unless necessary.
+                        'weight': 100,
+                        'podAffinityTerm': {
+                            'labelSelector': {
+                                'matchExpressions': [{
+                                    'key': TAG_SKYPILOT_CLUSTER_NAME,
+                                    'operator': 'In',
+                                    'values': [cluster_name_on_cloud]
+                                }]
+                            },
+                            'topologyKey': 'kubernetes.io/hostname'
+                        }
                     }]
                 }
             }
+
         pod = kubernetes.core_api().create_namespaced_pod(namespace, pod_spec)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:
@@ -512,12 +528,16 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     wait_pods_dict = _filter_pods(namespace, tags, ['Pending'])
     wait_pods = list(wait_pods_dict.values())
     wait_pods.append(jump_pod)
-    logger.debug('run_instances: waiting for pods to schedule and run: '
-                 f'{list(wait_pods_dict.keys())}')
+    provision_timeout = provider_config['timeout']
+
+    wait_str = ('indefinitely'
+                if provision_timeout < 0 else f'for {provision_timeout}s')
+    logger.debug(f'run_instances: waiting {wait_str} for pods to schedule and '
+                 f'run: {list(wait_pods_dict.keys())}')
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
-    _wait_for_pods_to_schedule(namespace, wait_pods, provider_config['timeout'])
+    _wait_for_pods_to_schedule(namespace, wait_pods, provision_timeout)
     # Wait until the pods and their containers are up and running, and
     # fail early if there is an error
     _wait_for_pods_to_run(namespace, wait_pods)
@@ -710,7 +730,9 @@ def get_cluster_info(
         custom_ray_options={
             'object-store-memory': 500000000,
             'num-cpus': cpu_request,
-        })
+        },
+        provider_name='kubernetes',
+        provider_config=provider_config)
 
 
 def query_instances(

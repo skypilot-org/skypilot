@@ -6,16 +6,19 @@ queried from GCP API.
 import typing
 from typing import Dict, List, Optional, Tuple
 
-import pandas as pd
-
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.clouds.service_catalog import common
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import pandas as pd
+
     from sky.clouds import cloud
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -323,12 +326,12 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 
 def _get_accelerator(
-    df: pd.DataFrame,
+    df: 'pd.DataFrame',
     accelerator: str,
     count: int,
     region: Optional[str],
     zone: Optional[str] = None,
-) -> pd.DataFrame:
+) -> 'pd.DataFrame':
     idx = (df['AcceleratorName'].str.fullmatch(
         accelerator, case=False)) & (df['AcceleratorCount'] == count)
     if region is not None:
