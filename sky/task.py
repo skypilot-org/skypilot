@@ -348,6 +348,18 @@ class Task:
         config: Dict[str, Any],
         env_overrides: Optional[List[Tuple[str, str]]] = None,
     ) -> 'Task':
+        # More robust handling for 'envs': explicitly convert keys and values to
+        # str, since users may pass '123' as keys/values which will get parsed
+        # as int causing validate_schema() to fail.
+        envs = config.get('envs')
+        if envs is not None and isinstance(envs, dict):
+            for k, v in envs.items():
+                if v is not None:
+                    envs[str(k)] = str(v)
+                else:
+                    envs[str(k)] = None
+        common_utils.validate_schema(config, schemas.get_task_schema(),
+                                     'Invalid task YAML: ')
         if env_overrides is not None:
             # We must override env vars before constructing the Task, because
             # the Storage object creation is eager and it (its name/source
@@ -364,16 +376,7 @@ class Task:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Environment variable {k!r} is None. Please set a '
-                        'value in task YAML or with --env flag.')
-
-        # More robust handling for 'envs': explicitly convert keys and values to
-        # str, since users may pass '123' as keys/values which will get parsed
-        # as int causing validate_schema() to fail.
-        envs = config.get('envs')
-        if envs is not None and isinstance(envs, dict):
-            config['envs'] = {str(k): str(v) for k, v in envs.items()}
-        common_utils.validate_schema(config, schemas.get_task_schema(),
-                                     'Invalid task YAML: ')
+                        'value for it in task YAML or with --env flag.')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
