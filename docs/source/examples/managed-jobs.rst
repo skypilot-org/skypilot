@@ -23,6 +23,12 @@ Managed Spot Jobs
 SkyPilot automatically finds available spot resources across regions and clouds to maximize availability.
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
 
+.. tip::
+
+  :code:`sky launch --use-spot` is a "serverful" command that launches a cluster for
+  running jobs, where recoveries of the cluster after preemptions is user's responsibility. In contrast, managed spot jobs, :code:`sky jobs launch --use-spot`, is a "serverless" command, where SkyPilot is in charge of the whole
+  lifecycle of each job, including provisioning clusters, monitoring job status, and recovering the job from preemptions. 
+
 Here is an example of a BERT training job failing over different regions across AWS and GCP.
 
 .. image:: https://i.imgur.com/Vteg3fK.gif
