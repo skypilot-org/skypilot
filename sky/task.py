@@ -363,8 +363,8 @@ class Task:
             if v is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Environment variable {k!r} is None. Please '
-                        'set a value in task YAML or with --env flag.')
+                        f'Environment variable {k!r} is None. Please set a '
+                        'value in task YAML or with --env flag.')
 
         # More robust handling for 'envs': explicitly convert keys and values to
         # str, since users may pass '123' as keys/values which will get parsed
