@@ -687,7 +687,7 @@ def _pop_and_ignore_fields_in_override_params(
 
 
 def _make_task_or_dag_from_entrypoint_with_overrides(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     *,
     entrypoint_name: str = 'Task',
     name: Optional[str] = None,
@@ -1028,7 +1028,7 @@ def cli():
           'the same data on the boot disk as an existing cluster.'))
 @usage_lib.entrypoint
 def launch(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     cluster: Optional[str],
     dryrun: bool,
     detach_setup: bool,
@@ -1246,9 +1246,7 @@ def exec(
         cluster = cluster_option
     if not entrypoint:
         raise click.UsageError('Missing argument \'[ENTRYPOINT]...\'')
-
-    if ports:
-        raise ValueError('`ports` is not supported by `sky exec`.')
+    assert cluster is not None, (cluster, cluster_option, entrypoint)
 
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
@@ -3330,7 +3328,7 @@ def jobs():
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     name: Optional[str],
     cluster: Optional[str],
     workdir: Optional[str],
@@ -3716,7 +3714,7 @@ def serve():
 
 def _generate_task_with_service(
     service_name: str,
-    service_yaml_args: List[str],
+    service_yaml_args: Tuple[str, ...],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -3821,7 +3819,7 @@ def _generate_task_with_service(
 @timeline.event
 @usage_lib.entrypoint
 def serve_up(
-    service_yaml: List[str],
+    service_yaml: Tuple[str, ...],
     service_name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
@@ -3939,7 +3937,7 @@ def serve_up(
 @usage_lib.entrypoint
 def serve_update(
     service_name: str,
-    service_yaml: List[str],
+    service_yaml: Tuple[str, ...],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
