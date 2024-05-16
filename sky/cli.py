@@ -3368,7 +3368,8 @@ def jobs_launch(
     """
     if cluster is not None:
         if name is not None and name != cluster:
-            raise click.UsageError('Cannot specify both --name and --cluster.')
+            raise click.UsageError('Cannot specify both --name and --cluster. '
+                                   'Use one of the flags as they are alias.')
         name = cluster
     env = _merge_env_vars(env_file, env)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
