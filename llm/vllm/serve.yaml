@@ -7,17 +7,15 @@ resources:
 setup: |
   conda activate vllm
   if [ $? -ne 0 ]; then
-    conda create -n vllm python=3.9 -y
+    conda create -n vllm python=3.10 -y
     conda activate vllm
   fi
 
-  git clone https://github.com/vllm-project/vllm.git || true
   # Install fschat and accelerate for chat completion
-  pip install fschat
-  pip install accelerate
+  git clone https://github.com/vllm-project/vllm.git || true
+  pip install transformers==4.38.0
+  pip install vllm==0.3.2
 
-  cd vllm
-  pip list | grep vllm || pip install .
   pip install gradio
 
 

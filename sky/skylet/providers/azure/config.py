@@ -120,6 +120,8 @@ def _configure_resource_group(config):
     create_or_update = get_azure_sdk_function(
         client=resource_client.deployments, function_name="create_or_update"
     )
+    # TODO (skypilot): this takes a long time (> 40 seconds) for stopping an
+    # azure VM, and this can be called twice during ray down.
     outputs = (
         create_or_update(
             resource_group_name=resource_group,

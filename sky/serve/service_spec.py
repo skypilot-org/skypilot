@@ -23,6 +23,8 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
+        dynamic_ondemand_fallback: Optional[bool] = None,
+        base_ondemand_fallback_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         # The following arguments are deprecated.
@@ -33,30 +35,39 @@ class SkyServiceSpec:
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
     ) -> None:
-        if min_replicas < 0:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('min_replicas must be greater or equal to 0')
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'max_replicas must be greater than or equal to min_replicas'
-                )
-        if target_qps_per_replica is not None and target_qps_per_replica <= 0:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'target_qps_per_replica must be greater than 0')
+                raise ValueError('max_replicas must be greater than or '
+                                 'equal to min_replicas. Found: '
+                                 f'min_replicas={min_replicas}, '
+                                 f'max_replicas={max_replicas}')
+
+        if target_qps_per_replica is not None:
+            if max_replicas is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('max_replicas must be set where '
+                                     'target_qps_per_replica is set.')
+        else:
+            if max_replicas is not None and max_replicas != min_replicas:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Detected different min_replicas and max_replicas '
+                        'while target_qps_per_replica is not set. To enable '
+                        'autoscaling, please set target_qps_per_replica.')
+
         if not readiness_path.startswith('/'):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
 
+        # TODO(tian): Following field are deprecated. Remove after 2 minor
+        # release, i.e. 0.6.0.
         if qps_upper_threshold is not None or qps_lower_threshold is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Field `qps_upper_threshold` and `qps_lower_threshold`'
                     'under `replica_policy` are deprecated. '
                     'Please use target_qps_per_replica instead.')
-
         if auto_restart is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -64,14 +75,24 @@ class SkyServiceSpec:
                     'Currently, SkyServe will cleanup failed replicas'
                     'and auto restart it to keep the service running.')
 
-        self._readiness_path = readiness_path
-        self._initial_delay_seconds = initial_delay_seconds
-        self._min_replicas = min_replicas
-        self._max_replicas = max_replicas
-        self._target_qps_per_replica = target_qps_per_replica
-        self._post_data = post_data
-        self._upscale_delay_seconds = upscale_delay_seconds
-        self._downscale_delay_seconds = downscale_delay_seconds
+        self._readiness_path: str = readiness_path
+        self._initial_delay_seconds: int = initial_delay_seconds
+        self._min_replicas: int = min_replicas
+        self._max_replicas: Optional[int] = max_replicas
+        self._target_qps_per_replica: Optional[float] = target_qps_per_replica
+        self._post_data: Optional[Dict[str, Any]] = post_data
+        self._dynamic_ondemand_fallback: Optional[
+            bool] = dynamic_ondemand_fallback
+        self._base_ondemand_fallback_replicas: Optional[
+            int] = base_ondemand_fallback_replicas
+        self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
+        self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
+
+        self._use_ondemand_fallback: bool = (
+            self.dynamic_ondemand_fallback is not None and
+            self.dynamic_ondemand_fallback) or (
+                self.base_ondemand_fallback_replicas is not None and
+                self.base_ondemand_fallback_replicas > 0)
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -137,12 +158,17 @@ class SkyServiceSpec:
                 'upscale_delay_seconds', None)
             service_config['downscale_delay_seconds'] = policy_section.get(
                 'downscale_delay_seconds', None)
+            service_config[
+                'base_ondemand_fallback_replicas'] = policy_section.get(
+                    'base_ondemand_fallback_replicas', None)
+            service_config['dynamic_ondemand_fallback'] = policy_section.get(
+                'dynamic_ondemand_fallback', None)
 
         return SkyServiceSpec(**service_config)
 
     @staticmethod
     def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
-        with open(os.path.expanduser(yaml_path), 'r') as f:
+        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
 
         if isinstance(config, str):
@@ -182,11 +208,14 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
+        add_if_not_none('replica_policy', 'dynamic_ondemand_fallback',
+                        self.dynamic_ondemand_fallback)
+        add_if_not_none('replica_policy', 'base_ondemand_fallback_replicas',
+                        self.base_ondemand_fallback_replicas)
         add_if_not_none('replica_policy', 'upscale_delay_seconds',
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
-
         return config
 
     def probe_str(self):
@@ -194,21 +223,43 @@ class SkyServiceSpec:
             return f'GET {self.readiness_path}'
         return f'POST {self.readiness_path} {json.dumps(self.post_data)}'
 
-    def policy_str(self):
+    def spot_policy_str(self):
+        policy_strs = []
+        if (self.dynamic_ondemand_fallback is not None and
+                self.dynamic_ondemand_fallback):
+            policy_strs.append('Dynamic on-demand fallback')
+            if self.base_ondemand_fallback_replicas is not None:
+                policy_strs.append(
+                    f'with {self.base_ondemand_fallback_replicas}'
+                    'base on-demand replicas')
+        else:
+            if self.base_ondemand_fallback_replicas is not None:
+                plural = (''
+                          if self.base_ondemand_fallback_replicas == 1 else 's')
+                policy_strs.append('Static spot mixture with '
+                                   f'{self.base_ondemand_fallback_replicas} '
+                                   f'base on-demand replica{plural}')
+        return ' '.join(policy_strs) if policy_strs else 'No spot policy'
+
+    def autoscaling_policy_str(self):
         # TODO(MaoZiming): Update policy_str
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
             return f'Fixed {self.min_replicas} replica{min_plural}'
+        # Already checked in __init__.
+        assert self.target_qps_per_replica is not None
         # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
-        return (f'Autoscaling from {self.min_replicas} to '
-                f'{self.max_replicas} replica{max_plural}')
+        return (f'Autoscaling from {self.min_replicas} to {self.max_replicas} '
+                f'replica{max_plural} (target QPS per replica: '
+                f'{self.target_qps_per_replica})')
 
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
-            Replica autoscaling policy:       {self.policy_str()}\
+            Replica autoscaling policy:       {self.autoscaling_policy_str()}
+            Spot Policy:                      {self.spot_policy_str()}
         """)
 
     @property
@@ -237,9 +288,21 @@ class SkyServiceSpec:
         return self._post_data
 
     @property
+    def base_ondemand_fallback_replicas(self) -> Optional[int]:
+        return self._base_ondemand_fallback_replicas
+
+    @property
+    def dynamic_ondemand_fallback(self) -> Optional[bool]:
+        return self._dynamic_ondemand_fallback
+
+    @property
     def upscale_delay_seconds(self) -> Optional[int]:
         return self._upscale_delay_seconds
 
     @property
     def downscale_delay_seconds(self) -> Optional[int]:
         return self._downscale_delay_seconds
+
+    @property
+    def use_ondemand_fallback(self) -> bool:
+        return self._use_ondemand_fallback

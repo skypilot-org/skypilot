@@ -1,0 +1,19 @@
+# Creates a service of type LoadBalancer for the skytest pod in cpu_test_pod.yaml
+#
+# Usage:
+#   kubectl apply -f cpu_test_pod.yaml
+#   kubectl apply -f loadbalancer_test_svc.yaml
+#
+# Access the server by running:
+#  kubectl get svc skytest-loadbalancer
+apiVersion: v1
+kind: Service
+metadata:
+  name: skytest-loadbalancer
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 8080
+    targetPort: 8080
+  selector:
+    app: skytest

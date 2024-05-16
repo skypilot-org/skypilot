@@ -40,7 +40,7 @@ def find_version():
     # Extract version information from filepath
     # Adapted from:
     #  https://github.com/ray-project/ray/blob/master/python/setup.py
-    with open(INIT_FILE_PATH, 'r') as fp:
+    with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
         version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',
                                   fp.read(), re.M)
         if version_match:
@@ -49,7 +49,7 @@ def find_version():
 
 
 def get_commit_hash():
-    with open(INIT_FILE_PATH, 'r') as fp:
+    with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
         commit_match = re.search(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
                                  fp.read(), re.M)
         if commit_match:
@@ -85,7 +85,7 @@ def get_commit_hash():
 def replace_commit_hash():
     """Fill in the commit hash in the __init__.py file."""
     try:
-        with open(INIT_FILE_PATH, 'r') as fp:
+        with open(INIT_FILE_PATH, 'r', encoding='utf-8') as fp:
             content = fp.read()
             global original_init_content
             original_init_content = content
@@ -93,7 +93,7 @@ def replace_commit_hash():
                              f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
                              content,
                              flags=re.M)
-        with open(INIT_FILE_PATH, 'w') as fp:
+        with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:
             fp.write(content)
     except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
@@ -106,7 +106,7 @@ def replace_commit_hash():
 def revert_commit_hash():
     try:
         if original_init_content is not None:
-            with open(INIT_FILE_PATH, 'w') as fp:
+            with open(INIT_FILE_PATH, 'w', encoding='utf-8') as fp:
                 fp.write(original_init_content)
     except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
@@ -169,7 +169,7 @@ local_ray = [
     # click/grpcio/protobuf.
     # Excluded 2.6.0 as it has a bug in the cluster launcher:
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
-    'ray[default] >= 2.2.0, <= 2.6.3, != 2.6.0',
+    'ray[default] >= 2.2.0, != 2.6.0',
 ]
 
 remote = [
@@ -183,16 +183,14 @@ remote = [
     "grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < '3.10' and sys_platform != 'darwin'",  # noqa:E501
     "grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= '3.10' and sys_platform != 'darwin'",  # noqa:E501
     # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/86fab1764e618215d8131e8e5068f0d493c77023/python/setup.py#L326
+    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
     'protobuf >= 3.15.3, != 3.19.5',
-    # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
-    # https://github.com/ray-project/ray/issues/36990
-    # >=1.10.8 is needed for ray>=2.6. See
-    # https://github.com/ray-project/ray/issues/35661
-    'pydantic <2.0, >=1.10.8',
+    # Some pydantic versions are not compatible with ray. Adopted from ray's
+    # setup.py: https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
+    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3',
 ]
 
-# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
+# NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
     # botocore does not work with urllib3>=2.0.0, according to https://github.com/boto/botocore/issues/2926
@@ -209,6 +207,7 @@ aws_dependencies = [
     # the latest version.
     'colorama < 0.4.5',
 ]
+
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
@@ -232,9 +231,21 @@ extras_require: Dict[str, List[str]] = {
     'cloudflare': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
-    'kubernetes': ['kubernetes>=20.0.0'] + local_ray,
+    'kubernetes': ['kubernetes>=20.0.0'],
     'remote': remote,
-    'runpod': ['runpod>=1.5.1']
+    'runpod': ['runpod>=1.5.1'],
+    'fluidstack': [],  # No dependencies needed for fluidstack
+    'cudo': ['cudo-compute>=0.1.8'],
+    'paperspace': [],  # No dependencies needed for paperspace
+    'vsphere': [
+        'pyvmomi==8.0.1.0.2',
+        # vsphere-automation-sdk is also required, but it does not have
+        # pypi release, which cause failure of our pypi release.
+        # https://peps.python.org/pep-0440/#direct-references
+        # We have the instruction for its installation in our
+        # docs instead.
+        # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0'
+    ],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
@@ -276,6 +287,7 @@ setuptools.setup(
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: OS Independent',
         'Topic :: Software Development :: Libraries :: Python Modules',

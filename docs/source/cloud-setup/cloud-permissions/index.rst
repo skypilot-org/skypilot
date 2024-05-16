@@ -19,3 +19,5 @@ Table of Contents
 
     aws
     gcp
+    vsphere
+    kubernetes

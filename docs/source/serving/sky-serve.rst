@@ -22,7 +22,7 @@ Why SkyServe?
 
 How it works:
 
-- Each service gets an endpoint that automatically redirects requests to its replicas.
+- Each service gets an endpoint that automatically distributes requests to its replicas.
 - Replicas of the same service can run in different regions and clouds — reducing cloud costs and increasing availability.
 - SkyServe handles the load balancing, recovery, and autoscaling of the replicas.
 
@@ -127,7 +127,7 @@ Run :code:`sky serve up service.yaml` to deploy the service with automatic price
 
 If you see the :code:`STATUS` column becomes :code:`READY`, then the service is ready to accept traffic!
 
-Simply ``curl -L`` the service endpoint, which automatically load-balances across the two replicas:
+Simply ``curl`` the service endpoint, which automatically load-balances across the two replicas:
 
 .. tab-set::
 
@@ -136,7 +136,7 @@ Simply ``curl -L`` the service endpoint, which automatically load-balances acros
 
         .. code-block:: console
 
-            $ curl -L 3.84.15.251:30001/v1/chat/completions \
+            $ curl 3.84.15.251:30001/v1/chat/completions \
                 -X POST \
                 -d '{"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "messages": [{"role": "user", "content": "Who are you?"}]}' \
                 -H 'Content-Type: application/json'
@@ -149,7 +149,7 @@ Simply ``curl -L`` the service endpoint, which automatically load-balances acros
 
         .. code-block:: console
 
-            $ curl -L 44.211.131.51:30001/generate \
+            $ curl 44.211.131.51:30001/generate \
                 -X POST \
                 -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
                 -H 'Content-Type: application/json'
@@ -193,8 +193,8 @@ And under the same directory, we have an :code:`index.html`:
 
 .. note::
 
-  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to
-  :ref:`SkyPilot Storage <sky-storage>`. Cloud bucket will be created, and cleaned up after the service is terminated.
+  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to a
+  :ref:`cloud bucket <sky-storage>`. The bucket will be created, and cleaned up after the service is terminated.
 
 Notice that task YAML already has a running HTTP endpoint at 8080, and exposed
 through the :code:`ports` section under :code:`resources`. Suppose we want to
@@ -240,7 +240,7 @@ Under the hood, :code:`sky serve up`:
 #. Launches a controller which handles autoscaling, monitoring and load balancing;
 #. Returns a Service Endpoint which will be used to accept traffic;
 #. Meanwhile, the controller provisions replica VMs which later run the services;
-#. Once any replica is ready, the requests sent to the Service Endpoint will be **HTTP-redirect** to one of the endpoint replicas.
+#. Once any replica is ready, the requests sent to the Service Endpoint will be distributed to one of the endpoint replicas.
 
 After the controller is provisioned, you'll see the following in :code:`sky serve status` output:
 
@@ -264,7 +264,7 @@ sending requests to :code:`<endpoint-url>` (e.g., ``44.201.119.3:30001``):
 
 .. code-block:: console
 
-    $ curl -L <endpoint-url>
+    $ curl <endpoint-url>
     <html>
     <head>
         <title>My First SkyServe Service</title>
@@ -273,12 +273,6 @@ sending requests to :code:`<endpoint-url>` (e.g., ``44.201.119.3:30001``):
         <p>Hello, SkyServe!</p>
     </body>
     </html>
-
-.. note::
-
-  Since we are using HTTP-redirect, we need to use :code:`curl -L
-  <endpoint-url>`. The :code:`curl` command by default won't follow the
-  redirect.
 
 Tutorial: Serve a Chatbot LLM!
 ------------------------------
@@ -291,7 +285,7 @@ Let's bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vi
       ports: 8080
       accelerators: A100:1
       disk_size: 1024
-      disk_tier: high
+      disk_tier: best
 
     setup: |
       conda activate chatbot
@@ -308,11 +302,12 @@ Let's bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vi
       conda activate chatbot
 
       echo 'Starting controller...'
-      python -u -m fastchat.serve.controller > ~/controller.log 2>&1 &
+      python -u -m fastchat.serve.controller --host 127.0.0.1 > ~/controller.log 2>&1 &
       sleep 10
       echo 'Starting model worker...'
       python -u -m fastchat.serve.model_worker \
                 --model-path lmsys/vicuna-${MODEL_SIZE}b-v1.3 2>&1 \
+                --host 127.0.0.1 \
                 | tee model_worker.log &
 
       echo 'Waiting for model worker to start...'
@@ -367,13 +362,13 @@ Send a request using the following cURL command:
 
 .. code-block:: console
 
-    $ curl -L http://<endpoint-url>/v1/chat/completions \
+    $ curl http://<endpoint-url>/v1/chat/completions \
         -X POST \
-        -d '{"model":"vicuna-13b-v1.3","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Who are you?"}],"temperature":0}' \
+        -d '{"model":"vicuna-7b-v1.3","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Who are you?"}],"temperature":0}' \
         -H 'Content-Type: application/json'
 
     # Example output:
-    {"id":"chatcmpl-gZ8SfgUwcm9Xjbuv4xfefq","object":"chat.completion","created":1702082533,"model":"vicuna-13b-v1.3","choices":[{"index":0,"message":{"role":"assistant","content":"I am Vicuna, a language model trained by researchers from Large Model Systems Organization (LMSYS)."},"finish_reason":"stop"}],"usage":{"prompt_tokens":19,"total_tokens":43,"completion_tokens":24}}
+    {"id":"chatcmpl-gZ8SfgUwcm9Xjbuv4xfefq","object":"chat.completion","created":1702082533,"model":"vicuna-7b-v1.3","choices":[{"index":0,"message":{"role":"assistant","content":"I am Vicuna, a language model trained by researchers from Large Model Systems Organization (LMSYS)."},"finish_reason":"stop"}],"usage":{"prompt_tokens":19,"total_tokens":43,"completion_tokens":24}}
 
 You can also use a simple chatbot Python script to send requests:
 
@@ -467,7 +462,7 @@ SkyServe has a centralized controller VM that manages the deployment of your ser
 It is composed of the following components:
 
 #. **Controller**: The controller will monitor the status of the replicas and re-launch a new replica if one of them fails. It also autoscales the number of replicas if autoscaling config is set (see :ref:`Service YAML spec <service-yaml-spec>` for more information).
-#. **Load Balancer**: The load balancer will route the traffic to all ready replicas. It is a lightweight HTTP server that listens on the service endpoint and **HTTP-redirects** the requests to one of the replicas.
+#. **Load Balancer**: The load balancer will route the traffic to all ready replicas. It is a lightweight HTTP server that listens on the service endpoint and distribute the requests to one of the replicas.
 
 All of the process group shares a single controller VM. The controller VM will be launched in the cloud with the best price/performance ratio. You can also :ref:`customize the controller resources <customizing-sky-serve-controller-resources>` based on your needs.
 

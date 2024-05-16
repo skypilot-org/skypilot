@@ -8,10 +8,11 @@ import socket
 import subprocess
 import time
 import traceback
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import colorama
 
+import sky
 from sky import clouds
 from sky import provision
 from sky import sky_logging
@@ -23,7 +24,6 @@ from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
-from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -68,8 +68,9 @@ def _bulk_provision(
     else:
         zone_str = ','.join(z.name for z in zones)
 
-    if isinstance(cloud, clouds.Local):
-        logger.info(f'{style.BRIGHT}Launching on local cluster '
+    if isinstance(cloud, clouds.Kubernetes):
+        # Omit the region name for Kubernetes.
+        logger.info(f'{style.BRIGHT}Launching on {cloud}{style.RESET_ALL} '
                     f'{cluster_name!r}.')
     else:
         logger.info(f'{style.BRIGHT}Launching on {cloud} '
@@ -164,6 +165,8 @@ def bulk_provision(
 
     with provision_logging.setup_provision_logging(log_dir):
         try:
+            logger.debug(f'SkyPilot version: {sky.__version__}; '
+                         f'commit: {sky.__commit__}')
             logger.debug(_TITLE.format('Provisioning'))
             logger.debug(
                 'Provision config:\n'
@@ -191,6 +194,17 @@ def bulk_provision(
                         terminate=terminate,
                         provider_config=original_config['provider'])
                     break
+                except NotImplementedError as e:
+                    verb = 'terminate' if terminate else 'stop'
+                    # If the underlying cloud does not support stopping
+                    # instances, we should stop failover as well.
+                    raise provision_common.StopFailoverError(
+                        'During provisioner\'s failover, '
+                        f'{terminate_str.lower()} {cluster_name!r} failed. '
+                        f'We cannot {verb} the resources launched, as it is '
+                        f'not supported by {cloud}. Please try launching the '
+                        'cluster again, or terminate it with: '
+                        f'sky down {cluster_name.display_name}') from e
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug(f'{terminate_str} {cluster_name!r} failed.')
                     logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
@@ -246,6 +260,8 @@ def _ssh_probe_command(ip: str,
         '-o',
         'StrictHostKeyChecking=no',
         '-o',
+        'PasswordAuthentication=no',
+        '-o',
         'ConnectTimeout=10s',
         '-o',
         f'UserKnownHostsFile={os.devnull}',
@@ -273,56 +289,86 @@ def _shlex_join(command: List[str]) -> str:
     return ' '.join(shlex.quote(arg) for arg in command)
 
 
-def _wait_ssh_connection_direct(
-        ip: str,
-        ssh_port: int,
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = None,
-        ssh_proxy_command: Optional[str] = None) -> bool:
+def _wait_ssh_connection_direct(ip: str,
+                                ssh_port: int,
+                                ssh_user: str,
+                                ssh_private_key: str,
+                                ssh_control_name: Optional[str] = None,
+                                ssh_proxy_command: Optional[str] = None,
+                                **kwargs) -> Tuple[bool, str]:
+    """Wait for SSH connection using raw sockets, and a SSH connection.
+
+    Using raw socket is more efficient than using SSH command to probe the
+    connection, before the SSH connection is ready. We use a actual SSH command
+    connection to test the connection, after the raw socket connection is ready
+    to make sure the SSH connection is actually ready.
+
+    Returns:
+        A tuple of (success, stderr).
+    """
+    del kwargs  # unused
     assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
+        success = False
+        stderr = ''
         with socket.create_connection((ip, ssh_port), timeout=1) as s:
             if s.recv(100).startswith(b'SSH'):
                 # Wait for SSH being actually ready, otherwise we may get the
                 # following error:
                 # "System is booting up. Unprivileged users are not permitted to
                 # log in yet".
-                return _wait_ssh_connection_indirect(ip, ssh_port, ssh_user,
-                                                     ssh_private_key,
-                                                     ssh_control_name,
-                                                     ssh_proxy_command)
+                success = True
+        if success:
+            return _wait_ssh_connection_indirect(ip, ssh_port, ssh_user,
+                                                 ssh_private_key,
+                                                 ssh_control_name,
+                                                 ssh_proxy_command)
     except socket.timeout:  # this is the most expected exception
-        pass
-    except Exception:  # pylint: disable=broad-except
-        pass
+        stderr = f'Timeout: SSH connection to {ip} is not ready.'
+    except Exception as e:  # pylint: disable=broad-except
+        stderr = f'Error: {common_utils.format_exception(e)}'
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
     logger.debug(f'Waiting for SSH to {ip}. Try: '
-                 f'{_shlex_join(command)}')
-    return False
+                 f'{_shlex_join(command)}. '
+                 f'{stderr}')
+    return False, stderr
 
 
-def _wait_ssh_connection_indirect(
-        ip: str,
-        ssh_port: int,
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = None,
-        ssh_proxy_command: Optional[str] = None) -> bool:
-    del ssh_control_name
+def _wait_ssh_connection_indirect(ip: str,
+                                  ssh_port: int,
+                                  ssh_user: str,
+                                  ssh_private_key: str,
+                                  ssh_control_name: Optional[str] = None,
+                                  ssh_proxy_command: Optional[str] = None,
+                                  **kwargs) -> Tuple[bool, str]:
+    """Wait for SSH connection using SSH command.
+
+    Returns:
+        A tuple of (success, stderr).
+    """
+    del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
-    proc = subprocess.run(command,
-                          shell=False,
-                          check=False,
-                          stdout=subprocess.DEVNULL,
-                          stderr=subprocess.PIPE)
-    if proc.returncode != 0:
-        logger.debug(
-            f'Waiting for SSH to {ip} with command: {_shlex_join(command)}\n'
-            f'Error: {proc.stderr.decode("utf-8")}')
-    return proc.returncode == 0
+    message = f'Waiting for SSH using command: {_shlex_join(command)}'
+    logger.debug(message)
+    try:
+        proc = subprocess.run(command,
+                              shell=False,
+                              check=False,
+                              timeout=10,
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode('utf-8')
+            stderr = f'Error: {stderr}'
+            logger.debug(f'{message}{stderr}')
+            return False, stderr
+    except subprocess.TimeoutExpired as e:
+        stderr = f'Error: {str(e)}'
+        logger.debug(f'{message}Error: {e}')
+        return False, stderr
+    return True, ''
 
 
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
@@ -351,13 +397,15 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
     while ips:
         ip = ips.popleft()
         ssh_port = ssh_ports.popleft()
-        if not waiter(ip, ssh_port, **ssh_credentials):
+        success, stderr = waiter(ip, ssh_port, **ssh_credentials)
+        if not success:
             ips.append(ip)
             ssh_ports.append(ssh_port)
             if time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        f'Failed to SSH to {ip} after timeout {timeout}s.')
+                        f'Failed to SSH to {ip} after timeout {timeout}s, with '
+                        f'{stderr}')
             logger.debug('Retrying in 1 second...')
             time.sleep(1)
 
@@ -395,9 +443,9 @@ def _post_provision_setup(
             'status with: sky status -r; and retry provisioning.')
 
     # TODO(suquark): Move wheel build here in future PRs.
-    ip_list = cluster_info.get_feasible_ips()
-    port_list = cluster_info.get_ssh_ports()
-    ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
+    # We don't set docker_user here, as we are configuring the VM itself.
+    ssh_credentials = backend_utils.ssh_credential_from_yaml(
+        cluster_yaml, ssh_user=cluster_info.ssh_user)
 
     with rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for SSH access[/]') as status:
@@ -414,7 +462,7 @@ def _post_provision_setup(
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:
             status.update(
-                '[bold cyan]Lauching - Initializing docker container[/]')
+                '[bold cyan]Launching - Initializing docker container[/]')
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -431,7 +479,7 @@ def _post_provision_setup(
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
-        # (1) spot controllers need permission to launch/down nodes of
+        # (1) jobs controllers need permission to launch/down nodes of
         #     multiple clouds
         # (2) head instances need permission for auto stop or auto down
         #     nodes for the current cloud
@@ -454,9 +502,9 @@ def _post_provision_setup(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_info, ssh_credentials)
 
-        head_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                      port=port_list[0],
-                                                      **ssh_credentials)
+        runners = provision.get_command_runners(cloud_name, cluster_info,
+                                                **ssh_credentials)
+        head_runner = runners[0]
 
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
@@ -493,7 +541,7 @@ def _post_provision_setup(
         #     if provision_record.is_instance_just_booted(inst.instance_id):
         #         worker_ips.append(inst.public_ip)
 
-        if len(ip_list) > 1:
+        if cluster_info.num_instances > 1:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,

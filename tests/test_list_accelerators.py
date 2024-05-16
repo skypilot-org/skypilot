@@ -1,21 +1,23 @@
 import sky
 
-CLOUDS_TO_TEST = ['AWS', 'GCP', 'IBM', 'Azure', 'Lambda', 'OCI', 'scp']
+CLOUDS_TO_TEST = [
+    'AWS', 'GCP', 'IBM', 'Azure', 'Lambda', 'OCI', 'scp', 'vsphere'
+]
 
 
 def test_list_accelerators():
     result = sky.list_accelerators()
     assert 'V100' in result, result
-    assert 'tpu-v3-8' in result, result
+    assert 'tpu-v3' in result, result
     assert 'Inferentia' not in result, result
     assert 'Trainium' not in result, result
     assert 'A100-80GB' in result, result
 
 
-def test_list_ccelerators_all():
+def test_list_accelerators_all():
     result = sky.list_accelerators(gpus_only=False)
     assert 'V100' in result, result
-    assert 'tpu-v3-8' in result, result
+    assert 'tpu-v3' in result, result
     assert 'Inferentia' in result, result
     assert 'Trainium' in result, result
     assert 'A100-80GB' in result, result

@@ -18,6 +18,7 @@ from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -26,7 +27,7 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_tenancy_prefix = None
+_tenancy_prefix: Optional[str] = None
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -40,6 +41,8 @@ class OCI(clouds.Cloud):
     _regions: List[clouds.Region] = []
 
     _INDENT_PREFIX = '    '
+
+    _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -166,7 +169,8 @@ class OCI(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -185,10 +189,13 @@ class OCI(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud  # Unused.
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud, dryrun  # Unused.
         assert region is not None, resources
 
         acc_dict = self.get_accelerators_from_instance_type(
@@ -261,9 +268,9 @@ class OCI(clouds.Cloud):
                     ['tenancy']).data
 
                 first_ad = ad_list[0]
-                _tenancy_prefix = str(first_ad.name).split(':')[0]
-            except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
-                    oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
+                _tenancy_prefix = str(first_ad.name).split(':', maxsplit=1)[0]
+            except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+                    oci_adaptor.oci.exceptions.InvalidConfig) as e:
                 # This should only happen in testing where oci config is
                 # monkeypatched. In real use, if the OCI config is not
                 # valid, the 'sky check' would fail (OCI disabled).
@@ -396,8 +403,8 @@ class OCI(clouds.Cloud):
             del user
             # TODO[Hysun]: More privilege check can be added
             return True, None
-        except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
-                oci_adaptor.get_oci().exceptions.InvalidConfig,
+        except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+                oci_adaptor.oci.exceptions.InvalidConfig,
                 oci_adaptor.service_exception()) as e:
             return False, (
                 f'OCI credential is not correctly set. '
@@ -445,14 +452,6 @@ class OCI(clouds.Cloud):
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         return service_catalog.validate_region_zone(region, zone, clouds='oci')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'oci')
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
@@ -522,14 +521,13 @@ class OCI(clouds.Cloud):
             'ERR: No image found in catalog for region '
             f'{region_name}. Try update your default image_id settings.')
 
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
-        # All the disk_tier are supported for any instance_type
-        del instance_type, disk_tier  # unused
-
-    def get_vpu_from_disktier(self, cpus: Optional[float],
-                              disk_tier: Optional[str]) -> int:
+    def get_vpu_from_disktier(
+            self, cpus: Optional[float],
+            disk_tier: Optional[resources_utils.DiskTier]) -> int:
+        # Only normalize the disk_tier if it is not None, since OCI have
+        # different default disk tier according to #vCPU.
+        if disk_tier is not None:
+            disk_tier = OCI._translate_disk_tier(disk_tier)
         vpu = oci_utils.oci_config.BOOT_VOLUME_VPU[disk_tier]
         if cpus is None:
             return vpu

@@ -8,7 +8,7 @@ from sky.task import Task
 
 def _create_config_file(config: str, tmp_path: pathlib.Path) -> str:
     config_path = tmp_path / 'config.yaml'
-    config_path.open('w').write(config)
+    config_path.open('w', encoding='utf-8').write(config)
     return config_path
 
 
@@ -111,3 +111,26 @@ def test_invalid_fields_storage(tmp_path):
     with pytest.raises(AssertionError) as e:
         Task.from_yaml(config_path)
     assert 'Invalid storage args' in e.value.args[0]
+
+
+def test_invalid_envs_key(tmp_path):
+    config_path = _create_config_file(
+        textwrap.dedent(f"""\
+            envs:
+                invalid_env_$_key: value
+            """), tmp_path)
+    with pytest.raises(ValueError) as e:
+        Task.from_yaml(config_path)
+    assert 'does not match any of the regexes:' in e.value.args[0]
+
+
+def test_invalid_envs_type(tmp_path):
+    config_path = _create_config_file(
+        textwrap.dedent(f"""\
+            envs:
+                - env_key1: abc
+                - env_key2: abc
+            """), tmp_path)
+    with pytest.raises(ValueError) as e:
+        Task.from_yaml(config_path)
+    assert 'is not of type \'dict\'' in e.value.args[0]

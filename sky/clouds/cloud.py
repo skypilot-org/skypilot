@@ -9,15 +9,14 @@ reused across cloud object creation.
 """
 import collections
 import enum
-import re
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
-from sky.skylet import constants
 from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -37,10 +36,14 @@ class CloudImplementationFeatures(enum.Enum):
     STOP = 'stop'  # Includes both stop and autostop.
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
+    IMAGE_ID = 'image_id'
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
     OPEN_PORTS = 'open_ports'
+    STORAGE_MOUNTING = 'storage_mounting'
+    HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
+    AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -94,7 +97,10 @@ class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
-    _DEFAULT_DISK_TIER = 'medium'
+    _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
+    _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
+    _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
     # The version of provisioner and status query. This is used to determine
     # the code path to use for each cloud in the backend.
@@ -112,6 +118,21 @@ class Cloud:
         None means no limit.
         """
         return None
+
+    @classmethod
+    def supports_service_account_on_remote(cls) -> bool:
+        """Returns whether the cloud supports service account on remote cluster.
+
+        This method is used by backend_utils.write_cluster_config() to decide
+        whether to upload user's local cloud credential files to the remote
+        cluster.
+
+        If a cloud supports service account on remote cluster, the user's local
+        cloud credential files are not needed to be uploaded to the remote
+        instance, as the remote instance can be assigned with a service account
+        that has the necessary permissions to access the cloud resources.
+        """
+        return cls._SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE
 
     #### Regions/Zones ####
 
@@ -226,7 +247,7 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def is_same_cloud(self, other):
+    def is_same_cloud(self, other: 'Cloud'):
         raise NotImplementedError
 
     def make_deploy_resources_variables(
@@ -235,6 +256,7 @@ class Cloud:
         cluster_name_on_cloud: str,
         region: 'Region',
         zones: Optional[List['Zone']],
+        dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
@@ -268,7 +290,8 @@ class Cloud:
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs, memory and
         disk tier.
 
@@ -280,10 +303,10 @@ class Cloud:
         memory.  If 'memory=4+', this method returns the default instance
         type with 4GB or more memory.
 
-        If disk_rier='medium', this method returns the default instance type
-        that support medium disk tier.
+        If disk_tier=DiskTier.MEDIUM, this method returns the default instance
+        type that support medium disk tier.
 
-        When cpus is None, memory is None or disk tier is None, this method will
+        When cpus is None, memory is None or disk_tier is None, this method will
         never return None. This method may return None if the cloud's default
         instance family does not have a VM with the given number of vCPUs
         (e.g., when cpus='7') or does not have a VM with the give disk tier
@@ -297,6 +320,25 @@ class Cloud:
         return service_catalog.is_image_tag_valid(image_tag,
                                                   region,
                                                   clouds=cls._REPR.lower())
+
+    @classmethod
+    def is_label_valid(cls, label_key: str,
+                       label_value: str) -> Tuple[bool, Optional[str]]:
+        """Validates that the label key and value are valid for this cloud.
+
+        Labels can be implemented in different ways across clouds. For example,
+        on AWS we use instance tags, on GCP we use labels, and on Kubernetes we
+        use labels. This method should be implemented to validate the label
+        format for the cloud.
+
+        Returns:
+            A tuple of a boolean indicating whether the label is valid and an
+            optional string describing the reason if the label is invalid.
+        """
+        # If a cloud does not support labels, they are ignored. Only clouds
+        # that support labels implement this method.
+        del label_key, label_value
+        return True, None
 
     def get_feasible_launchable_resources(
         self,
@@ -455,25 +497,18 @@ class Cloud:
                                                     zone,
                                                     clouds=self._REPR.lower())
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        """Returns whether the accelerator is valid in the region or zone."""
-        raise NotImplementedError
-
-    def need_cleanup_after_preemption(
-            self, resource: 'resources_lib.Resources') -> bool:
-        """Returns whether a spot resource needs cleanup after preeemption.
+    def need_cleanup_after_preemption_or_failure(
+            self, resources: 'resources_lib.Resources') -> bool:
+        """Whether a resource needs cleanup after preeemption or failure.
 
         In most cases, spot resources do not need cleanup after preemption,
         as long as the cluster can be relaunched with the same name and tag,
         no matter the preemption behavior is to terminate or stop the cluster.
-        The only exception by far is GCP's Spot TPU VM. We override this method
-        in gcp.py.
+        Similar for on-demand resources that go into maintenance mode. The
+        only exception by far is GCP's TPU VM. We override this method in
+        gcp.py.
         """
-        del resource
+        del resources
         return False
 
     @classmethod
@@ -539,36 +574,28 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def check_cluster_name_is_valid(cls, cluster_name: str) -> None:
-        """Errors out on invalid cluster names not supported by cloud providers.
-
-        Bans (including but not limited to) names that:
-        - are digits-only
-        - contain underscore (_)
-
-        Raises:
-            exceptions.InvalidClusterNameError: If the cluster name is invalid.
-        """
-        if cluster_name is None:
-            return
-        valid_regex = constants.CLUSTER_NAME_VALID_REGEX
-        if re.fullmatch(valid_regex, cluster_name) is None:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name "{cluster_name}" is invalid; '
-                    'ensure it is fully matched by regex (e.g., '
-                    'only contains lower letters, numbers and dash): '
-                    f'{valid_regex}')
-
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+                                disk_tier: resources_utils.DiskTier) -> None:
         """Errors out if the disk tier is not supported by the cloud provider.
 
         Raises:
             exceptions.NotSupportedError: If the disk tier is not supported.
         """
-        raise NotImplementedError
+        del instance_type  # unused
+        if disk_tier not in cls._SUPPORTED_DISK_TIERS:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'{disk_tier} is not supported by {cls._REPR}.')
+
+    @classmethod
+    def _translate_disk_tier(
+        cls, disk_tier: Optional[resources_utils.DiskTier]
+    ) -> resources_utils.DiskTier:
+        if disk_tier is None:
+            return cls._DEFAULT_DISK_TIER
+        if disk_tier == resources_utils.DiskTier.BEST:
+            return cls._BEST_DISK_TIER
+        return disk_tier
 
     @classmethod
     def _check_instance_type_accelerators_combination(
@@ -737,3 +764,9 @@ class Cloud:
         state.pop('PROVISIONER_VERSION', None)
         state.pop('STATUS_VERSION', None)
         return state
+
+
+# === Helper functions ===
+def cloud_in_iterable(cloud: Cloud, cloud_list: Iterable[Cloud]) -> bool:
+    """Returns whether the cloud is in the given cloud list."""
+    return any(cloud.is_same_cloud(c) for c in cloud_list)

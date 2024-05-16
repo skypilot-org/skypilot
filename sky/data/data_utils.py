@@ -90,12 +90,15 @@ def split_cos_path(s3_path: str) -> Tuple[str, str, str]:
     return bucket_name, data_path, region
 
 
-def create_s3_client(region: str = 'us-east-2') -> Client:
+def create_s3_client(region: Optional[str] = None) -> Client:
     """Helper method that connects to Boto3 client for S3 Bucket
 
     Args:
-      region: str; Region name, e.g. us-west-1, us-east-2
+      region: str; Region name, e.g. us-west-1, us-east-2. If None, default
+        region us-east-1 is used.
     """
+    if region is None:
+        region = 'us-east-1'
     return aws.client('s3', region_name=region)
 
 
@@ -468,14 +471,14 @@ class Rclone():
         os.makedirs(os.path.dirname(rclone_config_path), exist_ok=True)
         # create rclone.conf if doesn't exist
         if not os.path.isfile(rclone_config_path):
-            open(rclone_config_path, 'w').close()
+            open(rclone_config_path, 'w', encoding='utf-8').close()
 
         # write back file without profile: [bucket_name]
         # to which the new bucket profile is appended
         with FileLock(rclone_config_path + '.lock'):
             profiles_to_keep = Rclone._remove_bucket_profile_rclone(
                 bucket_name, cloud)
-            with open(f'{rclone_config_path}', 'w') as file:
+            with open(f'{rclone_config_path}', 'w', encoding='utf-8') as file:
                 if profiles_to_keep:
                     file.writelines(profiles_to_keep)
                     if profiles_to_keep[-1].strip():
@@ -492,7 +495,8 @@ class Rclone():
          if bucket exists, else empty string"""
         bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
             bucket_name, cloud)
-        with open(Rclone._RCLONE_ABS_CONFIG_PATH) as file:
+        with open(Rclone._RCLONE_ABS_CONFIG_PATH, 'r',
+                  encoding='utf-8') as file:
             bucket_profile_found = False
             for line in file:
                 if line.lstrip().startswith('#'):  # skip user's comments.
@@ -526,7 +530,7 @@ class Rclone():
                 bucket_name, cloud)
 
             # write back file without profile: [bucket_rclone_profile]
-            with open(f'{rclone_config_path}', 'w') as file:
+            with open(f'{rclone_config_path}', 'w', encoding='utf-8') as file:
                 file.writelines(profiles_to_keep)
 
     @staticmethod
@@ -538,7 +542,7 @@ class Rclone():
             bucket_name, cloud)
         rclone_config_path = Rclone._RCLONE_ABS_CONFIG_PATH
 
-        with open(f'{rclone_config_path}', 'r') as file:
+        with open(f'{rclone_config_path}', 'r', encoding='utf-8') as file:
             lines = file.readlines()  # returns a list of the file's lines
             # delete existing bucket profile matching:
             # '[profile_prefix+bucket_name]'

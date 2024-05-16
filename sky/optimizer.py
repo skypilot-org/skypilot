@@ -7,26 +7,26 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import colorama
-import networkx as nx
 import numpy as np
 import prettytable
 
-from sky import check
+from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
-from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky import task as task_lib
-from sky.backends import backend_utils
+from sky.adaptors import common as adaptors_common
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    # pylint: disable=ungrouped-imports
+    import networkx as nx
+
     from sky import dag as dag_lib
+else:
+    nx = adaptors_common.LazyImport('networkx')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -103,7 +103,7 @@ class Optimizer:
 
     @staticmethod
     def optimize(dag: 'dag_lib.Dag',
-                 minimize=OptimizeTarget.COST,
+                 minimize: OptimizeTarget = OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[
                      resources_lib.Resources]] = None,
                  quiet: bool = False):
@@ -249,8 +249,6 @@ class Optimizer:
 
         # node -> cloud -> list of resources that satisfy user's requirements.
         node_to_candidate_map: _TaskToPerCloudCandidates = {}
-        specific_reservations = set(
-            skypilot_config.get_nested(('gcp', 'specific_reservations'), set()))
 
         # Compute the estimated cost/time for each node.
         for node_i, node in enumerate(topo_order):
@@ -311,7 +309,7 @@ class Optimizer:
                         cost_per_node = resources.get_cost(estimated_runtime)
                         num_available_reserved_nodes = sum(
                             resources.get_reservations_available_resources(
-                                specific_reservations).values())
+                            ).values())
 
                         # We consider the cost of the unused reservation
                         # resources to be 0 since we are already paying for
@@ -337,8 +335,10 @@ class Optimizer:
                 # If Kubernetes was included in the search space, then
                 # mention "kubernetes cluster" and/instead of "catalog"
                 # in the error message.
-                enabled_clouds = global_user_state.get_enabled_clouds()
-                if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
+                enabled_clouds = (
+                    sky_check.get_cached_enabled_clouds_or_refresh())
+                if clouds.cloud_in_iterable(clouds.Kubernetes(),
+                                            enabled_clouds):
                     if any(orig_resources.cloud is None
                            for orig_resources in node.resources):
                         source_hint = 'catalog and kubernetes cluster'
@@ -787,7 +787,7 @@ class Optimizer:
 
             chosen_str = ''
             if chosen:
-                chosen_str = (colorama.Fore.GREEN + '   ' + u'\u2714' +
+                chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
             row = Row(cloud, resources.instance_type + spot, vcpus, mem,
                       str(accelerators), str(region_or_zone), cost_str,
@@ -809,10 +809,12 @@ class Optimizer:
             'CLOUD', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS',
             'REGION/ZONE'
         ]
-        # Do not print Source or Sink.
-        best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
-                          for t, r in ordered_best_plan.items()]
-        if len(best_plan_rows) > 1:
+        if len(ordered_best_plan) > 1:
+            best_plan_rows = []
+            for t, r in ordered_best_plan.items():
+                assert t.name is not None, t
+                best_plan_rows.append([t.name, str(t.num_nodes)] +
+                                      _get_resources_element_list(r))
             logger.info(
                 f'{colorama.Style.BRIGHT}Best plan: {colorama.Style.RESET_ALL}')
             best_plan_table = _create_table(['TASK', '#NODES'] +
@@ -835,7 +837,7 @@ class Optimizer:
                 json.dumps(resource.to_yaml_config()): cost
                 for resource, cost in v.items()
             }
-            task_str = (f'for task {repr(task)!r} ' if num_tasks > 1 else '')
+            task_str = (f'for task {task.name!r} ' if num_tasks > 1 else '')
             plural = 's' if task.num_nodes > 1 else ''
             logger.info(
                 f'{colorama.Style.BRIGHT}Considered resources {task_str}'
@@ -1086,10 +1088,6 @@ class DummyCloud(clouds.Cloud):
     pass
 
 
-def _cloud_in_list(cloud: clouds.Cloud, lst: Iterable[clouds.Cloud]) -> bool:
-    return any(cloud.is_same_cloud(c) for c in lst)
-
-
 def _make_launchables_for_valid_region_zones(
     launchable_resources: resources_lib.Resources
 ) -> List[resources_lib.Resources]:
@@ -1164,8 +1162,8 @@ def _fill_in_launchable_resources(
         Dict mapping Cloud to a list of feasible Resources (for printing),
         Sorted list of fuzzy candidates (alternative GPU names).
     """
-    backend_utils.check_public_cloud_enabled()
-    enabled_clouds = global_user_state.get_enabled_clouds()
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        raise_if_no_cloud_access=True)
     launchable = collections.defaultdict(list)
     all_fuzzy_candidates = set()
     cloud_candidates: _PerCloudCandidates = collections.defaultdict(
@@ -1173,11 +1171,11 @@ def _fill_in_launchable_resources(
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
-        if resources.cloud is not None and not _cloud_in_list(
-                resources.cloud, enabled_clouds):
+        if (resources.cloud is not None and
+                not clouds.cloud_in_iterable(resources.cloud, enabled_clouds)):
             if try_fix_with_sky_check:
                 # Explicitly check again to update the enabled cloud list.
-                check.check(quiet=True)
+                sky_check.check(quiet=True)
                 return _fill_in_launchable_resources(task, blocked_resources,
                                                      False)
             with ux_utils.print_exception_no_traceback():
@@ -1190,15 +1188,6 @@ def _fill_in_launchable_resources(
         else:
             clouds_list = ([resources.cloud]
                            if resources.cloud is not None else enabled_clouds)
-            # Hack: When >=2 cloud candidates, always remove local cloud from
-            # possible candidates. This is so the optimizer will consider
-            # public clouds, except local. Local will be included as part of
-            # optimizer in a future PR.
-            # TODO(mluo): Add on-prem to cloud spillover.
-            if len(clouds_list) >= 2:
-                clouds_list = [
-                    c for c in clouds_list if not isinstance(c, clouds.Local)
-                ]
             for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list) = (
                     cloud.get_feasible_launchable_resources(

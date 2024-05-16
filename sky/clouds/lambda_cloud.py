@@ -6,10 +6,10 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import requests
 
 from sky import clouds
-from sky import exceptions
 from sky import status_lib
 from sky.clouds import service_catalog
 from sky.clouds.utils import lambda_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -42,8 +42,10 @@ class Lambda(clouds.Cloud):
             'You can try running docker command inside the `run` section in task.yaml.'
         ),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.IMAGE_ID: f'Specifying image ID is not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is currently not supported on {_REPR}.',
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: f'Host controllers are not supported in {_REPR}.',
     }
 
     @classmethod
@@ -128,7 +130,8 @@ class Lambda(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -155,10 +158,13 @@ class Lambda(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud  # Unused.
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud, dryrun  # Unused.
         assert zones is None, 'Lambda does not support zones.'
 
         r = resources
@@ -263,23 +269,9 @@ class Lambda(clouds.Cloud):
                                                     zone,
                                                     clouds='lambda')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'lambda')
-
     @classmethod
     def regions(cls) -> List['clouds.Region']:
         return service_catalog.regions(clouds='lambda')
-
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
-        raise exceptions.NotSupportedError(
-            'Lambda does not support disk tiers.')
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
@@ -289,6 +281,7 @@ class Lambda(clouds.Cloud):
             'booting': status_lib.ClusterStatus.INIT,
             'active': status_lib.ClusterStatus.UP,
             'unhealthy': status_lib.ClusterStatus.INIT,
+            'terminating': None,
             'terminated': None,
         }
         # TODO(ewzeng): filter by hash_filter_string to be safe

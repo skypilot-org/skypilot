@@ -2,17 +2,18 @@
 
 import dataclasses
 import shlex
-import typing
+import time
 from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import command_runner
 from sky.utils import subprocess_utils
 
-if typing.TYPE_CHECKING:
-    from sky.utils import command_runner
-
 logger = sky_logging.init_logger(__name__)
+
+DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
+                                'the Docker daemon socket')
 
 
 @dataclasses.dataclass
@@ -90,6 +91,10 @@ def docker_start_cmds(
         env_flags,
         user_options_str,
         '--net=host',
+        # SkyPilot: Add following options to enable fuse.
+        '--cap-add=SYS_ADMIN',
+        '--device=/dev/fuse',
+        '--security-opt=apparmor:unconfined',
         image,
         'bash',
     ]
@@ -109,7 +114,7 @@ class DockerInitializer:
     """Initializer for docker containers on a remote node."""
 
     def __init__(self, docker_config: Dict[str, Any],
-                 runner: 'command_runner.SSHCommandRunner', log_path: str):
+                 runner: 'command_runner.CommandRunner', log_path: str):
         self.docker_config = docker_config
         self.container_name = docker_config['container_name']
         self.runner = runner
@@ -120,7 +125,11 @@ class DockerInitializer:
         self.docker_cmd = 'podman' if use_podman else 'docker'
         self.log_path = log_path
 
-    def _run(self, cmd, run_env='host') -> str:
+    def _run(self,
+             cmd,
+             run_env='host',
+             wait_for_docker_daemon: bool = False) -> str:
+
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
             cmd = ' '.join(_with_interactive(cmd))
@@ -132,16 +141,29 @@ class DockerInitializer:
                    f' {shlex.quote(cmd)} ')
 
         logger.debug(f'+ {cmd}')
-        rc, stdout, stderr = self.runner.run(cmd,
-                                             require_outputs=True,
-                                             stream_logs=False,
-                                             log_path=self.log_path)
+        cnt = 0
+        retry = 3
+        while True:
+            rc, stdout, stderr = self.runner.run(cmd,
+                                                 require_outputs=True,
+                                                 stream_logs=False,
+                                                 log_path=self.log_path)
+            if (not wait_for_docker_daemon or
+                    DOCKER_PERMISSION_DENIED_STR not in stdout + stderr):
+                break
+
+            cnt += 1
+            if cnt > retry:
+                break
+            logger.info(
+                'Failed to run docker command, retrying in 10 seconds... '
+                f'({cnt}/{retry})')
+            time.sleep(10)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
             error_msg='Failed to run docker setup commands',
-            stderr=stdout + stderr,
-            stream_logs=False)
+            stderr=stdout + stderr)
         return stdout.strip()
 
     def initialize(self) -> str:
@@ -164,33 +186,53 @@ class DockerInitializer:
             # TODO(tian): Maybe support a command to get the login password?
             docker_login_config = DockerLoginConfig(
                 **self.docker_config['docker_login_config'])
-            self._run(f'{self.docker_cmd} login --username '
-                      f'{docker_login_config.username} '
-                      f'--password {docker_login_config.password} '
-                      f'{docker_login_config.server}')
-            specific_image = f'{docker_login_config.server}/{specific_image}'
+            self._run(
+                f'{self.docker_cmd} login --username '
+                f'{docker_login_config.username} '
+                f'--password {docker_login_config.password} '
+                f'{docker_login_config.server}',
+                wait_for_docker_daemon=True)
+            # We automatically add the server prefix to the image name if
+            # the user did not add it.
+            server_prefix = f'{docker_login_config.server}/'
+            if not specific_image.startswith(server_prefix):
+                specific_image = f'{server_prefix}{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
                                     'pull_before_run is specified')
-            self._run(f'{self.docker_cmd} pull {specific_image}')
+            self._run(f'{self.docker_cmd} pull {specific_image}',
+                      wait_for_docker_daemon=True)
         else:
-            self._run(f'{self.docker_cmd} image inspect {specific_image} '
-                      '1> /dev/null  2>&1 || '
-                      f'{self.docker_cmd} pull {specific_image}')
+            self._run(
+                f'{self.docker_cmd} image inspect {specific_image} '
+                '1> /dev/null  2>&1 || '
+                f'{self.docker_cmd} pull {specific_image}',
+                wait_for_docker_daemon=True)
 
         logger.info(f'Starting container {self.container_name} with image '
                     f'{specific_image}')
         container_running = self._check_container_status()
         if container_running:
-            running_image = (self._run(
-                check_docker_image(self.container_name, self.docker_cmd)))
+            running_image = self._run(
+                check_docker_image(self.container_name, self.docker_cmd))
             if running_image != specific_image:
                 logger.error(
                     f'A container with name {self.container_name} is running '
                     f'image {running_image} instead of {specific_image} (which '
                     'was provided in the YAML)')
         else:
+            # Edit docker config first to avoid disconnecting the container
+            # from GPUs when a systemctl command is called. This is a known
+            # issue with nvidia container toolkit:
+            # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
+            self._run(
+                '[ -f /etc/docker/daemon.json ] || '
+                'echo "{}" | sudo tee /etc/docker/daemon.json;'
+                'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
+                '/etc/docker/daemon.json > /tmp/daemon.json;'
+                'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
+                'sudo systemctl restart docker')
             user_docker_run_options = self.docker_config.get('run_options', [])
             start_command = docker_start_cmds(
                 specific_image,
@@ -210,13 +252,18 @@ class DockerInitializer:
         # Disable apt-get from asking user input during installation.
         # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # pylint: disable=line-too-long
         self._run(
-            'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
+            f'echo \'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}\' '
+            '>> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
             run_env='docker')
         # Install dependencies.
         self._run(
-            'sudo apt-get update; sudo apt-get install -y rsync curl wget '
-            'patch openssh-server python3-pip;',
+            'sudo apt-get update; '
+            # Our mount script will install gcsfuse without fuse package.
+            # We need to install fuse package first to enable storage mount.
+            # The dpkg option is to suppress the prompt for fuse installation.
+            'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
+            'rsync curl wget patch openssh-server python3-pip fuse;',
             run_env='docker')
 
         # Copy local authorized_keys to docker container.
@@ -343,7 +390,8 @@ class DockerInitializer:
     def _check_container_exited(self) -> bool:
         if self.initialized:
             return True
-        output = (self._run(
-            check_docker_running_cmd(self.container_name, self.docker_cmd)))
+        output = (self._run(check_docker_running_cmd(self.container_name,
+                                                     self.docker_cmd),
+                            wait_for_docker_daemon=True))
         return 'false' in output.lower(
         ) and 'no such object' not in output.lower()

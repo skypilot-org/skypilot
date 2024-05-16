@@ -1,5 +1,6 @@
 resources:
   accelerators: L4:2
+  memory: 64+
 
 num_nodes: 2
 
@@ -12,7 +13,8 @@ setup: |
     conda activate ray
   fi
 
-  pip install "ray[train]" # Have to use ray < 2.8 as the later version will cause a conflict with the existing ray cluster
+  pip install "ray[train]"
+  pip install tqdm
   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 run: |

@@ -6,6 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -32,8 +33,18 @@ class RunPod(clouds.Cloud):
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is not '
              'supported yet on RunPod.'),
+        clouds.CloudImplementationFeatures.IMAGE_ID:
+            ('Specifying image ID is not supported on RunPod.'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            (f'Docker image is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-            ('Customizing disk tier is not supported yet on RunPod.')
+            ('Customizing disk tier is not supported yet on RunPod.'),
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
+            ('Mounting object stores is not supported on RunPod. To read data '
+             'from object stores on RunPod, use `mode: COPY` to copy the data '
+             'to local disk.'),
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
+            ('Host controllers are not supported on RunPod.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -138,7 +149,8 @@ class RunPod(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         """Returns the default instance type for RunPod."""
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
@@ -156,10 +168,13 @@ class RunPod(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del zones  # unused
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str,
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del zones, dryrun  # unused
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -264,11 +279,3 @@ class RunPod(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='runpod')
-
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'runpod')

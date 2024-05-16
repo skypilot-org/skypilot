@@ -157,7 +157,7 @@ class _AsyncSummaryWriter(threading.Thread):
                 summary.estimated_total_time = total_time
 
     def _write_summary(self) -> None:
-        with open(self._log_path, 'w') as f:
+        with open(self._log_path, 'w', encoding='utf-8') as f:
             json.dump(self._summary.__dict__, f)
 
     def run(self) -> None:

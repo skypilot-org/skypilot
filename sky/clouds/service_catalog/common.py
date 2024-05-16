@@ -4,24 +4,30 @@ import difflib
 import hashlib
 import os
 import time
+import typing
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import filelock
-import pandas as pd
 import requests
 
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.clouds import cloud_registry
 from sky.clouds.service_catalog import constants
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    import pandas as pd
+else:
+    pd = adaptors_common.LazyImport('pandas')
+
 logger = sky_logging.init_logger(__name__)
 
-_CATALOG_DIR = os.path.join(constants.LOCAL_CATALOG_DIR,
-                            constants.CATALOG_SCHEMA_VERSION)
-os.makedirs(_CATALOG_DIR, exist_ok=True)
+_ABSOLUTE_VERSIONED_CATALOG_DIR = os.path.join(
+    os.path.expanduser(constants.CATALOG_DIR), constants.CATALOG_SCHEMA_VERSION)
+os.makedirs(_ABSOLUTE_VERSIONED_CATALOG_DIR, exist_ok=True)
 
 
 class InstanceTypeInfo(NamedTuple):
@@ -52,11 +58,102 @@ class InstanceTypeInfo(NamedTuple):
 
 
 def get_catalog_path(filename: str) -> str:
-    return os.path.join(_CATALOG_DIR, filename)
+    return os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, filename)
+
+
+def is_catalog_modified(filename: str) -> bool:
+    # Check the md5 of the file to see if it has changed.
+    catalog_path = get_catalog_path(filename)
+    meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
+    md5_filepath = meta_path + '.md5'
+    if os.path.exists(md5_filepath):
+        with open(catalog_path, 'rb') as f:
+            file_md5 = hashlib.md5(f.read()).hexdigest()
+        with open(md5_filepath, 'r', encoding='utf-8') as f:
+            last_md5 = f.read()
+        return file_md5 != last_md5
+    else:
+        # If the md5 file does not exist, it means the catalog was manually
+        # populated instead of being fetched from the cloud.
+        return True
+
+
+def get_modified_catalog_file_mounts() -> Dict[str, str]:
+    """Returns a dict of catalogs which have been modified locally.
+
+    The dictionary maps the remote catalog path (relative) to the local path of
+    the modified catalog (absolute). Can be used directly as file_mounts for a
+    Task.
+
+    Used to determine which catalogs to upload to the controllers when they
+    are provisioned.
+    """
+
+    def _get_modified_catalogs() -> List[str]:
+        """Returns a list of modified catalogs relative to the catalog dir."""
+        modified_catalogs = []
+        for cloud_name in constants.ALL_CLOUDS:
+            cloud_catalog_dir = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR,
+                                             cloud_name)
+            if not os.path.exists(cloud_catalog_dir):
+                continue
+            # Iterate over all csvs cloud's catalog directory
+            for file in os.listdir(cloud_catalog_dir):
+                if file.endswith('.csv'):
+                    filename = os.path.join(cloud_name,
+                                            file)  # e.g., aws/vms.csv
+                    if is_catalog_modified(filename):
+                        modified_catalogs.append(filename)
+        return modified_catalogs
+
+    modified_catalog_list = _get_modified_catalogs()
+    modified_catalog_path_map = {}  # Map of remote: local catalog paths
+    for catalog in modified_catalog_list:
+        # Use relative paths for remote to handle varying usernames on the cloud
+        remote_path = os.path.join(constants.CATALOG_DIR,
+                                   constants.CATALOG_SCHEMA_VERSION, catalog)
+        local_path = os.path.expanduser(remote_path)
+        modified_catalog_path_map[remote_path] = local_path
+    return modified_catalog_path_map
+
+
+class LazyDataFrame:
+    """A lazy data frame that reads the catalog on demand.
+
+    We don't need to load the catalog for every SkyPilot call, and this class
+    allows us to load the catalog only when needed.
+    """
+
+    def __init__(self, filename: str):
+        self._filename = filename
+        self._df: Optional['pd.DataFrame'] = None
+
+    def _load_df(self) -> 'pd.DataFrame':
+        if self._df is None:
+            try:
+                self._df = pd.read_csv(self._filename)
+            except Exception as e:  # pylint: disable=broad-except
+                # As users can manually modify the catalog, read_csv can fail.
+                logger.error(f'Failed to read {self._filename}. '
+                             'To fix: delete the csv file and try again.')
+                with ux_utils.print_exception_no_traceback():
+                    raise e
+        return self._df
+
+    def __getattr__(self, name: str):
+        return getattr(self._load_df(), name)
+
+    def __getitem__(self, key):
+        # Delegate the indexing operation to the underlying DataFrame
+        return self._load_df()[key]
+
+    def __setitem__(self, key, value):
+        # Delegate the set operation to the underlying DataFrame
+        self._load_df()[key] = value
 
 
 def read_catalog(filename: str,
-                 pull_frequency_hours: Optional[int] = None) -> pd.DataFrame:
+                 pull_frequency_hours: Optional[int] = None) -> LazyDataFrame:
     """Reads the catalog from a local CSV file.
 
     If the file does not exist, download the up-to-date catalog that matches
@@ -72,7 +169,7 @@ def read_catalog(filename: str,
     catalog_path = get_catalog_path(filename)
     cloud = cloud_registry.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
 
-    meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
+    meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)
 
     # Atomic check, to avoid conflicts with other processes.
@@ -85,16 +182,10 @@ def read_catalog(filename: str,
                 return True
             if pull_frequency_hours is None:
                 return False
-            # Check the md5 of the file to see if it has changed.
-            with open(catalog_path, 'rb') as f:
-                file_md5 = hashlib.md5(f.read()).hexdigest()
-            md5_filepath = meta_path + '.md5'
-            if os.path.exists(md5_filepath):
-                with open(md5_filepath, 'r') as f:
-                    last_md5 = f.read()
-                if file_md5 != last_md5:
-                    # Do not update the file if the user modified it.
-                    return False
+            if is_catalog_modified(filename):
+                # If the catalog is modified by a user manually, we should
+                # avoid overwriting the catalog by fetching from GitHub.
+                return False
 
             last_update = os.path.getmtime(catalog_path)
             return last_update + pull_frequency_hours * 3600 < time.time()
@@ -127,28 +218,20 @@ def read_catalog(filename: str,
                 else:
                     # Download successful, save the catalog to a local file.
                     os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-                    with open(catalog_path, 'w') as f:
+                    with open(catalog_path, 'w', encoding='utf-8') as f:
                         f.write(r.text)
-                    with open(meta_path + '.md5', 'w') as f:
+                    with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
                         f.write(hashlib.md5(r.text.encode()).hexdigest())
 
-    try:
-        df = pd.read_csv(catalog_path)
-    except Exception as e:  # pylint: disable=broad-except
-        # As users can manually modify the catalog, read_csv can fail.
-        logger.error(f'Failed to read {catalog_path}. '
-                     'To fix: delete the csv file and try again.')
-        with ux_utils.print_exception_no_traceback():
-            raise e
-    return df
+    return LazyDataFrame(catalog_path)
 
 
 def _get_instance_type(
-    df: pd.DataFrame,
+    df: 'pd.DataFrame',
     instance_type: str,
     region: Optional[str],
     zone: Optional[str] = None,
-) -> pd.DataFrame:
+) -> 'pd.DataFrame':
     idx = df['InstanceType'] == instance_type
     if region is not None:
         idx &= df['Region'].str.lower() == region.lower()
@@ -158,13 +241,13 @@ def _get_instance_type(
     return df[idx]
 
 
-def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
+def instance_type_exists_impl(df: 'pd.DataFrame', instance_type: str) -> bool:
     """Returns True if the instance type is valid."""
     return instance_type in df['InstanceType'].unique()
 
 
 def validate_region_zone_impl(
-        cloud_name: str, df: pd.DataFrame, region: Optional[str],
+        cloud_name: str, df: 'pd.DataFrame', region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog.
 
@@ -234,7 +317,7 @@ def validate_region_zone_impl(
 
 
 def get_hourly_cost_impl(
-    df: pd.DataFrame,
+    df: 'pd.DataFrame',
     instance_type: str,
     use_spot: bool,
     region: Optional[str],
@@ -267,6 +350,10 @@ def get_hourly_cost_impl(
         # all the zones in the same region.
         assert region is None or len(set(df[price_str])) == 1, df
 
+    if pd.isna(df[price_str]).all():
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No {price_str} found for instance type '
+                             f'{instance_type!r}.')
     cheapest_idx = df[price_str].idxmin()
     cheapest = df.loc[cheapest_idx]
     return cheapest[price_str]
@@ -279,7 +366,7 @@ def _get_value(value):
 
 
 def get_vcpus_mem_from_instance_type_impl(
-    df: pd.DataFrame,
+    df: 'pd.DataFrame',
     instance_type: str,
 ) -> Tuple[Optional[float], Optional[float]]:
     df = _get_instance_type(df, instance_type, None)
@@ -300,7 +387,8 @@ def get_vcpus_mem_from_instance_type_impl(
     return _get_value(vcpus), _get_value(mem)
 
 
-def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
+def _filter_with_cpus(df: 'pd.DataFrame',
+                      cpus: Optional[str]) -> 'pd.DataFrame':
     if cpus is None:
         return df
 
@@ -323,8 +411,8 @@ def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
         return df[df['vCPUs'] == num_cpus]
 
 
-def _filter_with_mem(df: pd.DataFrame,
-                     memory_gb_or_ratio: Optional[str]) -> pd.DataFrame:
+def _filter_with_mem(df: 'pd.DataFrame',
+                     memory_gb_or_ratio: Optional[str]) -> 'pd.DataFrame':
     if memory_gb_or_ratio is None:
         return df
 
@@ -349,8 +437,8 @@ def _filter_with_mem(df: pd.DataFrame,
         return df[df['MemoryGiB'] == memory]
 
 
-def _filter_region_zone(df: pd.DataFrame, region: Optional[str],
-                        zone: Optional[str]) -> pd.DataFrame:
+def _filter_region_zone(df: 'pd.DataFrame', region: Optional[str],
+                        zone: Optional[str]) -> 'pd.DataFrame':
     if region is not None:
         df = df[df['Region'].str.lower() == region.lower()]
     if zone is not None:
@@ -359,7 +447,7 @@ def _filter_region_zone(df: pd.DataFrame, region: Optional[str],
 
 
 def get_instance_type_for_cpus_mem_impl(
-        df: pd.DataFrame, cpus: Optional[str],
+        df: 'pd.DataFrame', cpus: Optional[str],
         memory_gb_or_ratio: Optional[str]) -> Optional[str]:
     """Returns the cheapest instance type that satisfies the requirements.
 
@@ -384,7 +472,7 @@ def get_instance_type_for_cpus_mem_impl(
 
 
 def get_accelerators_from_instance_type_impl(
-    df: pd.DataFrame,
+    df: 'pd.DataFrame',
     instance_type: str,
 ) -> Optional[Dict[str, int]]:
     df = _get_instance_type(df, instance_type, None)
@@ -399,7 +487,7 @@ def get_accelerators_from_instance_type_impl(
 
 
 def get_instance_type_for_accelerator_impl(
-    df: pd.DataFrame,
+    df: 'pd.DataFrame',
     acc_name: str,
     acc_count: int,
     cpus: Optional[str] = None,
@@ -439,21 +527,23 @@ def get_instance_type_for_accelerator_impl(
 
     # Current strategy: choose the cheapest instance
     price_str = 'SpotPrice' if use_spot else 'Price'
+    if pd.isna(result[price_str]).all():
+        return ([], [])
     result = result.sort_values(price_str, ascending=True)
     instance_types = list(result['InstanceType'].drop_duplicates())
     return (instance_types, [])
 
 
 def list_accelerators_impl(
-    cloud: str,
-    df: pd.DataFrame,
-    gpus_only: bool,
-    name_filter: Optional[str],
-    region_filter: Optional[str],
-    quantity_filter: Optional[int],
-    case_sensitive: bool = True,
-    all_regions: bool = False,
-) -> Dict[str, List[InstanceTypeInfo]]:
+        cloud: str,
+        df: 'pd.DataFrame',
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        quantity_filter: Optional[int],
+        case_sensitive: bool = True,
+        all_regions: bool = False,
+        require_price: bool = True) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
     `name_filter` is a regular expression used to filter accelerator names
@@ -462,6 +552,7 @@ def list_accelerators_impl(
     Returns a mapping from the canonical names of accelerators to a list of
     instance types offered by this cloud.
     """
+    del require_price  # Unused.
     if gpus_only:
         df = df[~df['GpuInfo'].isna()]
     df = df.copy()  # avoid column assignment warning
@@ -487,6 +578,7 @@ def list_accelerators_impl(
         'SpotPrice',
         'Region',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
+
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter,
                                                    case=case_sensitive,
@@ -501,20 +593,18 @@ def list_accelerators_impl(
     grouped = df.groupby('AcceleratorName')
 
     def make_list_from_df(rows):
+
+        sort_key = ['Price', 'SpotPrice']
+        subset = [
+            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
+            'MemoryGiB'
+        ]
         if all_regions:
-            # Keep all regions.
-            rows = rows.groupby([
-                'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-                'MemoryGiB', 'Region'
-            ],
-                                dropna=False).aggregate('min').reset_index()
-        else:
-            # Only keep the lowest prices across regions.
-            rows = rows.groupby([
-                'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-                'MemoryGiB'
-            ],
-                                dropna=False).aggregate('min').reset_index()
+            sort_key.append('Region')
+            subset.append('Region')
+
+        rows = rows.sort_values(by=sort_key).drop_duplicates(subset=subset,
+                                                             keep='first')
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
                 cloud,
@@ -530,14 +620,17 @@ def list_accelerators_impl(
             ),
             axis='columns',
         ).tolist()
-        ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
-                                   if info.cpu_count is not None else 0))
+        # Sort by price and region as well.
+        ret.sort(
+            key=lambda info: (info.accelerator_count, info.instance_type, info.
+                              cpu_count if not pd.isna(info.cpu_count) else 0,
+                              info.price, info.spot_price, info.region))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}
 
 
-def get_region_zones(df: pd.DataFrame,
+def get_region_zones(df: 'pd.DataFrame',
                      use_spot: bool) -> List[cloud_lib.Region]:
     """Returns a list of regions/zones from a dataframe."""
     price_str = 'SpotPrice' if use_spot else 'Price'
@@ -556,41 +649,8 @@ def get_region_zones(df: pd.DataFrame,
     return regions
 
 
-def _accelerator_in_region(df: pd.DataFrame, acc_name: str, acc_count: int,
-                           region: str) -> bool:
-    """Returns True if the accelerator is in the region."""
-    return len(df[(df['AcceleratorName'] == acc_name) &
-                  (df['AcceleratorCount'] == acc_count) &
-                  (df['Region'].str.lower() == region.lower())]) > 0
-
-
-def _accelerator_in_zone(df: pd.DataFrame, acc_name: str, acc_count: int,
-                         zone: str) -> bool:
-    """Returns True if the accelerator is in the zone."""
-    return len(df[(df['AcceleratorName'] == acc_name) &
-                  (df['AcceleratorCount'] == acc_count) &
-                  (df['AvailabilityZone'] == zone)]) > 0
-
-
-def accelerator_in_region_or_zone_impl(
-    df: pd.DataFrame,
-    accelerator_name: str,
-    acc_count: int,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
-) -> bool:
-    """Returns True if the accelerator is in the region or zone."""
-    assert region is not None or zone is not None, (
-        'Both region and zone are None.')
-    if zone is None:
-        assert region is not None
-        return _accelerator_in_region(df, accelerator_name, acc_count, region)
-    else:
-        return _accelerator_in_zone(df, accelerator_name, acc_count, zone)
-
-
 # Images
-def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
+def get_image_id_from_tag_impl(df: 'pd.DataFrame', tag: str,
                                region: Optional[str]) -> Optional[str]:
     """Returns the image ID for the given tag and region.
 
@@ -611,7 +671,7 @@ def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
     return image_id
 
 
-def is_image_tag_valid_impl(df: pd.DataFrame, tag: str,
+def is_image_tag_valid_impl(df: 'pd.DataFrame', tag: str,
                             region: Optional[str]) -> bool:
     """Returns True if the image tag is valid."""
     df = df[df['Tag'] == tag]

@@ -1,0 +1,20 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replica_policy:
+    min_replicas: 2
+    max_replicas: 3
+    base_ondemand_fallback_replicas: 1
+    # Use a large qps per replica to avoid scale up for testing purpose.
+    target_qps_per_replica: 10000
+
+resources:
+  ports: 8080
+  cpus: 2+
+  use_spot: true
+
+workdir: examples/serve/http_server
+
+# Use 8080 to test jupyter service is terminated
+run: python3 server.py --port 8080

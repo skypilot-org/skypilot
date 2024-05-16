@@ -1,7 +1,7 @@
 resources:
   accelerators: A100-80GB:1
   disk_size: 1000
-  disk_tier: high
+  disk_tier: best
 
 workdir: .
 

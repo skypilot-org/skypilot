@@ -1,4 +1,7 @@
+<!-- $REMOVE -->
 # Self-Hosted Llama-2 Chatbot on Any Cloud
+<!-- $END_REMOVE -->
+<!-- $UNCOMMENT# Llama-2: Open LLM from Meta -->
 
 [Llama-2](https://github.com/facebookresearch/llama/tree/main) is the top open-source models on the [Open LLM leaderboard](https://huggingface.co/spaces/HuggingFaceH4/open_llm_leaderboard) today. It has been released with a license that authorizes commercial use. You can deploy a private Llama-2 chatbot with SkyPilot in your own cloud with just one simple command.
 
@@ -26,7 +29,7 @@ Go to the [application page](https://ai.meta.com/resources/models-and-libraries/
 
 Generate a read-only access token on huggingface [here](https://huggingface.co/settings/token), and make sure your huggingface account can access the Llama-2 models [here](https://huggingface.co/meta-llama/Llama-2-7b-chat/tree/main).
 
-Fill the access token in the [chatbot-hf.yaml](chatbot-hf.yaml) and [chatbot-meta.yaml](chatbot-meta.yaml) file.
+Fill the access token in the [chatbot-hf.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2/chatbot-hf.yaml) and [chatbot-meta.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2/chatbot-meta.yaml) file.
 ```yaml
 envs:
   MODEL_SIZE: 7

@@ -1,18 +1,20 @@
 .. _sky-faq:
 
 Frequently Asked Questions
-------------------------------------------------
+==========================
 
 
 .. contents::
     :local:
-    :depth: 1
+    :depth: 2
 
+Git and GitHub
+--------------
 
-Can I clone private GitHub repositories in a task's ``setup`` commands?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+How to clone private GitHub repositories in a task's ``setup`` commands?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Yes, provided you have `set up SSH agent forwarding <https://docs.github.com/en/developers/overview/using-ssh-agent-forwarding>`_.
+This is possible provided you have `set up SSH agent forwarding <https://docs.github.com/en/developers/overview/using-ssh-agent-forwarding>`_.
 For example, run the following on your laptop:
 
 .. code-block:: bash
@@ -29,6 +31,38 @@ Then, any SkyPilot clusters launched from this machine would be able to clone pr
       git clone git@github.com:your-proj/your-repo.git
 
 Note: currently, cloning private repositories in the ``run`` commands is not supported yet.
+
+How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Currently, there is a difference in whether ``.git`` is synced up depending on the command used:
+
+- For regular ``sky launch``, the workdir's ``.git`` is synced up by default.
+- For managed spot jobs ``sky spot launch``, the workdir's ``.git`` is excluded by default.
+
+In the second case, to ensure the workdir's ``.git`` is synced up for managed spot jobs, you can explicitly add a file mount to sync it up:
+
+.. code-block:: yaml
+
+  workdir: .
+  file_mounts:
+    ~/sky_workdir/.git: .git
+
+This can be useful if your jobs use certain experiment tracking tools that depend on the ``.git`` directory to track code changes.
+
+File mounting (``file_mounts``)
+-------------------------------
+
+How to make SkyPilot clusters use my Weights & Biases credentials?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Install the wandb library on your laptop and login to your account via ``wandb login``.
+Then, add the following lines in your task yaml file:
+
+.. code-block:: yaml
+
+  file_mounts:
+    ~/.netrc: ~/.netrc
 
 How to mount additional files into a cloned repository?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -56,18 +90,6 @@ To get around this, mount the files to a different path, then symlink to them.  
     ln -s /tmp/tmp.txt ~/code-repo/
 
 
-
-How to make SkyPilot clusters use my Weights & Biases credentials?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Install the wandb library on your laptop and login to your account via ``wandb login``.
-Then, add the following lines in your task yaml file:
-
-.. code-block:: yaml
-
-  file_mounts:
-    ~/.netrc: ~/.netrc
-
 How to update an existing cluster's ``file_mounts`` without rerunning ``setup``?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -75,23 +97,9 @@ If you have edited the ``file_mounts`` section (e.g., by adding some files) and 
 
 To avoid rerunning the ``setup`` commands, pass the ``--no-setup`` flag to ``sky launch``.
 
-How can I launch a VS Code tunnel using a SkyPilot task definition?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To launch a VS Code tunnel using a SkyPilot task definition, you can use the following task definition:
-
-.. code-block:: yaml
-
-    setup: |
-      sudo snap install --classic code
-      # if `snap` is not available, you can try the following commands instead:
-      # wget https://go.microsoft.com/fwlink/?LinkID=760868 -O vscode.deb
-      # sudo apt install ./vscode.deb -y
-      # rm vscode.deb
-    run: |
-      code tunnel --accept-server-license-terms
-
-Note that you'll be prompted to authenticate with your GitHub account to launch a VS Code tunnel.
+Region settings
+---------------
 
 How to launch VMs in a subset of regions only (e.g., Europe only)?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -183,3 +191,42 @@ You can customize the catalog files to your needs.
 For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.
 Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
 SkyPilot will automatically download the latest catalog in the next run.
+
+Miscellaneous
+-------------
+
+How can I launch a VS Code tunnel using a SkyPilot task definition?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To launch a VS Code tunnel using a SkyPilot task definition, you can use the following task definition:
+
+.. code-block:: yaml
+
+    setup: |
+      sudo snap install --classic code
+      # if `snap` is not available, you can try the following commands instead:
+      # wget https://go.microsoft.com/fwlink/?LinkID=760868 -O vscode.deb
+      # sudo apt install ./vscode.deb -y
+      # rm vscode.deb
+    run: |
+      code tunnel --accept-server-license-terms
+
+Note that you'll be prompted to authenticate with your GitHub account to launch a VS Code tunnel.
+
+PyTorch 2.2.0 failed on SkyPilot clusters. What should I do?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The latest PyTorch release (2.2.0) has a version conflict with the default cuDNN version on SkyPilot clusters, which may raise a segmentation fault when you run the job.
+
+To fix this, you can choose one of the following solutions:
+
+1. Use older version of PyTorch (like 2.1.0) instead of 2.2.0, i.e. :code:`pip install "torch<2.2"`;
+2. Remove the cuDNN from the cluster's :code:`LD_LIBRARY_PATH` by adding the following line to your task:
+
+.. code-block:: yaml
+
+  run: |
+    export LD_LIBRARY_PATH=$(echo $LD_LIBRARY_PATH | sed 's|:/usr/local/cuda/lib64||g; s|/usr/local/cuda/lib64:||g; s|/usr/local/cuda/lib64||g')
+    # Other commands using PyTorch 2.2.0
+    ...
+

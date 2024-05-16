@@ -8,6 +8,7 @@ import psutil
 
 from sky import sky_logging
 from sky.skylet import configs
+from sky.skylet import constants
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -54,13 +55,11 @@ def get_autostop_config() -> AutostopConfig:
 def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
     boot_time = psutil.boot_time()
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, down)
-    prev_autostop_config = get_autostop_config()
     configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
     logger.debug(f'set_autostop(): idle_minutes {idle_minutes}, down {down}.')
-    if (prev_autostop_config.autostop_idle_minutes < 0 or
-            prev_autostop_config.boot_time != psutil.boot_time()):
-        # Either autostop never set, or has been canceled. Reset timer.
-        set_last_active_time_to_now()
+    # Reset timer whenever an autostop setting is submitted, i.e. the idle
+    # time will be counted from now.
+    set_last_active_time_to_now()
 
 
 def set_autostopping_started() -> None:
@@ -76,10 +75,16 @@ def set_autostopping_started() -> None:
     configs.set_config(_AUTOSTOP_INDICATOR, str(psutil.boot_time()))
 
 
-def get_is_autostopping_payload() -> str:
+def get_is_autostopping() -> bool:
     """Returns whether the cluster is in the process of autostopping."""
     result = configs.get_config(_AUTOSTOP_INDICATOR)
     is_autostopping = (result == str(psutil.boot_time()))
+    return is_autostopping
+
+
+def get_is_autostopping_payload() -> str:
+    """Payload for whether the cluster is in the process of autostopping."""
+    is_autostopping = get_is_autostopping()
     return common_utils.encode_payload(is_autostopping)
 
 
@@ -123,4 +128,4 @@ class AutostopCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'python3 -u -c {shlex.quote(code)}'
+        return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}'

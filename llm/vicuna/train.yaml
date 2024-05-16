@@ -2,7 +2,7 @@ resources:
   accelerators: A100-80GB:8
   disk_size: 1000
   use_spot: true
-  disk_tier: high
+  disk_tier: best
 
 num_nodes: 1
 
@@ -100,7 +100,7 @@ run: |
     --fsdp_transformer_layer_cls_to_wrap 'LlamaDecoderLayer' \
     --tf32 True \
     --model_max_length ${SEQ_LEN} \
-    --run_name $SKYPILOT_JOB_ID \
+    --run_name $SKYPILOT_TASK_ID \
     --gradient_checkpointing True \
     --lazy_preprocess True
 

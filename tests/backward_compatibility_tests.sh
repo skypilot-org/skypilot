@@ -13,7 +13,7 @@
 #   bash tests/backward_compatibility_tests.sh
 
 #!/bin/bash
-set -ev
+set -evx
 
 need_launch=${1:-0}
 start_from=${2:-0}
@@ -51,8 +51,11 @@ if [ "$start_from" -le 1 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
 which sky
+# Job 1
 sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME} examples/minimal.yaml
 sky autostop -i 10 -y ${CLUSTER_NAME}
+# Job 2
+sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 100
 
 conda activate sky-back-compat-current
 sky status -r ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
@@ -60,12 +63,21 @@ rm -r  ~/.sky/wheels || true
 if [ "$need_launch" -eq "1" ]; then
   sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}
 fi
-sky exec --cloud ${CLOUD} ${CLUSTER_NAME} examples/minimal.yaml
+# Job 3
+sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 50
+q=$(sky queue ${CLUSTER_NAME})
+echo "$q"
+echo "$q" | grep "RUNNING" | wc -l | grep 2 || exit 1
+# Job 4
 s=$(sky launch --cloud ${CLOUD} -d -c ${CLUSTER_NAME} examples/minimal.yaml)
-echo $s
+sky logs ${CLUSTER_NAME} 2 --status | grep RUNNING || exit 1
 # remove color and find the job id
-echo $s | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 3" || exit 1
-sky queue ${CLUSTER_NAME}
+echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 4" || exit 1
+# wait for ready
+sky logs ${CLUSTER_NAME} 2
+q=$(sky queue ${CLUSTER_NAME})
+echo "$q"
+echo "$q" | grep "SUCCEEDED" | wc -l | grep 4 || exit 1
 fi
 
 # sky stop + sky start + sky exec
@@ -112,7 +124,7 @@ sky logs ${CLUSTER_NAME}-4 2
 fi
 
 # (1 node) sky start + sky exec + sky queue + sky logs
-if [ "$start_form" -le 5 ]; then
+if [ "$start_from" -le 5 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME}-5 examples/minimal.yaml
@@ -147,4 +159,36 @@ sky logs ${CLUSTER_NAME}-6 2 --status
 sky logs ${CLUSTER_NAME}-6 2
 fi
 
+# Test managed jobs to make sure existing jobs and new job can run correctly,
+# after the jobs controller is updated.
+# Get a new uuid to avoid conflict with previous back-compat tests.
+uuid=$(uuidgen)
+MANAGED_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}
+if [ "$start_from" -le 7 ]; then
+conda activate sky-back-compat-master
+rm -r  ~/.sky/wheels || true
+sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
+sky spot launch -d --cloud ${CLOUD} -y --cpus 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 300"
+conda activate sky-back-compat-current
+rm -r  ~/.sky/wheels || true
+s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7 | grep "RUNNING" | wc -l)
+s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-1)
+echo "$s"
+echo "$s" | grep " hi" || exit 1
+sky jobs launch -d --cloud ${CLOUD} -y -n ${MANAGED_JOB_JOB_NAME}-7-2 "echo hi; sleep 40"
+s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-2)
+echo "$s"
+echo "$s" | grep " hi" || exit 1
+s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
+echo "$s"
+echo "$s" | grep "RUNNING" | wc -l | grep 3 || exit 1
+sky jobs cancel -y -n ${MANAGED_JOB_JOB_NAME}-7-0
+sky jobs logs -n "${MANAGED_JOB_JOB_NAME}-7-1"
+s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
+echo "$s"
+echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
+echo "$s" | grep "CANCELLED" | wc -l | grep 1 || exit 1
+fi
+
 sky down ${CLUSTER_NAME}* -y
+sky jobs cancel -n ${MANAGED_JOB_JOB_NAME}* -y

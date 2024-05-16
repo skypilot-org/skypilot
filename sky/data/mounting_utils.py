@@ -4,6 +4,7 @@ import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky.utils import command_runner
 
 # Values used to construct mounting commands
 _STAT_CACHE_TTL = '5s'
@@ -19,7 +20,7 @@ def get_s3_mount_install_cmd() -> str:
     install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
                    'releases/download/0.24.0-romilb-upstream/goofys '
                    '-O /usr/local/bin/goofys && '
-                   'sudo chmod +x /usr/local/bin/goofys')
+                   'sudo chmod 755 /usr/local/bin/goofys')
     return install_cmd
 
 
@@ -129,6 +130,8 @@ def get_mounting_script(
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
+                             
+        {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
         MOUNT_PATH={mount_path}
         MOUNT_BINARY={mount_binary}

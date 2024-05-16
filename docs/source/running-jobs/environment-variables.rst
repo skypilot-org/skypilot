@@ -88,10 +88,52 @@ it available in your current shell, then using ``--env`` to pass it to SkyPilot:
 SkyPilot environment variables
 ------------------------------------------------------------------
 
-SkyPilot exports these environment variables for a task's execution (while ``run`` commands are running):
+SkyPilot exports these environment variables for a task's execution. ``setup``
+and ``run`` stages have different environment variables available.
+
+Environment variables for ``setup``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
 .. list-table::
-   :widths: 20 70 10
+   :widths: 20 60 10
+   :header-rows: 1
+
+   * - Name
+     - Definition
+     - Example
+   * - ``SKYPILOT_SETUP_NODE_RANK``
+     - Rank (an integer ID from 0 to :code:`num_nodes-1`) of the node being set up.
+     - 0
+   * - ``SKYPILOT_SETUP_NODE_IPS``
+     - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
+     - 1.2.3.4
+   * - ``SKYPILOT_TASK_ID``
+     - A unique ID assigned to each task.
+       
+       This environment variable is available only when the task is submitted 
+       with :code:`sky launch --detach-setup`, or run as a managed spot job.
+       
+       Refer to the description in the :ref:`environment variables for run <env-vars-for-run>`.
+     - sky-2023-07-06-21-18-31-563597_myclus_1
+     
+       For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
+   * - ``SKYPILOT_CLUSTER_INFO``
+     - A JSON string containing information about the cluster. To access the information, you could parse the JSON string in bash ``echo $SKYPILOT_CLUSTER_INFO | jq .cloud`` or in Python ``json.loads(os.environ['SKYPILOT_CLUSTER_INFO'])['cloud']``.
+     - {"cluster_name": "my-cluster-name", "cloud": "GCP", "region": "us-central1", "zone": "us-central1-a"}
+   * - ``SKYPILOT_SERVE_REPLICA_ID``
+     - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
+     - 1
+
+Since setup commands always run on all nodes of a cluster, SkyPilot ensures both of these environment variables (the ranks and the IP list) never change across multiple setups on the same cluster.
+
+.. _env-vars-for-run:
+
+Environment variables for ``run``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :widths: 20 60 10
    :header-rows: 1
 
    * - Name
@@ -109,17 +151,26 @@ SkyPilot exports these environment variables for a task's execution (while ``run
        more :ref:`here <dist-jobs>`.
      - 0
    * - ``SKYPILOT_TASK_ID``
-     - A unique ID assigned to each task.
+     - A unique ID assigned to each task in the format "sky-<timestamp>_<cluster-name>_<task-id>".
        Useful for logging purposes: e.g., use a unique output path on the cluster; pass to Weights & Biases; etc.
+       Each task's logs are stored on the cluster at ``~/sky_logs/${SKYPILOT_TASK_ID%%_*}/tasks/*.log``.
 
        If a task is run as a :ref:`managed spot job <spot-jobs>`, then all
-       recoveries of that job will have the same ID value. Read more :ref:`here <spot-jobs-end-to-end>`.
-     - sky-2023-07-06-21-18-31-563597_myclus_id-1
+       recoveries of that job will have the same ID value. The ID is in the format "sky-managed-<timestamp>_<job-name>(_<task-name>)_<job-id>-<task-id>", where ``<task-name>`` will appear when a pipeline is used, i.e., more than one task in a managed spot job. Read more :ref:`here <spot-jobs-end-to-end>`.
+     - sky-2023-07-06-21-18-31-563597_myclus_1
+     
+       For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
+   * - ``SKYPILOT_CLUSTER_INFO``
+     - A JSON string containing information about the cluster. To access the information, you could parse the JSON string in bash ``echo $SKYPILOT_CLUSTER_INFO | jq .cloud`` or in Python ``json.loads(os.environ['SKYPILOT_CLUSTER_INFO'])['cloud']``.
+     - {"cluster_name": "my-cluster-name", "cloud": "GCP", "region": "us-central1", "zone": "us-central1-a"}
+   * - ``SKYPILOT_SERVE_REPLICA_ID``
+     - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
+     - 1
 
 The values of these variables are filled in by SkyPilot at task execution time.
 
 You can access these variables in the following ways:
 
-* In the task YAML's ``run`` commands (a Bash script), access them using the ``${MYVAR}`` syntax;
-* In the program(s) launched in ``run``, access them using the
+* In the task YAML's ``setup``/``run`` commands (a Bash script), access them using the ``${MYVAR}`` syntax;
+* In the program(s) launched in ``setup``/``run``, access them using the
   language's standard method (e.g., ``os.environ`` for Python).

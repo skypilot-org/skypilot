@@ -5,7 +5,7 @@
 # Its canonical open-source location is:
 #   https://google.github.io/styleguide/pylintrc
 
-[MASTER]
+[MAIN]
 
 # Files or directories to be skipped. They should be base names, not paths.
 ignore=third_party,ray_patches,providers
@@ -50,7 +50,8 @@ confidence=
 # --enable=similarities". If you want to run only the classes checker, but have
 # no Warning level messages displayed, use"--disable=all --enable=classes
 # --disable=W"
-disable=abstract-method,
+disable=R,
+        abstract-method,
         apply-builtin,
         arguments-differ,
         attribute-defined-outside-init,
@@ -60,6 +61,7 @@ disable=abstract-method,
         buffer-builtin,
         c-extension-no-member,
         consider-using-enumerate,
+        consider-using-f-string, # FIXME(sky): make pass
         cmp-builtin,
         cmp-method,
         coerce-builtin,
@@ -76,7 +78,7 @@ disable=abstract-method,
         global-statement,
         hex-method,
         idiv-method,
-        implicit-str-concat-in-sequence,
+        implicit-str-concat,
         import-error,
         import-self,
         import-star-module-level,
@@ -139,6 +141,7 @@ disable=abstract-method,
         trailing-newlines,
         unichr-builtin,
         unicode-builtin,
+        unnecessary-lambda-assignment, # FIXME(sky): make pass.
         unnecessary-pass,
         unpacking-in-except,
         useless-else-on-loop,
@@ -156,12 +159,6 @@ disable=abstract-method,
 # (visual studio) and html. You can also give a reporter class, eg
 # mypackage.mymodule.MyReporterClass.
 output-format=text
-
-# Put messages in a separate file for each module / package specified on the
-# command line instead of printing them on stdout. Reports (if any) will be
-# written in a file name "pylint_global.[txt|html]". This option is deprecated
-# and it will be removed in Pylint 2.0.
-files-output=no
 
 # Tells whether to display a full report or only the messages
 reports=no
@@ -269,7 +266,7 @@ generated-members=
 # Maximum number of characters on a single line.
 max-line-length=80
 
-# TODO(https://github.com/PyCQA/pylint/issues/3352): Direct pylint to exempt
+# TODO(https://github.com/pylint-dev/pylint/issues/3352): Direct pylint to exempt
 # lines made too long by directives to pytype.
 
 # Regexp for a line that is allowed to be longer than the limit.
@@ -280,12 +277,6 @@ ignore-long-lines=(?x)(
 # Allow the body of an if to be on the same line as the test if there is no
 # else.
 single-line-if-stmt=yes
-
-# List of optional constructs for which whitespace checking is disabled. `dict-
-# separator` is used to allow tabulation in dicts, etc.: {1  : 1,\n222: 2}.
-# `trailing-comma` allows a space between comma and closing bracket: (a, ).
-# `empty-line` allows space-only lines.
-no-space-check=
 
 # Maximum number of lines in a module
 max-module-lines=99999

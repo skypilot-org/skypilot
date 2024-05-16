@@ -13,6 +13,8 @@ SIGTSTP_CODE = 146
 RSYNC_FILE_NOT_FOUND_CODE = 23
 # Arbitrarily chosen value. Used in SkyPilot's storage mounting scripts
 MOUNT_PATH_NON_EMPTY_CODE = 42
+# Arbitrarily chosen value. Used to provision Kubernetes instance in Skypilot
+INSUFFICIENT_PRIVILEGES_CODE = 52
 # Return code when git command is ran in a dir that is not git repo
 GIT_FATAL_EXIT_CODE = 128
 
@@ -44,12 +46,18 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class InvalidCloudConfigs(Exception):
+    """Raised when invalid configurations are provided for a given cloud."""
+    pass
+
+
 class ProvisionPrechecksError(Exception):
-    """Raised when a spot job fails prechecks before provision.
+    """Raised when a managed job fails prechecks before provision.
+
     Developer note: For now this should only be used by managed
-    spot code path (technically, this can/should be raised by the
+    jobs code path (technically, this can/should be raised by the
     lower-level sky.launch()). Please refer to the docstring of
-    `spot.recovery_strategy._launch` for more details about when
+    `jobs.recovery_strategy._launch` for more details about when
     the error will be raised.
 
     Args:
@@ -61,11 +69,11 @@ class ProvisionPrechecksError(Exception):
         self.reasons = list(reasons)
 
 
-class SpotJobReachedMaxRetriesError(Exception):
-    """Raised when a spot job fails to be launched after maximum retries.
+class ManagedJobReachedMaxRetriesError(Exception):
+    """Raised when a managed job fails to be launched after maximum retries.
 
-    Developer note: For now this should only be used by managed spot code
-    path. Please refer to the docstring of `spot.recovery_strategy._launch`
+    Developer note: For now this should only be used by managed jobs code
+    path. Please refer to the docstring of `jobs.recovery_strategy._launch`
     for more details about when the error will be raised.
     """
     pass
@@ -92,8 +100,11 @@ class CommandError(Exception):
         self.command = command
         self.error_msg = error_msg
         self.detailed_reason = detailed_reason
-        message = (f'Command {command} failed with return code {returncode}.'
-                   f'\n{error_msg}')
+        if not command:
+            message = error_msg
+        else:
+            message = (f'Command {command} failed with return code '
+                       f'{returncode}.\n{error_msg}')
         super().__init__(message)
 
 
@@ -179,8 +190,8 @@ class StorageExternalDeletionError(StorageBucketGetError):
     pass
 
 
-class FetchIPError(Exception):
-    """Raised when fetching the IP fails."""
+class FetchClusterInfoError(Exception):
+    """Raised when fetching the cluster info fails."""
 
     class Reason(enum.Enum):
         HEAD = 'HEAD'
@@ -201,8 +212,8 @@ class ClusterStatusFetchingError(Exception):
     pass
 
 
-class SpotUserCancelledError(Exception):
-    """Raised when a spot user cancels the job."""
+class ManagedJobUserCancelledError(Exception):
+    """Raised when a user cancels a managed job."""
     pass
 
 

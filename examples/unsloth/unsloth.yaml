@@ -1,0 +1,42 @@
+# Runs the unsloth example app via SkyPilot
+#
+# The example app starts by obtaining the LAION dataset,
+# loads the Mistral model with 4-bit precision, performs model
+# patching with fast LoRA weights, and finally initializes and
+# trains the model using the SFTTrainer with specified
+# hyperparameters and the LAION dataset.
+#
+# Usage:
+#   sky launch -c myclus unsloth.yaml
+#   sky down myclus
+
+resources:
+  accelerators: T4:1
+  disk_size: 128
+
+file_mounts:
+  # Creates a new bucket my-unsloth-checkpoints and mounts it at /outputs  
+  /outputs:
+    name: my-unsloth-checkpoints # Ensure this name is unique
+
+workdir: .
+
+setup: |
+  set -ex
+  pip install --upgrade pip
+  cuda_version=$(nvcc --version | grep "release" | awk '{print $6}' | cut -c 2-)
+  
+  if [[ "$cuda_version" == "12.1"* ]]; then
+    pip install --upgrade --force-reinstall --no-cache-dir torch==2.2.0 triton \
+      --index-url https://download.pytorch.org/whl/cu121
+    pip install ipython
+    pip install "unsloth[cu121-torch220] @ git+https://github.com/unslothai/unsloth.git"
+  else
+    pip install --upgrade --force-reinstall --no-cache-dir torch==2.2.0 triton \
+      --index-url https://download.pytorch.org/whl/cu118
+    pip install ipython
+    pip install "unsloth[cu118-torch220] @ git+https://github.com/unslothai/unsloth.git"
+  fi
+
+run: |
+  python unsloth_example.py --output-dir /outputs

@@ -16,7 +16,9 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -35,7 +37,7 @@ logger = sky_logging.init_logger(__name__)
 # It has the following purposes:
 #   - make all nodes (any cloud) able to access private S3 buckets
 #   - make some remote nodes able to launch new nodes on AWS (i.e., makes
-#     AWS head node able to launch AWS workers, or any-cloud spot controller
+#     AWS head node able to launch AWS workers, or any-cloud jobs controller
 #     able to launch spot clusters on AWS).
 #
 # If we detect the current user identity is AWS SSO, we will not upload this
@@ -79,6 +81,8 @@ class AWSIdentityType(enum.Enum):
 
     IAM_ROLE = 'iam-role'
 
+    CONTAINER_ROLE = 'container-role'
+
     #       Name                    Value             Type    Location
     #       ----                    -----             ----    --------
     #    profile                <not set>             None    None
@@ -101,6 +105,8 @@ class AWS(clouds.Cloud):
     # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 248
 
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
+
     _regions: List[clouds.Region] = []
 
     _INDENT_PREFIX = '    '
@@ -112,6 +118,7 @@ class AWS(clouds.Cloud):
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
+    _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
@@ -253,9 +260,17 @@ class AWS(clouds.Cloud):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
         client = aws.client('ec2', region_name=region)
+        image_not_found_message = (
+            f'Image {image_id!r} not found in AWS region {region}.\n'
+            f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+            'Example: ami-0729d913a335efca7')
         try:
             image_info = client.describe_images(ImageIds=[image_id])
-            image_info = image_info['Images'][0]
+            image_info = image_info.get('Images', [])
+            if not image_info:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(image_not_found_message)
+            image_info = image_info[0]
             image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
         except aws.botocore_exceptions().NoCredentialsError:
@@ -265,10 +280,7 @@ class AWS(clouds.Cloud):
             return DEFAULT_AMI_GB
         except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Image {image_id!r} not found in AWS region {region}.\n'
-                    f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
-                    'Example: ami-0729d913a335efca7') from None
+                raise ValueError(image_not_found_message) from None
         return image_size
 
     @classmethod
@@ -277,7 +289,7 @@ class AWS(clouds.Cloud):
         # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
         command_str = (
             'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document'  # pylint: disable=line-too-long
-            ' | python3 -u -c "import sys, json; '
+            f' | {constants.SKY_PYTHON_CMD} -u -c "import sys, json; '
             'print(json.load(sys.stdin)[\'availabilityZone\'])"')
         return command_str
 
@@ -336,7 +348,8 @@ class AWS(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -360,10 +373,13 @@ class AWS(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='aws')
 
-    def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Any]:
+    def make_deploy_resources_variables(self,
+                                        resources: 'resources_lib.Resources',
+                                        cluster_name_on_cloud: str,
+                                        region: 'clouds.Region',
+                                        zones: Optional[List['clouds.Zone']],
+                                        dryrun: bool = False) -> Dict[str, Any]:
+        del dryrun  # unused
         assert zones is not None, (region, zones)
 
         region_name = region.name
@@ -405,6 +421,8 @@ class AWS(clouds.Cloud):
             'zones': ','.join(zone_names),
             'image_id': image_id,
             'security_group': security_group,
+            'security_group_managed_by_skypilot':
+                str(security_group != user_security_group).lower(),
             **AWS._get_disk_specs(r.disk_tier)
         }
 
@@ -413,6 +431,15 @@ class AWS(clouds.Cloud):
     ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            # Check the instance type is valid in the cloud
+            regions = self.regions_with_offering(
+                resources.instance_type,
+                accelerators=resources.accelerators,
+                use_spot=resources.use_spot,
+                region=resources.region,
+                zone=resources.zone)
+            if not regions:
+                return ([], [])
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(accelerators=None)
             return ([resources], [])
@@ -516,10 +543,16 @@ class AWS(clouds.Cloud):
         elif identity_type == AWSIdentityType.IAM_ROLE:
             # When using an IAM role, the credentials may not exist in the
             # ~/.aws/credentials file. So we don't check for the existence of the
-            # file. This will happen when the user is on a VM (or spot-controller)
-            # created by an SSO account, i.e. the VM will be assigned the IAM
-            # role: skypilot-v1.
+            # file. This will happen when the user is on a VM (or
+            # jobs-controller) created by an SSO account, i.e. the VM will be
+            # assigned the IAM role: skypilot-v1.
             hints = f'AWS IAM role is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.CONTAINER_ROLE:
+            # Similar to the IAM ROLE, an ECS container may not store credentials
+            # in the~/.aws/credentials file. So we don't check for the existence of
+            # the file. i.e. the container will be assigned the IAM role of the
+            # task: skypilot-v1.
+            hints = f'AWS container-role is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -579,6 +612,8 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.SSO
         elif _is_access_key_of_type(AWSIdentityType.IAM_ROLE.value):
             return AWSIdentityType.IAM_ROLE
+        elif _is_access_key_of_type(AWSIdentityType.CONTAINER_ROLE.value):
+            return AWSIdentityType.CONTAINER_ROLE
         elif _is_access_key_of_type(AWSIdentityType.ENV.value):
             return AWSIdentityType.ENV
         else:
@@ -720,7 +755,7 @@ class AWS(clouds.Cloud):
         # credentials. We need to define a mechanism to find out the cloud
         # provider of the cluster to be launched in this function and make sure
         # the cluster will not be used for launching clusters in other clouds,
-        # e.g. spot controller.
+        # e.g. jobs controller.
         if self._current_identity_type(
         ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}
@@ -733,36 +768,25 @@ class AWS(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
-        return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'aws')
+    @classmethod
+    def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
+        return 'standard' if disk_tier == resources_utils.DiskTier.LOW else 'gp3'
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
-        del instance_type, disk_tier  # unused
-
-    @classmethod
-    def _get_disk_type(cls, disk_tier: str) -> str:
-        return 'standard' if disk_tier == 'low' else 'gp3'
-
-    @classmethod
-    def _get_disk_specs(cls, disk_tier: Optional[str]) -> Dict[str, Any]:
-        tier = disk_tier or cls._DEFAULT_DISK_TIER
+    def _get_disk_specs(
+            cls,
+            disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
+        tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
-            'high': 7000,
-            'medium': 3500,
-            'low': 0,  # only gp3 is required to set iops
+            resources_utils.DiskTier.HIGH: 7000,
+            resources_utils.DiskTier.MEDIUM: 3500,
+            resources_utils.DiskTier.LOW: 0,  # only gp3 is required to set iops
         }
         return {
             'disk_tier': cls._get_disk_type(tier),
             'disk_iops': tier2iops[tier],
             'disk_throughput': tier2iops[tier] // 16,
-            'custom_disk_perf': tier != 'low',
+            'custom_disk_perf': tier != resources_utils.DiskTier.LOW,
         }
 
     @classmethod
@@ -948,3 +972,22 @@ class AWS(clouds.Cloud):
             error_msg=f'Failed to delete image {image_id!r} on {region}.',
             stderr=stderr,
             stream_logs=True)
+
+    @classmethod
+    def is_label_valid(cls, label_key: str,
+                       label_value: str) -> Tuple[bool, Optional[str]]:
+        key_regex = re.compile(r'^[^aws:][\S]{0,127}$')
+        value_regex = re.compile(r'^[\S]{0,255}$')
+        key_valid = bool(key_regex.match(label_key))
+        value_valid = bool(value_regex.match(label_value))
+        error_msg = None
+        if not key_valid:
+            error_msg = (f'Invalid tag key {label_key} for AWS. '
+                         'Key must start with any character except \'aws:\' '
+                         'and must be 128 characters or fewer in length.')
+        if not value_valid:
+            error_msg = (f'Invalid tag value {label_value} for AWS. '
+                         'Value must be 256 characters or fewer in length.')
+        if not key_valid or not value_valid:
+            return False, error_msg
+        return True, None

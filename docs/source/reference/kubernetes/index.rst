@@ -22,7 +22,7 @@ tasks can be submitted to your Kubernetes cluster just like any other cloud prov
 **Supported Kubernetes deployments:**
 
 * Hosted Kubernetes services (EKS, GKE)
-* On-prem clusters (Kubeadm, K3s, Rancher)
+* On-prem clusters (Kubeadm, Rancher)
 * Local development clusters (KinD, minikube)
 
 
@@ -123,16 +123,92 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
     $ # Set a specific namespace to be used in the current-context
     $ kubectl config set-context --current --namespace=mynamespace
 
+
+Using Custom Images
+-------------------
+By default, we use and maintain a SkyPilot container image that has conda and a few other basic tools installed.
+
+To use your own image, add :code:`image_id: docker:<your image tag>` to the :code:`resources` section of your task YAML.
+
+.. code-block:: yaml
+
+    resources:
+      image_id: docker:myrepo/myimage:latest
+    ...
+
+Your image must satisfy the following requirements:
+
+* Image must be **debian-based** and must have the apt package manager installed.
+* The default user in the image must have root privileges or passwordless sudo access.
+
+.. note::
+
+    If your cluster runs on non-x86_64 architecture (e.g., Apple Silicon), your image must be built natively for that architecture. Otherwise, your job may get stuck at :code:`Start streaming logs ...`. See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/3035>`_ for more.
+
+Using Images from Private Repositories
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config.yaml` to specify the secret like so:
+
+.. code-block:: yaml
+
+    kubernetes:
+      pod_config:
+        spec:
+          imagePullSecrets:
+            - name: your-secret-here
+
+.. tip::
+
+    If you use Amazon ECR, your secret credentials may expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
+
+
+Opening Ports
+-------------
+
+Opening ports on SkyPilot clusters running on Kubernetes is supported through two modes:
+
+1. `LoadBalancer services <https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer>`_ (default)
+2. `Nginx IngressController <https://kubernetes.github.io/ingress-nginx/>`_
+
+One of these modes must be supported and configured on your cluster. Refer to the :ref:`setting up ports on Kubernetes guide <kubernetes-ports>` on how to do this.
+
+.. tip::
+
+  On Google GKE, Amazon EKS or other cloud-hosted Kubernetes services, the default LoadBalancer services mode is supported out of the box and no additional configuration is needed.
+
+Once your cluster is  configured, launch a task which exposes services on a port by adding :code:`ports` to the :code:`resources` section of your task YAML.
+
+.. code-block:: yaml
+
+    # task.yaml
+    resources:
+      ports: 8888
+
+    run: |
+      python -m http.server 8888
+
+After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can get the URL to access the port using :code:`sky status --endpoints myclus`.
+
+.. code-block:: bash
+
+    # List all ports exposed by the cluster
+    $ sky status --endpoints myclus
+    8888: 34.173.13.241:8888
+
+    # curl a specific port's endpoint
+    $ curl $(sky status --endpoint 8888 myclus)
+    ...
+
+.. tip::
+
+    To learn more about opening ports in SkyPilot tasks, see :ref:`Opening Ports <ports>`.
+
 FAQs
 ----
 
 * **Are autoscaling Kubernetes clusters supported?**
 
   To run on an autoscaling cluster, you may need to adjust the resource provisioning timeout (:code:`Kubernetes.TIMEOUT` in `clouds/kubernetes.py`) to a large value to give enough time for the cluster to autoscale. We are working on a better interface to adjust this timeout - stay tuned!
-
-* **What container image is used for tasks? Can I specify my own image?**
-
-  We use and maintain a SkyPilot container image that has conda and a few other basic tools installed. You can specify a custom image to use in `clouds/kubernetes.py`, but it must have rsync, conda and OpenSSH server installed. We are working on a interface to allow specifying custom images through the :code:`image_id` field in the task YAML - stay tuned!
 
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
@@ -141,6 +217,33 @@ FAQs
 * **I have multiple users in my organization who share the same Kubernetes cluster. How do I provide isolation for their SkyPilot workloads?**
 
   For isolation, you can create separate Kubernetes namespaces and set them in the kubeconfig distributed to users. SkyPilot will use the namespace set in the kubeconfig for running all tasks.
+
+* **How can I specify custom configuration for the pods created by SkyPilot?**
+
+  You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
+  The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#pod-v1-core>`_.
+
+  For example, to set custom environment variables and attach a volume on your pods, you can add the following to your :code:`~/.sky/config.yaml` file:
+
+  .. code-block:: yaml
+
+      kubernetes:
+        pod_config:
+          spec:
+            containers:
+              - env:
+                - name: MY_ENV_VAR
+                  value: MY_ENV_VALUE
+                volumeMounts:       # Custom volume mounts for the pod
+                  - mountPath: /foo
+                    name: example-volume
+            volumes:
+              - name: example-volume
+                hostPath:
+                  path: /tmp
+                  type: Directory
+
+  For more details refer to :ref:`config-yaml`.
 
 Features and Roadmap
 --------------------
@@ -151,8 +254,8 @@ Kubernetes support is under active development. Some features are in progress an
 * Auto-down - ✅ Available
 * Storage mounting - ✅ Available on x86_64 clusters
 * Multi-node tasks - ✅ Available
-* Opening ports and exposing services - 🚧 In progress
-* Custom images - 🚧 In progress
+* Custom images - ✅ Available
+* Opening ports and exposing services - ✅ Available
 * Multiple Kubernetes Clusters - 🚧 In progress
 
 
@@ -160,3 +263,4 @@ Kubernetes support is under active development. Some features are in progress an
    :hidden:
 
    kubernetes-setup
+   kubernetes-troubleshooting

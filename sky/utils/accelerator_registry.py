@@ -1,6 +1,12 @@
 """Accelerator registry."""
+import typing
+from typing import Optional
+
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import clouds
 
 # Canonicalized names of all accelerators (except TPUs) supported by SkyPilot.
 # NOTE: Must include accelerators supported for local clusters.
@@ -23,8 +29,7 @@ from sky.utils import ux_utils
 # 3. (For SkyPilot dev) What to do if I want to add a new accelerator?
 #
 # Append its case-sensitive canonical name to this list. The name must match
-# `AcceleratorName` in the service catalog, or what we define in
-# `onprem_utils.get_local_cluster_accelerators`.
+# `AcceleratorName` in the service catalog.
 _ACCELERATORS = [
     'A100',
     'A10G',
@@ -67,8 +72,13 @@ def is_schedulable_non_gpu_accelerator(accelerator_name: str) -> bool:
     return False
 
 
-def canonicalize_accelerator_name(accelerator: str) -> str:
+def canonicalize_accelerator_name(accelerator: str,
+                                  cloud: Optional['clouds.Cloud']) -> str:
     """Returns the canonical accelerator name."""
+    cloud_str = None
+    if cloud is not None:
+        cloud_str = str(cloud).lower()
+
     # TPU names are always lowercase.
     if accelerator.lower().startswith('tpu-'):
         return accelerator.lower()
@@ -84,7 +94,8 @@ def canonicalize_accelerator_name(accelerator: str) -> str:
     # To cover such cases, we should search the accelerator name
     # in the service catalog.
     searched = service_catalog.list_accelerators(name_filter=accelerator,
-                                                 case_sensitive=False)
+                                                 case_sensitive=False,
+                                                 clouds=cloud_str)
     names = list(searched.keys())
 
     # Exact match.

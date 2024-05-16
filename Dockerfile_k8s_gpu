@@ -1,13 +1,13 @@
 # TODO(romilb) - The base image used here (ray) is very large (11.4GB).
 #  as a result, this built image is about 13.5GB. We need to pick a lighter base
 #  image.
-FROM rayproject/ray:2.4.0-py310-gpu
+FROM rayproject/ray:2.9.3-py310-gpu
 
 # Initialize conda for root user, install ssh and other local dependencies
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
 RUN sudo rm -rf /etc/apt/sources.list.d/cuda* && \
     sudo apt update -y && \
-    sudo apt install gcc rsync sudo patch openssh-server pciutils nano fuse unzip -y && \
+    sudo apt install gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat curl -y && \
     sudo rm -rf /var/lib/apt/lists/* && \
     sudo apt remove -y python3 && \
     conda init
@@ -38,20 +38,16 @@ RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install networkx oauth2client pandas pendulum PrettyTable && \
     pip install rich tabulate filelock && \
     pip install packaging 'protobuf<4.0.0' pulp && \
-    pip install awscli boto3 pycryptodome==3.12.0 && \
-    pip install docker kubernetes
+    pip install pycryptodome==3.12.0 && \
+    pip install docker kubernetes==28.1.0 && \
+    pip install grpcio==1.51.3 python-dotenv==1.0.1
 
 # Add /home/sky/.local/bin/ to PATH
 RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
-# Install SkyPilot. This is purposely separate from installing SkyPilot
-# dependencies to optimize rebuild time
+# Copy SkyPilot code base. This is required for the ssh jump pod to find the
+# lifecycle management scripts
 COPY --chown=sky . /skypilot/sky/
-
-# TODO(romilb): Installing SkyPilot may not be necessary since ray up will do it
-RUN cd /skypilot/ && \
-    sudo mv -v sky/setup_files/* . && \
-    pip install ".[aws]"
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1

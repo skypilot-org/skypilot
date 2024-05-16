@@ -1,0 +1,16 @@
+resources:
+  cpus: 2+
+
+num_nodes: 3
+
+setup: |
+  echo "Setting up nodes"
+  echo "$SKYPILOT_SETUP_NODE_RANK"
+  if [ "$SKYPILOT_SETUP_NODE_RANK" == "1" ]; then
+      echo FAILING $SKYPILOT_SETUP_NODE_RANK
+      exit 1
+  fi
+  sleep 10000
+
+run: |
+  echo Should not get here

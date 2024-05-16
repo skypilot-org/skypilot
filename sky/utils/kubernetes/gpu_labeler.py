@@ -10,6 +10,7 @@ from kubernetes import config
 import yaml
 
 import sky
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import rich_utils
 
 
@@ -91,7 +92,7 @@ def label():
         job_manifest_path = os.path.join(manifest_dir,
                                          'k8s_gpu_labeler_job.yaml')
 
-        with open(job_manifest_path, 'r') as file:
+        with open(job_manifest_path, 'r', encoding='utf-8') as file:
             job_manifest = yaml.safe_load(file)
 
         # Iterate over nodes
@@ -104,6 +105,25 @@ def label():
                 gpu_nodes.append(node)
 
         print(f'Found {len(gpu_nodes)} GPU nodes in the cluster')
+
+        # Check if the 'nvidia' RuntimeClass exists
+        try:
+            nvidia_exists = kubernetes_utils.check_nvidia_runtime_class()
+        except Exception as e:  # pylint: disable=broad-except
+            print('Error occurred while checking for nvidia RuntimeClass: '
+                  f'{str(e)}')
+            print('Continuing without using nvidia RuntimeClass. '
+                  'This may fail on K3s clusters. '
+                  'For more details, refer to K3s deployment notes at: '
+                  'https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html')  # pylint: disable=line-too-long
+            nvidia_exists = False
+
+        if nvidia_exists:
+            print('Using nvidia RuntimeClass for GPU labeling.')
+            job_manifest['spec']['template']['spec'][
+                'runtimeClassName'] = 'nvidia'
+        else:
+            print('Using default RuntimeClass for GPU labeling.')
 
         for node in gpu_nodes:
             node_name = node.metadata.name
@@ -124,12 +144,12 @@ def label():
               'please ensure that they have the label '
               '`nvidia.com/gpu: <number of GPUs>`')
     else:
-        print('GPU labeling started - this may take a few minutes to complete.'
+        print('GPU labeling started - this may take 10 min or more to complete.'
               '\nTo check the status of GPU labeling jobs, run '
               '`kubectl get jobs -n kube-system -l job=sky-gpu-labeler`'
               '\nYou can check if nodes have been labeled by running '
               '`kubectl describe nodes` and looking for labels of the format '
-              '`skypilot.co/accelerators: <gpu_name>`. ')
+              '`skypilot.co/accelerator: <gpu_name>`. ')
 
 
 def main():
@@ -138,7 +158,7 @@ def main():
         'SkyPilot. Operates by running a job on each node that '
         'parses nvidia-smi and patches the node with new labels. '
         'Labels created are of the format '
-        'skypilot.co/accelerators: <gpu_name>. Automatically '
+        'skypilot.co/accelerator: <gpu_name>. Automatically '
         'creates a service account and cluster role binding with '
         'permissions to list nodes and create labels.')
     parser.add_argument('--cleanup',

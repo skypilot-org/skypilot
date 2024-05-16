@@ -1,0 +1,27 @@
+resources:
+  cloud: aws
+  region: us-east-2
+  # Nvidia image from
+  # https://aws.amazon.com/marketplace/pp/prodview-rf7na2b2ttvdg
+  image_id: ami-062ddd90fb6f8267a
+  accelerators: T4:1
+
+# Test file_mounts - both rsync and mounting based.
+file_mounts:
+  /setup.py: ./setup.py
+  /mount_public_s3:
+    source: s3://digitalcorpora
+    mode: MOUNT
+
+setup: |
+  echo "running setup"
+
+run: |
+  set -ex
+  
+  ls -ltr /mount_public_s3/corpora
+  
+  for i in {1..100}; do
+    echo "Hello $i"
+    sleep 0.25
+  done
