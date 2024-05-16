@@ -360,7 +360,6 @@ class Task:
                 else:
                     new_envs[str(k)] = None
             config['envs'] = new_envs
-        print(config)
         common_utils.validate_schema(config, schemas.get_task_schema(),
                                      'Invalid task YAML: ')
         if env_overrides is not None:
