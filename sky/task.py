@@ -353,13 +353,14 @@ class Task:
         # as int causing validate_schema() to fail.
         envs = config.get('envs')
         if envs is not None and isinstance(envs, dict):
+            new_envs: Dict[str, Optional[str]] = {}
             for k, v in envs.items():
-                new_envs: Dict[str, Optional[str]] = {}
                 if v is not None:
                     new_envs[str(k)] = str(v)
                 else:
                     new_envs[str(k)] = None
             config['envs'] = new_envs
+        print(config)
         common_utils.validate_schema(config, schemas.get_task_schema(),
                                      'Invalid task YAML: ')
         if env_overrides is not None:
