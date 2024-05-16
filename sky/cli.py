@@ -565,7 +565,7 @@ def _launch_with_confirm(
                 raise_if_no_cloud_access=True)
         except exceptions.NoCloudAccessError as e:
             # Catch the exception where the public cloud is not enabled, and
-            # only print the error message without the error type.
+            # make it yellow for better visibility.
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(f'{colorama.Fore.YELLOW}{e}'
                                    f'{colorama.Style.RESET_ALL}') from e
