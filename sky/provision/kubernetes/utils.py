@@ -226,7 +226,9 @@ class GFDLabelFormatter(GPULabelFormatter):
         # 3. remove 'RTX-' (e.g. 'RTX-6000' -> 'RTX6000')
         # Same logic, but uppercased, as the Skypilot labeler job found in
         # sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
-        return value.upper().replace('NVIDIA-', '').replace('GEFORCE-', '').replace('RTX-', 'RTX')
+        return value.upper().replace('NVIDIA-',
+                                     '').replace('GEFORCE-',
+                                                 '').replace('RTX-', 'RTX')
 
 
 class KarpenterLabelFormatter(SkyPilotLabelFormatter):
@@ -485,7 +487,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 for label, value in label_list:
                     if (label == k8s_acc_label_key and
                             label_formatter.get_accelerator_from_label_value(
-                                value).lower() == acc_type.lower()):
+                                value) == acc_type):
                         return label, value
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
