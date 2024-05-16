@@ -224,7 +224,7 @@ class GFDLabelFormatter(GPULabelFormatter):
         # If we didn't find a canonical name:
         # 1. remove 'NVIDIA-' (e.g., 'NVIDIA-RTX-A6000' -> 'RTX-A6000')
         # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
-        return value.replace('NVIDIA-', '').replace('GEFORCE-', '')
+        return value.upper().replace('NVIDIA-', '').replace('GEFORCE-', '')
 
 
 class KarpenterLabelFormatter(SkyPilotLabelFormatter):
