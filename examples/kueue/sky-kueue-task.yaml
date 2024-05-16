@@ -1,0 +1,11 @@
+resources:
+  cloud: kubernetes
+  cpus: 6
+  labels:
+    kueue.x-k8s.io/queue-name: user-queue
+
+run: |
+  for i in {1..600}; do
+    echo "$i"
+    sleep 1
+  done

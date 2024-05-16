@@ -1,0 +1,13 @@
+resources:
+  cpus: 2
+  memory: 2
+  cloud: kubernetes
+  accelerators: T4:1
+  labels:
+    kueue.x-k8s.io/queue-name: user-queue
+
+setup: |
+  echo hi
+
+run: |
+  nvidia-smi
