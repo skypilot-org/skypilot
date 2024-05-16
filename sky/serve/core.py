@@ -1,7 +1,7 @@
 """SkyServe core APIs."""
 import re
 import tempfile
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -94,7 +94,7 @@ def _validate_service_task(task: 'sky.Task') -> None:
 def up(
     task: 'sky.Task',
     service_name: Optional[str] = None,
-) -> None:
+) -> Tuple[str, str]:
     """Spin up a service.
 
     Please refer to the sky.cli.serve_up for the document.
@@ -102,6 +102,11 @@ def up(
     Args:
         task: sky.Task to serve up.
         service_name: Name of the service.
+
+    Returns:
+        service_name: str; The name of the service.  Same if passed in as an
+            argument.
+        endpoint: str; The service endpoint.
     """
     if service_name is None:
         service_name = serve_utils.generate_service_name()
@@ -292,6 +297,7 @@ def up(
             f'{style.RESET_ALL}'
             f'\n{fore.GREEN}The replicas should be ready within a '
             f'short time.{style.RESET_ALL}')
+        return service_name, endpoint
 
 
 @usage_lib.entrypoint
