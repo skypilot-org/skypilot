@@ -3302,14 +3302,6 @@ def jobs():
               type=str,
               help='Recovery strategy to use for managed jobs.')
 @click.option(
-    '--detach-setup/--no-detach-setup',
-    '-s',
-    default=True,
-    is_flag=True,
-    required=False,
-    help=('The spot job will always have detach setup to be True. This flag '
-          'is just for consistency with the other commands.'))
-@click.option(
     '--detach-run',
     '-d',
     default=False,
@@ -3357,7 +3349,6 @@ def jobs_launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
-    detach_setup: bool,
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
@@ -3376,9 +3367,6 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
-    if not detach_setup:
-        raise click.UsageError(
-            '--no-detach-setup is not supported for managed spot jobs.')
     if cluster is not None:
         if name is not None and name != cluster:
             raise click.UsageError('Cannot specify both --name and --cluster.')
