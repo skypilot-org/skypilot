@@ -402,7 +402,7 @@ def get_task_schema():
                 'patternProperties': {
                     # Checks env keys are valid env var names.
                     '^[a-zA-Z_][a-zA-Z0-9_]*$': {
-                        'type': 'string'
+                        'type': ['string', 'null']
                     }
                 },
                 'additionalProperties': False,
