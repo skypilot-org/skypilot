@@ -47,6 +47,9 @@ def list_accelerators(
         case_sensitive: bool = True,
         all_regions: bool = False,
         require_price: bool = True) -> Dict[str, List[common.InstanceTypeInfo]]:
+    # TODO(romilb): We should consider putting a lru_cache() with TTL to
+    #   avoid multiple calls to kubernetes API in a short period of time (e.g.,
+    #   from the optimizer).
     return list_accelerators_realtime(gpus_only, name_filter, region_filter,
                                       quantity_filter, case_sensitive,
                                       all_regions, require_price)[0]
