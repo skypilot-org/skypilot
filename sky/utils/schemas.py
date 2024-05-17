@@ -587,6 +587,7 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
+    from sky.clouds import service_catalog
     from sky.utils import kubernetes_enums
 
     resources_schema = {
@@ -722,6 +723,16 @@ def get_config_schema():
         },
     }
 
+    allowed_clouds = {
+        # A list of cloud names that are allowed to be used
+        'type': 'array',
+        'items': {
+            'type': 'string',
+            'case_insensitive_enum':
+                (list(service_catalog.ALL_CLOUDS) + ['cloudflare'])
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
@@ -738,6 +749,7 @@ def get_config_schema():
             'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
+            'allowed_clouds': allowed_clouds,
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.

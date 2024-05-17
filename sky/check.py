@@ -1,7 +1,7 @@
 """Credential checks: check cloud credentials and enable clouds."""
 import traceback
 from types import ModuleType
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import click
 import colorama
@@ -10,6 +10,7 @@ import rich
 from sky import clouds as sky_clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.utils import ux_utils
 
@@ -52,20 +53,42 @@ def check(
             disabled_clouds.append(cloud_repr)
             echo(f'    Reason: {reason}')
 
+    def get_cloud_tuple(
+            cloud_name: str) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
+        # Validates cloud_name and returns a tuple of the cloud's name and
+        # the cloud object. Includes special handling for Cloudflare.
+        if cloud_name.lower().startswith('cloudflare'):
+            return cloudflare.SKY_CHECK_NAME, cloudflare
+        else:
+            cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud_name)
+            assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
+            return repr(cloud_obj), cloud_obj
+
+    def get_all_clouds():
+        return tuple([repr(c) for c in sky_clouds.CLOUD_REGISTRY.values()] +
+                     [cloudflare.SKY_CHECK_NAME])
+
     if clouds is not None:
-        clouds_to_check: List[Tuple[str, Any]] = []
-        for cloud in clouds:
-            if cloud.lower() == 'cloudflare':
-                clouds_to_check.append(
-                    ('Cloudflare, for R2 object store', cloudflare))
-            else:
-                cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
-                assert cloud_obj is not None, f'Cloud {cloud!r} not found'
-                clouds_to_check.append((repr(cloud_obj), cloud_obj))
+        cloud_list = clouds
     else:
-        clouds_to_check = [(repr(cloud_obj), cloud_obj)
-                           for cloud_obj in sky_clouds.CLOUD_REGISTRY.values()]
-        clouds_to_check.append(('Cloudflare, for R2 object store', cloudflare))
+        cloud_list = get_all_clouds()
+    clouds_to_check = [get_cloud_tuple(c) for c in cloud_list]
+
+    # Use allowed_clouds from config if it exists, otherwise check all clouds.
+    # Also validate names with get_cloud_tuple.
+    config_allowed_cloud_names = [
+        get_cloud_tuple(c)[0] for c in skypilot_config.get_nested(
+            ['allowed_clouds'], get_all_clouds())
+    ]
+    # Use disallowed_cloud_names for logging the clouds that will be disabled
+    # because they are not included in allowed_clouds in config.yaml.
+    disallowed_cloud_names = [
+        c for c in get_all_clouds() if c not in config_allowed_cloud_names
+    ]
+    # Check only the clouds which are allowed in the config.
+    clouds_to_check = [
+        c for c in clouds_to_check if c[0] in config_allowed_cloud_names
+    ]
 
     for cloud_tuple in sorted(clouds_to_check):
         check_one_cloud(cloud_tuple)
@@ -79,16 +102,30 @@ def check(
     disabled_clouds_set = {
         cloud for cloud in disabled_clouds if not cloud.startswith('Cloudflare')
     }
+    config_allowed_clouds_set = {
+        cloud for cloud in config_allowed_cloud_names
+        if not cloud.startswith('Cloudflare')
+    }
     previously_enabled_clouds_set = {
         repr(cloud) for cloud in global_user_state.get_cached_enabled_clouds()
     }
 
-    # Determine the set of enabled clouds: previously enabled clouds + newly
-    # enabled clouds - newly disabled clouds.
-    all_enabled_clouds = ((previously_enabled_clouds_set | enabled_clouds_set) -
-                          disabled_clouds_set)
+    # Determine the set of enabled clouds: (previously enabled clouds + newly
+    # enabled clouds - newly disabled clouds) intersected with
+    # config_allowed_clouds, if specified in config.yaml.
+    # This means that if a cloud is already enabled and is not included in
+    # allowed_clouds in config.yaml, it will be disabled.
+    all_enabled_clouds = (config_allowed_clouds_set & (
+        (previously_enabled_clouds_set | enabled_clouds_set) -
+        disabled_clouds_set))
     global_user_state.set_enabled_clouds(list(all_enabled_clouds))
 
+    disallowed_clouds_hint = None
+    if disallowed_cloud_names:
+        disallowed_clouds_hint = (
+            '\nNote: The following clouds were disabled because they were not '
+            'included in allowed_clouds in ~/.sky/config.yaml: '
+            f'{", ".join([c for c in disallowed_cloud_names])}')
     if len(all_enabled_clouds) == 0:
         echo(
             click.style(
@@ -96,6 +133,8 @@ def check(
                 'task. Run `sky check` for more info.',
                 fg='red',
                 bold=True))
+        if disallowed_clouds_hint:
+            echo(click.style(disallowed_clouds_hint, dim=True))
         raise SystemExit()
     else:
         clouds_arg = (' ' +
@@ -108,6 +147,9 @@ def check(
                 'If any problems remain, refer to detailed docs at: '
                 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
                 dim=True))
+
+        if disallowed_clouds_hint:
+            echo(click.style(disallowed_clouds_hint, dim=True))
 
         # Pretty print for UX.
         if not quiet:
