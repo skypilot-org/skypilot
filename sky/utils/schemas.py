@@ -587,8 +587,8 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
-    from sky.utils import kubernetes_enums
     from sky.clouds import service_catalog
+    from sky.utils import kubernetes_enums
 
     resources_schema = {
         k: v
@@ -728,8 +728,8 @@ def get_config_schema():
         'type': 'array',
         'items': {
             'type': 'string',
-            'case_insensitive_enum': (list(service_catalog.ALL_CLOUDS) +
-                                      ['cloudflare'])
+            'case_insensitive_enum':
+                (list(service_catalog.ALL_CLOUDS) + ['cloudflare'])
         }
     }
 
