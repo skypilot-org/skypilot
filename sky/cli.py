@@ -2988,7 +2988,7 @@ def show_gpus(
     * ``TOTAL_GPUS`` (Kubernetes only): Total number of GPUs available in the
       Kubernetes cluster.
 
-    * ``AVAILABLE_GPUS`` (Kubernetes only): Number of currently available GPUs
+    * ``TOTAL_FREE_GPUS`` (Kubernetes only): Number of currently free GPUs
       in the Kubernetes cluster. This is fetched in real-time and may change
       when other users are using the cluster.
     """
@@ -3047,6 +3047,10 @@ def show_gpus(
             err_msg = kubernetes_utils.NO_GPU_ERROR_MESSAGE.format(
                 gpu_info_msg=gpu_info_msg, debug_msg=debug_msg)
             yield err_msg
+            if kubernetes_utils.get_autoscaler_type() is not None:
+                # If using autoscaling cluster, show note
+                yield '\n'
+                yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
             return
         for gpu, _ in sorted(counts.items()):
             realtime_gpu_table.add_row([
@@ -3082,13 +3086,6 @@ def show_gpus(
                 region_filter=region,
             )
 
-            if len(result) == 0 and cloud_is_kubernetes:
-                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
-                if kubernetes_autoscaling:
-                    yield '\n'
-                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
-                return
-
             # "Common" GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
@@ -3110,15 +3107,13 @@ def show_gpus(
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
-                if (cloud_is_kubernetes or
-                        cloud is None) and kubernetes_autoscaling:
+                if cloud is None and kubernetes_autoscaling:
                     yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                     yield '\n\n'
             else:
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
-                if (cloud_is_kubernetes or
-                        cloud is None) and kubernetes_autoscaling:
+                if cloud is None and kubernetes_autoscaling:
                     yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                 return
         else:
