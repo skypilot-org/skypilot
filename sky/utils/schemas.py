@@ -722,8 +722,8 @@ def get_config_schema():
         },
     }
 
-    candidate_clouds = {
-        # A list of cloud names that should be used for execution
+    allowed_clouds = {
+        # A list of cloud names that are allowed to be used
         'type': 'array',
         'items': {
             'type': 'string',
@@ -746,7 +746,7 @@ def get_config_schema():
             'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
-            'candidate_clouds': candidate_clouds,
+            'allowed_clouds': allowed_clouds,
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.
