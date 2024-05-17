@@ -254,7 +254,7 @@ class TestJobsOperations:
                                        _mock_jobs_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, [jobs.JOB_CONTROLLER_NAME, '-a'])
-        assert result.exit_code == 2
+        assert result.exit_code == click.UsageError.exit_code
         assert 'Cancelling the jobs controller\'s jobs is not allowed.' in str(
             result.output)
 
@@ -398,7 +398,7 @@ class TestServeOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel,
                                    [serve.SKY_SERVE_CONTROLLER_NAME, '-a'])
-        assert result.exit_code == 2
+        assert result.exit_code == click.UsageError.exit_code
         assert 'Cancelling the sky serve controller\'s jobs is not allowed.' in str(
             result.output)
 
