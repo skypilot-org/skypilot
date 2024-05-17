@@ -738,6 +738,9 @@ def get_config_schema():
             'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
+            '_disable_base64_optimization': {
+                'type': 'boolean',
+            },
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.

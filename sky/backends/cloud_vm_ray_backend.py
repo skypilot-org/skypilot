@@ -35,6 +35,7 @@ from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -3152,7 +3153,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             encoded_script = base64.b64encode(
                 setup_script.encode('utf-8')).decode('utf-8')
             if (detach_setup or
-                    len(encoded_script) > _MAX_INLINE_SCRIPT_LENGTH):
+                    len(encoded_script) > _MAX_INLINE_SCRIPT_LENGTH or
+                    skypilot_config.get_nested(['_disable_base64_optimization'],
+                                               False)):
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
@@ -3260,7 +3263,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
-        if len(job_submit_cmd) > _MAX_INLINE_SCRIPT_LENGTH:
+        if (len(job_submit_cmd) > _MAX_INLINE_SCRIPT_LENGTH or
+                skypilot_config.get_nested(['_disable_base64_optimization'],
+                                           False)):
             runners = handle.get_command_runners()
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
