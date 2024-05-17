@@ -10,10 +10,10 @@ This guide will set up SkyPilot to work with an EKS cluster that optionally uses
 Setup your EKS cluster to work with SkyPilot by following the [SkyPilot on Kubernetes docs](https://skypilot.readthedocs.io/en/latest/reference/kubernetes/index.html#submitting-skypilot-tasks-to-kubernetes-clusters). For convenience, we will list down the steps here.
 
 0. [Install SkyPilot](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html) from pypi nightly build or from source.
-    - Installing nightly build from pip - `pip install -U "skypilot-nightly[aws,gcp,kubernetes]==1.0.0.dev20240510"`. 
-      - Available on PyPI on May 10th 2024.
+    - Installing nightly build from pip - `pip install -U "skypilot-nightly[aws,gcp,kubernetes]"`. 
+      - Use build 1.0.0.dev20240510 or newer.
     - Installing from source - `git clone https://github.com/skypilot-org/skypilot.git && cd skypilot && pip install -e ".[aws,gcp,kubernetes]"`
-      - Make sure to use [commit `4683c46`](https://github.com/skypilot-org/skypilot/commit/4683c46edb5e1b5dcadb1ef143e6baedc145fcd4) or later.
+      - Use [commit `4683c46`](https://github.com/skypilot-org/skypilot/commit/4683c46edb5e1b5dcadb1ef143e6baedc145fcd4) or later.
 
 
 1. Make sure kubectl, socat and nc (netcat) are installed on your local machine.
