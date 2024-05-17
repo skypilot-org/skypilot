@@ -254,7 +254,7 @@ class TestJobsOperations:
                                        _mock_jobs_controller):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, [jobs.JOB_CONTROLLER_NAME, '-a'])
-        assert result.exit_code == 1
+        assert result.exit_code == click.UsageError.exit_code
         assert 'Cancelling the jobs controller\'s jobs is not allowed.' in str(
             result.output)
 
@@ -272,7 +272,8 @@ class TestJobsOperations:
         result = cli_runner.invoke(cli.jobs_logs, ['1'])
         assert result.exit_code == 1
         assert controller_utils.Controllers.JOBS_CONTROLLER.value.default_hint_if_non_existent in str(
-            result.output), (result.exception, result.output, result.exc_info)
+            result.exception), (result.exception, result.output,
+                                result.exc_info)
 
     @pytest.mark.timeout(60)
     def test_queue(self, _mock_db_conn):
@@ -397,7 +398,7 @@ class TestServeOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel,
                                    [serve.SKY_SERVE_CONTROLLER_NAME, '-a'])
-        assert result.exit_code == 1
+        assert result.exit_code == click.UsageError.exit_code
         assert 'Cancelling the sky serve controller\'s jobs is not allowed.' in str(
             result.output)
 
@@ -416,7 +417,8 @@ class TestServeOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.serve_logs, ['test', '--controller'])
         assert controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.default_hint_if_non_existent in str(
-            result.output), (result.exception, result.output, result.exc_info)
+            result.exception), (result.exception, result.output,
+                                result.exc_info)
 
     @pytest.mark.timeout(60)
     def test_status(self, _mock_db_conn):

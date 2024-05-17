@@ -565,9 +565,10 @@ def _launch_with_confirm(
                 raise_if_no_cloud_access=True)
         except exceptions.NoCloudAccessError as e:
             # Catch the exception where the public cloud is not enabled, and
-            # only print the error message without the error type.
-            click.secho(e, fg='yellow')
-            sys.exit(1)
+            # make it yellow for better visibility.
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(f'{colorama.Fore.YELLOW}{e}'
+                                   f'{colorama.Style.RESET_ALL}') from e
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
@@ -2094,16 +2095,16 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
 
     try:
         core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
-    except exceptions.NotSupportedError:
+    except exceptions.NotSupportedError as e:
         controller = controller_utils.Controllers.from_name(cluster)
         assert controller is not None, cluster
-        click.echo(controller.value.decline_cancel_hint)
-        sys.exit(1)
+        with ux_utils.print_exception_no_traceback():
+            raise click.UsageError(controller.value.decline_cancel_hint) from e
     except ValueError as e:
         raise click.UsageError(str(e))
-    except exceptions.ClusterNotUpError as e:
-        click.echo(str(e))
-        sys.exit(1)
+    except exceptions.ClusterNotUpError:
+        with ux_utils.print_exception_no_traceback():
+            raise
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -3638,9 +3639,9 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 follow=follow)
         else:
             managed_jobs.tail_logs(name=name, job_id=job_id, follow=follow)
-    except exceptions.ClusterNotUpError as e:
-        click.echo(e)
-        sys.exit(1)
+    except exceptions.ClusterNotUpError:
+        with ux_utils.print_exception_no_traceback():
+            raise
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
@@ -4298,9 +4299,9 @@ def serve_logs(
                             target=target_component,
                             replica_id=replica_id,
                             follow=follow)
-    except exceptions.ClusterNotUpError as e:
-        click.echo(e)
-        sys.exit(1)
+    except exceptions.ClusterNotUpError:
+        with ux_utils.print_exception_no_traceback():
+            raise
 
 
 # ==============================
@@ -4987,10 +4988,11 @@ def local_up(gpus: bool):
                    f'exists.{style.RESET_ALL}\n'
                    'If you want to delete it instead, run: sky local down')
     else:
-        click.echo('Failed to create local cluster. '
-                   f'Full log: {log_path}'
-                   f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
-        sys.exit(1)
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Failed to create local cluster. '
+                f'Full log: {log_path}'
+                f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     # Run sky check
     with rich_utils.safe_status('[bold cyan]Running sky check...'):
         sky_check.check(quiet=True)
@@ -5087,10 +5089,11 @@ def local_down():
         elif returncode == 100:
             click.echo('\nLocal cluster does not exist.')
         else:
-            click.echo('Failed to create local cluster. '
-                       f'Stdout: {stdout}'
-                       f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
-            sys.exit(1)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to create local cluster. '
+                    f'Stdout: {stdout}'
+                    f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     if cluster_removed:
         # Run sky check
         with rich_utils.safe_status('[bold cyan]Running sky check...'):
