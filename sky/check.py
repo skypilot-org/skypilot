@@ -100,14 +100,22 @@ def check(
     disabled_clouds_set = {
         cloud for cloud in disabled_clouds if not cloud.startswith('Cloudflare')
     }
+    config_allowed_clouds_set = {
+        cloud for cloud in config_allowed_clouds
+        if not cloud.startswith('Cloudflare')
+    }
     previously_enabled_clouds_set = {
         repr(cloud) for cloud in global_user_state.get_cached_enabled_clouds()
     }
 
-    # Determine the set of enabled clouds: previously enabled clouds + newly
-    # enabled clouds - newly disabled clouds.
-    all_enabled_clouds = ((previously_enabled_clouds_set | enabled_clouds_set) -
-                          disabled_clouds_set)
+    # Determine the set of enabled clouds: (previously enabled clouds + newly
+    # enabled clouds - newly disabled clouds) intersected with
+    # config_allowed_clouds, if specified in config.yaml.
+    # This means that if a cloud is already enabled and is not included in
+    # allowed_clouds in config.yaml, it will be disabled.
+    all_enabled_clouds = (config_allowed_clouds_set & (
+        (previously_enabled_clouds_set | enabled_clouds_set) -
+        disabled_clouds_set))
     global_user_state.set_enabled_clouds(list(all_enabled_clouds))
 
     skipped_clouds_hint = None
