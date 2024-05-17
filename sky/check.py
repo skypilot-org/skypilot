@@ -75,17 +75,17 @@ def check(
 
     # Use allowed_clouds from config if it exists, otherwise check all clouds.
     # Also validate names with get_cloud_tuple.
-    config_allowed_clouds = [
+    config_allowed_cloud_names = [
         get_cloud_tuple(c)[0] for c in skypilot_config.get_nested(
             ['allowed_clouds'], get_all_clouds())
     ]
     # Use skipped_clouds for logging the skipped clouds.
     skipped_clouds = [
-        c for c in clouds_to_check if c[0] not in config_allowed_clouds
+        c for c in clouds_to_check if c[0] not in config_allowed_cloud_names
     ]
     # Check only the clouds which are allowed in the config.
     clouds_to_check = [
-        c for c in clouds_to_check if c[0] in config_allowed_clouds
+        c for c in clouds_to_check if c[0] in config_allowed_cloud_names
     ]
 
     for cloud_tuple in sorted(clouds_to_check):
@@ -101,7 +101,7 @@ def check(
         cloud for cloud in disabled_clouds if not cloud.startswith('Cloudflare')
     }
     config_allowed_clouds_set = {
-        cloud for cloud in config_allowed_clouds
+        cloud for cloud in config_allowed_cloud_names
         if not cloud.startswith('Cloudflare')
     }
     previously_enabled_clouds_set = {
@@ -121,7 +121,7 @@ def check(
     skipped_clouds_hint = None
     if skipped_clouds:
         skipped_clouds_hint = (
-            '\nNote: The following clouds were skipped because they were not '
+            '\nNote: The following clouds were disabled because they were not '
             'included in allowed_clouds in ~/.sky/config.yaml: '
             f'{", ".join([c[0] for c in skipped_clouds])}')
     if len(all_enabled_clouds) == 0:
