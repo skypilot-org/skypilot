@@ -65,8 +65,8 @@ def check(
             return repr(cloud_obj), cloud_obj
 
     def get_all_clouds():
-        return tuple([repr(c) for c in sky_clouds.CLOUD_REGISTRY.values()]
-                     + [cloudflare.SKY_CHECK_NAME])
+        return tuple([repr(c) for c in sky_clouds.CLOUD_REGISTRY.values()] +
+                     [cloudflare.SKY_CHECK_NAME])
 
     if clouds is not None:
         cloud_list = clouds
@@ -85,14 +85,10 @@ def check(
     disallowed_cloud_names = [
         c for c in get_all_clouds() if c not in config_allowed_cloud_names
     ]
-    print(f'config_allowed_cloud_names: {config_allowed_cloud_names}'
-          f'\nclouds_to_check: {clouds_to_check}'
-          f'\ndisallowed_cloud_names: {disallowed_cloud_names}')
     # Check only the clouds which are allowed in the config.
     clouds_to_check = [
         c for c in clouds_to_check if c[0] in config_allowed_cloud_names
     ]
-    print(f'clouds_to_check: {clouds_to_check}')
 
     for cloud_tuple in sorted(clouds_to_check):
         check_one_cloud(cloud_tuple)
