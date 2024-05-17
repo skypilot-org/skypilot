@@ -59,7 +59,7 @@
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3-70B-Instruct
   # MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
-  HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token, or use --env to pass.
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 service:
   replicas: 2

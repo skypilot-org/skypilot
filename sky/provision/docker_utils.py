@@ -3,15 +3,12 @@
 import dataclasses
 import shlex
 import time
-import typing
 from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import command_runner
 from sky.utils import subprocess_utils
-
-if typing.TYPE_CHECKING:
-    from sky.utils import command_runner
 
 logger = sky_logging.init_logger(__name__)
 
@@ -117,7 +114,7 @@ class DockerInitializer:
     """Initializer for docker containers on a remote node."""
 
     def __init__(self, docker_config: Dict[str, Any],
-                 runner: 'command_runner.SSHCommandRunner', log_path: str):
+                 runner: 'command_runner.CommandRunner', log_path: str):
         self.docker_config = docker_config
         self.container_name = docker_config['container_name']
         self.runner = runner
@@ -255,7 +252,8 @@ class DockerInitializer:
         # Disable apt-get from asking user input during installation.
         # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # pylint: disable=line-too-long
         self._run(
-            'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
+            f'echo \'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}\' '
+            '>> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
             run_env='docker')
         # Install dependencies.
