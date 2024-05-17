@@ -57,7 +57,7 @@ def check(
             cloud_name: str) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
         # Validates cloud_name and returns a tuple of the cloud's name and
         # the cloud object. Includes special handling for Cloudflare.
-        if cloud_name.lower() == 'cloudflare':
+        if cloud_name.lower().startswith('cloudflare'):
             return cloudflare.SKY_CHECK_NAME, cloudflare
         else:
             cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud_name)
@@ -65,7 +65,8 @@ def check(
             return repr(cloud_obj), cloud_obj
 
     def get_all_clouds():
-        return tuple(list(sky_clouds.CLOUD_REGISTRY.keys()) + [cloudflare.NAME])
+        return tuple([repr(c) for c in sky_clouds.CLOUD_REGISTRY.values()]
+                     + [cloudflare.SKY_CHECK_NAME])
 
     if clouds is not None:
         cloud_list = clouds
@@ -79,14 +80,19 @@ def check(
         get_cloud_tuple(c)[0] for c in skypilot_config.get_nested(
             ['allowed_clouds'], get_all_clouds())
     ]
-    # Use skipped_clouds for logging the skipped clouds.
-    skipped_clouds = [
-        c for c in clouds_to_check if c[0] not in config_allowed_cloud_names
+    # Use disallowed_cloud_names for logging the clouds that will be disabled
+    # because they are not included in allowed_clouds in config.yaml.
+    disallowed_cloud_names = [
+        c for c in get_all_clouds() if c not in config_allowed_cloud_names
     ]
+    print(f'config_allowed_cloud_names: {config_allowed_cloud_names}'
+          f'\nclouds_to_check: {clouds_to_check}'
+          f'\ndisallowed_cloud_names: {disallowed_cloud_names}')
     # Check only the clouds which are allowed in the config.
     clouds_to_check = [
         c for c in clouds_to_check if c[0] in config_allowed_cloud_names
     ]
+    print(f'clouds_to_check: {clouds_to_check}')
 
     for cloud_tuple in sorted(clouds_to_check):
         check_one_cloud(cloud_tuple)
@@ -118,12 +124,12 @@ def check(
         disabled_clouds_set))
     global_user_state.set_enabled_clouds(list(all_enabled_clouds))
 
-    skipped_clouds_hint = None
-    if skipped_clouds:
-        skipped_clouds_hint = (
+    disallowed_clouds_hint = None
+    if disallowed_cloud_names:
+        disallowed_clouds_hint = (
             '\nNote: The following clouds were disabled because they were not '
             'included in allowed_clouds in ~/.sky/config.yaml: '
-            f'{", ".join([c[0] for c in skipped_clouds])}')
+            f'{", ".join([c for c in disallowed_cloud_names])}')
     if len(all_enabled_clouds) == 0:
         echo(
             click.style(
@@ -131,8 +137,8 @@ def check(
                 'task. Run `sky check` for more info.',
                 fg='red',
                 bold=True))
-        if skipped_clouds_hint:
-            echo(click.style(skipped_clouds_hint, dim=True))
+        if disallowed_clouds_hint:
+            echo(click.style(disallowed_clouds_hint, dim=True))
         raise SystemExit()
     else:
         clouds_arg = (' ' +
@@ -146,8 +152,8 @@ def check(
                 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
                 dim=True))
 
-        if skipped_clouds_hint:
-            echo(click.style(skipped_clouds_hint, dim=True))
+        if disallowed_clouds_hint:
+            echo(click.style(disallowed_clouds_hint, dim=True))
 
         # Pretty print for UX.
         if not quiet:
