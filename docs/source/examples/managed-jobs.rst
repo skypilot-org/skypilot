@@ -7,7 +7,7 @@ Managed Jobs
 
   This feature is great for scaling out: running a single job for long durations, or running many jobs (pipelines).
 
-SkyPilot supports **managed jobs**, which can automatically recover from any spot preemptions or hardware failures.
+SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically recover from any spot preemptions or hardware failures.
 It can be used in three modes:
 
 #. :ref:`Managed Spot Jobs <spot-jobs>`: Jobs run on auto-recovering spot instances. This can **save significant costs** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
@@ -20,14 +20,27 @@ It can be used in three modes:
 Managed Spot Jobs
 -----------------
 
-SkyPilot automatically finds available spot resources across regions and clouds to maximize availability.
+SkyPilot managed spot jobs automatically finds available spot resources across regions and clouds to maximize availability.
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
 
-.. tip::
+Difference between **managed spot jobs** and **unmanaged spot cluster** (:code:`sky jobs launch --use-spot` vs :code:`sky launch --use-spot`):
 
-  :code:`sky launch --use-spot` is a "serverful" command that launches a cluster for
-  running jobs, where recoveries of the cluster after preemptions is user's responsibility. In contrast, managed spot jobs, :code:`sky jobs launch --use-spot`, is a "serverless" command, where SkyPilot is in charge of the whole
-  lifecycle of each job, including provisioning clusters, monitoring job status, and recovering the job from preemptions. 
+.. list-table::
+   :widths: 30 15 12 37
+   :header-rows: 1
+
+   * - Command
+     - Managed?
+     - SSH-able?
+     - Best for
+   * - :code:`sky launch --use-spot`
+     - No
+     - Yes
+     - Interactive dev on spot instances (e.g., :ref:`SSH, VSCode, Jupyter <dev-connect>`).
+   * - :code:`sky jobs launch --use-spot`
+     - Yes (monitoring and recovery)
+     - No
+     - Scaling out long-running jobs (e.g., training, batch inference, data processing).
 
 Here is an example of a BERT training job failing over different regions across AWS and GCP.
 
