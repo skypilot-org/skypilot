@@ -13,8 +13,8 @@ service:
 # Fields below are the same with `serve-openai-api.yaml`.
 envs:
   MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
-  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
-  AUTH_TOKEN: sky-authkey-3d2105b9-a9ba-4f13 # Change to your own auth token
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+  AUTH_TOKEN: # TODO: Fill with your own auth token (a random string), or use --env to pass.
 
 resources:
   accelerators: {L4:1, A10G:1, A10:1, A100:1, A100-80GB:1}

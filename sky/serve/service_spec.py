@@ -229,10 +229,8 @@ class SkyServiceSpec:
             method = f'GET {self.readiness_path}'
         else:
             method = f'POST {self.readiness_path} {json.dumps(self.post_data)}'
-        if self.readiness_headers is None:
-            headers = ''
-        else:
-            headers = f' with headers {json.dumps(self.readiness_headers)}'
+        headers = ('' if self.readiness_headers is None else
+                   ' with custom headers')
         return f'{method}{headers}'
 
     def spot_policy_str(self):
