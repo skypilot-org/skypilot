@@ -2011,10 +2011,10 @@ class RetryingVmProvisioner(object):
                     cloud_user = to_provision.cloud.get_current_user_identity()
 
                 requested_features = self._requested_features.copy()
-                # Skip stop feature for Kubernetes jobs controller.
+                # Skip stop feature for Kubernetes controllers.
                 if (isinstance(to_provision.cloud, clouds.Kubernetes) and
                         controller_utils.Controllers.from_name(cluster_name)
-                        == controller_utils.Controllers.JOBS_CONTROLLER):
+                        is not None):
                     assert (clouds.CloudImplementationFeatures.STOP
                             in requested_features), requested_features
                     requested_features.remove(
@@ -4152,11 +4152,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Skip auto-stop for Kubernetes clusters.
             if (isinstance(handle.launched_resources.cloud, clouds.Kubernetes)
                     and not down and idle_minutes_to_autostop >= 0):
-                # We should hit this code path only for the jobs controller on
+                # We should hit this code path only for the controllers on
                 # Kubernetes clusters.
                 assert (controller_utils.Controllers.from_name(
-                    handle.cluster_name) == controller_utils.Controllers.
-                        JOBS_CONTROLLER), handle.cluster_name
+                    handle.cluster_name) is not None), handle.cluster_name
                 logger.info('Auto-stop is not supported for Kubernetes '
                             'clusters. Skipping.')
                 return
