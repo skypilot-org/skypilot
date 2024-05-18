@@ -3047,10 +3047,6 @@ def show_gpus(
             err_msg = kubernetes_utils.NO_GPU_ERROR_MESSAGE.format(
                 gpu_info_msg=gpu_info_msg, debug_msg=debug_msg)
             yield err_msg
-            if kubernetes_utils.get_autoscaler_type() is not None:
-                # If using autoscaling cluster, show note
-                yield '\n'
-                yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
             return
         for gpu, _ in sorted(counts.items()):
             realtime_gpu_table.add_row([
@@ -3078,6 +3074,9 @@ def show_gpus(
             # If cloud is kubernetes, we want to show real-time capacity
             if cloud_is_kubernetes:
                 yield from _kubernetes_realtime_gpu_output()
+                if kubernetes_utils.get_autoscaler_type() is not None:
+                    yield '\n'
+                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                 return
 
             result = service_catalog.list_accelerator_counts(
