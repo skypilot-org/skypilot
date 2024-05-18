@@ -20,13 +20,12 @@ It can be used in three modes:
 Managed Spot Jobs
 -----------------
 
-SkyPilot managed spot jobs automatically finds available spot resources across regions and clouds to maximize availability.
+*SkyPilot managed spot job* (:code:`sky jobs launch --use-spot`) automatically finds available spot resources across regions and clouds to maximize availability.
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
 
-Difference between **managed spot jobs** and **unmanaged spot cluster** (:code:`sky jobs launch --use-spot` vs :code:`sky launch --use-spot`):
 
 .. list-table::
-   :widths: 30 15 12 37
+   :widths: 30 18 12 35
    :header-rows: 1
 
    * - Command
@@ -34,13 +33,13 @@ Difference between **managed spot jobs** and **unmanaged spot cluster** (:code:`
      - SSH-able?
      - Best for
    * - :code:`sky launch --use-spot`
-     - No
+     - Unmanaged spot cluster
      - Yes
      - Interactive dev on spot instances (e.g., :ref:`SSH, VSCode, Jupyter <dev-connect>`).
    * - :code:`sky jobs launch --use-spot`
-     - Yes (monitoring and recovery)
+     - Managed spot job (auto-recovery)
      - No
-     - Scaling out long-running jobs (e.g., training, batch inference, data processing).
+     - Scaling out long-running jobs (e.g., data processing, training, batch inference).
 
 Here is an example of a BERT training job failing over different regions across AWS and GCP.
 
