@@ -20,7 +20,7 @@ It can be used in three modes:
 Managed Spot Jobs
 -----------------
 
-*SkyPilot managed spot job* (:code:`sky jobs launch --use-spot`) automatically finds available spot resources across regions and clouds to maximize availability.
+In this mode, :code:`sky jobs launch --use-spot` is used to launch a managed spot job. SkyPilot automatically finds available spot resources across regions and clouds to maximize availability.
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
 
 
