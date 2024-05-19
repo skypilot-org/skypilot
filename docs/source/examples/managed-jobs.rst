@@ -24,7 +24,8 @@ In this mode, :code:`sky jobs launch --use-spot` is used to launch a managed spo
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
 
 
-Quick comparison between _unmanaged spot clusters_ vs. _managed spot jobs_:
+Quick comparison between *unmanaged spot clusters* vs. *managed spot jobs*:
+
 .. list-table::
    :widths: 30 18 12 35
    :header-rows: 1
@@ -36,7 +37,7 @@ Quick comparison between _unmanaged spot clusters_ vs. _managed spot jobs_:
    * - :code:`sky launch --use-spot`
      - Unmanaged spot cluster
      - Yes
-     - Interactive dev on spot instances (best for hardware with low preemption rates)
+     - Interactive dev on spot instances (especially for hardware with low preemption rates)
    * - :code:`sky jobs launch --use-spot`
      - Managed spot job (auto-recovery)
      - No
