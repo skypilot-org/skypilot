@@ -24,6 +24,7 @@ Managed Spot Jobs
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
 
 
+Quick comparison between _unmanaged spot clusters_ vs. _managed spot jobs_:
 .. list-table::
    :widths: 30 18 12 35
    :header-rows: 1
