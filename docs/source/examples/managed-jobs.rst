@@ -36,7 +36,7 @@ Quick comparison between _unmanaged spot clusters_ vs. _managed spot jobs_:
    * - :code:`sky launch --use-spot`
      - Unmanaged spot cluster
      - Yes
-     - Interactive dev on spot instances (e.g., :ref:`SSH, VSCode, Jupyter <dev-connect>`).
+     - Interactive dev on spot instances (best for hardware with low preemption rates)
    * - :code:`sky jobs launch --use-spot`
      - Managed spot job (auto-recovery)
      - No
