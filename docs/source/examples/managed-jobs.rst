@@ -40,7 +40,7 @@ Quick comparison between _unmanaged spot clusters_ vs. _managed spot jobs_:
    * - :code:`sky jobs launch --use-spot`
      - Managed spot job (auto-recovery)
      - No
-     - Scaling out long-running jobs (e.g., data processing, training, batch inference).
+     - Scaling out long-running jobs (e.g., data processing, training, batch inference)
 
 Here is an example of a BERT training job failing over different regions across AWS and GCP.
 
