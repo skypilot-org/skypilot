@@ -1005,7 +1005,7 @@ class Optimizer:
                             task=local_task,
                             blocked_resources=blocked_resources,
                             quiet=False))
-                    if launchable_resources_map.get(resources, {}):
+                    if launchable_resources_map.get(resources, []):
                         break
 
         local_graph = local_dag.get_graph()
@@ -1055,11 +1055,11 @@ class Optimizer:
 
             topo_order = list(nx.topological_sort(graph))
             # Get the cost of each specified resources for display purpose.
-            node_to_cost_map, _ = (Optimizer._estimate_nodes_cost_or_time(
+            node_to_cost_map, _ = Optimizer._estimate_nodes_cost_or_time(
                 topo_order=topo_order,
                 minimize_cost=minimize_cost,
                 blocked_resources=blocked_resources,
-                quiet=True))
+                quiet=True)
         else:
             best_plan = local_best_plan
             topo_order = local_topo_order
@@ -1185,7 +1185,8 @@ def _check_specified_clouds(task: task_lib.Task):
             # If all resources are specified with a disabled cloud, we should
             # raise an error as no resource can satisfy the requirement.
             # Otherwise, we should just skip the resource.
-            raise exceptions.ResourcesUnavailableError(msg)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(msg)
         logger.warning(f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}')
 
 
@@ -1228,10 +1229,12 @@ def _fill_in_launchable_resources(
                        if resources.cloud is not None else enabled_clouds)
         for cloud in clouds_list:
             (feasible_resources,
-             fuzzy_candidate_list) = (cloud.get_feasible_launchable_resources(
-                 resources, num_nodes=task.num_nodes))
+             fuzzy_candidate_list) = cloud.get_feasible_launchable_resources(
+                 resources, num_nodes=task.num_nodes)
             if len(feasible_resources) > 0:
-                # Assume feasible_resources is sorted by prices.
+                # Assume feasible_resources is sorted by prices. Guaranteed by
+                # the implementation of get_feasible_launchable_resources and
+                # the underlying service_catalog filtering
                 cheapest = feasible_resources[0]
                 # Generate region/zone-specified resources.
                 launchable[resources].extend(
@@ -1249,11 +1252,11 @@ def _fill_in_launchable_resources(
                 logger.info(
                     f'No resource satisfying {num_node_str}'
                     f'{resources.repr_with_region_zone} on {clouds_str}.')
-            if len(all_fuzzy_candidates) > 0:
-                logger.info('Did you mean: '
-                            f'{colorama.Fore.CYAN}'
-                            f'{sorted(all_fuzzy_candidates)}'
-                            f'{colorama.Style.RESET_ALL}')
+                if all_fuzzy_candidates:
+                    logger.info('Did you mean: '
+                                f'{colorama.Fore.CYAN}'
+                                f'{sorted(all_fuzzy_candidates)}'
+                                f'{colorama.Style.RESET_ALL}')
             else:
                 if resources.cpus is not None:
                     logger.info('Try specifying a different CPU count, '
