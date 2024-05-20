@@ -315,9 +315,6 @@ class GCP(clouds.Cloud):
         else:
             return 0.08 * num_gigabytes
 
-    def is_same_cloud(self, other):
-        return isinstance(other, GCP)
-
     @classmethod
     def _is_machine_image(cls, image_id: str) -> bool:
         find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
