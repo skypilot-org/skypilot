@@ -18,7 +18,7 @@ from sky.utils import ux_utils
 def check(
     quiet: bool = False,
     verbose: bool = False,
-    clouds: Optional[Tuple[str]] = None,
+    clouds: Optional[Iterable[str]] = None,
 ) -> None:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
