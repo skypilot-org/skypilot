@@ -1190,7 +1190,7 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
             msg = (f'Task{task_name} requires {", ".join(disabled_clouds)} '
                    f'which {is_or_are} not enabled. To enable access, change '
                    f'the task cloud requirement or run: {colorama.Style.BRIGHT}'
-                   f'sky check {" ".join(disabled_clouds)}'
+                   f'sky check {" ".join(c.lower() for c in disabled_clouds)}'
                    f'{colorama.Style.RESET_ALL}')
             if all_clouds_specified == disabled_clouds:
                 # If all resources are specified with a disabled cloud, we
