@@ -155,7 +155,6 @@ class Cudo(clouds.Cloud):
         # `return 0.0` is a good placeholder.)
         return 0.0
 
-
     @classmethod
     def get_default_instance_type(
             cls,
