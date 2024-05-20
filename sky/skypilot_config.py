@@ -51,6 +51,7 @@ import yaml
 from sky import sky_logging
 from sky.utils import common_utils
 from sky.utils import schemas
+from sky.utils import ux_utils
 
 # The config path is discovered in this order:
 #
@@ -128,7 +129,14 @@ def _try_load_config() -> None:
     global _dict, _loaded_config_path
     config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if config_path_via_env_var is not None:
-        config_path = config_path_via_env_var
+        config_path = os.path.expanduser(config_path_via_env_var)
+        if not os.path.exists(config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    'Config file specified by env var '
+                    f'{ENV_VAR_SKYPILOT_CONFIG} ({config_path!r}) does not '
+                    'exist. Please double check the path or unset the env var: '
+                    f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     else:
         config_path = CONFIG_PATH
     config_path = os.path.expanduser(config_path)

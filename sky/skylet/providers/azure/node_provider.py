@@ -116,7 +116,12 @@ class AzureNodeProvider(NodeProvider):
             resource_group_name=resource_group, vm_name=vm.name
         ).as_dict()
         for status in instance["statuses"]:
-            code, state = status["code"].split("/")
+            code_state = status["code"].split("/")
+            # It is possible that sometimes the 'code' is empty string, and we
+            # should skip them.
+            if len(code_state) != 2:
+                continue
+            code, state = code_state
             # skip provisioning status
             if code == "PowerState":
                 metadata["status"] = state

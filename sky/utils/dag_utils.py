@@ -1,4 +1,5 @@
 """Utilities for loading and dumping DAGs from/to YAML files."""
+import copy
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag as dag_lib
@@ -10,6 +11,54 @@ from sky.utils import common_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# Message thrown when APIs sky.{exec,launch,spot.launch}() received a string
+# instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
+# this.
+_ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
+Expected a sky.Task or sky.Dag but received a string.
+
+If you meant to run a command, make it a Task's run command:
+
+    task = sky.Task(run=command)
+
+The command can then be run as:
+
+  sky.exec(task, cluster_name=..., ...)
+  # Or use {'V100': 1}, 'V100:0.5', etc.
+  task.set_resources(sky.Resources(accelerators='V100:1'))
+  sky.exec(task, cluster_name=..., ...)
+
+  sky.launch(task, ...)
+
+  sky.spot.launch(task, ...)
+""".strip()
+
+
+def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
+    """Convert the entrypoint to a sky.Dag.
+
+    Raises TypeError if 'entrypoint' is not a 'sky.Task' or 'sky.Dag'.
+    """
+    # Not suppressing stacktrace: when calling this via API user may want to
+    # see their own program in the stacktrace. Our CLI impl would not trigger
+    # these errors.
+    if isinstance(entrypoint, str):
+        with ux_utils.print_exception_no_traceback():
+            raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
+    elif isinstance(entrypoint, dag_lib.Dag):
+        return copy.deepcopy(entrypoint)
+    elif isinstance(entrypoint, task_lib.Task):
+        entrypoint = copy.deepcopy(entrypoint)
+        with dag_lib.Dag() as dag:
+            dag.add(entrypoint)
+            dag.name = entrypoint.name
+        return dag
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise TypeError(
+                'Expected a sky.Task or sky.Dag but received argument of type: '
+                f'{type(entrypoint)}')
 
 
 def load_chain_dag_from_yaml(

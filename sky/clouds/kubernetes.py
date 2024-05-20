@@ -6,6 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
@@ -22,6 +23,11 @@ logger = sky_logging.init_logger(__name__)
 # Check if KUBECONFIG is set, and use it if it is.
 DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
 CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
+
+# Namespace for SkyPilot resources shared across multiple tenants on the
+# same cluster (even if they might be running in different namespaces).
+# E.g., FUSE device manager daemonset is run in this namespace.
+_SKY_SYSTEM_NAMESPACE = 'skypilot-system'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -42,8 +48,8 @@ class Kubernetes(clouds.Cloud):
     # Note that this timeout includes time taken by the Kubernetes scheduler
     # itself, which can be upto 2-3 seconds.
     # For non-autoscaling clusters, we conservatively set this to 10s.
-    # TODO(romilb): Make the timeout configurable.
-    TIMEOUT = 10
+    timeout = skypilot_config.get_nested(['kubernetes', 'provision_timeout'],
+                                         10)
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
@@ -254,6 +260,8 @@ class Kubernetes(clouds.Cloud):
 
         port_mode = network_utils.get_port_mode(None)
 
+        fuse_device_required = bool(resources.requires_fuse)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -261,7 +269,7 @@ class Kubernetes(clouds.Cloud):
             'cpus': str(cpus),
             'memory': str(mem),
             'accelerator_count': str(acc_count),
-            'timeout': str(self.TIMEOUT),
+            'timeout': str(self.timeout),
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
@@ -270,7 +278,9 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_value': k8s_acc_label_value,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
-            # TODO(romilb): Allow user to specify custom images
+            'k8s_fuse_device_required': fuse_device_required,
+            # Namespace to run the FUSE device manager in
+            'k8s_fuse_device_manager_namespace': _SKY_SYSTEM_NAMESPACE,
             'image_id': image_id,
         }
 
