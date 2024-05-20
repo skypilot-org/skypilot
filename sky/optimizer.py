@@ -1149,7 +1149,7 @@ def _filter_out_blocked_launchable_resources(
     return available_resources
 
 
-def _check_specified_clouds(task: task_lib.Task):
+def _check_specified_clouds(task: task_lib.Task) -> None:
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
         raise_if_no_cloud_access=True)
 
