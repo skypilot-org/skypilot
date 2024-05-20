@@ -1,4 +1,5 @@
 """Storage and Store Classes for Sky Data."""
+import asyncio
 import enum
 import os
 import re
@@ -8,6 +9,7 @@ import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
+import uuid
 
 import colorama
 
@@ -2066,7 +2068,7 @@ class AzureBlobStore(AbstractStore):
             self.resource_client.resource_groups.create_or_update(
                 self.resource_group_name, {'location': self.region})
             try:
-                self.storage_client.storage_accounts.begin_create(
+                creation_response = self.storage_client.storage_accounts.begin_create(
                     self.resource_group_name, self.storage_account_name, {
                         'sku': {
                             'name': 'Standard_GRS'
@@ -2082,7 +2084,38 @@ class AzureBlobStore(AbstractStore):
                             },
                             'key_source': 'Microsoft.Storage'
                         },
-                    }).result()
+                    })
+                creation_response.result()
+                # Assigning Storage Blob Data Owner role of the storage account
+                # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
+                authorization_client = data_utils.create_az_client(
+                    'authorization')
+                graph_client = data_utils.create_az_client('graph')
+                async def get_object_id():
+                    user = await graph_client.users.with_url(
+                        'https://graph.microsoft.com/v1.0/me').get()
+                    object_id = str(user.additional_data['id'])
+                    return object_id
+                object_id = asyncio.run(get_object_id())
+                # Defintion ID of Storage Blob Data Owner role.
+                # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # pylint: disable=line-too-long
+                storage_blob_data_owner_role_id = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
+                role_definition_id = ('/subscriptions'
+                                      f'/{azure.get_subscription_id()}'
+                                      '/providers/Microsoft.Authorization'
+                                      '/roleDefinitions'
+                                      f'/{storage_blob_data_owner_role_id}')
+                authorization_client.role_assignments.create(
+                        scope=creation_response.id,
+                        role_assignment_name=uuid.uuid4(),
+                        parameters={
+                            "properties": {
+                                "principalId": f'{object_id}',
+                                "principalType": "User",
+                                "roleDefinitionId": role_definition_id,
+                            }
+                        },
+                    )
             except azure.exceptions().ResourceExistsError as e:
                 error_message = e.message
                 if 'StorageAccountAlreadyTaken' in error_message:

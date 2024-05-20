@@ -65,6 +65,12 @@ def get_client(name: str,
         elif name == 'storage':
             from azure.mgmt.storage import StorageManagementClient
             return StorageManagementClient(credential, subscription_id)
+        elif name == 'authorization':
+            from azure.mgmt.authorization import AuthorizationManagementClient
+            return AuthorizationManagementClient(credential, subscription_id)
+        elif name == 'graph':
+            from msgraph import GraphServiceClient
+            return GraphServiceClient(credential)
         elif name == 'container':
             from azure.storage.blob import ContainerClient
             container_url = (f'https://{storage_account_name}.'
