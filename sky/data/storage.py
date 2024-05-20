@@ -2074,8 +2074,7 @@ class AzureBlobStore(AbstractStore):
                             },
                             'key_source': 'Microsoft.Storage'
                         },
-                    })
-                creation_response.result()
+                    }).result()
                 # Assigning Storage Blob Data Owner role of the storage account
                 # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
                 authorization_client = data_utils.create_az_client(
