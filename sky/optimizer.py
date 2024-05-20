@@ -1166,7 +1166,40 @@ def _fill_in_launchable_resources(
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
         raise_if_no_cloud_access=True)
-    rechecked_clouds: Set[clouds.Cloud] = set()
+
+    # Recheck the enabled clouds if the task's requested resources are on a
+    # cloud that is not enabled in the cached enabled_clouds.
+    all_clouds_specified: Set[str] = set()
+    clouds_need_recheck: Set[str] = set()
+    for resources in task.resources:
+        cloud_str = str(resources.cloud)
+        if (resources.cloud is not None and
+                not clouds.cloud_in_iterable(resources.cloud, enabled_clouds)):
+            # Explicitly check again to update the enabled cloud list.
+            clouds_need_recheck.add(cloud_str)
+        all_clouds_specified.add(cloud_str)
+
+    # Explicitly check again to update the enabled cloud list.
+    sky_check.check(quiet=True, clouds=list(clouds_need_recheck))
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        raise_if_no_cloud_access=True)
+    rechecked_but_disabled_clouds = (clouds_need_recheck -
+                                     {str(c).lower() for c in enabled_clouds})
+    if rechecked_but_disabled_clouds:
+        is_or_are = 'is' if len(rechecked_but_disabled_clouds) == 1 else 'are'
+        msg = (
+            f'Task requires {", ".join(rechecked_but_disabled_clouds)} which '
+            f'{is_or_are} not enabled. To enable access, change the task '
+            f'cloud requirement or run: {colorama.Style.BRIGHT}sky check '
+            f'{" ".join(rechecked_but_disabled_clouds)}'
+            f'{colorama.Style.RESET_ALL}')
+        if all_clouds_specified == rechecked_but_disabled_clouds:
+            # If all resources are specified with a disabled cloud, we should
+            # raise an error as no resource can satisfy the requirement.
+            # Otherwise, we should just skip the resource.
+            raise exceptions.ResourcesUnavailableError(msg)
+        logger.warning(msg)
+
     launchable: Dict[resources_lib.Resources, List[resources_lib.Resources]] = (
         collections.defaultdict(list))
     all_fuzzy_candidates = set()
@@ -1175,39 +1208,9 @@ def _fill_in_launchable_resources(
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
-        if (resources.cloud is not None and
-                not clouds.cloud_in_iterable(resources.cloud, enabled_clouds)):
-            if clouds.cloud_in_iterable(resources.cloud, rechecked_clouds):
-                # If we have already checked this cloud and it is still not
-                # enabled, we should skip the resource, as the hint has already
-                # been printed.
-                continue
-            # Explicitly check again to update the enabled cloud list.
-            sky_check.check(quiet=True, clouds=[str(resources.cloud)])
-            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-                raise_if_no_cloud_access=False)
-            rechecked_clouds.add(resources.cloud)
-            if not clouds.cloud_in_iterable(resources.cloud, enabled_clouds):
-                msg = (
-                    f'Task requires {resources.cloud} which is not enabled. To '
-                    'enable access, change the task cloud requirement or run: '
-                    f'{colorama.Style.BRIGHT}sky check '
-                    f'{str(resources.cloud).lower()}{colorama.Style.RESET_ALL}')
-                if all(
-                        resources.cloud.is_same_cloud(r.cloud)
-                        for r in task.resources
-                        if r.cloud is not None):
-                    # If all resources are specified with the same cloud, we
-                    # should raise an error. Otherwise, we should just skip the
-                    # resource.
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesUnavailableError(msg)
-                else:
-                    logger.warning(
-                        f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}'
-                    )
-                    launchable[resources] = []
-                continue
+        if str(resources.cloud) in rechecked_but_disabled_clouds:
+            launchable[resources] = []
+            continue
         clouds_list = ([resources.cloud]
                        if resources.cloud is not None else enabled_clouds)
         for cloud in clouds_list:
