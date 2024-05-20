@@ -120,8 +120,7 @@ class Optimizer:
                 for a task.
             exceptions.NoCloudAccessError: if no public clouds are enabled.
         """
-        for task in dag.tasks:
-            _check_specified_clouds(task)
+        _check_specified_clouds(dag)
 
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
@@ -1149,45 +1148,49 @@ def _filter_out_blocked_launchable_resources(
     return available_resources
 
 
-def _check_specified_clouds(task: task_lib.Task) -> None:
+def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
         raise_if_no_cloud_access=True)
 
-    # Recheck the enabled clouds if the task's requested resources are on a
-    # cloud that is not enabled in the cached enabled_clouds.
-    all_clouds_specified: Set[str] = set()
-    clouds_need_recheck: Set[str] = set()
-    for resources in task.resources:
-        cloud_str = str(resources.cloud)
-        if (resources.cloud is not None and
-                not clouds.cloud_in_iterable(resources.cloud, enabled_clouds)):
-            # Explicitly check again to update the enabled cloud list.
-            clouds_need_recheck.add(cloud_str)
-        all_clouds_specified.add(cloud_str)
+    global_disabled_clouds: Set[str] = set()
+    for task in dag.tasks:
+        # Recheck the enabled clouds if the task's requested resources are on a
+        # cloud that is not enabled in the cached enabled_clouds.
+        all_clouds_specified: Set[str] = set()
+        clouds_need_recheck: Set[str] = set()
+        for resources in task.resources:
+            cloud_str = str(resources.cloud)
+            if (resources.cloud is not None and not clouds.cloud_in_iterable(
+                    resources.cloud, enabled_clouds)):
+                # Explicitly check again to update the enabled cloud list.
+                clouds_need_recheck.add(cloud_str)
+            all_clouds_specified.add(cloud_str)
 
-    # Explicitly check again to update the enabled cloud list.
-    sky_check.check(quiet=True, clouds=list(clouds_need_recheck))
-    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-        raise_if_no_cloud_access=True)
-    rechecked_but_disabled_clouds = (clouds_need_recheck -
-                                     {str(c) for c in enabled_clouds})
-    if rechecked_but_disabled_clouds:
-        is_or_are = 'is' if len(rechecked_but_disabled_clouds) == 1 else 'are'
-        task_name = f' {task.name!r}' if task.name is not None else ''
-        msg = (
-            f'Task{task_name} requires '
-            f'{", ".join(rechecked_but_disabled_clouds)} which {is_or_are} not '
-            'enabled. To enable access, change the task cloud requirement or '
-            f'run: {colorama.Style.BRIGHT}sky check '
-            f'{" ".join(rechecked_but_disabled_clouds)}'
-            f'{colorama.Style.RESET_ALL}')
-        if all_clouds_specified == rechecked_but_disabled_clouds:
-            # If all resources are specified with a disabled cloud, we should
-            # raise an error as no resource can satisfy the requirement.
-            # Otherwise, we should just skip the resource.
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesUnavailableError(msg)
-        logger.warning(f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}')
+        # Explicitly check again to update the enabled cloud list.
+        sky_check.check(quiet=True,
+                        clouds=list(clouds_need_recheck -
+                                    global_disabled_clouds))
+        enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+            raise_if_no_cloud_access=True)
+        disabled_clouds = (clouds_need_recheck -
+                           {str(c) for c in enabled_clouds})
+        global_disabled_clouds.update(disabled_clouds)
+        if disabled_clouds:
+            is_or_are = 'is' if len(disabled_clouds) == 1 else 'are'
+            task_name = f' {task.name!r}' if task.name is not None else ''
+            msg = (f'Task{task_name} requires {", ".join(disabled_clouds)} '
+                   f'which {is_or_are} not enabled. To enable access, change '
+                   f'the task cloud requirement or run: {colorama.Style.BRIGHT}'
+                   f'sky check {" ".join(disabled_clouds)}'
+                   f'{colorama.Style.RESET_ALL}')
+            if all_clouds_specified == disabled_clouds:
+                # If all resources are specified with a disabled cloud, we
+                # should raise an error as no resource can satisfy the
+                # requirement. Otherwise, we should just skip the resource.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(msg)
+            logger.warning(
+                f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}')
 
 
 def _fill_in_launchable_resources(
