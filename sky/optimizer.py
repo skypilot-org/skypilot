@@ -1149,6 +1149,15 @@ def _filter_out_blocked_launchable_resources(
 
 
 def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
+    """Check if specified clouds are enabled in cache and refresh if needed.
+    
+    Our enabled cloud list is cached in a local database, and if a user
+    specified a cloud that is not enabled, we should refresh the cache for that
+    cloud in case the cloud access has been enabled since the last cache update.
+
+    Args:
+        dag: The DAG specified by a user.
+    """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
         raise_if_no_cloud_access=True)
 
