@@ -200,7 +200,7 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 require_outputs=True
                 # No need to source bashrc, as it should be sourced in the setup
                 # commands already.
-                )
+            )
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could
