@@ -197,10 +197,10 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 cmd,
                 stream_logs=False,
                 log_path=log_path,
-                require_outputs=True
-                # No need to source bashrc, as it should be sourced in the setup
-                # commands already.
-            )
+                require_outputs=True,
+                # Installing dependencies requires source bashrc to access
+                # conda.
+                source_bashrc=True)
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:
                 # Got network connection issue occur during setup. This could
@@ -214,7 +214,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 returncode, stdout, stderr = runner.run(cmd,
                                                         stream_logs=False,
                                                         log_path=log_path,
-                                                        require_outputs=True)
+                                                        require_outputs=True,
+                                                        source_bashrc=True)
                 if not returncode:
                     break
 
