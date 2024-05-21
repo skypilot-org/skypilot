@@ -3777,7 +3777,7 @@ def test_user_ray_cluster(generic_cloud: str):
     test = Test(
         'user-ray-cluster',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} "ray start --head"',
+            f'sky launch -y -c {name} --cloud {generic_cloud} "pip install ray>2.11; ray start --head"',
             f'sky exec {name} "echo hi"',
             f'sky logs {name} 1 --status',
             f'sky status -r {name} | grep UP',
