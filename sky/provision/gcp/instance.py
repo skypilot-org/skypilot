@@ -134,10 +134,12 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
             break
     return head_instance_id
 
-def _run_instances_in_managed_instance_group(region: str, cluster_name_on_cloud: str,
-                   config: common.ProvisionConfig) -> common.ProvisionRecord:
+
+def _run_instances_in_managed_instance_group(
+        region: str, cluster_name_on_cloud: str,
+        config: common.ProvisionConfig) -> common.ProvisionRecord:
     print("Managed instance group is enabled.")
-    
+
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
 
@@ -145,39 +147,42 @@ def _run_instances_in_managed_instance_group(region: str, cluster_name_on_cloud:
     project_id = config.provider_config['project_id']
     availability_zone = config.provider_config['availability_zone']
     head_instance_id = ""
-    
+
     # check instance templates
 
     # TODO add instance template name to the task definition if the user wants to use it.
     # Calculate template instance name based on the config node values. Hash them to get a unique name.
-    node_config_hash = mig_utils.create_node_config_hash(cluster_name_on_cloud, config.node_config)
+    node_config_hash = mig_utils.create_node_config_hash(
+        cluster_name_on_cloud, config.node_config)
     instance_template_name = f"{cluster_name_on_cloud}-it-{node_config_hash}"
-    if not mig_utils.check_instance_template_exits(project_id, region, instance_template_name):
-        mig_utils.create_regional_instance_template(project_id, 
-                                            region, 
-                                            instance_template_name, 
-                                            config.node_config,
-                                            cluster_name_on_cloud)
+    if not mig_utils.check_instance_template_exits(project_id, region,
+                                                   instance_template_name):
+        mig_utils.create_regional_instance_template(project_id, region,
+                                                    instance_template_name,
+                                                    config.node_config,
+                                                    cluster_name_on_cloud)
     else:
         print(f"Instance template {instance_template_name} already exists...")
-    
+
     # create managed instance group
-    instance_template_url =  f"projects/{project_id}/regions/{region}/instanceTemplates/{instance_template_name}"
+    instance_template_url = f"projects/{project_id}/regions/{region}/instanceTemplates/{instance_template_name}"
     managed_instance_group_name = f"{cluster_name_on_cloud}-mig-{node_config_hash}"
-    if not mig_utils.check_managed_instance_group_exists(project_id, availability_zone, managed_instance_group_name):
-        mig_utils.create_managed_instance_group(project_id, 
-                                                availability_zone, 
-                                                managed_instance_group_name, 
-                                                instance_template_url, 
+    if not mig_utils.check_managed_instance_group_exists(
+            project_id, availability_zone, managed_instance_group_name):
+        mig_utils.create_managed_instance_group(project_id,
+                                                availability_zone,
+                                                managed_instance_group_name,
+                                                instance_template_url,
                                                 size=config.count)
-    else:    
+    else:
         # TODO: if we already have one, we should resize it.
-        print(f"Managed instance group {managed_instance_group_name} already exists...")
+        print(
+            f"Managed instance group {managed_instance_group_name} already exists..."
+        )
         # mig_utils.resize_managed_instance_group(project_id, zone, group_name, size, run_duration)
 
-    mig_utils.wait_for_managed_group_to_be_stable(project_id, availability_zone, managed_instance_group_name)
-    
-    
+    mig_utils.wait_for_managed_group_to_be_stable(project_id, availability_zone,
+                                                  managed_instance_group_name)
 
     resource: Type[instance_utils.GCPInstance]
     if node_type == instance_utils.GCPNodeType.COMPUTE:
@@ -186,7 +191,7 @@ def _run_instances_in_managed_instance_group(region: str, cluster_name_on_cloud:
         resource = instance_utils.GCPTPUVMInstance
     else:
         raise ValueError(f'Unknown node type {node_type}')
-    
+
     # filter_labels = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     # running_instances = resource.filter(
     #     project_id=project_id,
@@ -202,7 +207,7 @@ def _run_instances_in_managed_instance_group(region: str, cluster_name_on_cloud:
     #             running_instances[0]['name'],
     #             is_head=True,
     #         )
-    
+
     # created_instance_ids = [n['name'] for n in running_instances]
 
     return common.ProvisionRecord(provider_name='gcp',
@@ -212,6 +217,7 @@ def _run_instances_in_managed_instance_group(region: str, cluster_name_on_cloud:
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=resumed_instance_ids,
                                   created_instance_ids=created_instance_ids)
+
 
 def _run_instances(region: str, cluster_name_on_cloud: str,
                    config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -422,7 +428,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     """See sky/provision/__init__.py"""
     try:
         if gcp_utils.is_use_managed_instance_group():
-            return _run_instances_in_managed_instance_group(region, cluster_name_on_cloud, config)
+            return _run_instances_in_managed_instance_group(
+                region, cluster_name_on_cloud, config)
         else:
             return _run_instances(region, cluster_name_on_cloud, config)
     except gcp.http_error_exception() as e:

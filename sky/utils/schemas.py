@@ -588,7 +588,7 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'use_managed_instance_group':{
+                'use_managed_instance_group': {
                     'type': 'boolean',
                 },
                 **_INSTANCE_TAGS_SCHEMA,

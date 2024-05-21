@@ -422,7 +422,8 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
-            'gcp_use_managed_instance_group': gcp_utils.is_use_managed_instance_group(),
+            'gcp_use_managed_instance_group':
+                gcp_utils.is_use_managed_instance_group(),
         }
         accelerators = r.accelerators
         if accelerators is not None:
