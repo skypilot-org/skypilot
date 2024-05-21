@@ -7,7 +7,7 @@ Managed Jobs
 
   This feature is great for scaling out: running a single job for long durations, or running many jobs (pipelines).
 
-SkyPilot supports **managed jobs**, which can automatically recover from any spot preemptions or hardware failures.
+SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically recover from any spot preemptions or hardware failures.
 It can be used in three modes:
 
 #. :ref:`Managed Spot Jobs <spot-jobs>`: Jobs run on auto-recovering spot instances. This can **save significant costs** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
@@ -20,8 +20,28 @@ It can be used in three modes:
 Managed Spot Jobs
 -----------------
 
-SkyPilot automatically finds available spot resources across regions and clouds to maximize availability.
+In this mode, :code:`sky jobs launch --use-spot` is used to launch a managed spot job. SkyPilot automatically finds available spot resources across regions and clouds to maximize availability.
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
+
+
+Quick comparison between *unmanaged spot clusters* vs. *managed spot jobs*:
+
+.. list-table::
+   :widths: 30 18 12 35
+   :header-rows: 1
+
+   * - Command
+     - Managed?
+     - SSH-able?
+     - Best for
+   * - :code:`sky launch --use-spot`
+     - Unmanaged spot cluster
+     - Yes
+     - Interactive dev on spot instances (especially for hardware with low preemption rates)
+   * - :code:`sky jobs launch --use-spot`
+     - Managed spot job (auto-recovery)
+     - No
+     - Scaling out long-running jobs (e.g., data processing, training, batch inference)
 
 Here is an example of a BERT training job failing over different regions across AWS and GCP.
 

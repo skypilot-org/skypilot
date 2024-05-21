@@ -134,9 +134,6 @@ class Azure(clouds.Cloud):
         cost += 0.0
         return cost
 
-    def is_same_cloud(self, other):
-        return isinstance(other, Azure)
-
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if region is None:
