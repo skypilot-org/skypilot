@@ -2081,8 +2081,13 @@ class AzureBlobStore(AbstractStore):
                     'authorization')
                 graph_client = data_utils.create_az_client('graph')
                 async def get_object_id():
+                    import logging
+                    original_level = logging.getLogger("httpx").getEffectiveLevel()
+                    # silencing the INFO level response log from httpx request
+                    logging.getLogger("httpx").setLevel(logging.WARNING)
                     user = await graph_client.users.with_url(
                         'https://graph.microsoft.com/v1.0/me').get()
+                    logging.getLogger("httpx").setLevel(original_level)
                     object_id = str(user.additional_data['id'])
                     return object_id
                 object_id = asyncio.run(get_object_id())
