@@ -166,7 +166,7 @@ class CommandRunner:
 
         # We need this to correctly run the cmd, and get the output.
         command = [
-            'bash',
+            '/bin/bash',
             '--login',
             '-c',
         ]
@@ -184,8 +184,9 @@ class CommandRunner:
             # cluster by 1 second.
             # sourcing ~/.bashrc is not required for internal executions
             command += [
-                'true && export OMP_NUM_THREADS=1 PYTHONWARNINGS=ignore'
-                f' && ({cmd})'
+                shlex.quote(
+                    'true && export OMP_NUM_THREADS=1 PYTHONWARNINGS=ignore'
+                    f' && ({cmd})')
             ]
         if not separate_stderr:
             command.append('2>&1')
