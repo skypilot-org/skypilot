@@ -12,6 +12,7 @@ from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
@@ -520,14 +521,18 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
 
-    # Adding the jump pod to the new_nodes list as well so it can be
-    # checked if it's scheduled and running along with other pods.
-    ssh_jump_pod_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
-    jump_pod = kubernetes.core_api().read_namespaced_pod(
-        ssh_jump_pod_name, namespace)
+
     wait_pods_dict = _filter_pods(namespace, tags, ['Pending'])
     wait_pods = list(wait_pods_dict.values())
-    wait_pods.append(jump_pod)
+
+    networking_mode = network_utils.get_networking_mode(config.provider_config.get('networking_mode'))
+    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
+        # Adding the jump pod to the new_nodes list as well so it can be
+        # checked if it's scheduled and running along with other pods.
+        ssh_jump_pod_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
+        jump_pod = kubernetes.core_api().read_namespaced_pod(
+            ssh_jump_pod_name, namespace)
+        wait_pods.append(jump_pod)
     provision_timeout = provider_config['timeout']
 
     wait_str = ('indefinitely'

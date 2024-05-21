@@ -18,7 +18,7 @@ fi
 # This is preferred because of socket re-use issues in kubectl port-forward,
 # see - https://github.com/kubernetes/kubernetes/issues/74551#issuecomment-769185879
 KUBECTL_OUTPUT=$(mktemp)
-kubectl port-forward svc/{{ ssh_jump_name }} :22 > "${KUBECTL_OUTPUT}" 2>&1 &
+kubectl port-forward pod/{{ pod_name }} :22 > "${KUBECTL_OUTPUT}" 2>&1 &
 
 # Capture the PID for the backgrounded kubectl command
 K8S_PORT_FWD_PID=$!

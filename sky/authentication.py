@@ -442,26 +442,32 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
     if network_mode == nodeport_mode:
         service_type = kubernetes_enums.KubernetesServiceType.NODEPORT
+        # Setup service for SSH jump pod. We create the SSH jump service here
+        # because we need to know the service IP address and port to set the
+        # ssh_proxy_command in the autoscaler config.
+        kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace,
+                                            service_type)
+        ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+            ssh_jump_name, nodeport_mode,
+            private_key_path=PRIVATE_SSH_KEY_PATH,
+            namespace=namespace)
     elif network_mode == port_forward_mode:
+        # Using `kubectl port-forward` creates a direct tunnel to the pod and
+        # does not require a ssh jump pod.
         kubernetes_utils.check_port_forward_mode_dependencies()
-        # Using `kubectl port-forward` creates a direct tunnel to jump pod and
-        # does not require opening any ports on Kubernetes nodes. As a result,
-        # the service can be a simple ClusterIP service which we access with
-        # `kubectl port-forward`.
-        service_type = kubernetes_enums.KubernetesServiceType.CLUSTERIP
+        # TODO(romilb): Handling multi-node clusters here might be tricky.
+        #   We would need to either port-forward to the head node and use
+        #   it as a jump host, or port-forward to each node individually.
+        #   In the either case, we would need to have a proxycommand on a per
+        #   node basis. This is currently not supported in upstream code.
+        #   Similarly in the downstream provisioning code, we would need to
+        #   set the worked pod name deterministically instead of using uuid.
+        ssh_target = config['cluster_name'] + '-head'
+        ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+            ssh_target, port_forward_mode)
     else:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')
-    # Setup service for SSH jump pod. We create the SSH jump service here
-    # because we need to know the service IP address and port to set the
-    # ssh_proxy_command in the autoscaler config.
-    kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, service_type)
-
-    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-        PRIVATE_SSH_KEY_PATH, ssh_jump_name, network_mode, namespace,
-        clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH,
-        clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
-
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
 
     return config

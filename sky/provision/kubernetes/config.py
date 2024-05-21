@@ -10,6 +10,8 @@ import yaml
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.kubernetes import network_utils
+from sky.utils import kubernetes_enums
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,9 @@ def bootstrap_instances(
 
     _configure_services(namespace, config.provider_config)
 
-    config = _configure_ssh_jump(namespace, config)
+    networking_mode = network_utils.get_networking_mode(config.provider_config.get('networking_mode'))
+    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
+        config = _configure_ssh_jump(namespace, config)
 
     requested_service_account = config.node_config['spec']['serviceAccountName']
     if (requested_service_account ==

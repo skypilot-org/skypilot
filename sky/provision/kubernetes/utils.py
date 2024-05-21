@@ -53,6 +53,10 @@ ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
 
 KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 
+# Port-forward proxy command constants
+PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh.j2'
+PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/generated/kubernetes/proxy_{}.sh'
+
 logger = sky_logging.init_logger(__name__)
 
 
@@ -852,10 +856,14 @@ def construct_ssh_jump_command(private_key_path: str,
 
 
 def get_ssh_proxy_command(
-        private_key_path: str, ssh_jump_name: str,
-        network_mode: kubernetes_enums.KubernetesNetworkingMode, namespace: str,
-        port_fwd_proxy_cmd_path: str, port_fwd_proxy_cmd_template: str) -> str:
-    """Generates the SSH proxy command to connect through the SSH jump pod.
+        k8s_ssh_target: str,
+        network_mode: kubernetes_enums.KubernetesNetworkingMode,
+        private_key_path: Optional[str] = None,
+        namespace: Optional[str] = None) -> str:
+    """Generates the SSH proxy command to connect to the pod.
+
+    Uses a jump pod if the network mode is NODEPORT, and direct port-forwarding
+    if the network mode is PORTFORWARD.
 
     By default, establishing an SSH connection creates a communication
     channel to a remote node by setting up a TCP connection. When a
@@ -871,55 +879,86 @@ def get_ssh_proxy_command(
 
     With the NodePort networking mode, a NodePort service is launched. This
     service opens an external port on the node which redirects to the desired
-    port within the pod. When establishing an SSH session in this mode, the
+    port to a SSH jump pod. When establishing an SSH session in this mode, the
     ProxyCommand makes use of this external port to create a communication
     channel directly to port 22, which is the default port ssh server listens
     on, of the jump pod.
 
     With Port-forward mode, instead of directly exposing an external port,
     'kubectl port-forward' sets up a tunnel between a local port
-    (127.0.0.1:23100) and port 22 of the jump pod. Then we establish a TCP
+    (127.0.0.1:23100) and port 22 of the provisioned pod. Then we establish TCP
     connection to the local end of this tunnel, 127.0.0.1:23100, using 'socat'.
-    This is setup in the inner ProxyCommand of the nested ProxyCommand, and the
-    rest is the same as NodePort approach, which the outer ProxyCommand
-    establishes a communication channel between 127.0.0.1:23100 and port 22 on
-    the jump pod. Consequently, any stdin provided on the local machine is
-    forwarded through this tunnel to the application (SSH server) listening in
-    the pod. Similarly, any output from the application in the pod is tunneled
-    back and displayed in the terminal on the local machine.
+    All of this is done in a ProxyCommand script. Any stdin provided on the
+    local machine is forwarded through this tunnel to the application
+    (SSH server) listening in the pod. Similarly, any output from the
+    application in the pod is tunneled back and displayed in the terminal on
+    the local machine.
 
     Args:
-        private_key_path: str; Path to the private key to use for SSH.
-            This key must be authorized to access the SSH jump pod.
-        ssh_jump_name: str; Name of the SSH jump service to use
+        k8s_ssh_target: str; The Kubernetes object that will be used as the
+            target for SSH. If network_mode is NODEPORT, this is the name of the
+            service. If network_mode is PORTFORWARD, this is the pod name.
         network_mode: KubernetesNetworkingMode; networking mode for ssh
             session. It is either 'NODEPORT' or 'PORTFORWARD'
-        namespace: Kubernetes namespace to use
-        port_fwd_proxy_cmd_path: str; path to the script used as Proxycommand
-            with 'kubectl port-forward'
-        port_fwd_proxy_cmd_template: str; template used to create
-            'kubectl port-forward' Proxycommand
+        private_key_path: str; Path to the private key to use for SSH.
+            This key must be authorized to access the SSH jump pod.
+            Required for NODEPORT networking mode.
+        namespace: Kubernetes namespace to use.
+            Required for NODEPORT networking mode.
     """
     # Fetch IP to connect to for the jump svc
     ssh_jump_ip = get_external_ip(network_mode)
     if network_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
-        ssh_jump_port = get_port(ssh_jump_name, namespace)
+        assert namespace is not None, 'Namespace must be provided for NodePort'
+        assert private_key_path is not None, 'Private key path must be provided'
+        ssh_jump_port = get_port(k8s_ssh_target, namespace)
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
     # Setting kubectl port-forward/socat to establish ssh session using
     # ClusterIP service to disallow any ports opened
     else:
-        vars_to_fill = {
-            'ssh_jump_name': ssh_jump_name,
-        }
-        common_utils.fill_template(port_fwd_proxy_cmd_template,
-                                   vars_to_fill,
-                                   output_path=port_fwd_proxy_cmd_path)
-        ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path,
-            ssh_jump_ip,
-            proxy_cmd_path=port_fwd_proxy_cmd_path)
+        ssh_jump_proxy_command = create_proxy_command_script(k8s_ssh_target)
     return ssh_jump_proxy_command
+
+
+def create_proxy_command_script(k8s_ssh_target: str) -> str:
+    """Creates a ProxyCommand script that uses kubectl port-forward to setup
+    a tunnel between a local port and the SSH server in the pod.
+
+    Args:
+        k8s_ssh_target: str; The pod name to use as the target for SSH.
+
+    Returns:
+        str: Path to the ProxyCommand script.
+    """
+    vars_to_fill = {
+        'pod_name': k8s_ssh_target,
+    }
+    port_fwd_proxy_cmd_path = os.path.expanduser(
+        PORT_FORWARD_PROXY_CMD_PATH.format(k8s_ssh_target))
+    os.makedirs(os.path.dirname(port_fwd_proxy_cmd_path), exist_ok=True,
+                mode=0o700)
+    common_utils.fill_template(PORT_FORWARD_PROXY_CMD_TEMPLATE,
+                               vars_to_fill,
+                               output_path=port_fwd_proxy_cmd_path)
+    # Set the permissions to 700 to ensure only the owner can read, write,
+    # and execute the file.
+    os.chmod(port_fwd_proxy_cmd_path, 0o700)
+    return port_fwd_proxy_cmd_path
+
+
+def remove_proxy_command_script(k8s_ssh_target: str):
+    """Removes the ProxyCommand script used for port-forwarding.
+
+    Args:
+        k8s_ssh_target: str; The pod name to use as the target for SSH.
+    """
+    port_fwd_proxy_cmd_path = os.path.expanduser(
+        PORT_FORWARD_PROXY_CMD_PATH.format(k8s_ssh_target))
+    print('Removing proxy command script at path:', port_fwd_proxy_cmd_path)
+    if os.path.exists(port_fwd_proxy_cmd_path):
+        print('File exists, removing.')
+        os.remove(port_fwd_proxy_cmd_path)
 
 
 def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
