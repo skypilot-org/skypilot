@@ -1,0 +1,11 @@
+resources:
+  cpus: 2+
+
+
+setup: |
+  conda create -n testenv python=3.6
+
+  echo "conda activate testenv" >> ~/.bashrc
+
+run: |
+  python --version | grep "Python 3.6" || exit 1

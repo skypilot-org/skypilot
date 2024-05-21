@@ -3771,8 +3771,8 @@ def test_skyserve_failures(generic_cloud: str):
 # TODO(Ziming, Tian): Add tests for autoscaling.
 
 
-# ------- Testing user ray cluster --------
-def test_user_ray_cluster(generic_cloud: str):
+# ------- Testing user dependencies --------
+def test_user_dependencies(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
         'user-ray-cluster',
@@ -3783,6 +3783,12 @@ def test_user_ray_cluster(generic_cloud: str):
             f'sky status -r {name} | grep UP',
             f'sky exec {name} "echo bye"',
             f'sky logs {name} 2 --status',
+            f'sky launch -c {name} tests/test_yamls/different_default_conda_env.yaml',
+            f'sky logs {name} 3 --status',
+            # Launch again to test the default env does not affect SkyPilot
+            # runtime setup
+            f'sky launch -c {name} "python --version | grep \"Python 3.6\""',
+            f'sky logs {name} 4 --status',
         ],
         f'sky down -y {name}',
     )
