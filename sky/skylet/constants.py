@@ -105,7 +105,7 @@ CONDA_INSTALLATION_COMMANDS = (
     '{ conda init && source ~/.bashrc; };'
     # Create a separate conda environment for SkyPilot dependencies.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
-    f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} && '
+    f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages && '
     f'echo $(echo {SKY_REMOTE_PYTHON_ENV})/bin/python > {SKY_PYTHON_PATH_FILE}; }};'
 )
 
