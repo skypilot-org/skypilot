@@ -62,6 +62,7 @@ provider:
   # The upper-level SkyPilot code has make sure there will not be resource
   # leakage.
   disable_launch_config_check: true
+  use_managed_instance_group: {{gcp_use_managed_instance_group}}
 
 auth:
   ssh_user: gcpuser
@@ -79,6 +80,7 @@ available_node_types:
       {%- for tag_key, tag_value in instance_tags.items() %}
         {{ tag_key }}: {{ tag_value }}
       {%- endfor %}
+        managed-instance-group: {{gcp_use_managed_instance_group}}
       {%- if specific_reservations %}
       reservationAffinity:
         consumeReservationType: SPECIFIC_RESERVATION

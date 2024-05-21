@@ -184,3 +184,6 @@ def get_minimal_permissions() -> List[str]:
         permissions += constants.RESERVATION_PERMISSIONS
 
     return permissions
+
+def is_use_managed_instance_group() -> bool:
+    return skypilot_config.get_nested(('gcp', 'use_managed_instance_group'), False)

@@ -134,6 +134,10 @@ def instance_to_handler(instance: str):
     elif instance_type == 'tpu':
         return GCPTPUVMInstance
     else:
+        # Managed Instance Groups breaks this assumption. The suffix is a random value.
+        if "-mig-" in instance:
+            # TODO: Implement MIG Instance
+            return GCPComputeInstance
         raise ValueError(f'Unknown instance type: {instance_type}')
 
 
