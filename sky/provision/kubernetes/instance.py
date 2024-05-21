@@ -259,38 +259,6 @@ def _wait_for_pods_to_run(namespace, new_nodes):
         time.sleep(1)
 
 
-def _run_command_on_pods(node_name: str,
-                         node_namespace: str,
-                         command: List[str],
-                         stream_logs: bool = False):
-    """Run command on Kubernetes pods.
-
-    If `stream_logs` is True, we poll for output and error messages while the
-    command is executing, and the stdout and stderr is written to logger.info.
-    When called from the provisioner, this logger.info is written to the
-    provision.log file (see setup_provision_logging()).
-    """
-    cmd_output = kubernetes.stream()(
-        kubernetes.core_api().connect_get_namespaced_pod_exec,
-        node_name,
-        node_namespace,
-        command=command,
-        stderr=True,
-        stdin=False,
-        stdout=True,
-        tty=False,
-        _preload_content=(not stream_logs),
-        _request_timeout=kubernetes.API_TIMEOUT)
-    if stream_logs:
-        while cmd_output.is_open():
-            cmd_output.update(timeout=1)
-            if cmd_output.peek_stdout():
-                logger.info(f'{cmd_output.read_stdout().strip()}')
-            if cmd_output.peek_stderr():
-                logger.info(f'{cmd_output.read_stderr().strip()}')
-        cmd_output.close()
-    return cmd_output
-
 
 def _set_env_vars_in_pods(namespace: str, new_pods: List):
     """Setting environment variables in pods.
@@ -313,7 +281,6 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
         'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
         '~/k8s_env_var.sh && '
-        'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
         '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
 
     for new_pod in new_pods:
@@ -363,7 +330,7 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
     # Setting up ssh for the pod instance. This is already setup for
     # the jump pod so it does not need to be run for it.
     set_k8s_ssh_cmd = (
-        'set -x; '
+        'set -ex; '
         'prefix_cmd() '
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
         'export DEBIAN_FRONTEND=noninteractive;'

@@ -216,6 +216,7 @@ class CommandRunner:
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
+            connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
@@ -603,6 +604,7 @@ class KubernetesCommandRunner(CommandRunner):
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
+            connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
@@ -630,13 +632,12 @@ class KubernetesCommandRunner(CommandRunner):
         """
         assert port_forward is None, ('port_forward is not supported for k8s '
                                       f'for now, but got: {port_forward}')
-
+        if connect_timeout is None:
+            connect_timeout = 30
+        kubectl_args = ['--pod-running-timeout', f'{connect_timeout}s', '-n', self.namespace, self.pod_name]
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
-            base_cmd = [
-                'kubectl', 'exec', '-it', '-n', self.namespace, self.pod_name,
-                '--'
-            ]
+            base_cmd = ['kubectl', 'exec', '-it', *kubectl_args, '--']
             command = base_cmd + cmd
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
@@ -648,7 +649,7 @@ class KubernetesCommandRunner(CommandRunner):
 
         if ssh_mode == SshMode.INTERACTIVE:
             kubectl_base_command.append('-i')
-        kubectl_base_command += ['-n', self.namespace, self.pod_name, '--']
+        kubectl_base_command += [*kubectl_args, '--']
 
         command_str = self._get_command_to_run(
             cmd,

@@ -59,6 +59,7 @@ class CommandRunner:
             process_stream: bool = ...,
             stream_logs: bool = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
             **kwargs) -> int:
         ...
 
@@ -71,6 +72,7 @@ class CommandRunner:
             process_stream: bool = ...,
             stream_logs: bool = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -83,6 +85,7 @@ class CommandRunner:
             process_stream: bool = ...,
             stream_logs: bool = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -136,6 +139,7 @@ class SSHCommandRunner(CommandRunner):
             stream_logs: bool = ...,
             ssh_mode: SshMode = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
             **kwargs) -> int:
         ...
 
@@ -150,6 +154,7 @@ class SSHCommandRunner(CommandRunner):
             stream_logs: bool = ...,
             ssh_mode: SshMode = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -164,6 +169,7 @@ class SSHCommandRunner(CommandRunner):
             stream_logs: bool = ...,
             ssh_mode: SshMode = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -196,6 +202,7 @@ class KubernetesCommandRunner(CommandRunner):
             stream_logs: bool = ...,
             ssh_mode: SshMode = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
             **kwargs) -> int:
         ...
 
@@ -210,6 +217,7 @@ class KubernetesCommandRunner(CommandRunner):
             stream_logs: bool = ...,
             ssh_mode: SshMode = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -224,6 +232,7 @@ class KubernetesCommandRunner(CommandRunner):
             stream_logs: bool = ...,
             ssh_mode: SshMode = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
