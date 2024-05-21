@@ -2,9 +2,10 @@
 import time
 from typing import Dict
 
+import cudo_utils as utils
+
 from sky import sky_logging
 from sky.adaptors.cudo import cudo
-import sky.clouds.service_catalog.cudo_catalog_helper as helper
 
 logger = sky_logging.init_logger(__name__)
 
@@ -126,7 +127,7 @@ def list_instances():
 def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
                  cpus):
     try:
-        gpu_model = helper.skypilot_gpu_to_cudo_gpu(gpu_model)
+        gpu_model = utils.skypilot_gpu_to_cudo_gpu(gpu_model)
         api = cudo().cudo_api.virtual_machines()
         types = api.list_vm_machine_types(mem,
                                           cpus,
