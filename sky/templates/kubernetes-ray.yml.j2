@@ -205,6 +205,7 @@ provider:
           labels:
             parent: skypilot
             skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-user: {{ user }}
           name: {{cluster_name_on_cloud}}-head-ssh
         spec:
           selector:
@@ -220,6 +221,7 @@ provider:
             labels:
               parent: skypilot
               skypilot-cluster: {{cluster_name_on_cloud}}
+              skypilot-user: {{ user }}
             # NOTE: If you're running multiple Ray clusters with services
             # on one Kubernetes cluster, they must have unique service
             # names.
@@ -256,6 +258,7 @@ available_node_types:
             skypilot-cluster: {{cluster_name_on_cloud}}
             # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
             skypilot-ssh-jump: {{k8s_ssh_jump_name}}
+            skypilot-user: {{ user }}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value }}
