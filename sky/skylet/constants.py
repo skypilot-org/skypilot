@@ -39,6 +39,9 @@ SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # Ray executable, e.g., /opt/conda/bin/ray
 SKY_RAY_CMD = (f'$([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
+# Separate env for SkyPilot runtime dependencies.
+SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
+SKY_REMOTE_PYTHON_ENV = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
@@ -100,11 +103,11 @@ CONDA_INSTALLATION_COMMANDS = (
     f'echo "$(echo ~)/miniconda3/bin/python" > {SKY_PYTHON_PATH_FILE}; }}; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
-    '(type -a python | grep -q python3) || '
-    'echo \'alias python=python3\' >> ~/.bashrc;'
-    '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
-    # Writes Python path to file if it does not exist or the file is empty.
-    f'[ -s {SKY_PYTHON_PATH_FILE} ] || which python3 > {SKY_PYTHON_PATH_FILE};')
+    # Create a separate conda environment for SkyPilot dependencies.
+    f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
+    f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} && '
+    f'echo $(echo {SKY_REMOTE_PYTHON_ENV})/bin/python > {SKY_PYTHON_PATH_FILE}; }};'
+)
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
@@ -142,7 +145,9 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # mentioned above are resolved.
     'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
-    f'[ -s {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE}; '
+    f'[ -s {SKY_RAY_PATH_FILE} ] || '
+    f'{{ source {SKY_REMOTE_PYTHON_ENV}/bin/activate && '
+    f'which ray > {SKY_RAY_PATH_FILE}; }}'
     # END ray package check and installation
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
