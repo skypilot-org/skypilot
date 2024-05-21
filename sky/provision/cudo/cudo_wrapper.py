@@ -2,10 +2,9 @@
 import time
 from typing import Dict
 
-import cudo_utils as utils
-
 from sky import sky_logging
 from sky.adaptors import cudo
+import sky.provision.cudo.cudo_utils as utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -14,8 +13,6 @@ def launch(name: str, data_center_id: str, ssh_key: str, machine_type: str,
            memory_gib: int, vcpu_count: int, gpu_count: int,
            tags: Dict[str, str], disk_size: int):
     """Launches an instance with the given parameters."""
-    disk = cudo.cudo.Disk(storage_class='STORAGE_CLASS_NETWORK',
-                          size_gib=disk_size)
 
     request = cudo.cudo.CreateVMBody(
         ssh_key_source='SSH_KEY_SOURCE_NONE',
@@ -27,8 +24,8 @@ def launch(name: str, data_center_id: str, ssh_key: str, machine_type: str,
         memory_gib=memory_gib,
         vcpus=vcpu_count,
         gpus=gpu_count,
-        boot_disk=cudo().Disk(storage_class='STORAGE_CLASS_NETWORK',
-                              size_gib=disk_size),
+        boot_disk=cudo.cudo.Disk(storage_class='STORAGE_CLASS_NETWORK',
+                                 size_gib=disk_size),
         metadata=tags)
 
     try:
@@ -130,7 +127,7 @@ def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
                  cpus):
     try:
         gpu_model = utils.skypilot_gpu_to_cudo_gpu(gpu_model)
-        api = cudo().cudo_api.virtual_machines()
+        api = cudo.cudo.cudo_api.virtual_machines()
         types = api.list_vm_machine_types(mem,
                                           cpus,
                                           gpu=gpu_count,
@@ -143,5 +140,5 @@ def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
             raise Exception(
                 'Too many VMs requested, try another gpu type or region')
         return total_count
-    except cudo().rest.ApiException as e:
+    except cudo.cudo.rest.ApiException as e:
         raise e
