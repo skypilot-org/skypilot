@@ -433,7 +433,8 @@ class SSHCommandRunner(CommandRunner):
             process_stream,
             separate_stderr,
             # A hack to remove the following SSH warning+bash warnings (twice):
-            # Warning: Permanently added 'xx.xx.xx.xx' to the list of known hosts.
+            # Warning: Permanently added 'xx.xx.xx.xx' to the list of known
+            # hosts.
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
             # When not source_bashrc, the bash warning will only show once.
