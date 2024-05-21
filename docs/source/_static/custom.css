@@ -23,12 +23,18 @@
 
 
 html[data-theme="light"] {
+  --pst-color-link: #176de8;
+  --pst-color-primary: #176de8;
   --pst-color-secondary: var(--pst-color-primary);
+  --pst-color-text-base: #4c4c4d;
 }
 
 html[data-theme="dark"] {
+  --pst-color-link: #176de8;
+  --pst-color-primary: #176de8;
   --pst-color-secondary: var(--pst-color-primary);
-
+  --pst-color-text-base: #d8d8d8;
+  
   .bd-sidebar::-webkit-scrollbar {
     width: 6px;
     background-color: #2e2e2e;
@@ -112,3 +118,61 @@ html[data-theme="dark"] {
     vertical-align: middle;
     line-height: 1; /* Adjust line height to ensure vertical alignment */
 }
+
+.navbar {
+  --bs-navbar-nav-link-padding-x: 1rem;
+}
+
+.navbar-brand.logo>svg {
+  width: 120px;
+}
+
+.navbar-brand.logo>svg .cls-6 {
+  fill: var(--pst-color-text-base);
+}
+/*********************************************
+* Footer - content *
+*********************************************/
+.footer {
+  font-size: var(--sbt-font-size-small-1);
+
+  &.bd-footer-content {
+    display: flex;
+    flex-wrap: wrap;
+    padding: 15px;
+    border-top: 1px solid #ccc;
+    font-size: 85%;
+
+    .bd-footer-content__inner {
+      padding-left: 0px;
+
+      p {
+        margin-bottom: 0px;
+      }
+    }
+  }
+}
+
+
+.bd-header .navbar-nav li a.nav-link:hover {
+  text-decoration: none;
+}
+
+/* Add transparent underline for the other tabs that are not active to avoid
+active tab to be moved up. */
+.nav-link {
+  border-bottom: none;
+}
+
+.bd-header .navbar-nav>.current>.nav-link {
+  border-bottom: none;
+}
+
+/* Assuming your breakpoints are defined in pixels */
+@media (min-width: 959.98px) {
+
+  .bd-sidebar-primary {
+    width: 20% !important;
+  }
+}
+

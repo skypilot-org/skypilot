@@ -149,12 +149,6 @@ In the above example, SkyPilot will first try to provision an A10 GPU, then an A
 Multiple Candidate Resources
 --------------------------------------------
 
-.. tip::
-
-  Support for multiple resources via ``any_of`` or ``ordered`` was added after v0.4.1.
-
-  To use this feature, :ref:`install the nightly release <installation>`: ``pip install -U skypilot-nightly``
-
 If a task would like to specify multiple candidate resources (not only GPUs), the user can specify a list of candidate resources with a preference annotation:
 
 
@@ -218,15 +212,15 @@ This will genereate the following output:
 
   $ sky launch -c mycluster task.yaml
   ...
-  I 12-20 23:55:56 optimizer.py:717] 
+  I 12-20 23:55:56 optimizer.py:717]
   I 12-20 23:55:56 optimizer.py:840] Considered resources (1 node):
   I 12-20 23:55:56 optimizer.py:910] ---------------------------------------------------------------------------------------------
-  I 12-20 23:55:56 optimizer.py:910]  CLOUD   INSTANCE         vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN   
+  I 12-20 23:55:56 optimizer.py:910]  CLOUD   INSTANCE         vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
   I 12-20 23:55:56 optimizer.py:910] ---------------------------------------------------------------------------------------------
-  I 12-20 23:55:56 optimizer.py:910]  GCP     g2-standard-96   96      384       L4:8           us-east4-a    7.98          ✔     
-  I 12-20 23:55:56 optimizer.py:910]  AWS     g5.48xlarge      192     768       A10G:8         us-east-1     16.29               
-  I 12-20 23:55:56 optimizer.py:910]  GCP     a2-highgpu-8g    96      680       A100:8         us-east1-b    29.39               
-  I 12-20 23:55:56 optimizer.py:910]  AWS     p4d.24xlarge     96      1152      A100:8         us-east-1     32.77               
+  I 12-20 23:55:56 optimizer.py:910]  GCP     g2-standard-96   96      384       L4:8           us-east4-a    7.98          ✔
+  I 12-20 23:55:56 optimizer.py:910]  AWS     g5.48xlarge      192     768       A10G:8         us-east-1     16.29
+  I 12-20 23:55:56 optimizer.py:910]  GCP     a2-highgpu-8g    96      680       A100:8         us-east1-b    29.39
+  I 12-20 23:55:56 optimizer.py:910]  AWS     p4d.24xlarge     96      1152      A100:8         us-east-1     32.77
   I 12-20 23:55:56 optimizer.py:910] ---------------------------------------------------------------------------------------------
-  I 12-20 23:55:56 optimizer.py:910] 
+  I 12-20 23:55:56 optimizer.py:910]
   Launching a new cluster 'mycluster'. Proceed? [Y/n]:

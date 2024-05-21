@@ -147,7 +147,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         service_name,
         controller_job_id=job_id,
         policy=service_spec.autoscaling_policy_str(),
-        version=constants.INITIAL_VERSION,
         requested_resources_str=backend_utils.get_task_resources_str(task),
         status=serve_state.ServiceStatus.CONTROLLER_INIT)
     # Directly throw an error here. See sky/serve/api.py::up
@@ -213,8 +212,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             _handle_signal(service_name)
             time.sleep(1)
     except exceptions.ServeUserTerminatedError:
-        serve_state.set_service_status(service_name,
-                                       serve_state.ServiceStatus.SHUTTING_DOWN)
+        serve_state.set_service_status_and_active_versions(
+            service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
     finally:
         process_to_kill: List[multiprocessing.Process] = []
         if load_balancer_process is not None:
@@ -229,7 +228,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             process.join()
         failed = _cleanup(service_name)
         if failed:
-            serve_state.set_service_status(
+            serve_state.set_service_status_and_active_versions(
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
             logger.error(f'Service {service_name} failed to clean up.')
         else:

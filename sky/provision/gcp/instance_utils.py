@@ -412,7 +412,7 @@ class GCPComputeInstance(GCPInstance):
             f'Waiting GCP operation {operation["name"]} to be ready ...')
 
         @_retry_on_http_exception(
-            f'Fail to wait for operation {operation["name"]}')
+            f'Failed to wait for operation {operation["name"]}')
         def call_operation(fn, timeout: int):
             request = fn(
                 project=project_id,
@@ -650,23 +650,32 @@ class GCPComputeInstance(GCPInstance):
 
         all_names = []
         if 'reservationAffinity' in config:
+            specific_reservations = set(config['reservationAffinity']['values'])
             reservations = gcp_cloud.GCP().get_reservations_available_resources(
                 config['machineType'],
                 region=zone.rpartition('-')[0],
                 zone=zone,
-                specific_reservations=set(
-                    config['reservationAffinity']['values']))
+                specific_reservations=specific_reservations)
+            # Filter the reservations by the user-specified ones, because
+            # reservations contain auto reservations as well, which do not
+            # need to explicitly specify in the config for creating instances.
+            specific_reservations_to_count = {
+                reservation: count
+                for reservation, count in reservations.items()
+                if reservation in specific_reservations
+            }
             # Sort the reservations by the number of available resources
-            reservation_list = sorted(reservations.items(),
-                                      key=lambda x: x[1],
-                                      reverse=True)
+            specified_reservations_list = sorted(
+                specific_reservations_to_count.items(),
+                key=lambda x: x[1],
+                reverse=True)
             # TODO(zhwu): Convert this to parallel execution.
             # TODO(zhwu): This is not atomic as the reservation count may change
             # between the time we check and the time we create the instances, as
             # other users may be creating instances at the same time.
             # Our current implementation will skip the current region if the
             # reservation count is not enough, which is suboptimal.
-            for reservation, reservation_count in reservation_list:
+            for reservation, reservation_count in specified_reservations_list:
                 if reservation_count <= 0:
                     continue
                 reservation_count = min(reservation_count, count)
@@ -956,7 +965,7 @@ class GCPTPUVMInstance(GCPInstance):
         del project_id, zone  # unused
 
         @_retry_on_http_exception(
-            f'Fail to wait for operation {operation["name"]}')
+            f'Failed to wait for operation {operation["name"]}')
         def call_operation(fn, timeout: int):
             request = fn(name=operation['name'])
             request.http.timeout = timeout
@@ -1013,6 +1022,8 @@ class GCPTPUVMInstance(GCPInstance):
             # SKY: Catch HttpError when accessing unauthorized region.
             # Return empty dict instead of raising exception to not break.
             if 'is not found or access is unauthorized.' in str(e):
+                return {}
+            if 'Permission \'tpu.nodes.list\' denied on' in str(e):
                 return {}
             logger.debug(f'filter: googleapiclient.errors.HttpError: {e}')
             raise

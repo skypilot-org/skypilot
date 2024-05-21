@@ -15,7 +15,7 @@ in ray yaml config as input,
 The local machine's public key should not be uploaded to the
 `~/.ssh/sky-key.pub` on the remote VM, because it will cause private/public
 key pair mismatch when the user tries to launch new VM from that remote VM
-using SkyPilot, e.g., the node is used as a spot controller. (Lambda cloud
+using SkyPilot, e.g., the node is used as a jobs controller. (Lambda cloud
 is an exception, due to the limitation of the cloud provider. See the
 comments in setup_lambda_authentication)
 """
@@ -34,6 +34,7 @@ import colorama
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+import filelock
 import yaml
 
 from sky import clouds
@@ -62,6 +63,7 @@ MAX_TRIALS = 64
 # TODO(zhwu): Support user specified key pair.
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 PUBLIC_SSH_KEY_PATH = '~/.ssh/sky-key.pub'
+_SSH_KEY_GENERATION_LOCK = '~/.sky/generated/ssh/.__internal-sky-key.lock'
 
 
 def _generate_rsa_key_pair() -> Tuple[str, str]:
@@ -84,8 +86,8 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
 
 def _save_key_pair(private_key_path: str, public_key_path: str,
                    private_key: str, public_key: str) -> None:
-    private_key_dir = os.path.dirname(private_key_path)
-    os.makedirs(private_key_dir, exist_ok=True)
+    key_dir = os.path.dirname(private_key_path)
+    os.makedirs(key_dir, exist_ok=True, mode=0o700)
 
     with open(
             private_key_path,
@@ -106,17 +108,21 @@ def get_or_generate_keys() -> Tuple[str, str]:
     """Returns the aboslute private and public key paths."""
     private_key_path = os.path.expanduser(PRIVATE_SSH_KEY_PATH)
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-    if not os.path.exists(private_key_path):
-        public_key, private_key = _generate_rsa_key_pair()
-        _save_key_pair(private_key_path, public_key_path, private_key,
-                       public_key)
-    else:
-        # FIXME(skypilot): ran into failing this assert once, but forgot the
-        # reproduction (has private key; but has not generated public key).
-        #   AssertionError: /home/ubuntu/.ssh/sky-key.pub
-        assert os.path.exists(public_key_path), (
-            'Private key found, but associated public key '
-            f'{public_key_path} does not exist.')
+
+    key_file_lock = os.path.expanduser(_SSH_KEY_GENERATION_LOCK)
+    lock_dir = os.path.dirname(key_file_lock)
+    # We should have the folder ~/.sky/generated/ssh to have 0o700 permission,
+    # as the ssh configs will be written to this folder as well in
+    # backend_utils.SSHConfigHelper
+    os.makedirs(lock_dir, exist_ok=True, mode=0o700)
+    with filelock.FileLock(key_file_lock, timeout=10):
+        if not os.path.exists(private_key_path):
+            public_key, private_key = _generate_rsa_key_pair()
+            _save_key_pair(private_key_path, public_key_path, private_key,
+                           public_key)
+    assert os.path.exists(public_key_path), (
+        'Private key found, but associated public key '
+        f'{public_key_path} does not exist.')
     return private_key_path, public_key_path
 
 
@@ -402,17 +408,27 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Add the user's public key to the SkyPilot cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
-    secret_field_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_FIELD_NAME
+    secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-    k8s = kubernetes.get_kubernetes()
+    k8s = kubernetes.kubernetes
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read()
         if not public_key.endswith('\n'):
             public_key += '\n'
-        secret_metadata = k8s.client.V1ObjectMeta(name=secret_name,
-                                                  labels={'parent': 'skypilot'})
+
+        # Generate metadata
+        secret_metadata = {
+            'name': secret_name,
+            'labels': {
+                'parent': 'skypilot'
+            }
+        }
+        custom_metadata = skypilot_config.get_nested(
+            ('kubernetes', 'custom_metadata'), {})
+        kubernetes_utils.merge_dicts(custom_metadata, secret_metadata)
+
         secret = k8s.client.V1Secret(
-            metadata=secret_metadata,
+            metadata=k8s.client.V1ObjectMeta(**secret_metadata),
             string_data={secret_field_name: public_key})
     if kubernetes_utils.check_secret_exists(secret_name, namespace):
         logger.debug(f'Key {secret_name} exists in the cluster, patching it...')
@@ -460,7 +476,7 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
-        runpod.runpod().cli.groups.ssh.functions.add_ssh_key(public_key)
+        runpod.runpod.cli.groups.ssh.functions.add_ssh_key(public_key)
 
     return configure_ssh_info(config)
 

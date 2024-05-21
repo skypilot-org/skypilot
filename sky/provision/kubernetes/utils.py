@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+import json
 import math
 import os
 import re
@@ -18,9 +19,13 @@ from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
+from sky.utils import schemas
 from sky.utils import ux_utils
 
+# TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
+
+DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
 
 MEMORY_SIZE_UNITS = {
     'B': 1,
@@ -32,8 +37,14 @@ MEMORY_SIZE_UNITS = {
 }
 NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. \
 If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
-(e.g., skypilot.co/accelerators) are setup correctly. \
+(e.g., skypilot.co/accelerator) are setup correctly. \
 To further debug, run: sky check.'
+
+KUBERNETES_AUTOSCALER_NOTE = (
+    'Note: Kubernetes cluster autoscaling is enabled. '
+    'All GPUs that can be provisioned may not be listed '
+    'here. Refer to your autoscaler\'s node pool '
+    'configuration to see the list of supported GPUs.')
 
 # TODO(romilb): Add links to docs for configuration instructions when ready.
 ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
@@ -178,12 +189,30 @@ class GKELabelFormatter(GPULabelFormatter):
                 f'Invalid accelerator name in GKE cluster: {value}')
 
 
+class KarpenterLabelFormatter(SkyPilotLabelFormatter):
+    """Karpeneter label formatter
+    Karpenter uses the label `karpenter.k8s.aws/instance-gpu-name` to identify
+    the GPU type. Details: https://karpenter.sh/docs/reference/instance-types/
+    The naming scheme is same as the SkyPilot formatter, so we inherit from it.
+    """
+    LABEL_KEY = 'karpenter.k8s.aws/instance-gpu-name'
+
+
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
-# it will be used to determine the priority of the label formats.
+# it will be used to determine the priority of the label formats when
+# auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
-    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter
+    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter,
+    KarpenterLabelFormatter
 ]
+
+# Mapping of autoscaler type to label formatter
+AUTOSCALER_TO_LABEL_FORMATTER = {
+    kubernetes_enums.KubernetesAutoscalerType.GKE: GKELabelFormatter,
+    kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterLabelFormatter,  # pylint: disable=line-too-long
+    kubernetes_enums.KubernetesAutoscalerType.GENERIC: SkyPilotLabelFormatter,
+}
 
 
 def detect_gpu_label_formatter(
@@ -348,10 +377,26 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
     # Check if the cluster has GPU resources
     # TODO(romilb): This assumes the accelerator is a nvidia GPU. We
     #  need to support TPUs and other accelerators as well.
-    # TODO(romilb): This will fail early for autoscaling clusters.
-    #  For AS clusters, we may need a way for users to specify GPU node pools
-    #  to use since the cluster may be scaling up from zero nodes and may not
-    #  have any GPU nodes yet.
+    # TODO(romilb): Currently, we broadly disable all GPU checks if autoscaling
+    #  is configured in config.yaml since the cluster may be scaling up from
+    #  zero nodes and may not have any GPU nodes yet. In the future, we should
+    #  support pollingthe clusters for autoscaling information, such as the
+    #  node pools configured etc.
+
+    autoscaler_type = get_autoscaler_type()
+    if autoscaler_type is not None:
+        # If autoscaler is set in config.yaml, override the label key and value
+        # to the autoscaler's format and bypass the GPU checks.
+        if check_mode:
+            # If check mode is enabled and autoscaler is set, we can return
+            # early since we assume the cluster autoscaler will handle GPU
+            # node provisioning.
+            return '', ''
+        formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
+        assert formatter is not None, ('Unsupported autoscaler type:'
+                                       f' {autoscaler_type}')
+        return formatter.get_label_key(), formatter.get_label_value(acc_type)
+
     has_gpus, cluster_resources = detect_gpu_resource()
     if has_gpus:
         # Check if the cluster has GPU labels setup correctly
@@ -509,20 +554,108 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     except Exception as e:  # pylint: disable=broad-except
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
-    # If we reach here, the credentials are valid and Kubernetes cluster is up
+
+    # If we reach here, the credentials are valid and Kubernetes cluster is up.
+    # We now do softer checks to check if exec based auth is used and to
+    # see if the cluster is GPU-enabled.
+
+    _, exec_msg = is_kubeconfig_exec_auth()
+
     # We now check if GPUs are available and labels are set correctly on the
     # cluster, and if not we return hints that may help debug any issues.
     # This early check avoids later surprises for user when they try to run
     # `sky launch --gpus <gpu>` and the optimizer does not list Kubernetes as a
     # provider if their cluster GPUs are not setup correctly.
+    gpu_msg = ''
     try:
         _, _ = get_gpu_label_key_value(acc_type='', check_mode=True)
     except exceptions.ResourcesUnavailableError as e:
         # If GPUs are not available, we return cluster as enabled (since it can
         # be a CPU-only cluster) but we also return the exception message which
         # serves as a hint for how to enable GPU access.
-        return True, f'{e}'
-    return True, None
+        gpu_msg = str(e)
+    if exec_msg and gpu_msg:
+        return True, f'{gpu_msg}\n    Additionally, {exec_msg}'
+    elif gpu_msg:
+        return True, gpu_msg
+    elif exec_msg:
+        return True, exec_msg
+    else:
+        return True, None
+
+
+def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
+    """Checks if the kubeconfig file uses exec-based authentication
+
+    Exec-based auth is commonly used for authenticating with cloud hosted
+    Kubernetes services, such as GKE. Here is an example snippet from a
+    kubeconfig using exec-based authentication for a GKE cluster:
+    - name: mycluster
+      user:
+        exec:
+          apiVersion: client.authentication.k8s.io/v1beta1
+          command: /Users/romilb/google-cloud-sdk/bin/gke-gcloud-auth-plugin
+          installHint: Install gke-gcloud-auth-plugin ...
+          provideClusterInfo: true
+
+
+    Using exec-based authentication is problematic when used in conjunction
+    with kubernetes.remote_identity = LOCAL_CREDENTIAL in ~/.sky/config.yaml.
+    This is because the exec-based authentication may not have the relevant
+    dependencies installed on the remote cluster or may have hardcoded paths
+    that are not available on the remote cluster.
+
+    Returns:
+        bool: True if exec-based authentication is used and LOCAL_CREDENTIAL
+            mode is used for remote_identity in ~/.sky/config.yaml.
+        str: Error message if exec-based authentication is used, None otherwise
+    """
+    k8s = kubernetes.kubernetes
+    try:
+        k8s.config.load_kube_config()
+    except kubernetes.config_exception():
+        # Using service account token or other auth methods, continue
+        return False, None
+
+    # Get active context and user from kubeconfig using k8s api
+    _, current_context = k8s.config.list_kube_config_contexts()
+    target_username = current_context['context']['user']
+
+    # K8s api does not provide a mechanism to get the user details from the
+    # context. We need to load the kubeconfig file and parse it to get the
+    # user details.
+    kubeconfig_path = os.path.expanduser(
+        os.getenv('KUBECONFIG',
+                  k8s.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION))
+    # Load the kubeconfig file as a dictionary
+    with open(kubeconfig_path, 'r', encoding='utf-8') as f:
+        kubeconfig = yaml.safe_load(f)
+
+    user_details = kubeconfig['users']
+
+    # Find user matching the target username
+    user_details = next(
+        user for user in user_details if user['name'] == target_username)
+
+    remote_identity = skypilot_config.get_nested(
+        ('kubernetes', 'remote_identity'),
+        schemas.get_default_remote_identity('kubernetes'))
+    if ('exec' in user_details.get('user', {}) and remote_identity
+            == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
+        ctx_name = current_context['name']
+        exec_msg = ('exec-based authentication is used for '
+                    f'Kubernetes context {ctx_name!r}.'
+                    ' This may cause issues with autodown or when running '
+                    'Managed Jobs or SkyServe controller on Kubernetes. '
+                    'To fix, configure SkyPilot to create a service account '
+                    'for running pods by setting the following in '
+                    '~/.sky/config.yaml:\n'
+                    '    kubernetes:\n'
+                    '      remote_identity: SERVICE_ACCOUNT\n'
+                    '    More: https://skypilot.readthedocs.io/en/latest/'
+                    'reference/config.html')
+        return True, exec_msg
+    return False, None
 
 
 def get_current_kube_config_context_name() -> Optional[str]:
@@ -531,7 +664,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
     Returns:
         str | None: The current kubernetes context if it exists, None otherwise
     """
-    k8s = kubernetes.get_kubernetes()
+    k8s = kubernetes.kubernetes
     try:
         _, current_context = k8s.config.list_kube_config_contexts()
         return current_context['name']
@@ -546,7 +679,7 @@ def get_current_kube_config_context_namespace() -> str:
         str | None: The current kubernetes context namespace if it exists, else
             the default namespace.
     """
-    k8s = kubernetes.get_kubernetes()
+    k8s = kubernetes.kubernetes
     try:
         _, current_context = k8s.config.list_kube_config_contexts()
         if 'namespace' in current_context['context']:
@@ -588,23 +721,18 @@ def parse_memory_resource(resource_qty_str: str,
 
 class KubernetesInstanceType:
     """Class to represent the "Instance Type" in a Kubernetes.
-
     Since Kubernetes does not have a notion of instances, we generate
     virtual instance types that represent the resources requested by a
     pod ("node").
-
     This name captures the following resource requests:
         - CPU
         - Memory
         - Accelerators
-
     The name format is "{n}CPU--{k}GB" where n is the number of vCPUs and
     k is the amount of memory in GB. Accelerators can be specified by
     appending "--{a}{type}" where a is the number of accelerators and
     type is the accelerator type.
-
     CPU and memory can be specified as floats. Accelerator count must be int.
-
     Examples:
         - 4CPU--16GB
         - 0.5CPU--1.5GB
@@ -643,7 +771,6 @@ class KubernetesInstanceType:
             cls,
             name: str) -> Tuple[float, float, Optional[int], Optional[str]]:
         """Parses and returns resources from the given InstanceType name
-
         Returns:
             cpus | float: Number of CPUs
             memory | float: Amount of memory in GB
@@ -688,7 +815,6 @@ class KubernetesInstanceType:
                        accelerator_count: Union[float, int] = 0,
                        accelerator_type: str = '') -> 'KubernetesInstanceType':
         """Returns an instance name object from the given resources.
-
         If accelerator_count is not an int, it will be rounded up since GPU
         requests in Kubernetes must be int.
         """
@@ -812,6 +938,10 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
     # Fill in template - ssh_key_secret and ssh_jump_image are not required for
     # the service spec, so we pass in empty strs.
     content = fill_ssh_jump_template('', '', ssh_jump_name, service_type.value)
+
+    # Add custom metadata from config
+    merge_custom_metadata(content['service_spec']['metadata'])
+
     # Create service
     try:
         kubernetes.core_api().create_namespaced_service(namespace,
@@ -885,6 +1015,11 @@ def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
     # required, so we pass in empty str.
     content = fill_ssh_jump_template(ssh_key_secret, ssh_jump_image,
                                      ssh_jump_name, '')
+
+    # Add custom metadata to all objects
+    for object_type in content.keys():
+        merge_custom_metadata(content[object_type]['metadata'])
+
     # ServiceAccount
     try:
         kubernetes.core_api().create_namespaced_service_account(
@@ -1016,28 +1151,64 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
 
 
 def check_port_forward_mode_dependencies() -> None:
-    """Checks if 'socat' is installed"""
-    # We store the dependency list as a list of lists. Each inner list
-    # contains the name of the dependency, the command to check if it is
-    # installed, and the package name to install it.
-    dependency_list = [['socat', ['socat', '-V'], 'socat'],
-                       ['nc', ['nc', '-h'], 'netcat']]
-    for name, check_cmd, install_cmd in dependency_list:
-        try:
-            subprocess.run(check_cmd,
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL,
-                           check=True)
-        except (FileNotFoundError, subprocess.CalledProcessError):
+    """Checks if 'socat' and 'nc' are installed"""
+
+    # Construct runtime errors
+    socat_default_error = RuntimeError(
+        f'`socat` is required to setup Kubernetes cloud with '
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+        'default networking mode and it is not installed. '
+        'On Debian/Ubuntu, install it with:\n'
+        f'  $ sudo apt install socat\n'
+        f'On MacOS, install it with: \n'
+        f'  $ brew install socat')
+    netcat_default_error = RuntimeError(
+        f'`nc` is required to setup Kubernetes cloud with '
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+        'default networking mode and it is not installed. '
+        'On Debian/Ubuntu, install it with:\n'
+        f'  $ sudo apt install netcat\n'
+        f'On MacOS, install it with: \n'
+        f'  $ brew install netcat')
+    mac_installed_error = RuntimeError(
+        f'The default MacOS `nc` is installed. However, for '
+        f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+        'default networking mode, GNU netcat is required. '
+        f'On MacOS, install it with: \n'
+        f'  $ brew install netcat')
+
+    # Ensure socat is installed
+    try:
+        subprocess.run(['socat', '-V'],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        with ux_utils.print_exception_no_traceback():
+            raise socat_default_error from None
+
+    # Ensure netcat is installed
+    #
+    # In some cases, the user may have the default MacOS nc installed, which
+    # does not support the -z flag. To use the -z flag for port scanning,
+    # they need GNU nc installed. We check for this case and raise an error.
+    try:
+        netcat_output = subprocess.run(['nc', '-h'],
+                                       capture_output=True,
+                                       check=False)
+        nc_mac_installed = netcat_output.returncode == 1 and 'apple' in str(
+            netcat_output.stderr)
+
+        if nc_mac_installed:
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'`{name}` is required to setup Kubernetes cloud with '
-                    f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-                    'default networking mode and it is not installed. '
-                    'On Debian/Ubuntu, install it with:\n'
-                    f'  $ sudo apt install {install_cmd}\n'
-                    f'On MacOS, install it with: \n'
-                    f'  $ brew install {install_cmd}') from None
+                raise mac_installed_error from None
+        elif netcat_output.returncode != 0:
+            with ux_utils.print_exception_no_traceback():
+                raise netcat_default_error from None
+
+    except FileNotFoundError:
+        with ux_utils.print_exception_no_traceback():
+            raise netcat_default_error from None
 
 
 def get_endpoint_debug_message() -> str:
@@ -1055,11 +1226,55 @@ def get_endpoint_debug_message() -> str:
     elif port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         endpoint_type = 'LoadBalancer'
         debug_cmd = 'kubectl describe service'
+    elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
+        endpoint_type = 'PodIP'
+        debug_cmd = 'kubectl describe pod'
     return ENDPOINTS_DEBUG_MESSAGE.format(endpoint_type=endpoint_type,
                                           debug_cmd=debug_cmd)
 
 
-def combine_pod_config_fields(config_yaml_path: str) -> None:
+def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
+    """Merge two dictionaries into the destination dictionary.
+
+    Updates nested dictionaries instead of replacing them.
+    If a list is encountered, it will be appended to the destination list.
+
+    An exception is when the key is 'containers', in which case the
+    first container in the list will be fetched and merge_dict will be
+    called on it with the first container in the destination list.
+    """
+    for key, value in source.items():
+        if isinstance(value, dict) and key in destination:
+            merge_dicts(value, destination[key])
+        elif isinstance(value, list) and key in destination:
+            assert isinstance(destination[key], list), \
+                f'Expected {key} to be a list, found {destination[key]}'
+            if key == 'containers':
+                # If the key is 'containers', we take the first and only
+                # container in the list and merge it.
+                assert len(value) == 1, \
+                    f'Expected only one container, found {value}'
+                merge_dicts(value[0], destination[key][0])
+            elif key in ['volumes', 'volumeMounts']:
+                # If the key is 'volumes' or 'volumeMounts', we search for
+                # item with the same name and merge it.
+                for new_volume in value:
+                    new_volume_name = new_volume.get('name')
+                    if new_volume_name is not None:
+                        destination_volume = next(
+                            (v for v in destination[key]
+                             if v.get('name') == new_volume_name), None)
+                        if destination_volume is not None:
+                            merge_dicts(new_volume, destination_volume)
+                        else:
+                            destination[key].append(new_volume)
+            else:
+                destination[key].extend(value)
+        else:
+            destination[key] = value
+
+
+def combine_pod_config_fields(cluster_yaml_path: str) -> None:
     """Adds or updates fields in the YAML with fields from the ~/.sky/config's
     kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
@@ -1098,47 +1313,63 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
                     - name: my-secret
         ```
     """
-
-    def _merge_dicts(source, destination):
-        """Merge two dictionaries.
-
-        Updates nested dictionaries instead of replacing them.
-        If a list is encountered, it will be appended to the destination list.
-
-        An exception is when the key is 'containers', in which case the
-        first container in the list will be fetched and _merge_dict will be
-        called on it with the first container in the destination list.
-        """
-        for key, value in source.items():
-            if isinstance(value, dict) and key in destination:
-                _merge_dicts(value, destination[key])
-            elif isinstance(value, list) and key in destination:
-                assert isinstance(destination[key], list), \
-                    f'Expected {key} to be a list, found {destination[key]}'
-                if key == 'containers':
-                    # If the key is 'containers', we take the first and only
-                    # container in the list and merge it.
-                    assert len(value) == 1, \
-                        f'Expected only one container, found {value}'
-                    _merge_dicts(value[0], destination[key][0])
-                else:
-                    destination[key].extend(value)
-            else:
-                destination[key] = value
-
-    with open(config_yaml_path, 'r', encoding='utf-8') as f:
+    with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
     kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
                                                    {})
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
-    _merge_dicts(
+    merge_dicts(
         kubernetes_config,
         yaml_obj['available_node_types']['ray_head_default']['node_config'])
 
     # Write the updated YAML back to the file
-    common_utils.dump_yaml(config_yaml_path, yaml_obj)
+    common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+
+
+def combine_metadata_fields(cluster_yaml_path: str) -> None:
+    """Updates the metadata for all Kubernetes objects created by SkyPilot with
+    fields from the ~/.sky/config's kubernetes.custom_metadata dict.
+
+    Obeys the same add or update semantics as combine_pod_config_fields().
+    """
+
+    with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
+        yaml_content = f.read()
+    yaml_obj = yaml.safe_load(yaml_content)
+    custom_metadata = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata'), {})
+
+    # List of objects in the cluster YAML to be updated
+    combination_destinations = [
+        # Service accounts
+        yaml_obj['provider']['autoscaler_service_account']['metadata'],
+        yaml_obj['provider']['autoscaler_role']['metadata'],
+        yaml_obj['provider']['autoscaler_role_binding']['metadata'],
+        yaml_obj['provider']['autoscaler_service_account']['metadata'],
+        # Pod spec
+        yaml_obj['available_node_types']['ray_head_default']['node_config']
+        ['metadata'],
+        # Services for pods
+        *[svc['metadata'] for svc in yaml_obj['provider']['services']]
+    ]
+
+    for destination in combination_destinations:
+        merge_dicts(custom_metadata, destination)
+
+    # Write the updated YAML back to the file
+    common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
+
+
+def merge_custom_metadata(original_metadata: Dict[str, Any]) -> None:
+    """Merges original metadata with custom_metadata from config
+
+    Merge is done in-place, so return is not required
+    """
+    custom_metadata = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata'), {})
+    merge_dicts(custom_metadata, original_metadata)
 
 
 def check_nvidia_runtime_class() -> bool:
@@ -1169,3 +1400,70 @@ def check_secret_exists(secret_name: str, namespace: str) -> bool:
         raise
     else:
         return True
+
+
+def create_namespace(namespace: str) -> None:
+    """Creates a namespace in the cluster.
+
+    If the namespace already exists, logs a message and does nothing.
+
+    Args:
+        namespace: Name of the namespace to create
+    """
+    kubernetes_client = kubernetes.kubernetes.client
+    ns_metadata = dict(name=namespace, labels={'parent': 'skypilot'})
+    merge_custom_metadata(ns_metadata)
+    namespace_obj = kubernetes_client.V1Namespace(metadata=ns_metadata)
+    try:
+        kubernetes.core_api().create_namespace(namespace_obj)
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.info(f'Namespace {namespace} already exists in the cluster.')
+        else:
+            raise
+
+
+def get_head_pod_name(cluster_name_on_cloud: str):
+    """Returns the pod name of the head pod for the given cluster name on cloud
+
+    Args:
+        cluster_name_on_cloud: Name of the cluster on cloud
+
+    Returns:
+        str: Pod name of the head pod
+    """
+    # We could have iterated over all pods in the namespace and checked for the
+    # label, but since we know the naming convention, we can directly return the
+    # head pod name.
+    return f'{cluster_name_on_cloud}-head'
+
+
+def get_autoscaler_type(
+) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
+    """Returns the autoscaler type by reading from config"""
+    autoscaler_type = skypilot_config.get_nested(['kubernetes', 'autoscaler'],
+                                                 None)
+    if autoscaler_type is not None:
+        autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
+            autoscaler_type)
+    return autoscaler_type
+
+
+def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
+    """Converts a dictionary to a Kubernetes object.
+
+    Useful for comparing two Kubernetes objects. Adapted from
+    https://github.com/kubernetes-client/python/issues/977#issuecomment-592030030  # pylint: disable=line-too-long
+
+    Args:
+        object_dict: Dictionary representing the Kubernetes object
+        object_type: Type of the Kubernetes object. E.g., 'V1Pod', 'V1Service'.
+    """
+
+    class FakeKubeResponse:
+
+        def __init__(self, obj):
+            self.data = json.dumps(obj)
+
+    fake_kube_response = FakeKubeResponse(object_dict)
+    return kubernetes.api_client().deserialize(fake_kube_response, object_type)

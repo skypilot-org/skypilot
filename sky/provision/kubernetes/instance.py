@@ -164,9 +164,18 @@ def _wait_for_pods_to_schedule(namespace, new_nodes, timeout: int):
     exceeds the timeout, raise an exception. If pod's container
     is ContainerCreating, then we can assume that resources have been
     allocated and we can exit.
+
+    If timeout is set to a negative value, this method will wait indefinitely.
     """
     start_time = time.time()
-    while time.time() - start_time < timeout:
+
+    def _evaluate_timeout() -> bool:
+        # If timeout is negative, retry indefinitely.
+        if timeout < 0:
+            return True
+        return time.time() - start_time < timeout
+
+    while _evaluate_timeout():
         all_pods_scheduled = True
         for node in new_nodes:
             # Iterate over each pod to check their status
@@ -209,7 +218,7 @@ def _wait_for_pods_to_run(namespace, new_nodes):
                 node.metadata.name, namespace)
 
             # Continue if pod and all the containers within the
-            # pod are succesfully created and running.
+            # pod are successfully created and running.
             if pod.status.phase == 'Running' and all(
                     container.state.running
                     for container in pod.status.container_statuses):
@@ -240,7 +249,17 @@ def _wait_for_pods_to_run(namespace, new_nodes):
         time.sleep(1)
 
 
-def _run_command_on_pods(node_name, node_namespace, command):
+def _run_command_on_pods(node_name: str,
+                         node_namespace: str,
+                         command: List[str],
+                         stream_logs: bool = False):
+    """Run command on Kubernetes pods.
+
+    If `stream_logs` is True, we poll for output and error messages while the
+    command is executing, and the stdout and stderr is written to logger.info.
+    When called from the provisioner, this logger.info is written to the
+    provision.log file (see setup_provision_logging()).
+    """
     cmd_output = kubernetes.stream()(
         kubernetes.core_api().connect_get_namespaced_pod_exec,
         node_name,
@@ -250,7 +269,16 @@ def _run_command_on_pods(node_name, node_namespace, command):
         stdin=False,
         stdout=True,
         tty=False,
+        _preload_content=(not stream_logs),
         _request_timeout=kubernetes.API_TIMEOUT)
+    if stream_logs:
+        while cmd_output.is_open():
+            cmd_output.update(timeout=1)
+            if cmd_output.peek_stdout():
+                logger.info(f'{cmd_output.read_stdout().strip()}')
+            if cmd_output.peek_stderr():
+                logger.info(f'{cmd_output.read_stderr().strip()}')
+        cmd_output.close()
     return cmd_output
 
 
@@ -271,13 +299,15 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     shell sessions.
     """
     set_k8s_env_var_cmd = [
-        '/bin/sh', '-c',
-        ('prefix_cmd() '
-         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-         'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > '
-         '~/k8s_env_var.sh && '
-         'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-         '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+        '/bin/sh',
+        '-c',
+        (
+            'prefix_cmd() '
+            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+            'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
+            '~/k8s_env_var.sh && '
+            'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
+            '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
     ]
 
     for new_pod in new_pods:
@@ -324,6 +354,7 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
         '/bin/sh',
         '-c',
         (
+            'set -x; '
             'prefix_cmd() '
             '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
             'export DEBIAN_FRONTEND=noninteractive;'
@@ -349,9 +380,15 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
             # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
             '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
     ]
-    # TODO(romilb): We need logging and surface errors here.
+    # TODO(romilb): Parallelize the setup of SSH in pods for multi-node clusters
     for new_node in new_nodes:
-        _run_command_on_pods(new_node.metadata.name, namespace, set_k8s_ssh_cmd)
+        pod_name = new_node.metadata.name
+        logger.info(f'{"-"*20}Start: Set up SSH in pod {pod_name!r} {"-"*20}')
+        _run_command_on_pods(new_node.metadata.name,
+                             namespace,
+                             set_k8s_ssh_cmd,
+                             stream_logs=True)
+        logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
 
 
 def _label_pod(namespace: str, pod_name: str, label: Dict[str, str]) -> None:
@@ -425,7 +462,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     nvidia_runtime_exists = False
     try:
         nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class()
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         logger.warning('run_instances: Error occurred while checking for '
                        f'nvidia RuntimeClass - '
                        f'{common_utils.format_exception(e)}'
@@ -459,18 +496,25 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # "nodes".
             pod_spec['spec']['affinity'] = {
                 'podAntiAffinity': {
-                    'requiredDuringSchedulingIgnoredDuringExecution': [{
-                        'labelSelector': {
-                            'matchExpressions': [{
-                                'key': TAG_SKYPILOT_CLUSTER_NAME,
-                                'operator': 'In',
-                                'values': [cluster_name_on_cloud]
-                            }]
-                        },
-                        'topologyKey': 'kubernetes.io/hostname'
+                    # Set as a soft constraint
+                    'preferredDuringSchedulingIgnoredDuringExecution': [{
+                        # Max weight to avoid scheduling on the
+                        # same physical node unless necessary.
+                        'weight': 100,
+                        'podAffinityTerm': {
+                            'labelSelector': {
+                                'matchExpressions': [{
+                                    'key': TAG_SKYPILOT_CLUSTER_NAME,
+                                    'operator': 'In',
+                                    'values': [cluster_name_on_cloud]
+                                }]
+                            },
+                            'topologyKey': 'kubernetes.io/hostname'
+                        }
                     }]
                 }
             }
+
         pod = kubernetes.core_api().create_namespaced_pod(namespace, pod_spec)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:
@@ -484,12 +528,16 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     wait_pods_dict = _filter_pods(namespace, tags, ['Pending'])
     wait_pods = list(wait_pods_dict.values())
     wait_pods.append(jump_pod)
-    logger.debug('run_instances: waiting for pods to schedule and run: '
-                 f'{list(wait_pods_dict.keys())}')
+    provision_timeout = provider_config['timeout']
+
+    wait_str = ('indefinitely'
+                if provision_timeout < 0 else f'for {provision_timeout}s')
+    logger.debug(f'run_instances: waiting {wait_str} for pods to schedule and '
+                 f'run: {list(wait_pods_dict.keys())}')
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
-    _wait_for_pods_to_schedule(namespace, wait_pods, provider_config['timeout'])
+    _wait_for_pods_to_schedule(namespace, wait_pods, provision_timeout)
     # Wait until the pods and their containers are up and running, and
     # fail early if there is an error
     _wait_for_pods_to_run(namespace, wait_pods)
@@ -510,9 +558,15 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
                      f'pods: {list(uninitialized_pods.keys())}')
         uninitialized_pods_list = list(uninitialized_pods.values())
+
+        # Setup SSH and environment variables in pods.
+        # Make sure commands used in these methods are generic and work
+        # on most base images. E.g., do not use Python, since that may not
+        # be installed by default.
         _check_user_privilege(namespace, uninitialized_pods_list)
         _setup_ssh_in_pods(namespace, uninitialized_pods_list)
         _set_env_vars_in_pods(namespace, uninitialized_pods_list)
+
         for pod in uninitialized_pods.values():
             _label_pod(namespace,
                        pod.metadata.name,
@@ -676,7 +730,9 @@ def get_cluster_info(
         custom_ray_options={
             'object-store-memory': 500000000,
             'num-cpus': cpu_request,
-        })
+        },
+        provider_name='kubernetes',
+        provider_config=provider_config)
 
 
 def query_instances(

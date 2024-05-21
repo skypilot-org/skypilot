@@ -147,7 +147,7 @@ Your image must satisfy the following requirements:
 
 Using Images from Private Repositories
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config` to specify the secret like so:
+To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config.yaml` to specify the secret like so:
 
 .. code-block:: yaml
 
@@ -223,7 +223,7 @@ FAQs
   You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
   The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#pod-v1-core>`_.
 
-  For example, to set custom environment variables in the pod, you can add the following to your :code:`~/.sky/config.yaml` file:
+  For example, to set custom environment variables and attach a volume on your pods, you can add the following to your :code:`~/.sky/config.yaml` file:
 
   .. code-block:: yaml
 
@@ -234,6 +234,14 @@ FAQs
               - env:
                 - name: MY_ENV_VAR
                   value: MY_ENV_VALUE
+                volumeMounts:       # Custom volume mounts for the pod
+                  - mountPath: /foo
+                    name: example-volume
+            volumes:
+              - name: example-volume
+                hostPath:
+                  path: /tmp
+                  type: Directory
 
   For more details refer to :ref:`config-yaml`.
 
@@ -255,3 +263,4 @@ Kubernetes support is under active development. Some features are in progress an
    :hidden:
 
    kubernetes-setup
+   kubernetes-troubleshooting

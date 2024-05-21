@@ -160,10 +160,6 @@ class OCI(clouds.Cloud):
         #     return 0.0
         return (num_gigabytes - 10 * 1024) * 0.0085
 
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, OCI)
-
     @classmethod
     def get_default_instance_type(
             cls,
@@ -269,8 +265,8 @@ class OCI(clouds.Cloud):
 
                 first_ad = ad_list[0]
                 _tenancy_prefix = str(first_ad.name).split(':', maxsplit=1)[0]
-            except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
-                    oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
+            except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+                    oci_adaptor.oci.exceptions.InvalidConfig) as e:
                 # This should only happen in testing where oci config is
                 # monkeypatched. In real use, if the OCI config is not
                 # valid, the 'sky check' would fail (OCI disabled).
@@ -403,8 +399,8 @@ class OCI(clouds.Cloud):
             del user
             # TODO[Hysun]: More privilege check can be added
             return True, None
-        except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
-                oci_adaptor.get_oci().exceptions.InvalidConfig,
+        except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+                oci_adaptor.oci.exceptions.InvalidConfig,
                 oci_adaptor.service_exception()) as e:
             return False, (
                 f'OCI credential is not correctly set. '

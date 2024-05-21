@@ -5,7 +5,7 @@ FROM continuumio/miniconda3:23.3.1-0
 
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
-    apt install gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat -y && \
+    apt install gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat curl -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt remove -y python3 && \
     conda init
@@ -28,10 +28,11 @@ USER sky
 # Install SkyPilot pip dependencies preemptively to speed up provisioning time
 RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install networkx oauth2client pandas pendulum PrettyTable && \
-    pip install ray[default]==2.4.0 rich tabulate filelock && \
+    pip install ray[default]==2.9.3 rich tabulate filelock && \
     pip install packaging 'protobuf<4.0.0' pulp && \
     pip install pycryptodome==3.12.0 && \
-    pip install docker kubernetes==28.1.0
+    pip install docker kubernetes==28.1.0 && \
+    pip install grpcio==1.51.3 python-dotenv==1.0.1
 
 # Add /home/sky/.local/bin/ to PATH
 RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc

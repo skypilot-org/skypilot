@@ -169,7 +169,7 @@ local_ray = [
     # click/grpcio/protobuf.
     # Excluded 2.6.0 as it has a bug in the cluster launcher:
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
-    'ray[default] >= 2.2.0, <= 2.9.3, != 2.6.0',
+    'ray[default] >= 2.2.0, != 2.6.0',
 ]
 
 remote = [
@@ -190,7 +190,7 @@ remote = [
     'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3',
 ]
 
-# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
+# NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
     # botocore does not work with urllib3>=2.0.0, according to https://github.com/boto/botocore/issues/2926
@@ -236,6 +236,7 @@ extras_require: Dict[str, List[str]] = {
     'runpod': ['runpod>=1.5.1'],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.8'],
+    'paperspace': [],  # No dependencies needed for paperspace
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have
@@ -286,6 +287,7 @@ setuptools.setup(
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: OS Independent',
         'Topic :: Software Development :: Libraries :: Python Modules',

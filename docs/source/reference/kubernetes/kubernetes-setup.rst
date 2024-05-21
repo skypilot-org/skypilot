@@ -165,12 +165,14 @@ such as `kubeadm <https://kubernetes.io/docs/setup/production-environment/tools/
 `Rancher <https://ranchermanager.docs.rancher.com/v2.5/pages-for-subheaders/kubernetes-clusters-in-rancher-setup>`_.
 Please follow their respective guides to deploy your Kubernetes cluster.
 
+.. _kubernetes-setup-gpusupport:
+
 Setting up GPU support
 ~~~~~~~~~~~~~~~~~~~~~~
 If your Kubernetes cluster has Nvidia GPUs, ensure that:
 
 1. The Nvidia GPU operator is installed (i.e., ``nvidia.com/gpu`` resource is available on each node) and ``nvidia`` is set as the default runtime for your container engine. See `Nvidia's installation guide <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_ for more details.
-2. Each node in your cluster is labelled with the GPU type. This labelling can be done by adding a label of the format ``skypilot.co/accelerators: <gpu_name>``, where the ``<gpu_name>`` is the lowercase name of the GPU. For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerators: v100`.
+2. Each node in your cluster is labelled with the GPU type. This labelling can be done using `SkyPilot's GPU labelling script <automatic-gpu-labelling_>`_ or by manually adding a label of the format ``skypilot.co/accelerator: <gpu_name>``, where the ``<gpu_name>`` is the lowercase name of the GPU. For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerator: v100`.
 
 .. tip::
     You can check if GPU operator is installed and the ``nvidia`` runtime is set as default by running:
@@ -188,7 +190,11 @@ If your Kubernetes cluster has Nvidia GPUs, ensure that:
 
 .. note::
 
-    GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerators`` label.
+    GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerator`` label.
+
+.. note::
+
+    GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
 
 .. _automatic-gpu-labelling:
 
@@ -203,13 +209,9 @@ We provide a convenience script that automatically detects GPU types and labels 
 
  Created GPU labeler job for node ip-192-168-54-76.us-west-2.compute.internal
  Created GPU labeler job for node ip-192-168-93-215.us-west-2.compute.internal
- GPU labeling started - this may take a few minutes to complete.
+ GPU labeling started - this may take 10 min or more to complete.
  To check the status of GPU labeling jobs, run `kubectl get jobs --namespace=kube-system -l job=sky-gpu-labeler`
- You can check if nodes have been labeled by running `kubectl describe nodes` and looking for labels of the format `skypilot.co/accelerators: <gpu_name>`.
-
-.. note::
-
-    GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
+ You can check if nodes have been labeled by running `kubectl describe nodes` and looking for labels of the format `skypilot.co/accelerator: <gpu_name>`.
 
 .. note::
 
@@ -228,6 +230,14 @@ You can also check the GPUs available on your nodes by running:
 .. code-block:: console
 
     $ sky show-gpus --cloud kubernetes
+
+.. tip::
+
+    If automatic GPU labelling fails, you can manually label your nodes with the GPU type. Use the following command to label your nodes:
+
+    .. code-block:: console
+
+        $ kubectl label nodes <node-name> skypilot.co/accelerator=<gpu_name>
 
 .. _kubernetes-setup-onprem-distro-specific:
 
@@ -372,7 +382,7 @@ To use this mode:
     # ingress-nginx-controller         LoadBalancer        10.24.4.254   35.202.58.117   80:31253/TCP,443:32699/TCP
 
 .. note::
-    If the ``EXTERNAL-IP`` field is ``<none>``, you must to manually assign a External IP.
+    If the ``EXTERNAL-IP`` field is ``<none>``, you may manually assign it an External IP.
     This can be done by patching the service with an IP that can be accessed from outside the cluster.
     If the service type is ``NodePort``, you can set the ``EXTERNAL-IP`` to any node's IP address:
 
@@ -385,12 +395,32 @@ To use this mode:
     If the ``EXTERNAL-IP`` field is left as ``<none>``, SkyPilot will use ``localhost`` as the external IP for the Ingress,
     and the endpoint may not be accessible from outside the cluster.
 
+.. note::
+    If you cannot update the ``EXTERNAL-IP`` field of the service, you can also
+    specify the Ingress IP or hostname through the ``skypilot.co/external-ip``
+    annotation on the ``ingress-nginx-controller`` service. In this case,
+    having a valid ``EXTERNAL-IP`` field is not required.
+
+    For example, if your ``ingress-nginx-controller`` service is ``NodePort``:
+
+    .. code-block:: bash
+
+      # Add skypilot.co/external-ip annotation to the  nginx ingress service.
+      # Replace <IP> in the following command with the IP you select.
+      # Can be any node's IP if using NodePort service type.
+      $ kubectl annotate service ingress-nginx-controller skypilot.co/external-ip=<IP> -n ingress-nginx
+
+
 3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
 
 .. code-block:: yaml
 
     kubernetes:
       ports: ingress
+
+.. tip::
+
+    For RKE2 and K3s, the pre-installed Nginx ingress is not correctly configured by default. Follow the `bare-metal installation instructions <https://kubernetes.github.io/ingress-nginx/deploy/#bare-metal-clusters/>`_ to set up the Nginx ingress controller correctly.
 
 When using this mode, SkyPilot creates an ingress resource and a ClusterIP service for each port opened. The port can be accessed externally by using the Ingress URL plus a path prefix of the form :code:`/skypilot/{pod_name}/{port}`.
 
@@ -453,3 +483,7 @@ Note that this dashboard can only be accessed from the machine where the ``kubec
     `Kubernetes documentation <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_
     for more information on how to set up access control for the dashboard.
 
+Troubleshooting Kubernetes Setup
+--------------------------------
+
+If you encounter issues while setting up your Kubernetes cluster, please refer to the :ref:`troubleshooting guide <kubernetes-troubleshooting>` to diagnose and fix issues.

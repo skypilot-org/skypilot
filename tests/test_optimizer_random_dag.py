@@ -87,6 +87,8 @@ def generate_random_dag(
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count
                     })
+                if not resources.get_valid_regions_for_launchable():
+                    continue
                 requested_features = set()
                 if op.num_nodes > 1:
                     requested_features.add(

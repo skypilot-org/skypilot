@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 
 import colorama
 
+import sky
 from sky import clouds
 from sky import provision
 from sky import sky_logging
@@ -23,7 +24,6 @@ from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
-from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -165,6 +165,8 @@ def bulk_provision(
 
     with provision_logging.setup_provision_logging(log_dir):
         try:
+            logger.debug(f'SkyPilot version: {sky.__version__}; '
+                         f'commit: {sky.__commit__}')
             logger.debug(_TITLE.format('Provisioning'))
             logger.debug(
                 'Provision config:\n'
@@ -258,6 +260,8 @@ def _ssh_probe_command(ip: str,
         '-o',
         'StrictHostKeyChecking=no',
         '-o',
+        'PasswordAuthentication=no',
+        '-o',
         'ConnectTimeout=10s',
         '-o',
         f'UserKnownHostsFile={os.devnull}',
@@ -346,18 +350,23 @@ def _wait_ssh_connection_indirect(ip: str,
     del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
-    logger.debug(f'Waiting for SSH using command: {_shlex_join(command)}')
-    proc = subprocess.run(command,
-                          shell=False,
-                          check=False,
-                          stdout=subprocess.DEVNULL,
-                          stderr=subprocess.PIPE)
-    if proc.returncode != 0:
-        stderr = proc.stderr.decode('utf-8')
-        stderr = f'Error: {stderr}'
-        logger.debug(
-            f'Waiting for SSH to {ip} with command: {_shlex_join(command)}\n'
-            f'{stderr}')
+    message = f'Waiting for SSH using command: {_shlex_join(command)}'
+    logger.debug(message)
+    try:
+        proc = subprocess.run(command,
+                              shell=False,
+                              check=False,
+                              timeout=10,
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode('utf-8')
+            stderr = f'Error: {stderr}'
+            logger.debug(f'{message}{stderr}')
+            return False, stderr
+    except subprocess.TimeoutExpired as e:
+        stderr = f'Error: {str(e)}'
+        logger.debug(f'{message}Error: {e}')
         return False, stderr
     return True, ''
 
@@ -434,8 +443,6 @@ def _post_provision_setup(
             'status with: sky status -r; and retry provisioning.')
 
     # TODO(suquark): Move wheel build here in future PRs.
-    ip_list = cluster_info.get_feasible_ips()
-    port_list = cluster_info.get_ssh_ports()
     # We don't set docker_user here, as we are configuring the VM itself.
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         cluster_yaml, ssh_user=cluster_info.ssh_user)
@@ -455,7 +462,7 @@ def _post_provision_setup(
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:
             status.update(
-                '[bold cyan]Lauching - Initializing docker container[/]')
+                '[bold cyan]Launching - Initializing docker container[/]')
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -472,7 +479,7 @@ def _post_provision_setup(
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
-        # (1) spot controllers need permission to launch/down nodes of
+        # (1) jobs controllers need permission to launch/down nodes of
         #     multiple clouds
         # (2) head instances need permission for auto stop or auto down
         #     nodes for the current cloud
@@ -495,9 +502,9 @@ def _post_provision_setup(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_info, ssh_credentials)
 
-        head_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                      port=port_list[0],
-                                                      **ssh_credentials)
+        runners = provision.get_command_runners(cloud_name, cluster_info,
+                                                **ssh_credentials)
+        head_runner = runners[0]
 
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
@@ -534,7 +541,7 @@ def _post_provision_setup(
         #     if provision_record.is_instance_just_booted(inst.instance_id):
         #         worker_ips.append(inst.public_ip)
 
-        if len(ip_list) > 1:
+        if cluster_info.num_instances > 1:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,

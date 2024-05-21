@@ -23,6 +23,7 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
+        readiness_headers: Optional[Dict[str, str]] = None,
         dynamic_ondemand_fallback: Optional[bool] = None,
         base_ondemand_fallback_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
@@ -37,27 +38,37 @@ class SkyServiceSpec:
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'max_replicas must be greater than or equal to min_replicas'
-                )
+                raise ValueError('max_replicas must be greater than or '
+                                 'equal to min_replicas. Found: '
+                                 f'min_replicas={min_replicas}, '
+                                 f'max_replicas={max_replicas}')
 
-        if target_qps_per_replica is not None and max_replicas is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('max_replicas must be set where '
-                                 'target_qps_per_replica is set.')
+        if target_qps_per_replica is not None:
+            if max_replicas is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('max_replicas must be set where '
+                                     'target_qps_per_replica is set.')
+        else:
+            if max_replicas is not None and max_replicas != min_replicas:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Detected different min_replicas and max_replicas '
+                        'while target_qps_per_replica is not set. To enable '
+                        'autoscaling, please set target_qps_per_replica.')
 
         if not readiness_path.startswith('/'):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
 
+        # TODO(tian): Following field are deprecated. Remove after 2 minor
+        # release, i.e. 0.6.0.
         if qps_upper_threshold is not None or qps_lower_threshold is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Field `qps_upper_threshold` and `qps_lower_threshold`'
                     'under `replica_policy` are deprecated. '
                     'Please use target_qps_per_replica instead.')
-
         if auto_restart is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -71,11 +82,11 @@ class SkyServiceSpec:
         self._max_replicas: Optional[int] = max_replicas
         self._target_qps_per_replica: Optional[float] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
+        self._readiness_headers: Optional[Dict[str, str]] = readiness_headers
         self._dynamic_ondemand_fallback: Optional[
             bool] = dynamic_ondemand_fallback
         self._base_ondemand_fallback_replicas: Optional[
             int] = base_ondemand_fallback_replicas
-        # _spot_locations will be set by set_spot_locations.
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
 
@@ -102,11 +113,13 @@ class SkyServiceSpec:
             service_config['readiness_path'] = readiness_section
             initial_delay_seconds = None
             post_data = None
+            readiness_headers = None
         else:
             service_config['readiness_path'] = readiness_section['path']
             initial_delay_seconds = readiness_section.get(
                 'initial_delay_seconds', None)
             post_data = readiness_section.get('post_data', None)
+            readiness_headers = readiness_section.get('headers', None)
         if initial_delay_seconds is None:
             initial_delay_seconds = constants.DEFAULT_INITIAL_DELAY_SECONDS
         service_config['initial_delay_seconds'] = initial_delay_seconds
@@ -120,6 +133,7 @@ class SkyServiceSpec:
                         '`readiness_probe` section of your service YAML.'
                     ) from e
         service_config['post_data'] = post_data
+        service_config['readiness_headers'] = readiness_headers
 
         policy_section = config.get('replica_policy', None)
         simplified_policy_section = config.get('replicas', None)
@@ -195,6 +209,7 @@ class SkyServiceSpec:
         add_if_not_none('readiness_probe', 'initial_delay_seconds',
                         self.initial_delay_seconds)
         add_if_not_none('readiness_probe', 'post_data', self.post_data)
+        add_if_not_none('readiness_probe', 'headers', self._readiness_headers)
         add_if_not_none('replica_policy', 'min_replicas', self.min_replicas)
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
@@ -211,8 +226,12 @@ class SkyServiceSpec:
 
     def probe_str(self):
         if self.post_data is None:
-            return f'GET {self.readiness_path}'
-        return f'POST {self.readiness_path} {json.dumps(self.post_data)}'
+            method = f'GET {self.readiness_path}'
+        else:
+            method = f'POST {self.readiness_path} {json.dumps(self.post_data)}'
+        headers = ('' if self.readiness_headers is None else
+                   ' with custom headers')
+        return f'{method}{headers}'
 
     def spot_policy_str(self):
         policy_strs = []
@@ -237,10 +256,13 @@ class SkyServiceSpec:
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
             return f'Fixed {self.min_replicas} replica{min_plural}'
+        # Already checked in __init__.
+        assert self.target_qps_per_replica is not None
         # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
-        return (f'Autoscaling from {self.min_replicas} to '
-                f'{self.max_replicas} replica{max_plural}')
+        return (f'Autoscaling from {self.min_replicas} to {self.max_replicas} '
+                f'replica{max_plural} (target QPS per replica: '
+                f'{self.target_qps_per_replica})')
 
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
@@ -274,6 +296,10 @@ class SkyServiceSpec:
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
+
+    @property
+    def readiness_headers(self) -> Optional[Dict[str, str]]:
+        return self._readiness_headers
 
     @property
     def base_ondemand_fallback_replicas(self) -> Optional[int]:

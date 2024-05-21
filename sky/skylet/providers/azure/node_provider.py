@@ -15,6 +15,7 @@ from sky.skylet.providers.azure.config import (
     bootstrap_azure,
     get_azure_sdk_function,
 )
+from sky.skylet import autostop_lib
 from sky.skylet.providers.command_runner import SkyDockerCommandRunner
 from sky.provision import docker_utils
 
@@ -61,16 +62,23 @@ class AzureNodeProvider(NodeProvider):
 
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
-        # TODO(suquark): This is a temporary patch for resource group.
-        # By default, Ray autoscaler assumes the resource group is still here even
-        # after the whole cluster is destroyed. However, now we deletes the resource
-        # group after tearing down the cluster. To comfort the autoscaler, we need
-        # to create/update it here, so the resource group always exists.
-        from sky.skylet.providers.azure.config import _configure_resource_group
+        if not autostop_lib.get_is_autostopping():
+            # TODO(suquark): This is a temporary patch for resource group.
+            # By default, Ray autoscaler assumes the resource group is still
+            # here even after the whole cluster is destroyed. However, now we
+            # deletes the resource group after tearing down the cluster. To
+            # comfort the autoscaler, we need to create/update it here, so the
+            # resource group always exists.
+            #
+            # We should not re-configure the resource group again, when it is
+            # running on the remote VM and the autostopping is in progress,
+            # because the VM is running which guarantees the resource group
+            # exists.
+            from sky.skylet.providers.azure.config import _configure_resource_group
 
-        _configure_resource_group(
-            {"cluster_name": cluster_name, "provider": provider_config}
-        )
+            _configure_resource_group(
+                {"cluster_name": cluster_name, "provider": provider_config}
+            )
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         # Sky only supports Azure CLI credential for now.
@@ -116,7 +124,12 @@ class AzureNodeProvider(NodeProvider):
             resource_group_name=resource_group, vm_name=vm.name
         ).as_dict()
         for status in instance["statuses"]:
-            code, state = status["code"].split("/")
+            code_state = status["code"].split("/")
+            # It is possible that sometimes the 'code' is empty string, and we
+            # should skip them.
+            if len(code_state) != 2:
+                continue
+            code, state = code_state
             # skip provisioning status
             if code == "PowerState":
                 metadata["status"] = state

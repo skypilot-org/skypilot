@@ -1,0 +1,35 @@
+# The template for the jobs controller
+
+name: {{dag_name}}
+
+file_mounts:
+  {{remote_user_yaml_path}}: {{user_yaml_path}}
+  {{remote_user_config_path}}: skypilot:local_skypilot_config_path
+  {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
+  {{remote_catalog_path}}: {{local_catalog_path}}
+  {%- endfor %}
+
+setup: |
+  {%- for cmd in cloud_dependencies_installation_commands %}
+  {{cmd}}
+  {%- endfor %}
+
+  {% if is_dev %}
+  # Internal: disable logging for manually logging into the jobs controller for debugging.
+  echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  {% endif %}
+
+  # Dashboard.
+  ps aux | grep -v nohup | grep -v grep | grep -- "-m sky.spot.dashboard" | awk '{print $2}' | xargs kill > /dev/null 2>&1 || true
+  pip list | grep flask  > /dev/null 2>&1 || pip install flask 2>&1 > /dev/null
+  ((ps aux | grep -v nohup | grep -v grep | grep -q -- "-m sky.jobs.dashboard.dashboard") || (nohup {{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard >> ~/.sky/job-dashboard.log 2>&1 &));
+
+run: |
+  # Start the controller for the current managed job.
+  python -u -m sky.jobs.controller {{remote_user_yaml_path}} \
+    --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
+
+envs:
+{%- for env_name, env_value in controller_envs.items() %}
+  {{env_name}}: {{env_value}}
+{%- endfor %}

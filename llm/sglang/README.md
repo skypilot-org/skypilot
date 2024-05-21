@@ -1,4 +1,7 @@
-# SGLang: Fast and Expressive LLM Inference with RadixAttention for 5x throughput
+<!-- $REMOVE -->
+# SGLang: A Structured Generation Language for LLMs
+<!-- $END_REMOVE -->
+<!-- $UNCOMMENT# SGLang: A Structured Generation Language -->
 
 <p align="center">
     <img src="https://github.com/skypilot-org/skypilot/assets/6753189/10b23cf8-b9b7-4014-a635-10f30a559e7c" alt="SGLang"/>
@@ -28,7 +31,7 @@ service:
   replicas: 2
 ```
 
-The entire Service YAML can be found here: [llava.yaml](llava.yaml).
+The entire Service YAML can be found here: [llava.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/sglang/llava.yaml).
 
 2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
 ```bash
@@ -65,7 +68,7 @@ ENDPOINT=$(sky serve status --endpoint sglang-llava)
 </figure>
 
 ```bash
-curl -L $ENDPOINT/v1/chat/completions \
+curl $ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "liuhaotian/llava-v1.6-vicuna-7b",
@@ -118,7 +121,7 @@ You should get a similar response as the following:
 ```bash
 sky serve up -n sglang-llama2 llama2.yaml --env HF_TOKEN=<your-huggingface-token>
 ```
-The entire Service YAML can be found here: [llama2.yaml](llama2.yaml).
+The entire Service YAML can be found here: [llama2.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/sglang/llama2.yaml).
 
 3. Use `sky serve status` to check the status of the serving:
 ```bash
@@ -146,7 +149,7 @@ ENDPOINT=$(sky serve status --endpoint sglang-llama2)
 4. Once it status is `READY`, you can use the endpoint to interact with the model:
 
 ```bash
-curl -L $ENDPOINT/v1/chat/completions \
+curl $ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-2-7b-chat-hf",

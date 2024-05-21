@@ -3,6 +3,7 @@
 Responsible for autoscaling and replica management.
 """
 import logging
+import os
 import threading
 import time
 import traceback
@@ -18,7 +19,6 @@ from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.utils import common_utils
-from sky.utils import env_options
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -40,7 +40,7 @@ class SkyServeController:
     """
 
     def __init__(self, service_name: str, service_spec: serve.SkyServiceSpec,
-                 task_yaml: str, port: int) -> None:
+                 task_yaml: str, host: str, port: int) -> None:
         self._service_name = service_name
         self._replica_manager: replica_managers.ReplicaManager = (
             replica_managers.SkyPilotReplicaManager(service_name=service_name,
@@ -48,6 +48,7 @@ class SkyServeController:
                                                     task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.Autoscaler.from_spec(service_name, service_spec))
+        self._host = host
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -57,12 +58,7 @@ class SkyServeController:
             try:
                 replica_infos = serve_state.get_replica_infos(
                     self._service_name)
-                replica_info_dicts = [
-                    info.to_info_dict(
-                        with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
-                    for info in replica_infos
-                ]
-                logger.info(f'All replica info: {replica_info_dicts}')
+                logger.info(f'All replica info: {replica_infos}')
                 scaling_options = self._autoscaler.evaluate_scaling(
                     replica_infos)
                 for scaling_option in scaling_options:
@@ -96,24 +92,15 @@ class SkyServeController:
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
             # TODO(MaoZiming): Check aggregator type.
-            replica_infos = serve_state.get_replica_infos(self._service_name)
             request_aggregator: Dict[str, Any] = request_data.get(
                 'request_aggregator', {})
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
-
-            ready_replicas = filter(lambda info: info.is_ready, replica_infos)
-            chosen_version = (
-                self._autoscaler.get_latest_version_with_min_replicas(
-                    replica_infos))
-            if chosen_version is None:
-                chosen_version = min(info.version for info in ready_replicas)
-
-            chosen_replicas = filter(
-                lambda info: info.version == chosen_version, ready_replicas)
-            ready_replica_urls = [info.url for info in chosen_replicas]
-            return {'ready_replica_urls': ready_replica_urls}
+            return {
+                'ready_replica_urls':
+                    self._replica_manager.get_active_replica_urls()
+            }
 
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request):
@@ -122,6 +109,11 @@ class SkyServeController:
                 version = request_data.get('version', None)
                 if version is None:
                     return {'message': 'Error: version is not specified.'}
+                update_mode_str = request_data.get(
+                    'mode', serve_utils.DEFAULT_UPDATE_MODE.value)
+                update_mode = serve_utils.UpdateMode(update_mode_str)
+                logger.info(f'Update to new version {version} with '
+                            f'update_mode {update_mode}.')
                 # The yaml with the name latest_task_yaml will be synced
                 # See sky/serve/core.py::update
                 latest_task_yaml = serve_utils.generate_task_yaml_file_name(
@@ -130,16 +122,21 @@ class SkyServeController:
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
-                self._replica_manager.update_version(version, service)
+                self._replica_manager.update_version(version,
+                                                     service,
+                                                     update_mode=update_mode)
                 new_autoscaler = autoscalers.Autoscaler.from_spec(
                     self._service_name, service)
                 if not isinstance(self._autoscaler, type(new_autoscaler)):
+                    logger.info('Autoscaler type changed to '
+                                f'{type(new_autoscaler)}, updating autoscaler.')
                     old_autoscaler = self._autoscaler
                     self._autoscaler = new_autoscaler
                     self._autoscaler.load_dynamic_states(
                         old_autoscaler.dump_dynamic_states())
-                else:
-                    self._autoscaler.update_version(version, service)
+                self._autoscaler.update_version(version,
+                                                service,
+                                                update_mode=update_mode)
                 return {'message': 'Success'}
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in update_service: '
@@ -155,15 +152,25 @@ class SkyServeController:
         threading.Thread(target=self._run_autoscaler).start()
 
         logger.info('SkyServe Controller started on '
-                    f'http://localhost:{self._port}')
+                    f'http://{self._host}:{self._port}')
 
-        uvicorn.run(self._app, host='localhost', port=self._port)
+        uvicorn.run(self._app, host={self._host}, port=self._port)
 
 
 # TODO(tian): Probably we should support service that will stop the VM in
 # specific time period.
 def run_controller(service_name: str, service_spec: serve.SkyServiceSpec,
                    task_yaml: str, controller_port: int):
-    controller = SkyServeController(service_name, service_spec, task_yaml,
+    # We expose the controller to the public network when running inside a
+    # kubernetes cluster to allow external load balancers (example, for
+    # high availability load balancers) to communicate with the controller.
+    def _get_host():
+        if 'KUBERNETES_SERVICE_HOST' in os.environ:
+            return '0.0.0.0'
+        else:
+            return 'localhost'
+
+    host = _get_host()
+    controller = SkyServeController(service_name, service_spec, task_yaml, host,
                                     controller_port)
     controller.run()

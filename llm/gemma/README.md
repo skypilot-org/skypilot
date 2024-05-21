@@ -1,4 +1,4 @@
-# Serve Your Gemma on Any Cloud
+# Gemma: Open-source Gemini
 ![image](https://github.com/skypilot-org/skypilot/assets/6753189/e452c39e-b5ef-4cb2-ab48-053f9e6f67b7)
 
 Google released [Gemma](https://blog.google/technology/developers/gemma-open-models/) and has made a big wave in the AI community.
@@ -6,7 +6,7 @@ It opens the opportunity for the open-source community to serve and finetune pri
 
 ## Serve Gemma on any Cloud
 
-Serving Gemma on any cloud is easy with SkyPilot. With [serve.yaml](serve.yaml) in this directory, you host the model on any cloud with a single command.
+Serving Gemma on any cloud is easy with SkyPilot. With [serve.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/gemma/serve.yaml) in this directory, you host the model on any cloud with a single command.
 
 ### Prerequsites
 
@@ -37,7 +37,7 @@ After the cluster is launched, we can access the model with the following comman
 ```bash
 IP=$(sky status --ip gemma)
 
-curl -L http://$IP:8000/v1/completions \
+curl http://$IP:8000/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "google/gemma-7b-it",
@@ -50,7 +50,7 @@ Chat API is also supported:
 ```bash
 IP=$(sky status --ip gemma)
 
-curl -L http://$IP:8000/v1/chat/completions \
+curl http://$IP:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "google/gemma-7b-it",
@@ -78,7 +78,7 @@ After the cluster is launched, we can access the model with the following comman
 ```bash
 ENDPOINT=$(sky serve status --endpoint gemma)
 
-curl -L http://$ENDPOINT/v1/completions \
+curl http://$ENDPOINT/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "google/gemma-7b-it",
@@ -89,7 +89,7 @@ curl -L http://$ENDPOINT/v1/completions \
 
 Chat API is also supported:
 ```bash
-curl -L http://$ENDPOINT/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "google/gemma-7b-it",

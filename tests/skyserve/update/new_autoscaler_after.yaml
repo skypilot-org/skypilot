@@ -1,0 +1,25 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 100
+  replica_policy:
+    min_replicas: 5
+    max_replicas: 5
+    base_ondemand_fallback_replicas: 1
+
+resources:
+  cloud: gcp
+  ports: 8081
+  use_spot: true
+  cpus: 2+
+
+workdir: examples/serve/http_server
+
+run: |
+  if [ $SKYPILOT_SERVE_REPLICA_ID -eq 7 ]; then
+    # Sleep for the last replica in the test_skyserve_new_autoscaler_update
+    # so that we can check the behavior difference between rolling and
+    # blue-green update.
+    sleep 60
+  fi
+  python3 server.py

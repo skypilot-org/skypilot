@@ -1,0 +1,57 @@
+# A managed spot example with storages.
+#
+# Runs a task that uses cloud buckets for uploading and accessing files.
+#
+# Usage:
+#   sky spot launch -c spot-storage examples/managed_job_with_storage.yaml
+#   sky down spot-storage
+
+resources:
+  cloud: aws
+  use_spot: true
+  job_recovery: failover
+
+workdir: ./examples
+
+file_mounts:
+  ~/bucket_workdir:
+    # Change this to the your own globally unique bucket name.
+    name: sky-workdir-zhwu
+    source: ./examples
+    persistent: false
+    mode: COPY
+  /imagenet-image:
+    source: s3://sky-imagenet-data
+  
+  # File mounts for folder
+  /tmp/workdir: ~/tmp-workdir
+
+
+  # File mounts for file
+  ~/tmpfile: ~/tmpfile
+  ~/a/b/c/tmpfile: ~/tmpfile
+
+  # Intermediate dirs are created and chown-ed to $USER if they don't already
+  # exist.  Thus they can be used too, e.g., 'mkdir -p /data/logs'.  See 'run'.
+  /data/checkpoints/best.pt: ~/tmpfile
+
+  ~/.ssh/id_rsa.pub: ~/.ssh/id_rsa.pub
+
+
+
+run: |
+  set -ex
+  ls ~/sky_workdir/managed_job_with_storage.yaml
+  ls ~/bucket_workdir/managed_job_with_storage.yaml
+  ls -l /imagenet-image/datasets
+  
+
+  mkdir -p /data/logs
+  touch /data/logs/test.log
+  touch /data/checkpoints/last.pt
+
+  echo hi >> /tmp/workdir/new_file
+  ls -al /tmp/workdir
+
+  cat ~/tmpfile
+  cat ~/a/b/c/tmpfile

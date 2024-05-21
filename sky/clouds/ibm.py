@@ -165,9 +165,6 @@ class IBM(clouds.Cloud):
             num_gigabytes -= (num_gigabytes - price_threshold['threshold'])
         return cost
 
-    def is_same_cloud(self, other):
-        return isinstance(other, IBM)
-
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',

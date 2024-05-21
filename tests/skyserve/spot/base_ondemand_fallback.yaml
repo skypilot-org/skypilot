@@ -6,12 +6,12 @@ service:
     min_replicas: 2
     max_replicas: 3
     base_ondemand_fallback_replicas: 1
+    # Use a large qps per replica to avoid scale up for testing purpose.
+    target_qps_per_replica: 10000
 
 resources:
   ports: 8080
-  cloud: gcp
   cpus: 2+
-  zone: us-central1-a
   use_spot: true
 
 workdir: examples/serve/http_server

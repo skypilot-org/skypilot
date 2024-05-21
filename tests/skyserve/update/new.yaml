@@ -1,14 +1,20 @@
 service:
   readiness_probe:
     path: /health
-    initial_delay_seconds: 20
-  replicas: 1
+    initial_delay_seconds: 100
+  replicas: 2
 
 resources:
-  ports: 8080
+  ports: 8081
   cloud: gcp
   cpus: 2+
 
 workdir: tests/skyserve/update
 
-run: python3 new_server.py --port 8080
+run: |
+  if (( $SKYPILOT_SERVE_REPLICA_ID % 2 == 0 )); then
+    # Sleep for replicas with even id, so that we can test the mixing traffic
+    # of rolling update
+    sleep 60
+  fi
+  python3 new_server.py --port 8081

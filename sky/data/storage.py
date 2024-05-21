@@ -11,7 +11,7 @@ import urllib.parse
 
 import colorama
 
-from sky import check
+from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -68,14 +68,34 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'It may have been deleted externally.')
 
 
+def get_cached_enabled_storage_clouds_or_refresh(
+        raise_if_no_cloud_access: bool = False) -> List[str]:
+    # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
+    # is resolved by implementing separate 'enabled_storage_clouds'
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
+
+    enabled_storage_clouds = [
+        cloud for cloud in enabled_clouds if cloud in STORE_ENABLED_CLOUDS
+    ]
+    r2_is_enabled, _ = cloudflare.check_credentials()
+    if r2_is_enabled:
+        enabled_storage_clouds.append(cloudflare.NAME)
+    if raise_if_no_cloud_access and not enabled_storage_clouds:
+        raise exceptions.NoCloudAccessError(
+            'No cloud access available for storage. '
+            'Please check your cloud credentials.')
+    return enabled_storage_clouds
+
+
 def _is_storage_cloud_enabled(cloud_name: str,
                               try_fix_with_sky_check: bool = True) -> bool:
-    enabled_storage_clouds = global_user_state.get_enabled_storage_clouds()
+    enabled_storage_clouds = get_cached_enabled_storage_clouds_or_refresh()
     if cloud_name in enabled_storage_clouds:
         return True
     if try_fix_with_sky_check:
         # TODO(zhwu): Only check the specified cloud to speed up.
-        check.check(quiet=True)
+        sky_check.check(quiet=True)
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)
     return False
@@ -90,15 +110,24 @@ class StoreType(enum.Enum):
     IBM = 'IBM'
 
     @classmethod
-    def from_cloud(cls, cloud: clouds.Cloud) -> 'StoreType':
-        if isinstance(cloud, clouds.AWS):
+    def from_cloud(cls, cloud: str) -> 'StoreType':
+        if cloud.lower() == str(clouds.AWS()).lower():
             return StoreType.S3
-        elif isinstance(cloud, clouds.GCP):
+        elif cloud.lower() == str(clouds.GCP()).lower():
             return StoreType.GCS
-        elif isinstance(cloud, clouds.Azure):
-            return StoreType.AZURE
-        elif isinstance(cloud, clouds.IBM):
+        elif cloud.lower() == str(clouds.IBM()).lower():
             return StoreType.IBM
+        elif cloud.lower() == cloudflare.NAME.lower():
+            return StoreType.R2
+        elif cloud.lower() == str(clouds.Azure()).lower():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Azure Blob Storage is not supported yet.')
+        elif cloud.lower() == str(clouds.Lambda()).lower():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Lambda Cloud does not provide cloud storage.')
+        elif cloud.lower() == str(clouds.SCP()).lower():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('SCP does not provide cloud storage.')
 
         raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
 
@@ -116,49 +145,26 @@ class StoreType(enum.Enum):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {store}')
 
+    def store_prefix(self) -> str:
+        if self == StoreType.S3:
+            return 's3://'
+        elif self == StoreType.GCS:
+            return 'gs://'
+        elif self == StoreType.R2:
+            return 'r2://'
+        elif self == StoreType.IBM:
+            return 'cos://'
+        elif self == StoreType.AZURE:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Azure Blob Storage is not supported yet.')
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown store type: {self}')
+
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
-
-
-def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
-    if isinstance(cloud, clouds.AWS):
-        return StoreType.S3
-    elif isinstance(cloud, clouds.GCP):
-        return StoreType.GCS
-    elif isinstance(cloud, clouds.IBM):
-        return StoreType.IBM
-    elif isinstance(cloud, clouds.Azure):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Azure Blob Storage is not supported yet.')
-    elif isinstance(cloud, clouds.Lambda):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Lambda Cloud does not provide cloud storage.')
-    elif isinstance(cloud, clouds.SCP):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('SCP does not provide cloud storage.')
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown cloud type: {cloud}')
-
-
-def get_store_prefix(storetype: StoreType) -> str:
-    if storetype == StoreType.S3:
-        return 's3://'
-    elif storetype == StoreType.GCS:
-        return 'gs://'
-    # R2 storages use 's3://' as a prefix for various aws cli commands
-    elif storetype == StoreType.R2:
-        return 's3://'
-    elif storetype == StoreType.IBM:
-        return 'cos://'
-    elif storetype == StoreType.AZURE:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Azure Blob Storage is not supported yet.')
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown store type: {storetype}')
 
 
 class AbstractStore:
@@ -333,14 +339,18 @@ class AbstractStore:
             # bucket's URL as 'source'.
             if handle is None:
                 with ux_utils.print_exception_no_traceback():
+                    store_prefix = StoreType.from_store(self).store_prefix()
                     raise exceptions.StorageSpecError(
                         'Attempted to mount a non-sky managed bucket '
                         f'{self.name!r} without specifying the storage source.'
-                        ' To mount an externally created bucket (e.g., '
+                        f' Bucket {self.name!r} already exists. \n'
+                        '    • To create a new bucket, specify a unique name.\n'
+                        '    • To mount an externally created bucket (e.g., '
                         'created through cloud console or cloud cli), '
                         'specify the bucket URL in the source field '
-                        'instead of its name. E.g., replace `name: external-'
-                        'bucket` with `source: gs://external-bucket`.')
+                        'instead of its name. I.e., replace '
+                        f'`name: {self.name}` with '
+                        f'`source: {store_prefix}{self.name}`.')
 
 
 class Storage(object):
@@ -787,7 +797,9 @@ class Storage(object):
 
         return storage_obj
 
-    def add_store(self, store_type: Union[str, StoreType]) -> AbstractStore:
+    def add_store(self,
+                  store_type: Union[str, StoreType],
+                  region: Optional[str] = None) -> AbstractStore:
         """Initializes and adds a new store to the storage.
 
         Invoked by the optimizer after it has selected a store to
@@ -795,6 +807,8 @@ class Storage(object):
 
         Args:
           store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
+          region: str; Region to place the bucket in. Caller must ensure that
+            the region is valid for the chosen store_type.
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -822,6 +836,7 @@ class Storage(object):
             store = store_cls(
                 name=self.name,
                 source=self.source,
+                region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
@@ -1306,7 +1321,7 @@ class S3Store(AbstractStore):
         # Store object is being reconstructed for deletion or re-mount with
         # sky start, and error is raised instead.
         if self.sync_on_reconstruction:
-            bucket = self._create_s3_bucket(self.name)
+            bucket = self._create_s3_bucket(self.name, self.region)
             return bucket, True
         else:
             # Raised when Storage object is reconstructed for sky storage
@@ -1356,9 +1371,15 @@ class S3Store(AbstractStore):
             if region is None:
                 s3_client.create_bucket(Bucket=bucket_name)
             else:
-                location = {'LocationConstraint': region}
-                s3_client.create_bucket(Bucket=bucket_name,
-                                        CreateBucketConfiguration=location)
+                if region == 'us-east-1':
+                    # If default us-east-1 region is used, the
+                    # LocationConstraint must not be specified.
+                    # https://stackoverflow.com/a/51912090
+                    s3_client.create_bucket(Bucket=bucket_name)
+                else:
+                    location = {'LocationConstraint': region}
+                    s3_client.create_bucket(Bucket=bucket_name,
+                                            CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
@@ -1732,7 +1753,7 @@ class GcsStore(AbstractStore):
                 # is being reconstructed for deletion or re-mount with
                 # sky start, and error is raised instead.
                 if self.sync_on_reconstruction:
-                    bucket = self._create_gcs_bucket(self.name)
+                    bucket = self._create_gcs_bucket(self.name, self.region)
                     return bucket, True
                 else:
                     # This is raised when Storage object is reconstructed for
