@@ -634,7 +634,10 @@ class KubernetesCommandRunner(CommandRunner):
                                       f'for now, but got: {port_forward}')
         if connect_timeout is None:
             connect_timeout = 30
-        kubectl_args = ['--pod-running-timeout', f'{connect_timeout}s', '-n', self.namespace, self.pod_name]
+        kubectl_args = [
+            '--pod-running-timeout', f'{connect_timeout}s', '-n',
+            self.namespace, self.pod_name
+        ]
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             base_cmd = ['kubectl', 'exec', '-it', *kubectl_args, '--']

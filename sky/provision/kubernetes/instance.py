@@ -259,7 +259,6 @@ def _wait_for_pods_to_run(namespace, new_nodes):
         time.sleep(1)
 
 
-
 def _set_env_vars_in_pods(namespace: str, new_pods: List):
     """Setting environment variables in pods.
 
