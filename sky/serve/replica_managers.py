@@ -568,10 +568,13 @@ class ReplicaManager:
         self._service_name: str = service_name
         self._uptime: Optional[float] = None
         self._update_mode = serve_utils.DEFAULT_UPDATE_MODE
+        header_keys = None
+        if spec.readiness_headers is not None:
+            header_keys = list(spec.readiness_headers.keys())
         logger.info(f'Readiness probe path: {spec.readiness_path}\n'
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
                     f'Post data: {spec.post_data}\n'
-                    f'Readiness headers: {spec.readiness_headers}')
+                    f'Readiness header keys: {header_keys}')
 
         # Newest version among the currently provisioned and launched replicas
         self.latest_version: int = serve_constants.INITIAL_VERSION
