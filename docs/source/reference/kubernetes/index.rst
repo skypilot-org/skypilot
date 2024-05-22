@@ -26,22 +26,23 @@ Why use SkyPilot on Kubernetes?
             .. grid-item-card::  ✅ Ease of Use
                 :text-align: center
 
-                No complex kubernetes manifests - write a simple SkyPilot YAML file and run ``sky launch``.
+                No complex kubernetes manifests - write a simple SkyPilot YAML and run ``sky launch``.
 
             .. grid-item-card::  📋 Get SkyPilot features on Kubernetes
                 :text-align: center
 
-                :ref:`SSH access to pods <dev-ssh>`, :ref:`VSCode integration <dev-vscode>`, :ref:`job management <managed-jobs>`, :ref:`automatically terminate pods <auto-stop>` and more.
+                :ref:`SSH access to pods <dev-ssh>`, :ref:`VSCode integration <dev-vscode>`, :ref:`job management <managed-jobs>`, :ref:`model serving <sky-serve>`, :ref:`autodown idle pods <auto-stop>` and more.
+
+            .. grid-item-card::  ☁️ Burst to the cloud
+                :text-align: center
+
+                Kubernetes cluster is full? SkyPilot seamlessly gets resources on the cloud to get your job running sooner.
 
             .. grid-item-card::  🖼 Run popular models on Kubernetes
                 :text-align: center
 
                 Train and serve `Llama-3 <https://skypilot.readthedocs.io/en/latest/gallery/llms/llama-3.html>`_, `Mixtral <https://skypilot.readthedocs.io/en/latest/gallery/llms/mixtral.html>`_, and more on your Kubernetes with ready-to-use recipes from the :ref:`AI gallery <ai-gallery>`.
 
-            .. grid-item-card::  ☁️ Burst to the cloud
-                :text-align: center
-
-                Kubernetes cluster is full? SkyPilot can seamlessly burst your jobs to the cloud to run them sooner.
 
     .. tab-item:: For Infrastructure Admins
         :sync: why-admins-tab
