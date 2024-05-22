@@ -540,6 +540,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     _wait_for_pods_to_schedule(namespace, wait_pods, provision_timeout)
     # Wait until the pods and their containers are up and running, and
     # fail early if there is an error
+    logger.debug(f'run_instances: waiting for pods to be running (pulling '
+                 f'images): {list(wait_pods_dict.keys())}')
     _wait_for_pods_to_run(namespace, wait_pods)
     logger.debug(f'run_instances: all pods are scheduled and running: '
                  f'{list(wait_pods_dict.keys())}')

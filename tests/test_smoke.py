@@ -1027,7 +1027,7 @@ def test_kubernetes_storage_mounts():
         'docker:ubuntu:18.04',
         # Test latest image with python 3.11 installed by default.
         'docker:continuumio/miniconda3:24.1.2-0',
-        # Test python 3.12 where SkyPilot should automatically create a separate
+        # Test python>=3.12 where SkyPilot should automatically create a separate
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',
     ])
@@ -1210,8 +1210,15 @@ def test_job_queue(generic_cloud: str):
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
         # Test latest image with python 3.11 installed by default.
-        # Does not work for python 3.12 due to ray's requirement for 3.11.
         'docker:continuumio/miniconda3:24.1.2-0',
+        # Test python>=3.12 where SkyPilot should automatically create a separate
+        # conda env for runtime with python 3.10.
+        'docker:continuumio/miniconda3:latest',
+        # Axolotl image is a good example custom image that has its conda path
+        # set in PATH with dockerfile and uses python>=3.12. It could test:
+        #  1. we handle the env var set in dockerfile correctly
+        #  2. python>=3.12 works with SkyPilot runtime.
+        'docker:winglian/axolotl:main-latest'
     ])
 def test_job_queue_with_docker(generic_cloud: str, image_id: str):
     name = _get_cluster_name() + image_id[len('docker:'):][:4]
@@ -2915,8 +2922,10 @@ def test_aws_custom_image():
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
         # Test latest image with python 3.11 installed by default.
-        # Does not work for python 3.12 due to ray's requirement for 3.11.
         'docker:continuumio/miniconda3:24.1.2-0',
+        # Test python>=3.12 where SkyPilot should automatically create a separate
+        # conda env for runtime with python 3.10.
+        'docker:continuumio/miniconda3:latest',
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
