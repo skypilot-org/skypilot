@@ -1,106 +1,42 @@
-# This is an NCCL benchmark to measure the effective
-# bandwidth in a multinode setting. This is an important preflight
-# check for multi-node environments, especially for PyTorch
-# since NCCL is the communication backend for GPU training
-# Example output from running this task is the following:
+# This measures NCCL all reduce performance with Torch with a
+# message size of 4.0GB
 
+# Usage:
+#   $ sky launch -c nccl --use-spot nccl_test.yaml 
 
-# (worker1, rank=1, pid=20075, ip=10.164.15.193) 10.164.15.192,10.164.15.193
-# (head, rank=0, pid=21170) 10.164.15.192,10.164.15.193
-# (head, rank=0, pid=21170) Warning: Permanently added '10.164.15.193' (ECDSA) to the list of known hosts.
-# (head, rank=0, pid=21170) # nThread 1 nGpus 8 minBytes 8 maxBytes 134217728 step: 2(factor) warmup iters: 5 iters: 20 agg iters: 1 validation: 1 graph: 0
-# (head, rank=0, pid=21170) #
-# (head, rank=0, pid=21170) # Using devices
-# (head, rank=0, pid=21170) #  Rank  0 Group  0 Pid  21431 on nccl-ebd1-head-5vwmjam2-compute device  0 [0x00] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank  1 Group  0 Pid  21431 on nccl-ebd1-head-5vwmjam2-compute device  1 [0x00] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank  2 Group  0 Pid  21431 on nccl-ebd1-head-5vwmjam2-compute device  2 [0x00] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank  3 Group  0 Pid  21431 on nccl-ebd1-head-5vwmjam2-compute device  3 [0x00] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank  4 Group  0 Pid  21431 on nccl-ebd1-head-5vwmjam2-compute device  4 [0x80] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank  5 Group  0 Pid  21431 on nccl-ebd1-head-5vwmjam2-compute device  5 [0x80] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank  6 Group  0 Pid  21431 on nccl-ebd1-head-5vwmjam2-compute device  6 [0x80] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank  7 Group  0 Pid  21431 on nccl-ebd1-head-5vwmjam2-compute device  7 [0x80] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank  8 Group  0 Pid  20335 on nccl-ebd1-worker-4mntuso6-compute device  0 [0x00] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank  9 Group  0 Pid  20335 on nccl-ebd1-worker-4mntuso6-compute device  1 [0x00] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank 10 Group  0 Pid  20335 on nccl-ebd1-worker-4mntuso6-compute device  2 [0x00] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank 11 Group  0 Pid  20335 on nccl-ebd1-worker-4mntuso6-compute device  3 [0x00] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank 12 Group  0 Pid  20335 on nccl-ebd1-worker-4mntuso6-compute device  4 [0x80] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank 13 Group  0 Pid  20335 on nccl-ebd1-worker-4mntuso6-compute device  5 [0x80] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank 14 Group  0 Pid  20335 on nccl-ebd1-worker-4mntuso6-compute device  6 [0x80] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #  Rank 15 Group  0 Pid  20335 on nccl-ebd1-worker-4mntuso6-compute device  7 [0x80] NVIDIA A100-SXM4-40GB
-# (head, rank=0, pid=21170) #
-# (head, rank=0, pid=21170) #                                                              out-of-place                       in-place          
-# (head, rank=0, pid=21170) #       size         count      type   redop    root     time   algbw   busbw #wrong     time   algbw   busbw #wrong
-# (head, rank=0, pid=21170) #        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)       
-# (head, rank=0, pid=21170)            8             2     float     sum      -1    225.7    0.00    0.00      0    308.3    0.00    0.00      0
-# (head, rank=0, pid=21170)           16             4     float     sum      -1    310.2    0.00    0.00      0    310.9    0.00    0.00      0
-# (head, rank=0, pid=21170)           32             8     float     sum      -1    310.3    0.00    0.00      0    310.2    0.00    0.00      0
-# (head, rank=0, pid=21170)           64            16     float     sum      -1    312.0    0.00    0.00      0    310.1    0.00    0.00      0
-# (head, rank=0, pid=21170)          128            32     float     sum      -1    311.5    0.00    0.00      0    228.5    0.00    0.00      0
-# (head, rank=0, pid=21170)          256            64     float     sum      -1    310.6    0.00    0.00      0    227.7    0.00    0.00      0
-# (head, rank=0, pid=21170)          512           128     float     sum      -1    313.5    0.00    0.00      0    222.9    0.00    0.00      0
-# (head, rank=0, pid=21170)         1024           256     float     sum      -1    312.1    0.00    0.01      0    227.9    0.00    0.01      0
-# (head, rank=0, pid=21170)         2048           512     float     sum      -1    318.0    0.01    0.01      0    142.7    0.01    0.03      0
-# (head, rank=0, pid=21170)         4096          1024     float     sum      -1    145.1    0.03    0.05      0    145.9    0.03    0.05      0
-# (head, rank=0, pid=21170)         8192          2048     float     sum      -1    271.5    0.03    0.06      0    185.7    0.04    0.08      0
-# (head, rank=0, pid=21170)        16384          4096     float     sum      -1    264.9    0.06    0.12      0    257.7    0.06    0.12      0
-# (head, rank=0, pid=21170)        32768          8192     float     sum      -1    316.1    0.10    0.19      0    312.9    0.10    0.20      0
-# (head, rank=0, pid=21170)        65536         16384     float     sum      -1    344.3    0.19    0.36      0    349.1    0.19    0.35      0
-# (head, rank=0, pid=21170)       131072         32768     float     sum      -1    458.2    0.29    0.54      0    461.0    0.28    0.53      0
-# (head, rank=0, pid=21170)       262144         65536     float     sum      -1    665.3    0.39    0.74      0    621.0    0.42    0.79      0
-# (head, rank=0, pid=21170)       524288        131072     float     sum      -1   2422.5    0.22    0.41      0   3018.5    0.17    0.33      0
-# (head, rank=0, pid=21170)      1048576        262144     float     sum      -1   3908.3    0.27    0.50      0   3923.2    0.27    0.50      0
-# (head, rank=0, pid=21170)      2097152        524288     float     sum      -1   2499.8    0.84    1.57      0   2329.5    0.90    1.69      0
-# (head, rank=0, pid=21170)      4194304       1048576     float     sum      -1   4423.3    0.95    1.78      0   4280.6    0.98    1.84      0
-# (head, rank=0, pid=21170)      8388608       2097152     float     sum      -1   6487.8    1.29    2.42      0   6333.2    1.32    2.48      0
-# (head, rank=0, pid=21170)     16777216       4194304     float     sum      -1    12280    1.37    2.56      0    12318    1.36    2.55      0
-# (head, rank=0, pid=21170)     33554432       8388608     float     sum      -1    23864    1.41    2.64      0    25575    1.31    2.46      0
-# (head, rank=0, pid=21170)     67108864      16777216     float     sum      -1    50313    1.33    2.50      0    51542    1.30    2.44      0
-# (head, rank=0, pid=21170)    134217728      33554432     float     sum      -1   100121    1.34    2.51      0   101764    1.32    2.47      0
-# (head, rank=0, pid=21170) # Out of bounds values : 0 OK
-# (head, rank=0, pid=21170) # Avg bus bandwidth    : 0.758155 
-# (head, rank=0, pid=21170) #
-# (head, rank=0, pid=21170) 
+# Example output
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:1
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:2
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:3
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:4
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:5
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:The average bandwidth of all_reduce with a 4.0GB payload (5 trials, 16 ranks):
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]: algbw: 2.053 GBps (16.4 Gbps)
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]: busbw: 3.850 GBps (30.8 Gbps)
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:
 
-
-# Usage: 
-#   # Ensure you run `ssh-agent` prior to launching
-#   # to enable passwordless ssh for `mpirun`
-#   eval $(ssh-agent -s)
-#   ssh-add ~/.ssh/sky-key
-#   # Launch the task
-#   sky launch -c nccl examples/nccl_test.yaml
-#   # Terminate the cluster once you are done
-#   sky down nccl
-
-
-name: nccl-test
+name: torch-nccl-allreduce
 
 num_nodes: 2
 
 resources:
   accelerators: A100:8
   use_spot: True
-  cloud: gcp
-
-envs:
-  INTERFACE: ens8
-  MPI_HOME: /usr/lib/x86_64-linux-gnu/openmpi # installed by libopenmpi-dev
-  CUDA_HOME: /usr/local/cuda
-  NCCL_HOME: /usr/local/nccl2/ # this is gcp specific
 
 setup: |
-  sudo apt update
-  sudo apt install -y openmpi-bin openmpi-common libopenmpi-dev
-  git clone https://github.com/NVIDIA/nccl-tests.git
-  cd nccl-tests
-  make MPI=1 MPI_HOME=$MPI_HOME CUDA_HOME=$CUDA_HOME NCCL_HOME=$NCCL_HOME
+  pip install torch
+  git clone https://github.com/stas00/ml-engineering.git
 
 run: |
-  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
-  mpi_nodes=$(echo "$SKYPILOT_NODE_IPS" | tr '\n' ',')
-  mpi_nodes=${mpi_nodes::-1}
-  echo "$mpi_nodes"
-  cd nccl-tests
-  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
-    mpirun -mca btl_tcp_if_include $INTERFACE -np $num_nodes -H $mpi_nodes $(pwd)/build/all_reduce_perf -b 8 -e 128M -f 2 -g 8
-  fi
+  cd ml-engineering/network/benchmarks
+  NNODES=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  MASTER_ADDR=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  python -u -m torch.distributed.run \
+    --nproc_per_node $SKYPILOT_NUM_GPUS_PER_NODE \
+    --nnodes $NNODES \
+    --rdzv_endpoint $MASTER_ADDR:8888 \
+    --rdzv_backend c10d \
+    --max_restarts 0 \
+    --role `hostname -s`: \
+    --tee 3 \
+    all_reduce_bench.py
