@@ -15,6 +15,17 @@ logger = sky_logging.init_logger(__name__)
 DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
                                 'the Docker daemon socket')
 
+# Configure environment variables. A docker image can have environment variables
+# set in the Dockerfile with `ENV``. We need to export these variables to the
+# shell environment, so that our ssh session can access them.
+SETUP_ENV_VARS_CMD = (
+    'prefix_cmd() '
+    '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+    'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
+    '~/container_env_var.sh && '
+    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh'
+)
+
 
 @dataclasses.dataclass
 class DockerLoginConfig:
@@ -299,13 +310,7 @@ class DockerInitializer:
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
             'sudo service ssh start;'
             'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;'
-            # SkyPilot: configure environment variables. A docker image can have
-            # environment variables set in the Dockerfile. We need to export
-            # these variables to the shell environment, so that our ssh session
-            # can access them.
-            'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
-            '~/docker_env_var.sh && '
-            'sudo mv ~/docker_env_var.sh /etc/profile.d/docker_env_var.sh',
+            f'{SETUP_ENV_VARS_CMD}',
             run_env='docker')
 
         # SkyPilot: End of Setup Commands.

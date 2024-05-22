@@ -10,6 +10,7 @@ from sky import skypilot_config
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import common
+from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
@@ -301,13 +302,7 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     set_k8s_env_var_cmd = [
         '/bin/sh',
         '-c',
-        (
-            'prefix_cmd() '
-            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-            'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
-            '~/k8s_env_var.sh && '
-            'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-            '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+        docker_utils.SETUP_ENV_VARS_CMD,
     ]
 
     for new_pod in new_pods:
