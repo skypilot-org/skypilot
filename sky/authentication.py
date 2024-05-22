@@ -448,7 +448,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace,
                                             service_type)
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_jump_name, nodeport_mode,
+            ssh_jump_name,
+            nodeport_mode,
             private_key_path=PRIVATE_SSH_KEY_PATH,
             namespace=namespace)
     elif network_mode == port_forward_mode:

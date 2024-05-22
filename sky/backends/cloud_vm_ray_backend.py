@@ -4125,8 +4125,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # If cloud was kubernetes, remove the ProxyCommand script used for
         # port-forwarding.
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-            kubernetes_utils.remove_proxy_command_script(handle.cluster_name_on_cloud + '-head')
-
+            kubernetes_utils.remove_proxy_command_script(
+                handle.cluster_name_on_cloud + '-head')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)

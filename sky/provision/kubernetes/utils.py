@@ -936,7 +936,8 @@ def create_proxy_command_script(k8s_ssh_target: str) -> str:
     }
     port_fwd_proxy_cmd_path = os.path.expanduser(
         PORT_FORWARD_PROXY_CMD_PATH.format(k8s_ssh_target))
-    os.makedirs(os.path.dirname(port_fwd_proxy_cmd_path), exist_ok=True,
+    os.makedirs(os.path.dirname(port_fwd_proxy_cmd_path),
+                exist_ok=True,
                 mode=0o700)
     common_utils.fill_template(PORT_FORWARD_PROXY_CMD_TEMPLATE,
                                vars_to_fill,

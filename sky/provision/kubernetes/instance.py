@@ -11,8 +11,8 @@ from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import config as config_lib
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.kubernetes import network_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
@@ -521,11 +521,11 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
 
-
     wait_pods_dict = _filter_pods(namespace, tags, ['Pending'])
     wait_pods = list(wait_pods_dict.values())
 
-    networking_mode = network_utils.get_networking_mode(config.provider_config.get('networking_mode'))
+    networking_mode = network_utils.get_networking_mode(
+        config.provider_config.get('networking_mode'))
     if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         # Adding the jump pod to the new_nodes list as well so it can be
         # checked if it's scheduled and running along with other pods.
