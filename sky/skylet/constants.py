@@ -42,6 +42,7 @@ SKY_RAY_CMD = (f'$([ -s {SKY_RAY_PATH_FILE} ] && '
 # Separate env for SkyPilot runtime dependencies.
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_REMOTE_PYTHON_ENV = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
+ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
@@ -100,14 +101,23 @@ CONDA_INSTALLATION_COMMANDS = (
     'conda config --set auto_activate_base true && '
     # Use $(echo ~) instead of ~ to avoid the error "no such file or directory".
     # Also, not using $HOME to avoid the error HOME variable not set.
-    f'echo "$(echo ~)/miniconda3/bin/python" > {SKY_PYTHON_PATH_FILE}; }}; '
+    f'conda activate base; }}; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
+    # If Python version is larger then equal to 3.12, create a new conda env
+    # with Python 3.10.
+    # We don't use a separate conda env for SkyPilot dependencies because it is
+    # costly to create a new conda env, and venv should be a lightweight and
+    # faster alternative when the python version satisfies the requirement.
+    '[[ $(python3 --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
+    f'echo "Creating conda env with Python 3.10" && '
+    f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
+    f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Create a separate conda environment for SkyPilot dependencies.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
     f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages && '
-    f'echo $(echo {SKY_REMOTE_PYTHON_ENV})/bin/python > {SKY_PYTHON_PATH_FILE}; }};'
-)
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE}; }};'
+    f'{ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
@@ -146,8 +156,8 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
-    f'{{ source {SKY_REMOTE_PYTHON_ENV}/bin/activate && '
-    f'which ray > {SKY_RAY_PATH_FILE}; }}'
+    f'{{ {ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
+    f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; '
     # END ray package check and installation
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
@@ -165,8 +175,6 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'{SKY_PIP_CMD} list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'&& {{ {SKY_PYTHON_CMD} -c "from sky.skylet.ray_patches import patch; patch()" '
     '|| exit 1; };')
-
-ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot

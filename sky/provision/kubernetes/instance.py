@@ -241,7 +241,7 @@ def _wait_for_pods_to_run(namespace, new_nodes):
                             'the node. Error details: '
                             f'{container_status.state.waiting.message}.')
             # Reaching this point means that one of the pods had an issue,
-            # so break out of the loop
+            # so break out of the loop, and wait until next second.
             break
 
         if all_pods_running:

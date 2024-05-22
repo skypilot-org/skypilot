@@ -925,7 +925,10 @@ def write_cluster_config(
                 'dump_port_command': dump_port_command,
                 # Sky-internal constants.
                 'sky_ray_cmd': constants.SKY_RAY_CMD,
-                'sky_pip_cmd': constants.SKY_PIP_CMD,
+                # pip install needs to have python env activated to make sure
+                # installed packages are within the env path.
+                'sky_pip_cmd': (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+                                f'{constants.SKY_PIP_CMD}'),
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Command for waiting ray cluster to be ready on head.
                 'ray_head_wait_initialized_command':

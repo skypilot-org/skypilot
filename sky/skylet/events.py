@@ -206,6 +206,15 @@ class AutostopEvent(SkyletEvent):
                     # <cmd>`.
                     env=env)
 
+            # Stop the ray autoscaler to avoid scaling up, during
+            # stopping/terminating of the cluster. We do not rely `ray down`
+            # below for stopping ray cluster, as it will not use the correct
+            # ray path.
+            logger.info('Stopping the ray cluster.')
+            subprocess.run(f'{constants.SKY_RAY_CMD} stop',
+                           shell=True,
+                           check=True)
+
             logger.info('Running final ray down.')
             subprocess.run(
                 f'{constants.SKY_RAY_CMD} down -y {config_path}',
