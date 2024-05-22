@@ -95,7 +95,7 @@ DOCKER_LOGIN_ENV_VARS = {
 # AWS's Deep Learning AMI's default conda environment.
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
-    '{ wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
+    '{ wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh; '  # pylint: disable=line-too-long
     'bash Miniconda3-Linux-x86_64.sh -b && '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     'conda config --set auto_activate_base true && '

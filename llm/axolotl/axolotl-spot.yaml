@@ -24,7 +24,7 @@ file_mounts:
 run: |
   huggingface-cli login --token ${HF_TOKEN}
   
-  accelerate launch -m axolotl.cli.train /sky_workdir/qlora-checkpoint.yaml
+  accelerate launch -m axolotl.cli.train qlora-checkpoint.yaml
 
 envs:
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
@@ -35,3 +35,4 @@ envs:
 
   
 
+4

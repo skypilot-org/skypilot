@@ -12,7 +12,7 @@ workdir: mistral
 run: |
   huggingface-cli login --token ${HF_TOKEN} 
 
-  accelerate launch -m axolotl.cli.train /sky_workdir/qlora.yaml
+  accelerate launch -m axolotl.cli.train qlora.yaml
 
 envs:
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
