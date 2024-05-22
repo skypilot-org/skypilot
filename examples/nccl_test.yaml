@@ -1,5 +1,4 @@
-# This measures NCCL all reduce performance with Torch with a
-# message size of 4.0GB
+# This measures NCCL all reduce performance with Torch.
 
 # Usage:
 #   $ sky launch -c nccl --use-spot nccl_test.yaml 
