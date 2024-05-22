@@ -198,8 +198,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 stream_logs=False,
                 log_path=log_path,
                 require_outputs=True,
-                # Installing depencies requires source bashrc to access the PATH
-                # in bashrc.
+                # Installing dependencies requires source bashrc to access
+                # conda.
                 source_bashrc=True)
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:

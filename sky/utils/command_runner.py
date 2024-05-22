@@ -184,8 +184,8 @@ class CommandRunner:
             # cluster by 1 second.
             # sourcing ~/.bashrc is not required for internal executions
             command += [
-                'true && export OMP_NUM_THREADS=1 PYTHONWARNINGS=ignore'
-                f' && ({cmd})'
+                shlex.quote('true && export OMP_NUM_THREADS=1 '
+                            f'PYTHONWARNINGS=ignore && ({cmd})')
             ]
         if not separate_stderr:
             command.append('2>&1')
@@ -431,10 +431,12 @@ class SSHCommandRunner(CommandRunner):
             cmd,
             process_stream,
             separate_stderr,
-            # A hack to remove the following bash warnings (twice):
+            # A hack to remove the following SSH warning+bash warnings (twice):
+            #  Warning: Permanently added 'xx.xx.xx.xx' to the list of known...
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
-            skip_lines=5 if source_bashrc else 0,
+            # When not source_bashrc, the bash warning will only show once.
+            skip_lines=5 if source_bashrc else 3,
             source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
