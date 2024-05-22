@@ -13,4 +13,6 @@ resources:
 
 workdir: examples/serve/misc/cancel
 
+setup: pip install aiohttp
+
 run: python3 server.py --port 9000
