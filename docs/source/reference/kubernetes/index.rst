@@ -12,18 +12,65 @@ SkyPilot tasks can be run on your private on-prem or cloud Kubernetes clusters.
 The Kubernetes cluster gets added to the list of "clouds" in SkyPilot and SkyPilot
 tasks can be submitted to your Kubernetes cluster just like any other cloud provider.
 
-**Benefits of using SkyPilot to run jobs on your Kubernetes cluster:**
+Why use SkyPilot on Kubernetes?
+-------------------------------
 
-* Get SkyPilot features (setup management, job execution, queuing, logging, SSH access) on your Kubernetes resources
-* Replace complex Kubernetes manifests with simple SkyPilot tasks
-* Seamlessly "burst" jobs to the cloud if your Kubernetes cluster is congested
-* Retain observability and control over your cluster with your existing Kubernetes tools
+.. tab-set::
 
-**Supported Kubernetes deployments:**
+    .. tab-item:: For AI Developers
+        :sync: why-ai-devs-tab
 
-* Hosted Kubernetes services (EKS, GKE)
-* On-prem clusters (Kubeadm, Rancher)
-* Local development clusters (KinD, minikube)
+        .. grid:: 2
+            :gutter: 3
+
+            .. grid-item-card::  ✅ Ease of Use
+                :text-align: center
+
+                No complex kubernetes manifests - write a simple SkyPilot YAML file and run ``sky launch``.
+
+            .. grid-item-card::  📋 Get SkyPilot features on Kubernetes
+                :text-align: center
+
+                :ref:`SSH access to pods <dev-ssh>`, :ref:`VSCode integration <dev-vscode>`, :ref:`job management <managed-jobs>`, :ref:`automatically terminate pods <auto-stop>` and more.
+
+            .. grid-item-card::  🖼 Run popular models on Kubernetes
+                :text-align: center
+
+                Train and serve `Llama-3 <https://skypilot.readthedocs.io/en/latest/gallery/llms/llama-3.html>`_, `Mixtral <https://skypilot.readthedocs.io/en/latest/gallery/llms/mixtral.html>`_, and more on your Kubernetes with ready-to-use recipes from the :ref:`AI gallery <ai-gallery>`.
+
+            .. grid-item-card::  ☁️ Burst to the cloud
+                :text-align: center
+
+                Kubernetes cluster is full? SkyPilot can seamlessly burst your jobs to the cloud to run them sooner.
+
+    .. tab-item:: For Infrastructure Admins
+        :sync: why-admins-tab
+
+        .. grid:: 2
+            :gutter: 3
+
+            .. grid-item-card::  ☁️ Burst to the cloud
+                :text-align: center
+
+                User jobs seamlessly burst to the cloud without requiring your intervention.
+
+            .. grid-item-card::  🚯️ Minimize resource wastage
+                :text-align: center
+
+                SkyPilot can automatically terminate idle pods to free up resources for other users.
+
+            .. grid-item-card::  👀 Observability
+                :text-align: center
+
+                Use your existing tools, such as the :ref:`Kubernetes Dashboard <kubernetes-observability>`, to monitor SkyPilot pods.
+
+            .. grid-item-card::  🍽️ Self-serve infra for your teams
+                :text-align: center
+
+                ..
+                    This point should maybe talk about quotas + sharing through kueue/native k8s quotas.
+
+                Reduce operational overhead by letting your teams provision their own resources on Kubernetes, while you retain control over the cluster.
 
 
 Kubernetes Cluster Requirements
@@ -33,6 +80,12 @@ To connect and use a Kubernetes cluster, SkyPilot needs:
 
 * An existing Kubernetes cluster running Kubernetes v1.20 or later.
 * A `Kubeconfig <https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/>`_ file containing access credentials and namespace to be used.
+
+**Supported Kubernetes deployments:**
+
+* Hosted Kubernetes services (EKS, GKE)
+* On-prem clusters (Kubeadm, Rancher, K3s)
+* Local development clusters (KinD, minikube)
 
 In a typical workflow:
 
@@ -217,6 +270,10 @@ FAQs
 * **I have multiple users in my organization who share the same Kubernetes cluster. How do I provide isolation for their SkyPilot workloads?**
 
   For isolation, you can create separate Kubernetes namespaces and set them in the kubeconfig distributed to users. SkyPilot will use the namespace set in the kubeconfig for running all tasks.
+
+* **How do I view the pods created by SkyPilot on my Kubernetes cluster?**
+
+  You can use your existing observability tools to filter resources with the label :code:`parent=skypilot`. As an example, follow the instructions :ref:`here <kubernetes-observability>` to deploy the Kubernetes Dashboard on your cluster.
 
 * **How can I specify custom configuration for the pods created by SkyPilot?**
 
