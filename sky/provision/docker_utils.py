@@ -307,7 +307,6 @@ class DockerInitializer:
             '~/docker_env_var.sh && '
             'sudo mv ~/docker_env_var.sh /etc/profile.d/docker_env_var.sh',
             run_env='docker')
-        
 
         # SkyPilot: End of Setup Commands.
         docker_user = self._run('whoami', run_env='docker')
