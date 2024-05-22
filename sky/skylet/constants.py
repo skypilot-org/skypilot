@@ -166,6 +166,8 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'&& {{ {SKY_PYTHON_CMD} -c "from sky.skylet.ray_patches import patch; patch()" '
     '|| exit 1; };')
 
+ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
+
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
 # will be recognized as the same user (e.g., jobs controller or sky serve

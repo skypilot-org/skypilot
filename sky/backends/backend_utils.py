@@ -930,6 +930,8 @@ def write_cluster_config(
                 # Command for waiting ray cluster to be ready on head.
                 'ray_head_wait_initialized_command':
                     instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
+                'sky_activate_python_env':
+                    constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
 
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
