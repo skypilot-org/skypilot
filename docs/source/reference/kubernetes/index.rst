@@ -52,7 +52,7 @@ Why use SkyPilot on Kubernetes?
             .. grid-item-card::  ☁️ Burst to the cloud
                 :text-align: center
 
-                User jobs seamlessly burst to the cloud without requiring your intervention.
+                Scale out to capacity across clouds and regions without requiring manual intervention.
 
             .. grid-item-card::  🚯️ Minimize resource wastage
                 :text-align: center
