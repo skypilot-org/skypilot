@@ -8,4 +8,4 @@ setup: |
   echo "conda activate testenv" >> ~/.bashrc
 
 run: |
-  python --version | grep "Python 3.6" || exit 1
+  python --version 2>&1 | grep "Python 3.6" || exit 1
