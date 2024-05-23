@@ -3786,7 +3786,7 @@ def test_skyserve_failures(generic_cloud: str):
 def test_user_dependencies(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
-        'user-ray-cluster',
+        'user-user-dependencies',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} "pip install ray>2.11; ray start --head"',
             f'sky exec {name} "echo hi"',
