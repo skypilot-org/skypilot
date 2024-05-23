@@ -1,5 +1,4 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
-import base64
 import copy
 import enum
 import functools
@@ -10,6 +9,7 @@ import math
 import os
 import pathlib
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -141,9 +141,9 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
 #
 # If a user have very long run or setup commands, the generated command may
-# exceed the limit, as we encode the script in base64 and directly include it in
-# the job submission command. If the command is too long, we instead write it to
-# a file, rsync and execute it.
+# exceed the limit, as we directly include scripts in job submission commands.
+# If the command is too long, we instead write it to a file, rsync and execute
+# it.
 #
 # We use 120KB as a threshold to be safe for other arguments that
 # might be added during ssh.
@@ -3149,8 +3149,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             runner = runners[node_id]
             setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
-            encoded_script = base64.b64encode(
-                setup_script.encode('utf-8')).decode('utf-8')
+            encoded_script = shlex.quote(setup_script)
             if (detach_setup or
                     len(encoded_script) > _MAX_INLINE_SCRIPT_LENGTH):
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
@@ -3163,9 +3162,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  stream_logs=False)
                 create_script_code = 'true'
             else:
-                create_script_code = (
-                    f'{{ echo "{encoded_script}" | base64 --decode > '
-                    f'{remote_setup_file_name}; }}')
+                create_script_code = (f'{{ echo {encoded_script} > '
+                                      f'{remote_setup_file_name}; }}')
 
             if detach_setup:
                 return
@@ -3246,10 +3244,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
-        encoded_script = base64.b64encode(
-            codegen.encode('utf-8')).decode('utf-8')
-        create_script_code = (f'{{ echo "{encoded_script}" | base64 --decode > '
-                              f'{script_path}; }}')
+        encoded_script = shlex.quote(codegen)
+        create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
         job_submit_cmd = (
             f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
