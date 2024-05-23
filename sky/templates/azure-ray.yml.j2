@@ -164,14 +164,14 @@ setup_commands:
 #   current num items (num SSH connections): 2
 head_start_ray_commands:
   # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
-  - {{ sky_activate_python_env }}; {{ sky_ray_cmd }} stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 {{ sky_ray_cmd }} start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--num-gpus=%s" % num_gpus if num_gpus}} {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1; 
+  - {{ sky_ray_cmd }} stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 {{ sky_ray_cmd }} start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--num-gpus=%s" % num_gpus if num_gpus}} {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1; 
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done; 
     {{dump_port_command}}; 
     {{ray_head_wait_initialized_command}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - {{ sky_activate_python_env }}; {{ sky_ray_cmd }} stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 {{ sky_ray_cmd }} start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--num-gpus=%s" % num_gpus if num_gpus}} {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
+  - {{ sky_ray_cmd }} stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 {{ sky_ray_cmd }} start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--num-gpus=%s" % num_gpus if num_gpus}} {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 {%- else %}
 worker_start_ray_commands: []

@@ -61,6 +61,8 @@ RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
+# We need to activate the python environment to make sure autostop in skylet
+# can find the cloud SDK/CLI in PATH.
 MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
                             f'{constants.SKY_PYTHON_CMD} -m '
                             'sky.skylet.attempt_skylet;')

@@ -37,7 +37,13 @@ SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
 SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # Ray executable, e.g., /opt/conda/bin/ray
-SKY_RAY_CMD = (f'$([ -s {SKY_RAY_PATH_FILE} ] && '
+# We need to add SKY_PYTHON_CMD before ray executable because:
+# The ray executable is a python script with a header like:
+#   #!/opt/conda/bin/python3
+# When we create the skypilot-runtime venv, the previously installed ray
+# executable will be reused (due to --system-site-packages), and that will cause
+# running ray CLI commands to use the wrong python executable.
+SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 # Separate env for SkyPilot runtime dependencies.
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
@@ -117,7 +123,7 @@ CONDA_INSTALLATION_COMMANDS = (
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
     f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages && '
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE}; }};'
-    f'{ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
+)
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'

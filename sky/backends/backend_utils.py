@@ -927,14 +927,11 @@ def write_cluster_config(
                 'sky_ray_cmd': constants.SKY_RAY_CMD,
                 # pip install needs to have python env activated to make sure
                 # installed packages are within the env path.
-                'sky_pip_cmd': (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
-                                f'{constants.SKY_PIP_CMD}'),
+                'sky_pip_cmd': f'{constants.SKY_PIP_CMD}',
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Command for waiting ray cluster to be ready on head.
                 'ray_head_wait_initialized_command':
                     instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
-                'sky_activate_python_env':
-                    constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
 
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
