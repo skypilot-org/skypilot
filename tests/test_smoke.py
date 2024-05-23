@@ -297,6 +297,9 @@ _VALIDATE_LAUNCH_OUTPUT = (
     'echo "==Validating task output ending==" && '
     'echo "$s" | grep -A 1 "task run finish" | '
     'grep "INFO: Job finished (status: SUCCEEDED)"'
+    'echo "==Validating task output ending 2==" && '
+    'echo "$s" | grep -A 1 "INFO: Job finished (status: SUCCEEDED)" | '
+    'grep "Job ID:"'
 )
 
 
