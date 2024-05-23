@@ -1025,9 +1025,11 @@ def test_kubernetes_storage_mounts():
     [
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
-        # Test latest image with python 3.11 installed by default.
-        # Does not work for python 3.12 due to ray's requirement for 3.11.
+        # Test image with python 3.11 installed by default.
         'docker:continuumio/miniconda3:24.1.2-0',
+        # Test python>=3.12 where SkyPilot should automatically create a separate
+        # conda env for runtime with python 3.10.
+        'docker:continuumio/miniconda3:latest',
     ])
 def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Tests bucket mounting on docker container
@@ -1208,8 +1210,15 @@ def test_job_queue(generic_cloud: str):
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
         # Test latest image with python 3.11 installed by default.
-        # Does not work for python 3.12 due to ray's requirement for 3.11.
         'docker:continuumio/miniconda3:24.1.2-0',
+        # Test python>=3.12 where SkyPilot should automatically create a separate
+        # conda env for runtime with python 3.10.
+        'docker:continuumio/miniconda3:latest',
+        # Axolotl image is a good example custom image that has its conda path
+        # set in PATH with dockerfile and uses python>=3.12. It could test:
+        #  1. we handle the env var set in dockerfile correctly
+        #  2. python>=3.12 works with SkyPilot runtime.
+        'docker:winglian/axolotl:main-latest'
     ])
 def test_job_queue_with_docker(generic_cloud: str, image_id: str):
     name = _get_cluster_name() + image_id[len('docker:'):][:4]
@@ -2913,8 +2922,10 @@ def test_aws_custom_image():
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
         # Test latest image with python 3.11 installed by default.
-        # Does not work for python 3.12 due to ray's requirement for 3.11.
         'docker:continuumio/miniconda3:24.1.2-0',
+        # Test python>=3.12 where SkyPilot should automatically create a separate
+        # conda env for runtime with python 3.10.
+        'docker:continuumio/miniconda3:latest',
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
@@ -3771,18 +3782,25 @@ def test_skyserve_failures(generic_cloud: str):
 # TODO(Ziming, Tian): Add tests for autoscaling.
 
 
-# ------- Testing user ray cluster --------
-def test_user_ray_cluster(generic_cloud: str):
+# ------- Testing user dependencies --------
+def test_user_dependencies(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
-        'user-ray-cluster',
+        'user-dependencies',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} "ray start --head"',
-            f'sky exec {name} "echo hi"',
+            f'sky launch -y -c {name} --cloud {generic_cloud} "pip install ray>2.11; ray start --head"',
             f'sky logs {name} 1 --status',
+            f'sky exec {name} "echo hi"',
+            f'sky logs {name} 2 --status',
             f'sky status -r {name} | grep UP',
             f'sky exec {name} "echo bye"',
-            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 --status',
+            f'sky launch -c {name} tests/test_yamls/different_default_conda_env.yaml',
+            f'sky logs {name} 4 --status',
+            # Launch again to test the default env does not affect SkyPilot
+            # runtime setup
+            f'sky launch -c {name} "python --version 2>&1 | grep \'Python 3.6\' || exit 1"',
+            f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
     )

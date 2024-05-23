@@ -98,7 +98,6 @@ def launch(
             'dag_name': dag.name,
             'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
-            'sky_python_cmd': skylet_constants.SKY_PYTHON_CMD,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
