@@ -318,12 +318,12 @@ class Kubernetes(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+    ) -> Tuple[List['resources_lib.Resources'], List[str], Optional[str]]:
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return ([resources], fuzzy_candidate_list)
+            return ([resources], fuzzy_candidate_list, None)
 
         def _make(instance_list):
             resource_list = []
@@ -379,10 +379,10 @@ class Kubernetes(clouds.Cloud):
                 logger.debug(f'Instance type {chosen_instance_type} does '
                              'not fit in the Kubernetes cluster. '
                              f'Reason: {reason}')
-                return [], []
+                return [], [], reason
 
         # No fuzzy lists for Kubernetes
-        return _make([chosen_instance_type]), []
+        return _make([chosen_instance_type]), [], None
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

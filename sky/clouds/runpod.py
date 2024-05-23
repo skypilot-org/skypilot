@@ -187,12 +187,12 @@ class RunPod(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+    ) -> Tuple[List['resources_lib.Resources'], List[str], Optional[str]]:
         """Returns a list of feasible resources for the given resources."""
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return ([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -215,9 +215,9 @@ class RunPod(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                return ([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return (_make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -231,8 +231,8 @@ class RunPod(clouds.Cloud):
             zone=resources.zone,
             clouds='runpod')
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return ([], fuzzy_candidate_list, None)
+        return (_make(instance_list), fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

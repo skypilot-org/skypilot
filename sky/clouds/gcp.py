@@ -497,10 +497,10 @@ class GCP(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources.Resources'
-    ) -> Tuple[List['resources.Resources'], List[str]]:
+    ) -> Tuple[List['resources.Resources'], List[str], Optional[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            return ([resources], [])
+            return ([resources], [], None)
 
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
@@ -509,7 +509,7 @@ class GCP(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if host_vm_type is None:
-                return ([], [])
+                return ([], [], None)
             else:
                 r = resources.copy(
                     cloud=GCP(),
@@ -518,7 +518,7 @@ class GCP(clouds.Cloud):
                     cpus=None,
                     memory=None,
                 )
-                return ([r], [])
+                return ([r], [], None)
 
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
@@ -540,7 +540,7 @@ class GCP(clouds.Cloud):
             clouds='gcp')
 
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
+            return ([], fuzzy_candidate_list, None)
         assert len(
             instance_list
         ) == 1, f'More than one instance type matched, {instance_list}'
@@ -555,11 +555,11 @@ class GCP(clouds.Cloud):
                 if resources.cpus.endswith('+'):
                     cpus = float(resources.cpus[:-1])
                     if cpus > num_cpus_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return ([], fuzzy_candidate_list, None)
                 else:
                     cpus = float(resources.cpus)
                     if cpus != num_cpus_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return ([], fuzzy_candidate_list, None)
             # FIXME(woosuk, wei-lin): This leverages the fact that TPU VMs
             # have 334 GB RAM, and 400 GB RAM for tpu-v4. We need to move
             # this to service catalog, instead.
@@ -568,11 +568,11 @@ class GCP(clouds.Cloud):
                 if resources.memory.endswith('+'):
                     memory = float(resources.memory[:-1])
                     if memory > memory_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return ([], fuzzy_candidate_list, None)
                 else:
                     memory = float(resources.memory)
                     if memory != memory_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return ([], fuzzy_candidate_list, None)
         else:
             host_vm_type = instance_list[0]
 
@@ -584,7 +584,7 @@ class GCP(clouds.Cloud):
             cpus=None,
             memory=None,
         )
-        return ([r], fuzzy_candidate_list)
+        return ([r], fuzzy_candidate_list, None)
 
     @classmethod
     def get_accelerators_from_instance_type(

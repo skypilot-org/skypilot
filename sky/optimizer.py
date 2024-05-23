@@ -348,10 +348,6 @@ class Optimizer:
                             for orig_resources in node.resources):
                         source_hint = 'kubernetes cluster'
 
-                # TODO(romilb): When `sky show-gpus` supports Kubernetes,
-                #  add a hint to run `sky show-gpus --kubernetes` to list
-                #  available accelerators on Kubernetes.
-
                 bold = colorama.Style.BRIGHT
                 cyan = colorama.Fore.CYAN
                 reset = colorama.Style.RESET_ALL
@@ -1239,10 +1235,13 @@ def _fill_in_launchable_resources(
             continue
         clouds_list = ([resources.cloud]
                        if resources.cloud is not None else enabled_clouds)
+        hints: dict[clouds.Cloud, str] = {}
         for cloud in clouds_list:
             (feasible_resources,
-             fuzzy_candidate_list) = cloud.get_feasible_launchable_resources(
+             fuzzy_candidate_list, hint) = cloud.get_feasible_launchable_resources(
                  resources, num_nodes=task.num_nodes)
+            if hint:
+                hints[cloud] = hint
             if len(feasible_resources) > 0:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
@@ -1269,6 +1268,8 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Fore.CYAN}'
                                 f'{sorted(all_fuzzy_candidates)}'
                                 f'{colorama.Style.RESET_ALL}')
+                for cloud, hint in hints.items():
+                    logger.info(f'{repr(cloud)}: {hint}')
             else:
                 if resources.cpus is not None:
                     logger.info('Try specifying a different CPU count, '

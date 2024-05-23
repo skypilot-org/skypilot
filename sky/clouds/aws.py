@@ -425,7 +425,7 @@ class AWS(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+    ) -> Tuple[List['resources_lib.Resources'], List[str], Optional[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Check the instance type is valid in the cloud
@@ -436,10 +436,10 @@ class AWS(clouds.Cloud):
                 region=resources.region,
                 zone=resources.zone)
             if not regions:
-                return ([], [])
+                return ([], [], None)
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return ([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -465,9 +465,9 @@ class AWS(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                return ([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return (_make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -482,8 +482,8 @@ class AWS(clouds.Cloud):
             zone=resources.zone,
             clouds='aws')
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return ([], fuzzy_candidate_list, None)
+        return (_make(instance_list), fuzzy_candidate_list, None)
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
