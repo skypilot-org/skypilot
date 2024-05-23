@@ -1912,7 +1912,7 @@ class AzureBlobStore(AbstractStore):
     def __init__(self,
                  name: str,
                  source: str,
-                 region: Optional[str] = 'eastus',
+                 region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
         self.storage_client: 'storage.Client'
@@ -2048,7 +2048,7 @@ class AzureBlobStore(AbstractStore):
             # config, then use default names.
             self.storage_account_name = skypilot_config.get_nested(
                 ('azure', 'storage_account'),
-                f'sky{common_utils.get_user_hash()}')
+                f'sky{self.region}{common_utils.get_user_hash()}')
             self.resource_group_name = skypilot_config.get_nested(
                 ('azure', 'resource_group'),
                 f'sky{common_utils.get_user_hash()}')
@@ -2369,8 +2369,7 @@ class AzureBlobStore(AbstractStore):
                                                    mount_cmd)
 
     def _create_az_bucket(self,
-                          container_name: str,
-                          region='eastus') -> StorageHandle:
+                          container_name: str) -> StorageHandle:
         """Creates AZ Container.
 
         Args:
@@ -2388,7 +2387,7 @@ class AzureBlobStore(AbstractStore):
                 self.resource_group_name, self.storage_account_name,
                 container_name, {})
             logger.info('Created AZ Container '
-                        f'{container_name} in {region}.')
+                        f'{container_name} in {self.region}.')
         except azure.exceptions().ResourceExistsError as e:
             error_msg, error_code = e.error.message, e.error.code
             if error_code == 'ContainerOperationFailure':
