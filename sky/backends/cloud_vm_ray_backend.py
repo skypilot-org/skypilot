@@ -3657,7 +3657,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
                     # Raised by rsync_down. Remote log dir may not exist, since
                     # the job can be run on some part of the nodes.
-                    logger.debug(f'{runner.ip} does not have the tasks/*.')
+                    logger.debug(f'{runner.node_id} does not have the tasks/*.')
                 else:
                     raise
 
