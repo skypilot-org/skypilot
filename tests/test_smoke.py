@@ -3798,7 +3798,7 @@ def test_user_dependencies(generic_cloud: str):
             f'sky logs {name} 3 --status',
             # Launch again to test the default env does not affect SkyPilot
             # runtime setup
-            f'sky launch -c {name} "python --version | grep \"Python 3.6\""',
+            f'sky launch -c {name} "python --version | grep \'Python 3.6\'"',
             f'sky logs {name} 4 --status',
         ],
         f'sky down -y {name}',
