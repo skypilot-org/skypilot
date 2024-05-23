@@ -270,34 +270,71 @@ def test_example_app():
     run_one_test(test)
 
 
+_VALIDATE_LAUNCH_OUTPUT = (
+    # Validate the output of the job submission:
+    # I 05-23 07:52:47 cloud_vm_ray_backend.py:3217] Running setup on 1 node.
+    # running setup
+    # I 05-23 07:52:49 cloud_vm_ray_backend.py:3230] Setup completed.
+    # I 05-23 07:52:55 cloud_vm_ray_backend.py:3319] Job submitted with Job ID: 1
+    # I 05-23 07:52:58 log_lib.py:408] Start streaming logs for job 1.
+    # INFO: Tip: use Ctrl-C to exit log streaming (task will not be killed).
+    # INFO: Waiting for task resources on 1 node. This will block if the cluster is full.
+    # INFO: All task resources reserved.
+    # INFO: Reserved IPs: ['10.128.0.127']
+    # (min, pid=4164) # conda environments:
+    # (min, pid=4164) #
+    # (min, pid=4164) base                  *  /opt/conda
+    # (min, pid=4164)
+    # (min, pid=4164) task run finish
+    # INFO: Job finished (status: SUCCEEDED).
+    'echo "$s" && echo "==Validating setup output==" && '
+    'echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+    'echo "==Validating running output hints==" && echo "$s" | '
+    'grep -A 1 "Job submitted with Job ID:" | '
+    'grep "Start streaming logs for job" && '
+    'echo "==Validating task output starting==" && echo "$s" | '
+    'grep -A 1 "INFO: Reserved IPs" | grep "(min, pid=" && '
+    'echo "==Validating task output ending==" && '
+    'echo "$s" | grep -A 1 "task run finish" | '
+    'grep "INFO: Job finished (status: SUCCEEDED)" && '
+    'echo "==Validating task output ending 2==" && '
+    'echo "$s" | grep -A 1 "INFO: Job finished (status: SUCCEEDED)" | '
+    'grep "Job ID:"')
+
+
 # ---------- A minimal task ----------
 def test_minimal(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
         'minimal',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
+            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
+            # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
+            # Test launch output again on existing cluster
+            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
             f'log_path=$(sky logs {name} 1 --sync-down | grep "Job 1 logs:" | sed -E "s/^.*Job 1 logs: (.*)\\x1b\\[0m/\\1/g") && echo "$log_path" && test -f $log_path/run.log',
             # Ensure the raylet process has the correct file descriptor limit.
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
-            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # Install jq for the next test.
             f'sky exec {name} \'sudo apt-get update && sudo apt-get install -y jq\'',
             # Check the cluster info
             f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cluster_name | grep {name}\'',
-            f'sky logs {name} 4 --status',  # Ensure the job succeeded.
-            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
             f'sky logs {name} 5 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
+            f'sky logs {name} 6 --status',  # Ensure the job succeeded.
             # Test '-c' for exec
             f'sky exec -c {name} echo',
-            f'sky logs {name} 6 --status',
-            f'sky exec echo -c {name}',
             f'sky logs {name} 7 --status',
+            f'sky exec echo -c {name}',
+            f'sky logs {name} 8 --status',
             f'sky exec -c {name} echo hi test',
-            f'sky logs {name} 8 | grep "hi test"',
+            f'sky logs {name} 9 | grep "hi test"',
             f'sky exec {name} && exit 1 || true',
             f'sky exec -c {name} && exit 1 || true',
         ],
@@ -1026,8 +1063,10 @@ def test_kubernetes_storage_mounts():
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
         # Test latest image with python 3.11 installed by default.
-        # Does not work for python 3.12 due to ray's requirement for 3.11.
         'docker:continuumio/miniconda3:24.1.2-0',
+        # Test python>=3.12 where SkyPilot should automatically create a separate
+        # conda env for runtime with python 3.10.
+        'docker:continuumio/miniconda3:latest',
     ])
 def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Tests bucket mounting on docker container
@@ -1208,8 +1247,15 @@ def test_job_queue(generic_cloud: str):
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
         # Test latest image with python 3.11 installed by default.
-        # Does not work for python 3.12 due to ray's requirement for 3.11.
         'docker:continuumio/miniconda3:24.1.2-0',
+        # Test python>=3.12 where SkyPilot should automatically create a separate
+        # conda env for runtime with python 3.10.
+        'docker:continuumio/miniconda3:latest',
+        # Axolotl image is a good example custom image that has its conda path
+        # set in PATH with dockerfile and uses python>=3.12. It could test:
+        #  1. we handle the env var set in dockerfile correctly
+        #  2. python>=3.12 works with SkyPilot runtime.
+        'docker:winglian/axolotl:main-latest'
     ])
 def test_job_queue_with_docker(generic_cloud: str, image_id: str):
     name = _get_cluster_name() + image_id[len('docker:'):][:4]
@@ -2913,8 +2959,10 @@ def test_aws_custom_image():
         'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
         'docker:ubuntu:18.04',
         # Test latest image with python 3.11 installed by default.
-        # Does not work for python 3.12 due to ray's requirement for 3.11.
         'docker:continuumio/miniconda3:24.1.2-0',
+        # Test python>=3.12 where SkyPilot should automatically create a separate
+        # conda env for runtime with python 3.10.
+        'docker:continuumio/miniconda3:latest',
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
@@ -3771,18 +3819,25 @@ def test_skyserve_failures(generic_cloud: str):
 # TODO(Ziming, Tian): Add tests for autoscaling.
 
 
-# ------- Testing user ray cluster --------
-def test_user_ray_cluster(generic_cloud: str):
+# ------- Testing user dependencies --------
+def test_user_dependencies(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
-        'user-ray-cluster',
+        'user-dependencies',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} "ray start --head"',
-            f'sky exec {name} "echo hi"',
+            f'sky launch -y -c {name} --cloud {generic_cloud} "pip install ray>2.11; ray start --head"',
             f'sky logs {name} 1 --status',
+            f'sky exec {name} "echo hi"',
+            f'sky logs {name} 2 --status',
             f'sky status -r {name} | grep UP',
             f'sky exec {name} "echo bye"',
-            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 --status',
+            f'sky launch -c {name} tests/test_yamls/different_default_conda_env.yaml',
+            f'sky logs {name} 4 --status',
+            # Launch again to test the default env does not affect SkyPilot
+            # runtime setup
+            f'sky launch -c {name} "python --version 2>&1 | grep \'Python 3.6\' || exit 1"',
+            f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
     )
