@@ -3,7 +3,7 @@ resources:
 
 
 setup: |
-  conda create -n testenv python=3.6
+  conda create -n testenv python=3.6 -y
 
   echo "conda activate testenv" >> ~/.bashrc
 
