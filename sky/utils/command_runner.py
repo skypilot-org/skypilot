@@ -218,6 +218,7 @@ class CommandRunner:
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
+            skip_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -394,6 +395,7 @@ class SSHCommandRunner(CommandRunner):
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
+            skip_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -428,17 +430,14 @@ class SSHCommandRunner(CommandRunner):
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
 
-        command_str = self._get_command_to_run(
-            cmd,
-            process_stream,
-            separate_stderr,
-            # A hack to remove the following SSH warning+bash warnings (twice):
-            #  Warning: Permanently added 'xx.xx.xx.xx' to the list of known...
-            #  bash: cannot set terminal process group
-            #  bash: no job control in this shell
-            # When not source_bashrc, the bash warning will only show once.
-            skip_lines=5 if source_bashrc else 3,
-            source_bashrc=source_bashrc)
+        # A hack to remove the following SSH warning:
+        #  Warning: Permanently added 'xx.xx.xx.xx' to the list of known...
+        skip_lines += 1
+        command_str = self._get_command_to_run(cmd,
+                                               process_stream,
+                                               separate_stderr,
+                                               skip_lines=skip_lines,
+                                               source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -608,6 +607,7 @@ class KubernetesCommandRunner(CommandRunner):
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
+            skip_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -656,6 +656,10 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_base_command.append('-i')
         kubectl_base_command += [*kubectl_args, '--']
 
+        # Although we do not SSH warning, but it still requires +1 to get rid
+        # of the starting bash warnings. It is likely that kubectl will generate
+        # an empty line at the beginning of the output.
+        skip_lines += 1
         command_str = self._get_command_to_run(
             cmd,
             process_stream,
@@ -663,10 +667,12 @@ class KubernetesCommandRunner(CommandRunner):
             # A hack to remove the following bash warnings (twice):
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
-            # and another WARNING for connection with SSH
-            skip_lines=4 if source_bashrc else 0,
+            # Kubernetes exec will not print the SSH warning.
+            skip_lines=skip_lines,
             source_bashrc=source_bashrc)
-        command = kubectl_base_command + [command_str]
+        command = kubectl_base_command + [
+            'bash', '-c', shlex.quote(command_str)
+        ]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
