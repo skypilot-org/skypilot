@@ -91,15 +91,18 @@ DOCKER_LOGIN_ENV_VARS = {
 # AWS's Deep Learning AMI's default conda environment.
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
-    '(wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
+    '{ wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
     'bash Miniconda3-Linux-x86_64.sh -b && '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
-    'conda config --set auto_activate_base true); '
-    'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;'
+    'conda config --set auto_activate_base true && '
+    # Use $(echo ~) instead of ~ to avoid the error "no such file or directory".
+    # Also, not using $HOME to avoid the error HOME variable not set.
+    f'echo "$(echo ~)/miniconda3/bin/python" > {SKY_PYTHON_PATH_FILE}; }}; '
+    'grep "# >>> conda initialize >>>" ~/.bashrc || '
+    '{ conda init && source ~/.bashrc; };'
     '(type -a python | grep -q python3) || '
     'echo \'alias python=python3\' >> ~/.bashrc;'
     '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
-    'source ~/.bashrc;'
     # Writes Python path to file if it does not exist or the file is empty.
     f'[ -s {SKY_PYTHON_PATH_FILE} ] || which python3 > {SKY_PYTHON_PATH_FILE};')
 
