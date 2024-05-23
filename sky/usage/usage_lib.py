@@ -190,6 +190,9 @@ class UsageMessageToReport(MessageToReport):
                 self.task_accelerators = list(resources.accelerators.keys())[0]
                 self.task_num_accelerators = resources.accelerators[
                     self.task_accelerators]
+            else:
+                self.task_accelerators = None
+                self.task_num_accelerators = None
 
     def update_task_id(self, task_id: int):
         self.task_id = task_id
