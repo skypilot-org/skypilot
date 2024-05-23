@@ -306,7 +306,8 @@ _VALIDATE_LAUNCH_OUTPUT = (
 def test_minimal(generic_cloud: str):
     name = _get_cluster_name()
     validate_output = _VALIDATE_LAUNCH_OUTPUT
-    # Kubernetes will have 
+    # Kubernetes will output a SSH Warning for proxy jump, which will cause
+    # the output validation fail. We skip the check for kubernetes for now.
     if generic_cloud.lower() == 'kubernetes':
         validate_output = 'true'
     test = Test(
