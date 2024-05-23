@@ -670,7 +670,6 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_base_command.append('-i')
         kubectl_base_command += [*kubectl_args, '--']
 
-
         command_str = self._get_command_to_run(
             cmd,
             process_stream,
