@@ -2011,10 +2011,10 @@ class RetryingVmProvisioner(object):
                     cloud_user = to_provision.cloud.get_current_user_identity()
 
                 requested_features = self._requested_features.copy()
-                # Skip stop feature for Kubernetes jobs controller.
+                # Skip stop feature for Kubernetes controllers.
                 if (isinstance(to_provision.cloud, clouds.Kubernetes) and
                         controller_utils.Controllers.from_name(cluster_name)
-                        == controller_utils.Controllers.JOBS_CONTROLLER):
+                        is not None):
                     assert (clouds.CloudImplementationFeatures.STOP
                             in requested_features), requested_features
                     requested_features.remove(
@@ -3175,7 +3175,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'{create_script_code} && {setup_cmd}',
                 log_path=setup_log_path,
                 process_stream=False,
-                source_bashrc=True,
+                # We do not source bashrc for setup, since bashrc is sourced
+                # in the script already.
+                # Skip two lines due to the /bin/bash -i and source ~/.bashrc
+                # in the setup_cmd.
+                #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
+                #   bash: no job control in this shell
+                skip_lines=2,
             )
 
             def error_message() -> str:
@@ -3724,7 +3730,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream=False,
             ssh_mode=command_runner.SshMode.INTERACTIVE,
             stdin=subprocess.DEVNULL,
-            source_bashrc=True,
         )
 
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
@@ -3762,7 +3767,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream=False,
             ssh_mode=command_runner.SshMode.INTERACTIVE,
             stdin=subprocess.DEVNULL,
-            source_bashrc=True,
         )
 
     def teardown_no_lock(self,
@@ -4152,11 +4156,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Skip auto-stop for Kubernetes clusters.
             if (isinstance(handle.launched_resources.cloud, clouds.Kubernetes)
                     and not down and idle_minutes_to_autostop >= 0):
-                # We should hit this code path only for the jobs controller on
+                # We should hit this code path only for the controllers on
                 # Kubernetes clusters.
                 assert (controller_utils.Controllers.from_name(
-                    handle.cluster_name) == controller_utils.Controllers.
-                        JOBS_CONTROLLER), handle.cluster_name
+                    handle.cluster_name) is not None), handle.cluster_name
                 logger.info('Auto-stop is not supported for Kubernetes '
                             'clusters. Skipping.')
                 return

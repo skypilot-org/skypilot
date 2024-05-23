@@ -12,6 +12,20 @@ You can specify environment variables to be made available to a task in two ways
 - The ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`
 - The ``--env`` flag in the ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
 
+.. tip::
+
+  If an environment variable is required to be specified with `--env` during
+  ``sky launch/exec``, you can set it to ``null`` in task YAML to raise an
+  error when it is forgotten to be specified. For example, the ``WANDB_API_KEY``
+  and ``HF_TOKEN`` in the following task YAML:
+
+  .. code-block:: yaml
+
+    envs:
+      WANDB_API_KEY:
+      HF_TOKEN: null
+      MYVAR: val
+
 The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via the ``${MYVAR}`` syntax.
 
 Using in ``file_mounts``

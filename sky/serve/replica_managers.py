@@ -488,6 +488,7 @@ class ReplicaInfo:
         self,
         readiness_path: str,
         post_data: Optional[Dict[str, Any]],
+        headers: Optional[Dict[str, str]],
     ) -> Tuple['ReplicaInfo', bool, float]:
         """Probe the readiness of the replica.
 
@@ -513,12 +514,14 @@ class ReplicaInfo:
                 msg += 'POST'
                 response = requests.post(
                     readiness_path,
+                    headers=headers,
                     json=post_data,
                     timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
             else:
                 msg += 'GET'
                 response = requests.get(
                     readiness_path,
+                    headers=headers,
                     timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
             msg += (f' request to {replica_identity} returned status '
                     f'code {response.status_code}')
@@ -565,9 +568,13 @@ class ReplicaManager:
         self._service_name: str = service_name
         self._uptime: Optional[float] = None
         self._update_mode = serve_utils.DEFAULT_UPDATE_MODE
+        header_keys = None
+        if spec.readiness_headers is not None:
+            header_keys = list(spec.readiness_headers.keys())
         logger.info(f'Readiness probe path: {spec.readiness_path}\n'
                     f'Initial delay seconds: {spec.initial_delay_seconds}\n'
-                    f'Post data: {spec.post_data}')
+                    f'Post data: {spec.post_data}\n'
+                    f'Readiness header keys: {header_keys}')
 
         # Newest version among the currently provisioned and launched replicas
         self.latest_version: int = serve_constants.INITIAL_VERSION
@@ -1033,8 +1040,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                 probe_futures.append(
                     pool.apply_async(
                         info.probe,
-                        (self._get_readiness_path(
-                            info.version), self._get_post_data(info.version)),
+                        (
+                            self._get_readiness_path(info.version),
+                            self._get_post_data(info.version),
+                            self._get_readiness_headers(info.version),
+                        ),
                     ),)
             logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
 
@@ -1214,6 +1224,9 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def _get_post_data(self, version: int) -> Optional[Dict[str, Any]]:
         return self._get_version_spec(version).post_data
+
+    def _get_readiness_headers(self, version: int) -> Optional[Dict[str, str]]:
+        return self._get_version_spec(version).readiness_headers
 
     def _get_initial_delay_seconds(self, version: int) -> int:
         return self._get_version_spec(version).initial_delay_seconds

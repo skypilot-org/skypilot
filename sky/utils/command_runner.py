@@ -66,7 +66,7 @@ def ssh_options_list(
     arg_dict = {
         # SSH port
         'Port': port,
-        # Supresses initial fingerprint verification.
+        # Suppresses initial fingerprint verification.
         'StrictHostKeyChecking': 'no',
         # SSH IP and fingerprint pairs no longer added to known_hosts.
         # This is to remove a 'REMOTE HOST IDENTIFICATION HAS CHANGED'
@@ -74,6 +74,10 @@ def ssh_options_list(
         # deleted node, because the fingerprints will not match in
         # that case.
         'UserKnownHostsFile': os.devnull,
+        # Suppresses the warning messages, such as:
+        #   Warning: Permanently added '34.69.216.203' (ED25519) to the list of
+        #   known hosts.
+        'LogLevel': 'ERROR',
         # Try fewer extraneous key pairs.
         'IdentitiesOnly': 'yes',
         # Abort if port forwarding fails (instead of just printing to
@@ -184,8 +188,8 @@ class CommandRunner:
             # cluster by 1 second.
             # sourcing ~/.bashrc is not required for internal executions
             command += [
-                'true && export OMP_NUM_THREADS=1 PYTHONWARNINGS=ignore'
-                f' && ({cmd})'
+                shlex.quote('true && export OMP_NUM_THREADS=1 '
+                            f'PYTHONWARNINGS=ignore && ({cmd})')
             ]
         if not separate_stderr:
             command.append('2>&1')
@@ -216,7 +220,9 @@ class CommandRunner:
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
+            connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
+            skip_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -228,6 +234,14 @@ class CommandRunner:
             ssh_mode: The mode to use for ssh.
                 See SSHMode for more details.
             separate_stderr: Whether to separate stderr from stdout.
+            connect_timeout: timeout in seconds for the ssh connection.
+            source_bashrc: Whether to source the ~/.bashrc before running the
+                command.
+            skip_lines: The number of lines to skip at the beginning of the
+                output. This is used when the output is not processed by
+                SkyPilot but we still want to get rid of some warning messages,
+                such as SSH warnings.
+
 
         Returns:
             returncode
@@ -393,6 +407,7 @@ class SSHCommandRunner(CommandRunner):
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
+            skip_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -410,7 +425,13 @@ class SSHCommandRunner(CommandRunner):
             ssh_mode: The mode to use for ssh.
                 See SSHMode for more details.
             separate_stderr: Whether to separate stderr from stdout.
-
+            connect_timeout: timeout in seconds for the ssh connection.
+            source_bashrc: Whether to source the bashrc before running the
+                command.
+            skip_lines: The number of lines to skip at the beginning of the
+                output. This is used when the output is not processed by
+                SkyPilot but we still want to get rid of some warning messages,
+                such as SSH warnings.
 
         Returns:
             returncode
@@ -431,10 +452,8 @@ class SSHCommandRunner(CommandRunner):
             cmd,
             process_stream,
             separate_stderr,
-            # A hack to remove the following bash warnings (twice):
-            #  bash: cannot set terminal process group
-            #  bash: no job control in this shell
-            skip_lines=5 if source_bashrc else 0,
+            # +1 to skip first new line.
+            skip_lines=skip_lines + 1,
             source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 

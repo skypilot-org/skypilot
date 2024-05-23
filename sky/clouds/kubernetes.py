@@ -140,9 +140,6 @@ class Kubernetes(clouds.Cloud):
     def __repr__(self):
         return self._REPR
 
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        return isinstance(other, Kubernetes)
-
     @classmethod
     def get_port(cls, svc_name) -> int:
         ns = kubernetes_utils.get_current_kube_config_context_namespace()

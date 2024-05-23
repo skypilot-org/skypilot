@@ -347,7 +347,11 @@ def shared_controller_vars_to_fill(
         remote_user_config_path: str) -> Dict[str, str]:
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
-            _get_cloud_dependencies_installation_commands(controller)
+            _get_cloud_dependencies_installation_commands(controller),
+        # We need to activate the python environment on the controller to ensure
+        # cloud SDKs are installed in SkyPilot runtime environment and can be
+        # accessed.
+        'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
     }
     env_vars: Dict[str, str] = {
         env.value: '1' for env in env_options.Options if env.get()
