@@ -224,6 +224,9 @@ class UsageMessageToReport(MessageToReport):
                              f'{resources.accelerators}.')
             self.accelerators = list(resources.accelerators.keys())[0]
             self.num_accelerators = resources.accelerators[self.accelerators]
+        else:
+            self.accelerators = None
+            self.num_accelerators = None
 
         self.num_nodes = num_nodes
         self.resources = resources.to_yaml_config()
