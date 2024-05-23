@@ -21,8 +21,9 @@ def restart_skylet():
         shell=True,
         check=False)
     subprocess.run(
-        # Activate python environment first to make sure skylet can find the
-        # cloud SDK for autostopping.
+        # We have made sure that `attempt_skylet.py` is executed with the
+        # skypilot runtime env activated, so that skylet can access the cloud
+        # CLI tools.
         f'nohup {constants.SKY_PYTHON_CMD} -m sky.skylet.skylet'
         ' >> ~/.sky/skylet.log 2>&1 &',
         shell=True,
