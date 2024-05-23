@@ -307,8 +307,8 @@ def test_minimal(generic_cloud: str):
     name = _get_cluster_name()
     validate_output = _VALIDATE_LAUNCH_OUTPUT
     # Kubernetes will have 
-    if generic_cloud == 'kubernetes':
-        validate_output = ''
+    if generic_cloud.lower() == 'kubernetes':
+        validate_output = 'true'
     test = Test(
         'minimal',
         [
