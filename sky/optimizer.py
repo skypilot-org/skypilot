@@ -1235,10 +1235,11 @@ def _fill_in_launchable_resources(
             continue
         clouds_list = ([resources.cloud]
                        if resources.cloud is not None else enabled_clouds)
-        hints: dict[clouds.Cloud, str] = {}
+        # If clouds provide hints, store them for later printing.
+        hints: Dict[clouds.Cloud, str] = {}
         for cloud in clouds_list:
-            (feasible_resources,
-             fuzzy_candidate_list, hint) = cloud.get_feasible_launchable_resources(
+            (feasible_resources, fuzzy_candidate_list,
+             hint) = cloud.get_feasible_launchable_resources(
                  resources, num_nodes=task.num_nodes)
             if hint:
                 hints[cloud] = hint

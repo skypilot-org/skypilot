@@ -340,11 +340,16 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         ]
         assert len(gpu_nodes) > 0, 'GPU nodes not found'
         candidate_nodes = gpu_nodes
-        not_fit_reason_prefix = (f'GPU nodes with {acc_type} do not have '
-                                 f'enough CPU (> {k8s_instance_type.cpus} vCPUs) and/or memory (> {k8s_instance_type.memory} G). ')
+        not_fit_reason_prefix = (
+            f'GPU nodes with {acc_type} do not have '
+            f'enough CPU (> {k8s_instance_type.cpus} vCPUs) and/or '
+            f'memory (> {k8s_instance_type.memory} G). ')
     else:
         candidate_nodes = nodes
-        not_fit_reason_prefix = f'No nodes found with enough CPU (> {k8s_instance_type.cpus} vCPUs) and/or memory (> {k8s_instance_type.memory} G). '
+        not_fit_reason_prefix = (f'No nodes found with enough '
+                                 f'CPU (> {k8s_instance_type.cpus} vCPUs) '
+                                 'and/or memory '
+                                 f'(> {k8s_instance_type.memory} G). ')
     # Check if  CPU and memory requirements are met on at least one
     # candidate node.
     fits, reason = check_cpu_mem_fits(k8s_instance_type, candidate_nodes)
