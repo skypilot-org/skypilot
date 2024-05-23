@@ -928,6 +928,9 @@ def write_cluster_config(
                 # pip install needs to have python env activated to make sure
                 # installed packages are within the env path.
                 'sky_pip_cmd': f'{constants.SKY_PIP_CMD}',
+                # Activate the SkyPilot runtime environment when starting ray
+                # cluster, so that ray autoscaler can access cloud SDK and CLIs
+                # on remote
                 'sky_activate_python_env':
                     constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
