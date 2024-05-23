@@ -29,10 +29,4 @@ run: |
 envs:
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
   BUCKET: # TODO: Fill with your unique bucket name, or use --env to pass.
-  
-  
 
-
-  
-
-4

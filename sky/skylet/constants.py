@@ -105,8 +105,6 @@ CONDA_INSTALLATION_COMMANDS = (
     'bash Miniconda3-Linux-x86_64.sh -b && '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     'conda config --set auto_activate_base true && '
-    # Use $(echo ~) instead of ~ to avoid the error "no such file or directory".
-    # Also, not using $HOME to avoid the error HOME variable not set.
     f'conda activate base; }}; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
