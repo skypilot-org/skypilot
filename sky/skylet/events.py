@@ -192,8 +192,9 @@ class AutostopEvent(SkyletEvent):
                 # Passing env inherited from os.environ is technically not
                 # needed, because we call `python <script>` rather than `ray
                 # <cmd>`. We just need the {RAY_USAGE_STATS_ENABLED: 0} part.
-                subprocess.run([constants.SKY_PYTHON_CMD, script],
+                subprocess.run(f'{constants.SKY_PYTHON_CMD} {script}',
                                check=True,
+                               shell=True,
                                env=env)
 
                 logger.info('Running ray down.')
