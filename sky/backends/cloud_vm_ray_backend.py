@@ -3177,7 +3177,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 process_stream=False,
                 # We do not source bashrc for setup, since bashrc is sourced
                 # in the script already.
-                # Skip three lines due to the /bin/bash -i and source ~/.bashrc
+                # Skip two lines due to the /bin/bash -i and source ~/.bashrc
                 # in the setup_cmd.
                 #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
                 #   bash: no job control in this shell
