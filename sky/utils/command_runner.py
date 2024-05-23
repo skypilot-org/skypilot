@@ -216,7 +216,9 @@ class CommandRunner:
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
+            connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
+            skip_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -228,6 +230,11 @@ class CommandRunner:
             ssh_mode: The mode to use for ssh.
                 See SSHMode for more details.
             separate_stderr: Whether to separate stderr from stdout.
+            connect_timeout: timeout in seconds for the ssh connection.
+            source_bashrc: Whether to source the bashrc before running the command.
+            skip_lines: The number of lines to skip from the output. This is
+                used when the output is not processed by SkyPilot but we still
+                want to get rid of some warning messages, such as SSH warnings.
 
         Returns:
             returncode
@@ -393,6 +400,7 @@ class SSHCommandRunner(CommandRunner):
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
+            skip_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -410,7 +418,11 @@ class SSHCommandRunner(CommandRunner):
             ssh_mode: The mode to use for ssh.
                 See SSHMode for more details.
             separate_stderr: Whether to separate stderr from stdout.
-
+            connect_timeout: timeout in seconds for the ssh connection.
+            source_bashrc: Whether to source the bashrc before running the command.
+            skip_lines: The number of lines to skip from the output. This is
+                used when the output is not processed by SkyPilot but we still
+                want to get rid of some warning messages, such as SSH warnings.
 
         Returns:
             returncode
@@ -431,12 +443,9 @@ class SSHCommandRunner(CommandRunner):
             cmd,
             process_stream,
             separate_stderr,
-            # A hack to remove the following SSH warning+bash warnings (twice):
+            # +1 to remove the following SSH warning:
             #  Warning: Permanently added 'xx.xx.xx.xx' to the list of known...
-            #  bash: cannot set terminal process group
-            #  bash: no job control in this shell
-            # When not source_bashrc, the bash warning will only show once.
-            skip_lines=5 if source_bashrc else 3,
+            skip_lines=skip_lines+1,
             source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
