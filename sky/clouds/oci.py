@@ -160,10 +160,6 @@ class OCI(clouds.Cloud):
         #     return 0.0
         return (num_gigabytes - 10 * 1024) * 0.0085
 
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, OCI)
-
     @classmethod
     def get_default_instance_type(
             cls,

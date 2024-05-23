@@ -5,31 +5,14 @@ name: axolotl
 
 resources:
   accelerators: L4:1
-  cloud: gcp # optional
+  image_id: docker:winglian/axolotl:main-py3.10-cu118-2.0.1
 
 workdir: mistral
 
-setup: |
-  docker pull winglian/axolotl:main-py3.10-cu118-2.0.1
-
 run: |
-  docker run --gpus all \
-    -v ~/sky_workdir:/sky_workdir \
-    -v /root/.cache:/root/.cache \
-    winglian/axolotl:main-py3.10-cu118-2.0.1 \
-    huggingface-cli login --token ${HF_TOKEN} 
+  huggingface-cli login --token ${HF_TOKEN} 
 
-  docker run --gpus all \
-    -v ~/sky_workdir:/sky_workdir \
-    -v /root/.cache:/root/.cache \
-    winglian/axolotl:main-py3.10-cu118-2.0.1 \
-    accelerate launch -m axolotl.cli.train /sky_workdir/qlora.yaml
+  accelerate launch -m axolotl.cli.train qlora.yaml
 
 envs:
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
-  
-  
-
-
-  
-

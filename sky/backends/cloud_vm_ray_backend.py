@@ -3175,7 +3175,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'{create_script_code} && {setup_cmd}',
                 log_path=setup_log_path,
                 process_stream=False,
-                source_bashrc=True,
+                # We do not source bashrc for setup, since bashrc is sourced
+                # in the script already.
+                # Skip two lines due to the /bin/bash -i and source ~/.bashrc
+                # in the setup_cmd.
+                #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
+                #   bash: no job control in this shell
+                skip_lines=2,
             )
 
             def error_message() -> str:
@@ -3724,7 +3730,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream=False,
             ssh_mode=command_runner.SshMode.INTERACTIVE,
             stdin=subprocess.DEVNULL,
-            source_bashrc=True,
         )
 
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
@@ -3762,7 +3767,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             process_stream=False,
             ssh_mode=command_runner.SshMode.INTERACTIVE,
             stdin=subprocess.DEVNULL,
-            source_bashrc=True,
         )
 
     def teardown_no_lock(self,

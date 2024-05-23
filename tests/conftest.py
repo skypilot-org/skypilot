@@ -160,7 +160,7 @@ def pytest_collection_modifyitems(config, items):
     serial_mark = pytest.mark.xdist_group(
         name=f'serial_{generic_cloud_keyword}')
     # Handle generic tests
-    if generic_cloud in ['lambda', 'kubernetes']:
+    if generic_cloud in ['lambda']:
         for item in items:
             if (_is_generic_test(item) and
                     f'no_{generic_cloud_keyword}' not in item.keywords):
