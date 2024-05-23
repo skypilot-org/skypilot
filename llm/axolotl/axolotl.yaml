@@ -16,9 +16,3 @@ run: |
 
 envs:
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
-  
-  
-
-
-  
-
