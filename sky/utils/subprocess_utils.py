@@ -78,7 +78,7 @@ def handle_returncode(returncode: int,
         error_msg: The error message to print.
         stderr: The stderr of the command.
     """
-    echo = logger.error if stream_logs else lambda _: None
+    echo = logger.error if stream_logs else logger.debug
     if returncode != 0:
         if stderr is not None:
             echo(stderr)

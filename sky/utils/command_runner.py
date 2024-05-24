@@ -735,12 +735,17 @@ class KubernetesCommandRunner(CommandRunner):
         Raises:
             exceptions.CommandError: rsync command failed.
         """
-        rc, remote_home_dir, _ = self.run('pwd',
-                                          require_outputs=True,
-                                          stream_logs=False)
-        if rc != 0:
-            raise ValueError('Failed to get remote home directory.')
-        remote_home_dir = remote_home_dir.strip()
+        def get_remote_home_dir()->str:
+            # Use `echo ~` to get the remote home directory, instead of pwd or
+            # echo $HOME, because pwd can be `/` when the remote user is root
+            # and $HOME is not always set.
+            rc, remote_home_dir, _ = self.run('echo ~',
+                                            require_outputs=True,
+                                            stream_logs=False)
+            if rc != 0:
+                raise ValueError('Failed to get remote home directory.')
+            remote_home_dir = remote_home_dir.strip()
+            return remote_home_dir
         # Build command.
         # TODO(zhwu): This will print a per-file progress bar (with -P),
         # shooting a lot of messages to the output. --info=progress2 is used
@@ -770,11 +775,14 @@ class KubernetesCommandRunner(CommandRunner):
                         shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
         rsync_command.append(f'-e "{helper_path}"')
-        # To support spaces in the path, we need to quote source and target.
-        # rsync doesn't support '~' in a quoted local path, but it is ok to
-        # have '~' in a quoted remote path.
+        # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
+        # /~/xx, so we need to replace ~ with the remote home directory. We only
+        # need to do this when ~ is at the beginning of the path.
         if up:
-            resolved_target = target.replace('~', remote_home_dir)
+            resolved_target = target
+            if target.startswith('~'):
+                remote_home_dir = get_remote_home_dir()
+                resolved_target = target.replace('~', remote_home_dir)
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
                 full_source_str = os.path.join(full_source_str, '')
@@ -783,7 +791,10 @@ class KubernetesCommandRunner(CommandRunner):
                 f'{self.pod_name}@{self.namespace}:{resolved_target!r}',
             ])
         else:
-            resolved_source = source.replace('~', remote_home_dir)
+            resolved_source = source
+            if source.startswith('~'):
+                remote_home_dir = get_remote_home_dir()
+                resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
                 f'{self.pod_name}@{self.namespace}:{resolved_source!r}',
                 f'{os.path.expanduser(target)!r}',
