@@ -3061,8 +3061,7 @@ def show_gpus(
                            'in Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes')
-            full_err_msg = (err_msg +
-                            kubernetes_utils.NO_GPU_HELP_MESSAGE +
+            full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
         for gpu, _ in sorted(counts.items()):
@@ -3115,9 +3114,8 @@ def show_gpus(
                            f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
                 if kubernetes_autoscaling:
-                    k8s_messages += ('\n' +
-                                     kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
-                                     )
+                    k8s_messages += (
+                        '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
             if cloud_is_kubernetes:
                 # Do not show clouds if --cloud kubernetes is specified
                 if not kubernetes_is_enabled:
