@@ -2650,27 +2650,6 @@ def stop_handler(signum, frame):
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
-def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
-                                       command: str,
-                                       failure_message: str) -> str:
-    """Runs command remotely and returns output with proper error handling."""
-    rc, stdout, stderr = runner.run(command,
-                                    require_outputs=True,
-                                    stream_logs=False)
-    if rc == 255:
-        # SSH failed
-        raise RuntimeError(
-            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
-            f'to {runner.ip} failed. This is most likely due to incorrect '
-            'credentials or incorrect permissions for the key file. Check '
-            'your credentials and try again.')
-    subprocess_utils.handle_returncode(rc,
-                                       command,
-                                       failure_message,
-                                       stderr=stderr)
-    return stdout
-
-
 def check_rsync_installed() -> None:
     """Checks if rsync is installed.
 

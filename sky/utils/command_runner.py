@@ -75,7 +75,7 @@ def ssh_options_list(
         # that case.
         'UserKnownHostsFile': os.devnull,
         # Suppresses the warning messages, such as:
-        #   Warning: Permanently added '34.69.216.203' (ED25519) to the list of
+        #   Warning: Permanently added 'xx.xx.xx.xx' (EDxxx) to the list of
         #   known hosts.
         'LogLevel': 'ERROR',
         # Try fewer extraneous key pairs.
@@ -626,12 +626,11 @@ class KubernetesCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
-        """Uses 'ssh' to run 'cmd' on a node with ip.
+        """Uses 'kubectl exec' to run 'cmd' on a pod by its name and namespace.
 
         Args:
             cmd: The command to run.
-            port_forward: A list of ports to forward from the localhost to the
-            remote host.
+            port_forward: This should be None for k8s.
 
             Advanced options:
 
@@ -642,7 +641,13 @@ class KubernetesCommandRunner(CommandRunner):
             ssh_mode: The mode to use for ssh.
                 See SSHMode for more details.
             separate_stderr: Whether to separate stderr from stdout.
-
+            connect_timeout: timeout in seconds for the pod connection.
+            source_bashrc: Whether to source the bashrc before running the
+                command.
+            skip_lines: The number of lines to skip at the beginning of the
+                output. This is used when the output is not processed by
+                SkyPilot but we still want to get rid of some warning messages,
+                such as SSH warnings.
 
         Returns:
             returncode
