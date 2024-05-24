@@ -61,7 +61,10 @@ RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-MAYBE_SKYLET_RESTART_CMD = (f'{constants.SKY_PYTHON_CMD} -m '
+# We need to activate the python environment to make sure autostop in skylet
+# can find the cloud SDK/CLI in PATH.
+MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+                            f'{constants.SKY_PYTHON_CMD} -m '
                             'sky.skylet.attempt_skylet;')
 
 
@@ -198,8 +201,8 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                 stream_logs=False,
                 log_path=log_path,
                 require_outputs=True,
-                # Installing depencies requires source bashrc to access the PATH
-                # in bashrc.
+                # Installing dependencies requires source bashrc to access
+                # conda.
                 source_bashrc=True)
             retry_cnt = 0
             while returncode == 255 and retry_cnt < _MAX_RETRY:

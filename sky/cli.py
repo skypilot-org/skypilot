@@ -4995,7 +4995,7 @@ def local_up(gpus: bool):
                 f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     # Run sky check
     with rich_utils.safe_status('[bold cyan]Running sky check...'):
-        sky_check.check(clouds=('kubernetes',), quiet=True)
+        sky_check.check(clouds=['kubernetes'], quiet=True)
     if cluster_created:
         # Prepare completion message which shows CPU and GPU count
         # Get number of CPUs
@@ -5097,7 +5097,7 @@ def local_down():
     if cluster_removed:
         # Run sky check
         with rich_utils.safe_status('[bold cyan]Running sky check...'):
-            sky_check.check(quiet=True)
+            sky_check.check(clouds=['kubernetes'], quiet=True)
         click.echo(
             f'{colorama.Fore.GREEN}Local cluster removed.{style.RESET_ALL}')
 

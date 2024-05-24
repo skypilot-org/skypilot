@@ -247,8 +247,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def is_same_cloud(self, other: 'Cloud'):
-        raise NotImplementedError
+    def is_same_cloud(self, other: 'Cloud') -> bool:
+        return isinstance(other, self.__class__)
 
     def make_deploy_resources_variables(
         self,
