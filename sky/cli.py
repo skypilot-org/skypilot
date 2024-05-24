@@ -3055,11 +3055,11 @@ def show_gpus(
             gpu_info_msg = ''
             debug_msg = 'To further debug, run: sky check.'
             if name_filter is not None:
-                gpu_info_msg = f' matching name {name_filter!r}'
-                debug_msg = ('To list all available accelerators, '
-                             'run: sky show-gpus --cloud kubernetes.')
+                gpu_info_msg = f' {name_filter!r}'
                 if quantity_filter is not None:
-                    gpu_info_msg += f' with quantity {quantity_filter}'
+                    gpu_info_msg += f' with requested quantity {quantity_filter}'
+                debug_msg = ('To show available accelerators on kubernetes,'
+                             ' run: sky show-gpus --cloud kubernetes')
             err_msg = kubernetes_utils.NO_GPU_ERROR_MESSAGE.format(
                 gpu_info_msg=gpu_info_msg, debug_msg=debug_msg)
             yield err_msg
@@ -3081,39 +3081,48 @@ def show_gpus(
 
         name, quantity = None, None
 
+        # Optimization - do not poll for Kubernetes API for fetching
+        # common GPUs because that will be fetched later for the table after
+        # common GPUs.
+        clouds_to_list = cloud
+        if cloud is None:
+            clouds_to_list = [
+                c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes']
+
         if accelerator_str is None:
             # If cloud is kubernetes, we want to show real-time capacity
-            if cloud_is_kubernetes:
+            if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
+                yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
                 yield from _kubernetes_realtime_gpu_output()
+                yield '\n\n'
                 if kubernetes_utils.get_autoscaler_type() is not None:
                     yield '\n'
                     yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
+            if cloud_is_kubernetes:
+                # Do not show clouds if --cloud kubernetes is specified
+                if not kubernetes_is_enabled:
+                    yield ('Kubernetes is not enabled. To fix, run: '
+                           'sky check kubernetes ')
                 return
 
-            # Optimization - do not poll for Kubernetes API for fetching
-            # common GPUs because that will be fetched later for the table after
-            # common GPUs.
-            clouds_to_list = cloud
-            if cloud is None and not show_all:
-                clouds_to_list = (
-                    c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes')
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
                 clouds=clouds_to_list,
                 region_filter=region,
             )
 
+            if kubernetes_is_enabled and cloud is None:
+                # Show section headers only if Kubernetes is enabled and
+                # a cloud is not specified
+                yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
+
             # "Common" GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             yield from gpu_table.get_string()
-
-            # Kubernetes GPUs with realtime information
-            if cloud is None and kubernetes_is_enabled:
-                yield '\n\n'
-                yield from _kubernetes_realtime_gpu_output(
-                    gpu_col_name='KUBERNETES_GPU')
 
             # Google TPUs
             for tpu in service_catalog.get_tpus():
@@ -3164,18 +3173,22 @@ def show_gpus(
             else:
                 name, quantity = accelerator_str, None
 
-        if cloud_is_kubernetes:
+        if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes) and not show_all:
+            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
             # Get real-time availability of GPUs for Kubernetes
             yield from _kubernetes_realtime_gpu_output(name_filter=name,
                                                        quantity_filter=quantity)
-            return
+            if cloud_is_kubernetes:
+                return
+            yield '\n\n'
         # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=name,
                                                    quantity_filter=quantity,
                                                    region_filter=region,
-                                                   clouds=cloud,
+                                                   clouds=clouds_to_list,
                                                    case_sensitive=False,
                                                    all_regions=all_regions)
         # Import here to save module load speed.
@@ -3207,13 +3220,18 @@ def show_gpus(
             new_result[gpu] = sorted_dataclasses
         result = new_result
 
+        if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes) and not show_all:
+            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
+
         if len(result) == 0:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
-            yield f'Resources \'{name}\'{quantity_str} not found. '
-            yield 'Try \'sky show-gpus --all\' '
-            yield 'to show available accelerators.'
+            cloud_str = f' on {cloud_obj}.' if cloud else ' in cloud catalogs.'
+            yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
+            yield 'To show available accelerators, run: sky show-gpus --all'
             return
+
 
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table_headers = [
