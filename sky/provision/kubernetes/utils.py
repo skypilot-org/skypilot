@@ -35,8 +35,10 @@ MEMORY_SIZE_UNITS = {
     'T': 2**40,
     'P': 2**50,
 }
-NO_GPU_HELP_MESSAGE = 'If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
-(e.g., skypilot.co/accelerator) are setup correctly. '
+NO_GPU_HELP_MESSAGE = ('If your cluster contains GPUs, make sure '
+                       'nvidia.com/gpu resource is available on the nodes and '
+                       'the node labels for identifying GPUs '
+                       '(e.g., skypilot.co/accelerator) are setup correctly. ')
 
 KUBERNETES_AUTOSCALER_NOTE = (
     'Note: Kubernetes cluster autoscaling is enabled. '
