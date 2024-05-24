@@ -3672,7 +3672,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             # Test rolling update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
             # sleep to wait for update to be registered.
-            'sleep 15',
+            'sleep 25',
             # 2 on-deamnd (ready) + 1 on-demand (shutting down).
             _check_replica_in_status(name, [(2, False, 'READY'),
                                             (1, False, 'SHUTTING_DOWN')]),
