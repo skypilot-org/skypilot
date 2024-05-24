@@ -735,17 +735,19 @@ class KubernetesCommandRunner(CommandRunner):
         Raises:
             exceptions.CommandError: rsync command failed.
         """
-        def get_remote_home_dir()->str:
+
+        def get_remote_home_dir() -> str:
             # Use `echo ~` to get the remote home directory, instead of pwd or
             # echo $HOME, because pwd can be `/` when the remote user is root
             # and $HOME is not always set.
             rc, remote_home_dir, _ = self.run('echo ~',
-                                            require_outputs=True,
-                                            stream_logs=False)
+                                              require_outputs=True,
+                                              stream_logs=False)
             if rc != 0:
                 raise ValueError('Failed to get remote home directory.')
             remote_home_dir = remote_home_dir.strip()
             return remote_home_dir
+
         # Build command.
         # TODO(zhwu): This will print a per-file progress bar (with -P),
         # shooting a lot of messages to the output. --info=progress2 is used
