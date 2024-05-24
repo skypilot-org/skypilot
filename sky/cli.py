@@ -3106,7 +3106,7 @@ def show_gpus(
             yield from gpu_table.get_string()
 
             # Kubernetes GPUs with realtime information
-            if kubernetes_is_enabled:
+            if cloud is None and kubernetes_is_enabled:
                 yield '\n\n'
                 yield from _kubernetes_realtime_gpu_output(
                     gpu_col_name='KUBERNETES_GPU')
