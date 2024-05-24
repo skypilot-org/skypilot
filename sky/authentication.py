@@ -465,7 +465,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         #   set the worked pod name deterministically instead of using uuid.
         ssh_target = config['cluster_name'] + '-head'
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_target, port_forward_mode)
+            ssh_target, port_forward_mode, private_key_path=PRIVATE_SSH_KEY_PATH)
     else:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')

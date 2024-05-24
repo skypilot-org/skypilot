@@ -917,7 +917,9 @@ def get_ssh_proxy_command(
     # Setting kubectl port-forward/socat to establish ssh session using
     # ClusterIP service to disallow any ports opened
     else:
-        ssh_jump_proxy_command = create_proxy_command_script(k8s_ssh_target)
+        ssh_jump_proxy_command_path = create_proxy_command_script(k8s_ssh_target)
+        ssh_jump_proxy_command = construct_ssh_jump_command(
+            private_key_path, ssh_jump_ip, proxy_cmd_path=ssh_jump_proxy_command_path)
     return ssh_jump_proxy_command
 
 
