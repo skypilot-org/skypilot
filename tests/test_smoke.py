@@ -305,20 +305,15 @@ _VALIDATE_LAUNCH_OUTPUT = (
 # ---------- A minimal task ----------
 def test_minimal(generic_cloud: str):
     name = _get_cluster_name()
-    validate_output = _VALIDATE_LAUNCH_OUTPUT
-    # Kubernetes will output a SSH Warning for proxy jump, which will cause
-    # the output validation fail. We skip the check for kubernetes for now.
-    if generic_cloud.lower() == 'kubernetes':
-        validate_output = 'true'
     test = Test(
         'minimal',
         [
-            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {validate_output}',
+            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {validate_output}',
+            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
