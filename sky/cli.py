@@ -3192,19 +3192,19 @@ def show_gpus(
         print_section_titles = False
         if kubernetes_is_enabled and (cloud is None or
                                       cloud_is_kubernetes) and not show_all:
+            # Print section title if not showing all and instead a specific
+            # accelerator is requested
+            print_section_titles = True
+            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
             try:
                 k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
                     name_filter=name, quantity_filter=quantity)
-            except ValueError as e:
-                if cloud_is_kubernetes:
-                    yield str(e)
-                else:
-                    k8s_messages += f'Note: {str(e)}'
-            else:
-                print_section_titles = True
-                yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Kubernetes GPUs{colorama.Style.RESET_ALL}')
                 yield from k8s_realtime_table.get_string()
+            except ValueError as e:
+                # In the case of a specific accelerator, show the error message
+                # immediately (e.g., "Resources H100 not found ...")
+                yield str(e)
             if kubernetes_autoscaling:
                 k8s_messages += ('\n' +
                                  kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3265,6 +3265,10 @@ def show_gpus(
             cloud_str = f' on {cloud_obj}.' if cloud else ' in cloud catalogs.'
             yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
             yield 'To show available accelerators, run: sky show-gpus --all'
+
+            if k8s_messages:
+                yield '\n'
+                yield k8s_messages
             return
 
         for i, (gpu, items) in enumerate(result.items()):
@@ -3322,6 +3326,9 @@ def show_gpus(
             if i != 0:
                 yield '\n\n'
             yield from accelerator_table.get_string()
+            if k8s_messages:
+                yield '\n'
+                yield k8s_messages
 
     if show_all:
         click.echo_via_pager(_output())
