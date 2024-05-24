@@ -46,6 +46,15 @@ class Cudo(clouds.Cloud):
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
     )
 
+    _PROJECT_HINT = (
+        'Create a project and then set it as the default project,:\n'
+        f'{_INDENT_PREFIX} $ cudoctl projects create my-project-name\n'
+        f'{_INDENT_PREFIX} $ cudoctl init\n'
+        f'{_INDENT_PREFIX}For more info: '
+        # pylint: disable=line-too-long
+        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
+    )
+
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
@@ -289,7 +298,9 @@ class Cudo(clouds.Cloud):
         project_id, error = cudo_api.get_project_id()
         if error is not None:
             return False, (
-                f'Error getting project '
+                f'Default project is not set. '
+                f'{cls._PROJECT_HINT}\n'
+                f'{cls._INDENT_PREFIX}'
                 f'{common_utils.format_exception(error, use_bracket=True)}')
         try:
             api = cudo_api.virtual_machines()
