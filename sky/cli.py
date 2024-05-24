@@ -3013,6 +3013,15 @@ def show_gpus(
     if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
+    # Kubernetes specific bools
+    cloud_is_kubernetes = isinstance(cloud_obj, sky_clouds.Kubernetes)
+    kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
+    kubernetes_is_enabled = sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
+
+    if cloud_is_kubernetes and region is not None:
+        raise click.UsageError(
+            'The --region flag cannot be set with --cloud kubernetes.')
+
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
 
@@ -3037,8 +3046,10 @@ def show_gpus(
             quantity_filter=quantity_filter,
             case_sensitive=False)
         assert (set(counts.keys()) == set(capacity.keys()) == set(
-            available.keys())), ('Keys of counts, capacity, '
-                                 'and available must be same.')
+            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
+                                 f'capacity ({list(capacity.keys())}), '
+                                 f'and available ({list(available.keys())}) '
+                                 'must be same.')
         if len(counts) == 0:
             gpu_info_msg = ''
             debug_msg = 'To further debug, run: sky check.'
@@ -3068,14 +3079,6 @@ def show_gpus(
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         name, quantity = None, None
-
-        # Kubernetes specific bools
-        cloud_is_kubernetes = isinstance(cloud_obj, sky_clouds.Kubernetes)
-        kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type(
-        ) is not None
-        kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
-            sky_clouds.Kubernetes(),
-            global_user_state.get_cached_enabled_clouds())
 
         if accelerator_str is None:
             # If cloud is kubernetes, we want to show real-time capacity
