@@ -235,11 +235,13 @@ class CommandRunner:
                 See SSHMode for more details.
             separate_stderr: Whether to separate stderr from stdout.
             connect_timeout: timeout in seconds for the ssh connection.
-            source_bashrc: Whether to source the bashrc before running the
+            source_bashrc: Whether to source the ~/.bashrc before running the
                 command.
-            skip_lines: The number of lines to skip from the output. This is
-                used when the output is not processed by SkyPilot but we still
-                want to get rid of some warning messages, such as SSH warnings.
+            skip_lines: The number of lines to skip at the beginning of the
+                output. This is used when the output is not processed by
+                SkyPilot but we still want to get rid of some warning messages,
+                such as SSH warnings.
+
 
         Returns:
             returncode
@@ -426,9 +428,10 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: timeout in seconds for the ssh connection.
             source_bashrc: Whether to source the bashrc before running the
                 command.
-            skip_lines: The number of lines to skip from the output. This is
-                used when the output is not processed by SkyPilot but we still
-                want to get rid of some warning messages, such as SSH warnings.
+            skip_lines: The number of lines to skip at the beginning of the
+                output. This is used when the output is not processed by
+                SkyPilot but we still want to get rid of some warning messages,
+                such as SSH warnings.
 
         Returns:
             returncode
