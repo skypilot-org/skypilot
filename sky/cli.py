@@ -3026,9 +3026,9 @@ def show_gpus(
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
 
-    def _kubernetes_realtime_gpu_output(name_filter: Optional[str] = None,
-                                        quantity_filter: Optional[int] = None,
-                                        raise_if_not_found: bool = False):
+    def _get_kubernetes_realtime_gpu_table(name_filter: Optional[str] = None,
+                                           quantity_filter: Optional[int] = None
+                                           ):
         if quantity_filter:
             qty_header = 'QTY_FILTER'
             free_header = 'FILTERED_FREE_GPUS'
@@ -3050,26 +3050,23 @@ def show_gpus(
                                  f'and available ({list(available.keys())}) '
                                  'must be same.')
         if len(counts) == 0:
-            gpu_info_msg = ''
+            err_msg = 'No GPUs found in Kubernetes cluster. '
             debug_msg = 'To further debug, run: sky check.'
             if name_filter is not None:
                 gpu_info_msg = f' {name_filter!r}'
                 if quantity_filter is not None:
                     gpu_info_msg += f' with requested quantity {quantity_filter}'
+                err_msg = f'Resources{gpu_info_msg} not found in Kubernetes cluster. '
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes')
-            err_msg = kubernetes_utils.NO_GPU_ERROR_MESSAGE.format(
-                gpu_info_msg=gpu_info_msg, debug_msg=debug_msg)
-            if raise_if_not_found:
-                raise ValueError(err_msg)
-            yield err_msg
-            return
+            full_err_msg = err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE + debug_msg
+            raise ValueError(full_err_msg)
         for gpu, _ in sorted(counts.items()):
             realtime_gpu_table.add_row([
                 gpu,
                 _list_to_str(counts.pop(gpu)), capacity[gpu], available[gpu]
             ])
-        yield from realtime_gpu_table.get_string()
+        return realtime_gpu_table
 
     def _output():
         gpu_table = log_utils.create_table(
@@ -3089,8 +3086,9 @@ def show_gpus(
             clouds_to_list = [
                 c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes']
 
+        k8s_messages = ''
         if accelerator_str is None:
-            k8s_messages = ''
+            # Collect k8s related messages in k8s_messages and print them at end
             print_section_titles = False
             # If cloud is kubernetes, we want to show real-time capacity
             if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
@@ -3098,24 +3096,27 @@ def show_gpus(
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    k8s_output_generator = _kubernetes_realtime_gpu_output(
-                        raise_if_not_found=(cloud is None)
-                    )
+                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table()
                 except ValueError as e:
-                    k8s_messages += f'Note: {str(e)}\n'
+                    if cloud_is_kubernetes:
+                        # Immediately show the error msg if --cloud kubernetes
+                        yield str(e)
+                    else:
+                        # Show the error message at the end if not specified
+                        k8s_messages += f'Note: {str(e)}'
                 else:
                     print_section_titles = True
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                            f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
-                    yield from k8s_output_generator
-                    yield '\n\n'
+                    yield from k8s_realtime_table.get_string()
                 if kubernetes_utils.get_autoscaler_type() is not None:
-                    k8s_messages += kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
+                    k8s_messages += '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
             if cloud_is_kubernetes:
                 # Do not show clouds if --cloud kubernetes is specified
                 if not kubernetes_is_enabled:
                     yield ('Kubernetes is not enabled. To fix, run: '
                            'sky check kubernetes ')
+                yield k8s_messages
                 return
 
             result = service_catalog.list_accelerator_counts(
@@ -3126,6 +3127,7 @@ def show_gpus(
 
             if print_section_titles:
                 # If section titles were printed above, print again here
+                yield '\n\n'
                 yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
@@ -3150,17 +3152,15 @@ def show_gpus(
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
-                if (cloud is None and kubernetes_is_enabled and
-                        kubernetes_autoscaling):
-                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
+                if k8s_messages:
+                    yield k8s_messages
                     yield '\n\n'
             else:
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
-                if (cloud is None and kubernetes_is_enabled and
-                        kubernetes_autoscaling):
-                    yield '\n'
-                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
+                if k8s_messages:
+                    yield '\n\n'
+                    yield k8s_messages
                 return
         else:
             # Parse accelerator string
@@ -3184,15 +3184,30 @@ def show_gpus(
             else:
                 name, quantity = accelerator_str, None
 
+        print_section_titles = False
         if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes) and not show_all:
-            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
-            # Get real-time availability of GPUs for Kubernetes
-            yield from _kubernetes_realtime_gpu_output(name_filter=name,
+            try:
+                k8s_realtime_table = _get_kubernetes_realtime_gpu_table(name_filter=name,
                                                        quantity_filter=quantity)
-            if cloud_is_kubernetes:
-                return
-            yield '\n\n'
+            except ValueError as e:
+                if cloud_is_kubernetes:
+                    yield str(e)
+                else:
+                    k8s_messages += f'Note: {str(e)}'
+            else:
+                print_section_titles = True
+                yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Kubernetes GPUs{colorama.Style.RESET_ALL}')
+                yield from k8s_realtime_table.get_string()
+            if kubernetes_utils.get_autoscaler_type() is not None:
+                k8s_messages += '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
+        if cloud_is_kubernetes:
+            # Do not show clouds if --cloud kubernetes is specified
+            if not kubernetes_is_enabled:
+                yield ('Kubernetes is not enabled. To fix, run: '
+                       'sky check kubernetes ')
+            yield k8s_messages
+            return
         # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
         result = service_catalog.list_accelerators(gpus_only=True,
@@ -3231,7 +3246,8 @@ def show_gpus(
             new_result[gpu] = sorted_dataclasses
         result = new_result
 
-        if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes) and not show_all:
+        if print_section_titles and not show_all:
+            yield '\n\n'
             yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
