@@ -3017,7 +3017,10 @@ def show_gpus(
         return ', '.join([str(e) for e in lst])
 
     def _kubernetes_realtime_gpu_output(name_filter: Optional[str] = None,
-                                        quantity_filter: Optional[int] = None):
+                                        quantity_filter: Optional[int] = None,
+                                        gpu_col_name: Optional[str] = None):
+        if gpu_col_name is None:
+            gpu_col_name = 'GPU'
         if quantity_filter:
             qty_header = 'QTY_FILTER'
             free_header = 'FILTERED_FREE_GPUS'
@@ -3025,10 +3028,10 @@ def show_gpus(
             qty_header = 'QTY_PER_NODE'
             free_header = 'TOTAL_FREE_GPUS'
         realtime_gpu_table = log_utils.create_table(
-            ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+            [gpu_col_name, qty_header, 'TOTAL_GPUS', free_header])
         counts, capacity, available = service_catalog.list_accelerator_realtime(
             gpus_only=True,
-            clouds=cloud,
+            clouds='kubernetes',
             name_filter=name_filter,
             region_filter=region,
             quantity_filter=quantity_filter,
@@ -3070,6 +3073,7 @@ def show_gpus(
         cloud_is_kubernetes = isinstance(cloud_obj, sky_clouds.Kubernetes)
         kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type(
         ) is not None
+        kubernetes_is_enabled = sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
 
         if accelerator_str is None:
             # If cloud is kubernetes, we want to show real-time capacity
@@ -3080,9 +3084,15 @@ def show_gpus(
                     yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                 return
 
+            # Optimization - do not poll for Kubernetes API for fetching
+            # common GPUs because that will be fetched later for the table after
+            # common GPUs.
+            clouds_to_list = cloud
+            if cloud is None and not show_all:
+                clouds_to_list = (c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes')
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
-                clouds=cloud,
+                clouds=clouds_to_list,
                 region_filter=region,
             )
 
@@ -3091,6 +3101,11 @@ def show_gpus(
                 if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             yield from gpu_table.get_string()
+
+            # Kubernetes GPUs with realtime information
+            if kubernetes_is_enabled:
+                yield '\n\n'
+                yield from _kubernetes_realtime_gpu_output(gpu_col_name='KUBERNETES_GPU')
 
             # Google TPUs
             for tpu in service_catalog.get_tpus():
@@ -3107,13 +3122,14 @@ def show_gpus(
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
-                if cloud is None and kubernetes_autoscaling:
+                if cloud is None and kubernetes_is_enabled and kubernetes_autoscaling:
                     yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                     yield '\n\n'
             else:
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
-                if cloud is None and kubernetes_autoscaling:
+                if cloud is None and kubernetes_is_enabled and kubernetes_autoscaling:
+                    yield '\n'
                     yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
                 return
         else:
