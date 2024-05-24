@@ -3,15 +3,12 @@
 import dataclasses
 import shlex
 import time
-import typing
 from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import command_runner
 from sky.utils import subprocess_utils
-
-if typing.TYPE_CHECKING:
-    from sky.utils import command_runner
 
 logger = sky_logging.init_logger(__name__)
 
@@ -117,7 +114,7 @@ class DockerInitializer:
     """Initializer for docker containers on a remote node."""
 
     def __init__(self, docker_config: Dict[str, Any],
-                 runner: 'command_runner.SSHCommandRunner', log_path: str):
+                 runner: 'command_runner.CommandRunner', log_path: str):
         self.docker_config = docker_config
         self.container_name = docker_config['container_name']
         self.runner = runner
@@ -166,8 +163,7 @@ class DockerInitializer:
             rc,
             cmd,
             error_msg='Failed to run docker setup commands',
-            stderr=stdout + stderr,
-            stream_logs=False)
+            stderr=stdout + stderr)
         return stdout.strip()
 
     def initialize(self) -> str:
@@ -218,14 +214,25 @@ class DockerInitializer:
                     f'{specific_image}')
         container_running = self._check_container_status()
         if container_running:
-            running_image = (self._run(
-                check_docker_image(self.container_name, self.docker_cmd)))
+            running_image = self._run(
+                check_docker_image(self.container_name, self.docker_cmd))
             if running_image != specific_image:
                 logger.error(
                     f'A container with name {self.container_name} is running '
                     f'image {running_image} instead of {specific_image} (which '
                     'was provided in the YAML)')
         else:
+            # Edit docker config first to avoid disconnecting the container
+            # from GPUs when a systemctl command is called. This is a known
+            # issue with nvidia container toolkit:
+            # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
+            self._run(
+                '[ -f /etc/docker/daemon.json ] || '
+                'echo "{}" | sudo tee /etc/docker/daemon.json;'
+                'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
+                '/etc/docker/daemon.json > /tmp/daemon.json;'
+                'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
+                'sudo systemctl restart docker')
             user_docker_run_options = self.docker_config.get('run_options', [])
             start_command = docker_start_cmds(
                 specific_image,
@@ -245,7 +252,8 @@ class DockerInitializer:
         # Disable apt-get from asking user input during installation.
         # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # pylint: disable=line-too-long
         self._run(
-            'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
+            f'echo \'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}\' '
+            '>> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
             run_env='docker')
         # Install dependencies.

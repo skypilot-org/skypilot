@@ -68,7 +68,7 @@ def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
     with open(tmp_path / 'valid.yaml', 'w', encoding='utf-8') as f:
         f.write(f"""\
         aws:
-            instance_tags:
+            labels:
                 mytag: myvalue
             ssh_proxy_command:
                 eu-west-1: null

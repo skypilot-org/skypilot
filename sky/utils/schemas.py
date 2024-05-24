@@ -3,9 +3,35 @@
 Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
+import enum
 
 
-def get_single_resources_schema():
+def _check_not_both_fields_present(field1: str, field2: str):
+    return {
+        'oneOf': [{
+            'required': [field1],
+            'not': {
+                'required': [field2]
+            }
+        }, {
+            'required': [field2],
+            'not': {
+                'required': [field1]
+            }
+        }, {
+            'not': {
+                'anyOf': [{
+                    'required': [field1]
+                }, {
+                    'required': [field2]
+                }]
+            }
+        }]
+    }
+
+
+def _get_single_resources_schema():
+    """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
@@ -57,7 +83,12 @@ def get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
+            # Deprecated: use 'job_recovery' instead. This is for backward
+            # compatibility, and can be removed in 0.8.0.
             'spot_recovery': {
+                'type': 'string',
+            },
+            'job_recovery': {
                 'type': 'string',
             },
             'disk_size': {
@@ -82,6 +113,12 @@ def get_single_resources_schema():
                     }
                 }],
             },
+            'labels': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                }
+            },
             'accelerator_args': {
                 'type': 'object',
                 'required': [],
@@ -105,45 +142,58 @@ def get_single_resources_schema():
                     'type': 'object',
                     'required': [],
                 }]
-            }
+            },
+            # The following fields are for internal use only.
+            '_docker_login_config': {
+                'type': 'object',
+                'required': ['username', 'password', 'server'],
+                'additionalProperties': False,
+                'properties': {
+                    'username': {
+                        'type': 'string',
+                    },
+                    'password': {
+                        'type': 'string',
+                    },
+                    'server': {
+                        'type': 'string',
+                    }
+                }
+            },
+            '_is_image_managed': {
+                'type': 'boolean',
+            },
+            '_requires_fuse': {
+                'type': 'boolean',
+            },
         }
     }
 
 
+def _get_multi_resources_schema():
+    multi_resources_schema = {
+        k: v
+        for k, v in _get_single_resources_schema().items()
+        # Validation may fail if $schema is included.
+        if k != '$schema'
+    }
+    return multi_resources_schema
+
+
 def get_resources_schema():
-    # To avoid circular imports, only import when needed.
-    # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
+    """Resource schema in task config."""
+    single_resources_schema = _get_single_resources_schema()['properties']
+    single_resources_schema.pop('accelerators')
+    multi_resources_schema = _get_multi_resources_schema()
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'cloud': {
-                'type': 'string',
-                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
-            },
-            'region': {
-                'type': 'string',
-            },
-            'zone': {
-                'type': 'string',
-            },
-            'cpus': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
-            'memory': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
+            **single_resources_schema,
+            # We redefine the 'accelerators' field to allow one line list or
+            # a set of accelerators.
             'accelerators': {
                 # {'V100:1', 'A100:1'} will be
                 # read as a string and converted to dict.
@@ -166,80 +216,17 @@ def get_resources_schema():
                     }
                 }]
             },
-            'instance_type': {
-                'type': 'string',
-            },
-            'use_spot': {
-                'type': 'boolean',
-            },
-            'spot_recovery': {
-                'type': 'string',
-            },
-            'disk_size': {
-                'type': 'integer',
-            },
-            'disk_tier': {
-                'type': 'string',
-            },
-            'ports': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'integer',
-                }, {
-                    'type': 'array',
-                    'items': {
-                        'anyOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'integer',
-                        }]
-                    }
-                }],
-            },
-            'accelerator_args': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'runtime_version': {
-                        'type': 'string',
-                    },
-                    'tpu_name': {
-                        'type': 'string',
-                    },
-                    'tpu_vm': {
-                        'type': 'boolean',
-                    }
-                }
-            },
-            'image_id': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'object',
-                    'required': [],
-                }]
-            },
             'any_of': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             },
             'ordered': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             }
-        }
+        },
+        # Avoid job_recovery and spot_recovery being present at the same time.
+        **_check_not_both_fields_present('job_recovery', 'spot_recovery')
     }
 
 
@@ -316,7 +303,13 @@ def get_service_schema():
                             }, {
                                 'type': 'object',
                             }]
-                        }
+                        },
+                        'headers': {
+                            'type': 'object',
+                            'additionalProperties': {
+                                'type': 'string'
+                            }
+                        },
                     }
                 }]
             },
@@ -415,7 +408,7 @@ def get_task_schema():
                 'patternProperties': {
                     # Checks env keys are valid env var names.
                     '^[a-zA-Z_][a-zA-Z0-9_]*$': {
-                        'type': 'string'
+                        'type': ['string', 'null']
                     }
                 },
                 'additionalProperties': False,
@@ -517,7 +510,9 @@ _NETWORK_CONFIG_SCHEMA = {
     },
 }
 
-_INSTANCE_TAGS_SCHEMA = {
+_LABELS_SCHEMA = {
+    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
+    # compatibility. Will be removed after 0.7.0.
     'instance_tags': {
         'type': 'object',
         'required': [],
@@ -525,18 +520,80 @@ _INSTANCE_TAGS_SCHEMA = {
             'type': 'string',
         },
     },
+    'labels': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': {
+            'type': 'string',
+        },
+    }
 }
+
+
+class RemoteIdentityOptions(enum.Enum):
+    """Enum for remote identity types.
+
+    Some clouds (e.g., AWS, Kubernetes) also allow string values for remote
+    identity, which map to the service account/role to use. Those are not
+    included in this enum.
+    """
+    LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
+    SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
+
+
+def get_default_remote_identity(cloud: str) -> str:
+    """Get the default remote identity for the specified cloud."""
+    if cloud == 'kubernetes':
+        return RemoteIdentityOptions.SERVICE_ACCOUNT.value
+    return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+
 
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
-        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'],
+        'case_insensitive_enum': [
+            option.value for option in RemoteIdentityOptions
+        ]
     }
+}
+
+_REMOTE_IDENTITY_SCHEMA_AWS = {
+    'remote_identity': {
+        'oneOf': [
+            {
+                'type': 'string'
+            },
+            {
+                # A list of single-element dict to pretain the order.
+                # Example:
+                #  remote_identity:
+                #    - my-cluster1-*: my-iam-role-1
+                #    - my-cluster2-*: my-iam-role-2
+                #    - "*"": my-iam-role-3
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'additionalProperties': {
+                        'type': 'string'
+                    },
+                    'maxProperties': 1,
+                    'minProperties': 1,
+                },
+            }
+        ]
+    }
+}
+
+_REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
+    'remote_identity': {
+        'type': 'string'
+    },
 }
 
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
+    from sky.clouds import service_catalog
     from sky.utils import kubernetes_enums
 
     resources_schema = {
@@ -568,11 +625,12 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'security_group_name': {
-                    'type': 'string',
+                    'type': 'string'
                 },
-                **_INSTANCE_TAGS_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
-            }
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'gcp': {
             'type': 'object',
@@ -588,9 +646,10 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                **_INSTANCE_TAGS_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
-            }
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'kubernetes': {
             'type': 'object',
@@ -634,6 +693,13 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'autoscaler': {
+                    'type': 'string',
+                    'case_insensitive_enum': [
+                        type.value
+                        for type in kubernetes_enums.KubernetesAutoscalerType
+                    ]
+                },
             }
         },
         'oci': {
@@ -663,16 +729,35 @@ def get_config_schema():
         },
     }
 
-    for config in cloud_configs.values():
-        config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
+    allowed_clouds = {
+        # A list of cloud names that are allowed to be used
+        'type': 'array',
+        'items': {
+            'type': 'string',
+            'case_insensitive_enum':
+                (list(service_catalog.ALL_CLOUDS) + ['cloudflare'])
+        }
+    }
+
+    for cloud, config in cloud_configs.items():
+        if cloud == 'aws':
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
+        elif cloud == 'kubernetes':
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
+        else:
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
+            'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
+            'allowed_clouds': allowed_clouds,
             **cloud_configs,
-        }
+        },
+        # Avoid spot and jobs being present at the same time.
+        **_check_not_both_fields_present('spot', 'jobs')
     }

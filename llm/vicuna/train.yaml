@@ -1,3 +1,10 @@
+envs:
+  MODEL_SIZE: 7
+  SEQ_LEN: 2048
+  GC_SCALE: 4
+  USE_FLASH_ATTN: 0
+  WANDB_API_KEY: # TODO: Fill with your own WANDB_API_KEY, or use --env to pass.
+
 resources:
   accelerators: A100-80GB:8
   disk_size: 1000
@@ -109,10 +116,3 @@ run: |
   gsutil -m rsync -r -x 'checkpoint-*' $LOCAL_CKPT_PATH/ $CKPT_PATH/
   exit $returncode
 
-
-envs:
-  MODEL_SIZE: 7
-  SEQ_LEN: 2048
-  GC_SCALE: 4
-  USE_FLASH_ATTN: 0
-  WANDB_API_KEY: ""

@@ -52,11 +52,12 @@ class InvalidCloudConfigs(Exception):
 
 
 class ProvisionPrechecksError(Exception):
-    """Raised when a spot job fails prechecks before provision.
+    """Raised when a managed job fails prechecks before provision.
+
     Developer note: For now this should only be used by managed
-    spot code path (technically, this can/should be raised by the
+    jobs code path (technically, this can/should be raised by the
     lower-level sky.launch()). Please refer to the docstring of
-    `spot.recovery_strategy._launch` for more details about when
+    `jobs.recovery_strategy._launch` for more details about when
     the error will be raised.
 
     Args:
@@ -68,11 +69,11 @@ class ProvisionPrechecksError(Exception):
         self.reasons = list(reasons)
 
 
-class SpotJobReachedMaxRetriesError(Exception):
-    """Raised when a spot job fails to be launched after maximum retries.
+class ManagedJobReachedMaxRetriesError(Exception):
+    """Raised when a managed job fails to be launched after maximum retries.
 
-    Developer note: For now this should only be used by managed spot code
-    path. Please refer to the docstring of `spot.recovery_strategy._launch`
+    Developer note: For now this should only be used by managed jobs code
+    path. Please refer to the docstring of `jobs.recovery_strategy._launch`
     for more details about when the error will be raised.
     """
     pass
@@ -189,8 +190,8 @@ class StorageExternalDeletionError(StorageBucketGetError):
     pass
 
 
-class FetchIPError(Exception):
-    """Raised when fetching the IP fails."""
+class FetchClusterInfoError(Exception):
+    """Raised when fetching the cluster info fails."""
 
     class Reason(enum.Enum):
         HEAD = 'HEAD'
@@ -211,8 +212,8 @@ class ClusterStatusFetchingError(Exception):
     pass
 
 
-class SpotUserCancelledError(Exception):
-    """Raised when a spot user cancels the job."""
+class ManagedJobUserCancelledError(Exception):
+    """Raised when a user cancels a managed job."""
     pass
 
 

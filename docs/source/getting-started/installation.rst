@@ -164,6 +164,10 @@ section :ref:`below <cloud-account-setup>`.
   If your clouds show ``enabled`` --- |:tada:| |:tada:| **Congratulations!** |:tada:| |:tada:| You can now head over to
   :ref:`Quickstart <quickstart>` to get started with SkyPilot.
 
+.. tip::
+
+  To check credentials only for specific clouds, pass the clouds as arguments: :code:`sky check aws gcp`
+
 .. _cloud-account-setup:
 
 Cloud account setup

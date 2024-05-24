@@ -53,7 +53,7 @@ We can now access the model through the OpenAI API with the IP and port:
 ```bash
 IP=$(sky status --ip mixtral)
 
-curl -L http://$IP:8000/v1/completions \
+curl http://$IP:8000/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
@@ -66,7 +66,7 @@ Chat API is also supported:
 ```bash
 IP=$(sky status --ip mixtral)
 
-curl -L http://$IP:8000/v1/chat/completions \
+curl http://$IP:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
@@ -119,7 +119,7 @@ After the `sky serve up` command, there will be a single endpoint for the servic
 ```bash
 ENDPOINT=$(sky serve status --endpoint mixtral)
 
-curl -L http://$ENDPOINT/v1/completions \
+curl http://$ENDPOINT/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
@@ -132,7 +132,7 @@ Chat API is also supported:
 ```bash
 ENDPOINT=$(sky serve status --endpoint mixtral)
 
-curl -L http://$ENDPOINT/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",

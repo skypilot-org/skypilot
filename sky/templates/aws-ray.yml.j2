@@ -60,6 +60,10 @@ available_node_types:
   ray.head.default:
     resources: {}
     node_config:
+      {% if remote_identity not in ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'] %}
+      IamInstanceProfile:
+        Name: {{remote_identity}}
+      {% endif %}
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
       # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
@@ -114,10 +118,10 @@ available_node_types:
           Tags:
             - Key: skypilot-user
               Value: {{ user }}
-{%- for tag_key, tag_value in instance_tags.items() %}
-            - Key: {{ tag_key }}
-              Value: {{ tag_value }}
-{%- endfor %}
+            {%- for label_key, label_value in labels.items() %}
+            - Key: {{ label_key }}
+              Value: {{ label_value|tojson }}
+            {%- endfor %}
 
 head_node_type: ray.head.default
 
@@ -161,5 +165,3 @@ setup_commands:
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
 # We do not need to list it here anymore.
-
-

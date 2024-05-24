@@ -3,6 +3,11 @@
 [Qwen1.5](https://github.com/QwenLM/Qwen1.5) is one of the top open LLMs.
 As of Feb 2024, Qwen1.5-72B-Chat is ranked higher than Mixtral-8x7b-Instruct-v0.1 on the LMSYS Chatbot Arena Leaderboard.
 
+📰 **Update (26 April 2024) -** SkyPilot now also supports the [**Qwen1.5-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) model! It performs competitively with Llama-3-70B across a [series of evaluations](https://qwenlm.github.io/blog/qwen1.5-110b/#model-quality). Use [serve-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/serve-110b.yaml) to serve the 110B model.
+
+<p align="center">
+    <img src="https://i.imgur.com/d7tEhAl.gif" alt="qwen" width="600"/>
+</p>
 
 ## References
 * [Qwen docs](https://qwen.readthedocs.io/en/latest/)
@@ -20,19 +25,19 @@ As of Feb 2024, Qwen1.5-72B-Chat is ranked higher than Mixtral-8x7b-Instruct-v0.
 
 After [installing SkyPilot](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html), run your own Qwen model on vLLM with SkyPilot in 1-click:
 
-1. Start serving Qwen 72B on a single instance with any available GPU in the list specified in [serve-72b.yaml](serve-72b.yaml) with a vLLM powered OpenAI-compatible endpoint (You can also switch to [serve-7b.yaml](serve-7b.yaml) for a smaller model):
+1. Start serving Qwen 110B on a single instance with any available GPU in the list specified in [serve-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/serve-110b.yaml) with a vLLM powered OpenAI-compatible endpoint (You can also switch to [serve-72b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/serve-72b.yaml) or [serve-7b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/serve-7b.yaml) for a smaller model):
 
 ```console
-sky launch -c qwen serve-72b.yaml
+sky launch -c qwen serve-110b.yaml
 ```
 2. Send a request to the endpoint for completion:
 ```bash
 IP=$(sky status --ip qwen)
 
-curl -L http://$IP:8000/v1/completions \
+curl http://$IP:8000/v1/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "Qwen/Qwen1.5-72B-Chat",
+      "model": "Qwen/Qwen1.5-110B-Chat",
       "prompt": "My favorite food is",
       "max_tokens": 512
   }' | jq -r '.choices[0].text'
@@ -40,10 +45,10 @@ curl -L http://$IP:8000/v1/completions \
 
 3. Send a request for chat completion:
 ```bash
-curl -L http://$IP:8000/v1/chat/completions \
+curl http://$IP:8000/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "Qwen/Qwen1.5-72B-Chat",
+      "model": "Qwen/Qwen1.5-110B-Chat",
       "messages": [
         {
           "role": "system",
@@ -87,11 +92,11 @@ As shown, the service is now backed by 2 replicas, one on Azure and one on GCP, 
 type is chosen to be **the cheapest available one** on the clouds. That said, it maximizes the
 availability of the service while minimizing the cost.
 
-3. To access the model, we use a `curl -L` command (`-L` to follow redirect) to send the request to the endpoint:
+3. To access the model, we use a `curl` command to send the request to the endpoint:
 ```bash
 ENDPOINT=$(sky serve status --endpoint qwen)
 
-curl -L http://$ENDPOINT/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
       "model": "Qwen/Qwen1.5-72B-Chat",
@@ -110,19 +115,17 @@ curl -L http://$ENDPOINT/v1/chat/completions \
 ```
 
 
-## **Optional:** Accessing Code Llama with Chat GUI
+## **Optional:** Accessing Qwen with Chat GUI
 
-It is also possible to access the Code Llama service with a GUI using [FastChat](https://github.com/lm-sys/FastChat).
+It is also possible to access the Qwen service with a GUI using [vLLM](https://github.com/vllm-project/vllm).
 
-1. Start the chat web UI:
+1. Start the chat web UI (change the `--env` flag to the model you are running):
 ```bash
-sky launch -c qwen-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint qwen)
+sky launch -c qwen-gui ./gui.yaml --env MODEL_NAME='Qwen/Qwen1.5-72B-Chat' --env ENDPOINT=$(sky serve status --endpoint qwen)
 ```
 
 2. Then, we can access the GUI at the returned gradio link:
 ```
 | INFO | stdout | Running on public URL: https://6141e84201ce0bb4ed.gradio.live
 ```
-
-Note that you may get better results to use a higher temperature and top_p value.
 

@@ -109,6 +109,26 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
                                       cluster_names=cluster_names)
 
 
+def endpoints(cluster: str,
+              port: Optional[Union[int, str]] = None) -> Dict[int, str]:
+    """Gets the endpoint for a given cluster and port number (endpoint).
+
+    Args:
+        cluster: The name of the cluster.
+        port: The port number to get the endpoint for. If None, endpoints
+            for all ports are returned..
+
+    Returns: A dictionary of port numbers to endpoints. If endpoint is None,
+        the dictionary will contain all ports:endpoints exposed on the cluster.
+
+    Raises:
+        ValueError: if the cluster is not UP or the endpoint is not exposed.
+        RuntimeError: if the cluster has no ports to be exposed or no endpoints
+            are exposed yet.
+    """
+    return backend_utils.get_endpoints(cluster=cluster, port=port)
+
+
 @usage_lib.entrypoint
 def cost_report() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -196,8 +216,6 @@ def _start(
         idle_minutes_to_autostop = (
             constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
 
-    # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
-    # would have a cluster name (the controller) filled in.
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
     with dag.Dag():
@@ -264,7 +282,7 @@ def start(
         ValueError: argument values are invalid: (1) the specified cluster does
           not exist; (2) if ``down`` is set to True but
           ``idle_minutes_to_autostop`` is None; (3) if the specified cluster is
-          the managed spot controller, and either ``idle_minutes_to_autostop``
+          the managed jobs controller, and either ``idle_minutes_to_autostop``
           is not None or ``down`` is True (omit them to use the default
           autostop settings).
         sky.exceptions.NotSupportedError: if the cluster to restart was
@@ -317,7 +335,7 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         ValueError: the specified cluster does not exist.
         RuntimeError: failed to stop the cluster.
         sky.exceptions.NotSupportedError: if the specified cluster is a spot
-          cluster, or a TPU VM Pod cluster, or the managed spot controller.
+          cluster, or a TPU VM Pod cluster, or the managed jobs controller.
     """
     if controller_utils.Controllers.from_name(cluster_name) is not None:
         raise exceptions.NotSupportedError(
@@ -372,7 +390,7 @@ def down(cluster_name: str, purge: bool = False) -> None:
         ValueError: the specified cluster does not exist.
         RuntimeError: failed to tear down the cluster.
         sky.exceptions.NotSupportedError: the specified cluster is the managed
-          spot controller.
+          jobs controller.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
@@ -470,6 +488,19 @@ def autostop(
                 f'  {_stop_not_supported_message(handle.launched_resources)}.'
             ) from e
 
+    # Check if autodown is required and supported
+    if not is_cancel:
+        try:
+            cloud.check_features_are_supported(
+                handle.launched_resources,
+                {clouds.CloudImplementationFeatures.AUTO_TERMINATE})
+        except exceptions.NotSupportedError as e:
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.YELLOW}{operation} on cluster '
+                f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
+                f'  Auto{option_str} is not supported on {cloud!r} - '
+                f'see reason above.') from e
+
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.set_autostop(handle, idle_minutes, down)
 
@@ -559,7 +590,7 @@ def cancel(
     Additional arguments:
         _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.
-            This is used by the spot controller to cancel the job when the
+            This is used by the jobs controller to cancel the job when the
             worker node is preempted in the spot cluster.
 
     Raises:

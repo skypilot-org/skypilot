@@ -1,5 +1,6 @@
 include sky/backends/monkey_patches/*.py
 exclude sky/clouds/service_catalog/data_fetchers/analyze.py
+include sky/provision/kubernetes/manifests/*
 include sky/setup_files/*
 include sky/skylet/*.sh
 include sky/skylet/LICENSE
@@ -12,8 +13,8 @@ include sky/skylet/providers/oci/*
 include sky/skylet/providers/scp/*
 include sky/skylet/providers/*.py
 include sky/skylet/ray_patches/*.patch
-include sky/spot/dashboard/*
-include sky/spot/dashboard/templates/*
-include sky/spot/dashboard/static/*
+include sky/jobs/dashboard/*
+include sky/jobs/dashboard/templates/*
+include sky/jobs/dashboard/static/*
 include sky/templates/*
 include sky/utils/kubernetes/*
