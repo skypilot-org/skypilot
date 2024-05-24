@@ -99,7 +99,8 @@ def list_accelerators_realtime(
                 node.metadata.labels.get(key))
 
             # Check if name_filter regex matches the accelerator_name
-            if name_filter and not re.match(name_filter, accelerator_name):
+            regex_flags = 0 if case_sensitive else re.IGNORECASE
+            if not re.match(name_filter, accelerator_name, flags=regex_flags):
                 continue
 
             accelerator_count = int(

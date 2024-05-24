@@ -123,6 +123,7 @@ def list_accelerator_realtime(
     region_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
+    case_sensitive: bool = True,
 ) -> Tuple[Dict[str, List[int]], Dict[str, int], Dict[str, int]]:
     """List all accelerators offered by Sky with their realtime availability.
 
@@ -144,6 +145,7 @@ def list_accelerator_realtime(
                             name_filter,
                             region_filter,
                             quantity_filter,
+                            case_sensitive=case_sensitive,
                             all_regions=False,
                             require_price=False))
     accelerator_counts: Dict[str, List[int]] = collections.defaultdict(list)

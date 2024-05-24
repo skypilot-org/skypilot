@@ -3030,8 +3030,9 @@ def show_gpus(
             gpus_only=True,
             clouds=cloud,
             name_filter=name_filter,
+            region_filter=region,
             quantity_filter=quantity_filter,
-            region_filter=region)
+            case_sensitive=False)
         assert (set(counts.keys()) == set(capacity.keys()) == set(
             available.keys())), ('Keys of counts, capacity, '
                                  'and available must be same.')
