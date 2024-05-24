@@ -9,7 +9,7 @@ import os
 
 import cudo_compute
 
-import sky.clouds.service_catalog.cudo_catalog_helper as helper
+import sky.provision.cudo.cudo_utils as utils
 
 VMS_CSV = 'cudo/vms.csv'
 
@@ -22,7 +22,7 @@ def cudo_api():
 
 
 def get_gpu_info(count, model):
-    mem = helper.cudo_gpu_mem[model]
+    mem = utils.cudo_gpu_mem[model]
     # pylint: disable=line-too-long
     # {'Name': 'A4000', 'Manufacturer': 'NVIDIA', 'Count': 1.0, 'MemoryInfo': {'SizeInMiB': 16384}}], 'TotalGpuMemoryInMiB': 16384}"
     info = {
@@ -59,12 +59,12 @@ def machine_types(gpu_model, mem_gib, vcpu_count, gpu_count):
 
 def update_prices():
     rows = []
-    for spec in helper.machine_specs:
+    for spec in utils.machine_specs:
         mts = machine_types('', spec['mem'], spec['vcpu'], spec['gpu'])
         for hc in mts['host_configs']:
-            if not helper.gpu_exists(hc['gpu_model']):
+            if not utils.gpu_exists(hc['gpu_model']):
                 continue
-            accelerator_name = helper.cudo_gpu_to_skypilot_gpu(hc['gpu_model'])
+            accelerator_name = utils.cudo_gpu_to_skypilot_gpu(hc['gpu_model'])
             row = {
                 'instance_type': get_instance_type(hc['machine_type'],
                                                    spec['gpu'], spec['vcpu'],
