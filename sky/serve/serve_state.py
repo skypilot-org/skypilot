@@ -244,9 +244,8 @@ def _get_user_id():
     return user_id
 
 def _parse_name_values(full_name: str):
-    parts = full_name.split('_')
-    service_id = parts[0]
-    name = '_'.join(parts[1:])
+    service_id = full_name
+    name = os.environ['SERVICE_NAME']
 
     return service_id, name
 
@@ -422,7 +421,7 @@ def get_glob_service_names(
                 rows.extend(
                     cursor.execute(
                         f'SELECT id,name FROM services WHERE id=\'{service_id}\' AND user_id = \'{user_id}\'').fetchall())
-    return list({f'{row[0]}_{row[1]}' for row in rows})
+    return list({row[0] for row in rows})
 
 
 # === Replica functions ===
