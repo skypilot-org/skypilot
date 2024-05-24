@@ -3016,7 +3016,8 @@ def show_gpus(
     # Kubernetes specific bools
     cloud_is_kubernetes = isinstance(cloud_obj, sky_clouds.Kubernetes)
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
-    kubernetes_is_enabled = sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
+    kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
+        sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
 
     if cloud_is_kubernetes and region is not None:
         raise click.UsageError(
