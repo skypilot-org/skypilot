@@ -496,4 +496,5 @@ class Kubernetes(clouds.Cloud):
             error_msg = ('kueue custom resources not found. Check kueue '
                          'components are installed with. '
                          '`kubectl get crds | grep kueue.x-k8s.io`')
+            return False, error_msg
         return True, None
