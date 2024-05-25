@@ -631,5 +631,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'We only support one store type for now.', storage_obj.stores)
             store_type = store_types[0]
             store_prefix = store_type.store_prefix()
-            storage_obj.source = f'{store_prefix}{storage_obj.name}'
+            if store_type is storage_lib.StoreType.AZURE:
+                storage_account_name = storage_obj.stores[store_type].storage_account_name
+                storage_obj.source = f'{store_prefix}{storage_account_name}/{storage_obj.name}'
+            else:
+                storage_obj.source = f'{store_prefix}{storage_obj.name}'
             storage_obj.force_delete = True
