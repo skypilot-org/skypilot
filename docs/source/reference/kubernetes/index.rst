@@ -18,7 +18,7 @@ Why use SkyPilot on Kubernetes?
         .. grid:: 2
             :gutter: 3
 
-            .. grid-item-card::  ✅ Ease of Use
+            .. grid-item-card::  ✅ Ease of use
                 :text-align: center
 
                 ..
