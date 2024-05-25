@@ -27,4 +27,6 @@ if __name__ == '__main__':
                              'temperature': 0,
                          })
 
+    if resp.status_code != 200:
+        raise RuntimeError(f'Failed to get response: {resp.text}')
     print(resp.json()['choices'][0]['message']['content'])

@@ -34,7 +34,7 @@ sky launch -c qwen serve-110b.yaml
 ```bash
 IP=$(sky status --ip qwen)
 
-curl -L http://$IP:8000/v1/completions \
+curl http://$IP:8000/v1/completions \
     -H "Content-Type: application/json" \
     -d '{
       "model": "Qwen/Qwen1.5-110B-Chat",
@@ -45,7 +45,7 @@ curl -L http://$IP:8000/v1/completions \
 
 3. Send a request for chat completion:
 ```bash
-curl -L http://$IP:8000/v1/chat/completions \
+curl http://$IP:8000/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
       "model": "Qwen/Qwen1.5-110B-Chat",
@@ -92,11 +92,11 @@ As shown, the service is now backed by 2 replicas, one on Azure and one on GCP, 
 type is chosen to be **the cheapest available one** on the clouds. That said, it maximizes the
 availability of the service while minimizing the cost.
 
-3. To access the model, we use a `curl -L` command (`-L` to follow redirect) to send the request to the endpoint:
+3. To access the model, we use a `curl` command to send the request to the endpoint:
 ```bash
 ENDPOINT=$(sky serve status --endpoint qwen)
 
-curl -L http://$ENDPOINT/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
       "model": "Qwen/Qwen1.5-72B-Chat",

@@ -27,6 +27,19 @@ Available fields and semantics:
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
         disk_size: 100
 
+  # Allow list for clouds to be used in `sky check`
+  #
+  # This field is used to restrict the clouds that SkyPilot will check and use
+  # when running `sky check`. Any cloud already enabled but not specified here
+  # will be disabled on the next `sky check` run.
+  # If this field is not set, SkyPilot will check and use all supported clouds.
+  #
+  # Default: null (use all supported clouds).
+  allowed_clouds:
+    - aws
+    - gcp
+    - kubernetes
+
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.
   aws:
