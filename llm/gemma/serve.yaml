@@ -24,21 +24,9 @@ resources:
   ports: 8000
   disk_tier: best
 
-setup: |
-  conda activate gemma
-  if [ $? -ne 0 ]; then
-    conda create -n gemma -y python=3.10
-    conda activate gemma
-  fi
-  pip install vllm==0.3.2
-  pip install transformers==4.38.1
-  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
-
 run: |
   conda activate gemma
   export PATH=$PATH:/sbin
-  # --max-model-len is set to 1024 to avoid taking too much GPU memory on L4 and
-  # A10g with small memory.
   python -u -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --model $MODEL_NAME \
