@@ -26,12 +26,12 @@ Why use SkyPilot on Kubernetes?
             .. grid-item-card::  📋 Interactive development on Kubernetes
                 :text-align: center
 
-                :ref:`SSH access to pods <dev-ssh>`, :ref:`VSCode integration <dev-vscode>`, :ref:`job management <managed-jobs>`, :ref:`model serving <sky-serve>`, :ref:`autodown idle pods <auto-stop>` and more.
+                :ref:`SSH access to pods <dev-ssh>`, :ref:`VSCode integration <dev-vscode>`, :ref:`job management <managed-jobs>`, :ref:`autodown idle pods <auto-stop>` and more.
 
             .. grid-item-card::  ☁️ Burst to the cloud
                 :text-align: center
 
-                Kubernetes cluster is full? SkyPilot seamlessly gets resources on the cloud to get your job running sooner.
+                Kubernetes cluster is full? SkyPilot :ref:`seamlessly gets resources on the cloud <kubernetes-optimizer-table>` to get your job running sooner.
 
             .. grid-item-card::  🖼 Run popular models on Kubernetes
                 :text-align: center
@@ -45,20 +45,20 @@ Why use SkyPilot on Kubernetes?
         .. grid:: 2
             :gutter: 3
 
-            .. grid-item-card::  ☁️ Burst to the cloud
+            .. grid-item-card::  ☁️ Unified platform for all Infrastructure
                 :text-align: center
 
-                Scale out to capacity across clouds and regions without requiring manual intervention.
+                Scale beyond your Kubernetes cluster to capacity on :ref:`across clouds and regions <auto-failover>` without manual intervention.
 
             .. grid-item-card::  🚯️ Minimize resource wastage
                 :text-align: center
 
-                SkyPilot can automatically terminate idle pods to free up resources for other users.
+                SkyPilot can run with your custom pod scheduler and automatically terminate idle pods to free up resources for other users.
 
             .. grid-item-card::  👀 Observability
                 :text-align: center
 
-                Use your existing tools, such as the :ref:`Kubernetes Dashboard <kubernetes-observability>`, to monitor SkyPilot pods.
+                Works with your existing tools, such as the :ref:`Kubernetes Dashboard <kubernetes-observability>`.
 
             .. grid-item-card::  🍽️ Self-serve infra for your teams
                 :text-align: center
@@ -92,8 +92,8 @@ In a typical workflow:
    files containing their credentials (`kube-context <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#define-clusters-users-and-contexts>`_).
    SkyPilot reads this Kubeconfig file to communicate with the cluster.
 
-Submitting SkyPilot tasks to Kubernetes Clusters
-------------------------------------------------
+Getting Started
+---------------
 .. _kubernetes-instructions:
 
 Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes-setup>` and provided you with a kubeconfig file:
@@ -134,6 +134,8 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
      :code:`sky check` will also check if GPU support is available on your cluster. If GPU support is not available, it
      will show the reason.
      To setup GPU support on the cluster, refer to the :ref:`Kubernetes cluster setup guide <kubernetes-setup>`.
+
+.. _kubernetes-optimizer-table:
 
 4. You can now run any SkyPilot task on your Kubernetes cluster.
 
@@ -269,7 +271,7 @@ FAQs
 
 * **How do I view the pods created by SkyPilot on my Kubernetes cluster?**
 
-  You can use your existing observability tools to filter resources with the label :code:`parent=skypilot`. As an example, follow the instructions :ref:`here <kubernetes-observability>` to deploy the Kubernetes Dashboard on your cluster.
+  You can use your existing observability tools to filter resources with the label :code:`parent=skypilot` (:code:`kubectl get pods -l 'parent=skypilot'`). As an example, follow the instructions :ref:`here <kubernetes-observability>` to deploy the Kubernetes Dashboard on your cluster.
 
 * **How can I specify custom configuration for the pods created by SkyPilot?**
 
