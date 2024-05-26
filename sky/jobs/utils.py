@@ -6,6 +6,7 @@ ManagedJobCodeGen.
 """
 import collections
 import enum
+import inspect
 import os
 import pathlib
 import shlex
@@ -28,7 +29,7 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.skylet.log_lib import run_bash_command_with_log
+from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
@@ -184,7 +185,7 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                 'managed_job_event',
                                 f'jobs-callback-{job_id}-{task_id}.log')
-        result = run_bash_command_with_log(
+        result = log_lib.run_bash_command_with_log(
             bash_command=event_callback,
             log_path=log_path,
             env_vars=dict(
@@ -448,18 +449,48 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     return ''
 
 
-def stream_logs_by_name(job_name: str, follow: bool = True) -> str:
-    """Stream logs by name."""
-    job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
-    if len(job_ids) == 0:
-        return (f'{colorama.Fore.RED}No job found with name {job_name!r}.'
-                f'{colorama.Style.RESET_ALL}')
-    if len(job_ids) > 1:
-        return (f'{colorama.Fore.RED}Multiple running jobs found '
-                f'with name {job_name!r}.\n'
-                f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    stream_logs_by_id(job_ids[0], follow)
-    return ''
+def stream_logs(job_id: Optional[int],
+                job_name: Optional[str],
+                controller: bool = False,
+                follow: bool = True) -> str:
+    """Stream logs by job id or job name."""
+    if job_id is None and job_name is None:
+        job_id = managed_job_state.get_latest_job_id()
+        if job_id is None:
+            return 'No managed job found.'
+    if controller:
+        if job_id is None:
+            assert job_name is not None
+            managed_jobs = managed_job_state.get_managed_jobs()
+            managed_jobs = list(
+                filter(lambda job: job['job_name'] == job_name, managed_jobs))
+            if len(managed_jobs) == 0:
+                return f'No managed job found with name {job_name!r}.'
+            if len(managed_jobs) > 1:
+                raise ValueError(
+                    f'Multiple managed jobs found with name {job_name!r}. '
+                    'Please specify the job_id instead.')
+            job_id = managed_jobs[0]['job_id']
+        assert job_id is not None, (job_id, job_name)
+        # TODO: keep sync with job_lib.JobLibCodeGen.tail_logs
+        run_timestamp = job_lib.get_run_timestamp(job_id)
+        if run_timestamp is None:
+            return f'No managed job contrller log found with job_id {job_id}.'
+        log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
+        log_lib.tail_logs(job_id=job_id, log_dir=log_dir, follow=follow)
+        return ''
+
+    if job_id is None:
+        assert job_name is not None
+        job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
+        if len(job_ids) == 0:
+            return f'No running managed job found with name {job_name!r}.'
+        if len(job_ids) > 1:
+            raise ValueError(
+                f'Multiple running jobs found with name {job_name!r}.')
+        job_id = job_ids[0]
+
+    return stream_logs_by_id(job_id, follow)
 
 
 def dump_managed_job_queue() -> str:
@@ -716,7 +747,8 @@ class ManagedJobCodeGen:
     _PREFIX = textwrap.dedent("""\
         managed_job_version = 0
         try:
-            from sky.jobs import constants, state, utils
+            from sky.jobs import state as managed_job_state
+            from sky.jobs import constants, utils
             managed_job_version = constants.MANAGED_JOBS_VERSION
         except ImportError:
             from sky.spot import spot_state as state, spot_utils as utils
@@ -750,20 +782,18 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def stream_logs_by_name(cls, job_name: str, follow: bool = True) -> str:
+    def stream_logs(cls,
+                    job_name: Optional[str],
+                    job_id: Optional[int],
+                    follow: bool = True,
+                    controller: bool = False) -> str:
+        # We inspect the source code of the function here for backward
+        # compatibility.
+        # TODO: change to utils.stream_logs(job_name, job_id, follow) in v0.8.0.
         code = textwrap.dedent(f"""\
-        msg = utils.stream_logs_by_name({job_name!r}, follow={follow})
-        print(msg, flush=True)
-        """)
-        return cls._build(code)
-
-    @classmethod
-    def stream_logs_by_id(cls,
-                          job_id: Optional[int],
-                          follow: bool = True) -> str:
-        code = textwrap.dedent(f"""\
-        job_id = {job_id} if {job_id} is not None else state.get_latest_job_id()
-        msg = utils.stream_logs_by_id(job_id, follow={follow})
+        {inspect.getsource(stream_logs)}
+        msg = stream_logs({job_name!r}, {job_id!r}, '
+        '                 follow={follow}, controller={controller})
         print(msg, flush=True)
         """)
         return cls._build(code)

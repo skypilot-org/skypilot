@@ -3632,25 +3632,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool):
     """Tail the log of a managed job."""
     try:
-        if controller:
-            # Get the job_id for the given job name, if specified.
-            if name is not None:
-                job_queue = managed_jobs.queue(refresh=False)
-                job_id = None
-                for job in job_queue:
-                    if job['job_name'] == name:
-                        job_id = job['job_id']
-                        break
-                if job_id is None:
-                    click.echo(f'Managed job with name {name!r} not found.')
-                    sys.exit(1)
-
-            core.tail_logs(
-                controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name,
-                job_id=job_id,
-                follow=follow)
-        else:
-            managed_jobs.tail_logs(name=name, job_id=job_id, follow=follow)
+        managed_jobs.tail_logs(name=name,
+                               job_id=job_id,
+                               follow=follow,
+                               controller=controller)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

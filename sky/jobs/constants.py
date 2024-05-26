@@ -24,4 +24,4 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # The version of the lib files that jobs/utils use. Whenever there is an API
 # change for the jobs/utils, we need to bump this version and update
 # job.utils.ManagedJobCodeGen to handle the version update.
-MANAGED_JOBS_VERSION = 1
+MANAGED_JOBS_VERSION = 2
