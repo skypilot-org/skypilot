@@ -164,6 +164,10 @@ section :ref:`below <cloud-account-setup>`.
   If your clouds show ``enabled`` --- |:tada:| |:tada:| **Congratulations!** |:tada:| |:tada:| You can now head over to
   :ref:`Quickstart <quickstart>` to get started with SkyPilot.
 
+.. tip::
+
+  To check credentials only for specific clouds, pass the clouds as arguments: :code:`sky check aws gcp`
+
 .. _cloud-account-setup:
 
 Cloud account setup
@@ -308,9 +312,10 @@ Cudo Compute
 ~~~~~~~~~~~~~~~~~~
 
 `Cudo Compute <https://www.cudocompute.com/>`__ GPU cloud provides low cost GPUs powered with green energy.
-
-1. Create an API Key by following `this guide <https://www.cudocompute.com/docs/guide/api-keys/>`__.
-2. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
+1. Create a billing account by following `this guide <https://www.cudocompute.com/docs/guide/billing/>`__.
+2. Create a project `<https://www.cudocompute.com/docs/guide/projects/>`__.
+3. Create an API Key by following `this guide <https://www.cudocompute.com/docs/guide/api-keys/>`__.
+3. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
 3. Run :code:`cudoctl init`:
 
 .. code-block:: shell
@@ -322,7 +327,7 @@ Cudo Compute
     ✔ context: default
     config file saved ~/.config/cudo/cudo.yml
 
-  pip install "cudocompute>=0.1.8"
+  pip install "cudo-compute>=0.1.10"
 
 If you want to want to use skypilot with a different Cudo Compute account or project, just run :code:`cudoctl init`: again.
 

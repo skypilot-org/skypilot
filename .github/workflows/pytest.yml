@@ -27,7 +27,7 @@ jobs:
           - tests/test_optimizer_random_dag.py
           - tests/test_storage.py
           - tests/test_wheels.py
-          - tests/test_spot_serve.py
+          - tests/test_jobs_and_serve.py
           - tests/test_yaml_parser.py
     runs-on: ubuntu-latest
     steps:

@@ -31,7 +31,7 @@ cd skypilot/llm/vicuna-llama-2
 Paste the access token into [train.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/train.yaml):
 ```yaml
 envs:
-  HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 ```
 
 ## Train your own Vicuna on Llama-2

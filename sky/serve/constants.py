@@ -21,6 +21,18 @@ SERVICE_REGISTER_TIMEOUT_SECONDS = 60
 # interval.
 LB_CONTROLLER_SYNC_INTERVAL_SECONDS = 20
 
+# The maximum retry times for load balancer for each request. After changing to
+# proxy implementation, we do retry for failed requests.
+# TODO(tian): Expose this option to users in yaml file.
+LB_MAX_RETRY = 3
+
+# The timeout in seconds for load balancer to wait for a response from replica.
+# Large LLMs like Llama2-70b is able to process the request within ~30 seconds.
+# We set the timeout to 120s to be safe. For reference, FastChat uses 100s:
+# https://github.com/lm-sys/FastChat/blob/f2e6ca964af7ad0585cadcf16ab98e57297e2133/fastchat/constants.py#L39 # pylint: disable=line-too-long
+# TODO(tian): Expose this option to users in yaml file.
+LB_STREAM_TIMEOUT = 120
+
 # Interval in seconds to probe replica endpoint.
 ENDPOINT_PROBE_INTERVAL_SECONDS = 10
 
@@ -53,9 +65,9 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # do some log rotation.
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 
-# Due to the CPU/memory usage of the controller process launched with sky job (
-# use ray job under the hood), we need to reserve some CPU/memory for each serve
-# controller process.
+# Due to the CPU/memory usage of the controller process launched with a job on
+# controller VM (use ray job under the hood), we need to reserve some CPU/memory
+# for each serve controller process.
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
 CONTROLLER_MEMORY_USAGE_GB = 1.0
@@ -69,7 +81,7 @@ DEFAULT_MIN_REPLICAS = 1
 # automatically generated from this start port.
 CONTROLLER_PORT_START = 20001
 LOAD_BALANCER_PORT_START = 30001
-LOAD_BALANCER_PORT_RANGE = '30001-30100'
+LOAD_BALANCER_PORT_RANGE = '30001-30020'
 
 # Initial version of service.
 INITIAL_VERSION = 1

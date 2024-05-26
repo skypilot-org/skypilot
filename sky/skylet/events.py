@@ -3,7 +3,6 @@ import math
 import os
 import re
 import subprocess
-import sys
 import time
 import traceback
 
@@ -14,10 +13,11 @@ from sky import clouds
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import cloud_registry
+from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
+from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.spot import spot_utils
 from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -64,15 +64,15 @@ class JobSchedulerEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
-        job_lib.scheduler.schedule_step()
+        job_lib.scheduler.schedule_step(force_update_jobs=True)
 
 
-class SpotJobUpdateEvent(SkyletEvent):
-    """Skylet event for updating spot job status."""
+class ManagedJobUpdateEvent(SkyletEvent):
+    """Skylet event for updating managed job status."""
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
-        spot_utils.update_spot_job_status()
+        managed_job_utils.update_managed_job_status()
 
 
 class ServiceUpdateEvent(SkyletEvent):
@@ -192,21 +192,36 @@ class AutostopEvent(SkyletEvent):
                 # Passing env inherited from os.environ is technically not
                 # needed, because we call `python <script>` rather than `ray
                 # <cmd>`. We just need the {RAY_USAGE_STATS_ENABLED: 0} part.
-                subprocess.run([sys.executable, script], check=True, env=env)
+                subprocess.run(f'{constants.SKY_PYTHON_CMD} {script}',
+                               check=True,
+                               shell=True,
+                               env=env)
 
                 logger.info('Running ray down.')
                 # Stop the workers first to avoid orphan workers.
                 subprocess.run(
-                    ['ray', 'down', '-y', '--workers-only', config_path],
+                    f'{constants.SKY_RAY_CMD} down -y --workers-only '
+                    f'{config_path}',
                     check=True,
+                    shell=True,
                     # We pass env inherited from os.environ due to calling `ray
                     # <cmd>`.
                     env=env)
 
+            # Stop the ray autoscaler to avoid scaling up, during
+            # stopping/terminating of the cluster. We do not rely `ray down`
+            # below for stopping ray cluster, as it will not use the correct
+            # ray path.
+            logger.info('Stopping the ray cluster.')
+            subprocess.run(f'{constants.SKY_RAY_CMD} stop',
+                           shell=True,
+                           check=True)
+
             logger.info('Running final ray down.')
             subprocess.run(
-                ['ray', 'down', '-y', config_path],
+                f'{constants.SKY_RAY_CMD} down -y {config_path}',
                 check=True,
+                shell=True,
                 # We pass env inherited from os.environ due to calling `ray
                 # <cmd>`.
                 env=env)
@@ -228,7 +243,7 @@ class AutostopEvent(SkyletEvent):
         # Stop the ray autoscaler to avoid scaling up, during
         # stopping/terminating of the cluster.
         logger.info('Stopping the ray cluster.')
-        subprocess.run('ray stop', shell=True, check=True)
+        subprocess.run(f'{constants.SKY_RAY_CMD} stop', shell=True, check=True)
 
         operation_fn = provision_lib.stop_instances
         if autostop_config.down:

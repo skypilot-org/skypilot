@@ -379,14 +379,15 @@ def _follow_job_logs(file,
 
 def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
-              spot_job_id: Optional[int] = None,
+              managed_job_id: Optional[int] = None,
               follow: bool = True) -> None:
     """Tail the logs of a job.
 
     Args:
         job_id: The job id.
         log_dir: The log directory of the job.
-        spot_job_id: The spot job id (for logging info only to avoid confusion).
+        managed_job_id: The managed job id (for logging info only to avoid
+            confusion).
         follow: Whether to follow the logs or print the logs so far and exit.
     """
     if job_id is None:
@@ -396,14 +397,14 @@ def tail_logs(job_id: Optional[int],
         logger.info('Skip streaming logs as no job has been submitted.')
         return
     job_str = f'job {job_id}'
-    if spot_job_id is not None:
-        job_str = f'spot job {spot_job_id}'
+    if managed_job_id is not None:
+        job_str = f'managed job {managed_job_id}'
     if log_dir is None:
         print(f'{job_str.capitalize()} not found (see `sky queue`).',
               file=sys.stderr)
         return
-    logger.debug(f'Tailing logs for job, real job_id {job_id}, spot_job_id '
-                 f'{spot_job_id}.')
+    logger.debug(f'Tailing logs for job, real job_id {job_id}, managed_job_id '
+                 f'{managed_job_id}.')
     logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for {job_str}.'
                 f'{colorama.Style.RESET_ALL}')
     log_path = os.path.join(log_dir, 'run.log')

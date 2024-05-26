@@ -1,6 +1,6 @@
 envs:
   MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
-  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 resources:
   accelerators: {L4:1, A10G:1, A10:1, A100:1, A100-80GB:1}

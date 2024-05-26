@@ -10,6 +10,7 @@ from sky import skypilot_config
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import common
+from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
@@ -218,7 +219,7 @@ def _wait_for_pods_to_run(namespace, new_nodes):
                 node.metadata.name, namespace)
 
             # Continue if pod and all the containers within the
-            # pod are succesfully created and running.
+            # pod are successfully created and running.
             if pod.status.phase == 'Running' and all(
                     container.state.running
                     for container in pod.status.container_statuses):
@@ -241,7 +242,7 @@ def _wait_for_pods_to_run(namespace, new_nodes):
                             'the node. Error details: '
                             f'{container_status.state.waiting.message}.')
             # Reaching this point means that one of the pods had an issue,
-            # so break out of the loop
+            # so break out of the loop, and wait until next second.
             break
 
         if all_pods_running:
@@ -301,13 +302,7 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
     set_k8s_env_var_cmd = [
         '/bin/sh',
         '-c',
-        (
-            'prefix_cmd() '
-            '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-            'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
-            '~/k8s_env_var.sh && '
-            'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-            '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+        docker_utils.SETUP_ENV_VARS_CMD,
     ]
 
     for new_pod in new_pods:
@@ -496,18 +491,25 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # "nodes".
             pod_spec['spec']['affinity'] = {
                 'podAntiAffinity': {
-                    'requiredDuringSchedulingIgnoredDuringExecution': [{
-                        'labelSelector': {
-                            'matchExpressions': [{
-                                'key': TAG_SKYPILOT_CLUSTER_NAME,
-                                'operator': 'In',
-                                'values': [cluster_name_on_cloud]
-                            }]
-                        },
-                        'topologyKey': 'kubernetes.io/hostname'
+                    # Set as a soft constraint
+                    'preferredDuringSchedulingIgnoredDuringExecution': [{
+                        # Max weight to avoid scheduling on the
+                        # same physical node unless necessary.
+                        'weight': 100,
+                        'podAffinityTerm': {
+                            'labelSelector': {
+                                'matchExpressions': [{
+                                    'key': TAG_SKYPILOT_CLUSTER_NAME,
+                                    'operator': 'In',
+                                    'values': [cluster_name_on_cloud]
+                                }]
+                            },
+                            'topologyKey': 'kubernetes.io/hostname'
+                        }
                     }]
                 }
             }
+
         pod = kubernetes.core_api().create_namespaced_pod(namespace, pod_spec)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:
@@ -533,6 +535,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     _wait_for_pods_to_schedule(namespace, wait_pods, provision_timeout)
     # Wait until the pods and their containers are up and running, and
     # fail early if there is an error
+    logger.debug(f'run_instances: waiting for pods to be running (pulling '
+                 f'images): {list(wait_pods_dict.keys())}')
     _wait_for_pods_to_run(namespace, wait_pods)
     logger.debug(f'run_instances: all pods are scheduled and running: '
                  f'{list(wait_pods_dict.keys())}')
@@ -723,7 +727,9 @@ def get_cluster_info(
         custom_ray_options={
             'object-store-memory': 500000000,
             'num-cpus': cpu_request,
-        })
+        },
+        provider_name='kubernetes',
+        provider_config=provider_config)
 
 
 def query_instances(

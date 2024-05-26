@@ -22,7 +22,7 @@ In this recipe, you will serve `databricks/dbrx-instruct` on your own infra  -- 
 ```yaml
 envs:
   MODEL_NAME: databricks/dbrx-instruct
-  HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token, or use --env to pass.
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 service:
   replicas: 2
@@ -171,7 +171,7 @@ Wait until the model is ready (this can take 10+ minutes), as indicated by these
 ...
 (task, pid=17433) INFO 03-28 04:32:50 metrics.py:218] Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Swapped: 0 reqs, Pending: 0 reqs, GPU KV cache usage: 0.0%, CPU KV cache usage: 0.0%
 ```
-:tada: **Congratulations!** :tada: You have now launched the DBRX Instruct LLM on your infra.
+🎉 **Congratulations!** 🎉 You have now launched the DBRX Instruct LLM on your infra.
 
 You can play with the model via
 - Standard OpenAPI-compatible endpoints (e.g., `/v1/chat/completions`)
@@ -256,7 +256,7 @@ ENDPOINT=$(sky serve status --endpoint dbrx)
 
 To curl the endpoint:
 ```console
-curl -L $ENDPOINT/v1/chat/completions \
+curl $ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "databricks/dbrx-instruct",

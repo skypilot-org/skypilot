@@ -4,7 +4,7 @@ import dataclasses
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from sky.utils.resources_utils import port_ranges_to_set
+from sky.utils import resources_utils
 
 # NOTE: we can use pydantic instead of dataclasses or namedtuples, because
 # pydantic provides more features like validation or parsing from
@@ -104,6 +104,10 @@ class ClusterInfo:
     # The unique identifier of the head instance, i.e., the
     # `instance_info.instance_id` of the head node.
     head_instance_id: Optional[InstanceId]
+    # Provider related information.
+    provider_name: str
+    provider_config: Optional[Dict[str, Any]] = None
+
     docker_user: Optional[str] = None
     # Override the ssh_user from the cluster config.
     ssh_user: Optional[str] = None
@@ -151,6 +155,19 @@ class ClusterInfo:
             other_ips.append(pair)
         return head_instance_ip + other_ips
 
+    def instance_ids(self) -> List[str]:
+        """Return the instance ids in the same order of ip_tuples."""
+        id_list = []
+        if self.head_instance_id is not None:
+            id_list.append(self.head_instance_id + '-0')
+        for inst_id, instances in self.instances.items():
+            start_idx = 0
+            if inst_id == self.head_instance_id:
+                start_idx = 1
+            id_list.extend(
+                [f'{inst_id}-{i}' for i in range(start_idx, len(instances))])
+        return id_list
+
     def has_external_ips(self) -> bool:
         """True if the cluster has external IP."""
         ip_tuples = self.ip_tuples()
@@ -186,8 +203,10 @@ class ClusterInfo:
     def get_ssh_ports(self) -> List[int]:
         """Get the SSH port of all the instances."""
         head_instance = self.get_head_instance()
-        assert head_instance is not None, self
-        head_instance_port = [head_instance.ssh_port]
+
+        head_instance_port = []
+        if head_instance is not None:
+            head_instance_port = [head_instance.ssh_port]
 
         worker_instances = self.get_worker_instances()
         worker_instance_ports = [
@@ -201,7 +220,7 @@ class Endpoint:
     pass
 
     @abc.abstractmethod
-    def url(self, ip: str):
+    def url(self, override_ip: Optional[str] = None) -> str:
         raise NotImplementedError
 
 
@@ -211,44 +230,41 @@ class SocketEndpoint(Endpoint):
     port: Optional[int]
     host: str = ''
 
-    def url(self, ip: str):
-        if not self.host:
-            self.host = ip
-        return f'{self.host}{":" + str(self.port) if self.port else ""}'
+    def url(self, override_ip: Optional[str] = None) -> str:
+        host = override_ip if override_ip else self.host
+        return f'{host}{":" + str(self.port) if self.port else ""}'
 
 
 @dataclasses.dataclass
 class HTTPEndpoint(SocketEndpoint):
-    """HTTP endpoint accesible via a url."""
+    """HTTP endpoint accessible via a url."""
     path: str = ''
 
-    def url(self, ip: str):
-        del ip  # Unused.
-        return f'http://{os.path.join(super().url(self.host), self.path)}'
+    def url(self, override_ip: Optional[str] = None) -> str:
+        host = override_ip if override_ip else self.host
+        return f'http://{os.path.join(super().url(host), self.path)}'
 
 
 @dataclasses.dataclass
 class HTTPSEndpoint(SocketEndpoint):
-    """HTTPS endpoint accesible via a url."""
+    """HTTPS endpoint accessible via a url."""
     path: str = ''
 
-    def url(self, ip: str):
-        del ip  # Unused.
-        return f'https://{os.path.join(super().url(self.host), self.path)}'
+    def url(self, override_ip: Optional[str] = None) -> str:
+        host = override_ip if override_ip else self.host
+        return f'https://{os.path.join(super().url(host), self.path)}'
 
 
 def query_ports_passthrough(
-    cluster_name_on_cloud: str,
     ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
+    head_ip: Optional[str],
 ) -> Dict[int, List[Endpoint]]:
-    """Common function to query ports for AWS, GCP and Azure.
+    """Common function to get endpoints for AWS, GCP and Azure.
 
-    Returns a list of socket endpoint with empty host and the input ports."""
-    del cluster_name_on_cloud, provider_config  # Unused.
-    ports = list(port_ranges_to_set(ports))
+    Returns a list of socket endpoint using head_ip and ports."""
+    assert head_ip is not None, head_ip
+    ports = list(resources_utils.port_ranges_to_set(ports))
     result: Dict[int, List[Endpoint]] = {}
     for port in ports:
-        result[port] = [SocketEndpoint(port=port)]
-
+        result[port] = [SocketEndpoint(port=port, host=head_ip)]
     return result

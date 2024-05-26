@@ -199,11 +199,17 @@ def get_ingress_external_ip_and_ports(
 
     ingress_service = ingress_services[0]
     if ingress_service.status.load_balancer.ingress is None:
-        # Try to use assigned external IP if it exists,
-        # otherwise return 'localhost'
+        # We try to get an IP/host for the service in the following order:
+        # 1. Try to use assigned external IP if it exists
+        # 2. Use the skypilot.co/external-ip annotation in the service
+        # 3. Otherwise return 'localhost'
+        ip = None
         if ingress_service.spec.external_i_ps is not None:
             ip = ingress_service.spec.external_i_ps[0]
-        else:
+        elif ingress_service.metadata.annotations is not None:
+            ip = ingress_service.metadata.annotations.get(
+                'skypilot.co/external-ip', None)
+        if ip is None:
             ip = 'localhost'
         ports = ingress_service.spec.ports
         http_port = [port for port in ports if port.name == 'http'][0].node_port
@@ -228,3 +234,13 @@ def get_loadbalancer_ip(namespace: str, service_name: str) -> Optional[str]:
     ip = service.status.load_balancer.ingress[
         0].ip or service.status.load_balancer.ingress[0].hostname
     return ip if ip is not None else None
+
+
+def get_pod_ip(namespace: str, pod_name: str) -> Optional[str]:
+    """Returns the IP address of the pod."""
+    core_api = kubernetes.core_api()
+    pod = core_api.read_namespaced_pod(pod_name,
+                                       namespace,
+                                       _request_timeout=kubernetes.API_TIMEOUT)
+
+    return pod.status.pod_ip if pod.status.pod_ip is not None else None

@@ -45,6 +45,7 @@ class Lambda(clouds.Cloud):
         clouds.CloudImplementationFeatures.IMAGE_ID: f'Specifying image ID is not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is currently not supported on {_REPR}.',
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: f'Host controllers are not supported in {_REPR}.',
     }
 
     @classmethod
@@ -119,10 +120,6 @@ class Lambda(clouds.Cloud):
 
     def __repr__(self):
         return 'Lambda'
-
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, Lambda)
 
     @classmethod
     def get_default_instance_type(

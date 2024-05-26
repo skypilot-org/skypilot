@@ -69,6 +69,8 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
+  * `Llama 3 <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3>`_
+  * `Qwen <https://github.com/skypilot-org/skypilot/tree/master/llm/qwen>`_
   * `Databricks DBRX <https://github.com/skypilot-org/skypilot/tree/master/llm/dbrx>`_
   * `Gemma <https://github.com/skypilot-org/skypilot/tree/master/llm/gemma>`_
   * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)
@@ -112,14 +114,14 @@ Contents
    ../getting-started/installation
    ../getting-started/quickstart
    ../getting-started/tutorial
-   ../examples/gpu-jupyter
+   ../examples/interactive-development
 
 
 .. toctree::
    :maxdepth: 1
    :caption: Running Jobs
 
-   ../examples/spot-jobs
+   ../examples/managed-jobs
    ../reference/job-queue
    ../examples/auto-failover
    ../reference/kubernetes/index
@@ -137,7 +139,7 @@ Contents
    :maxdepth: 1
    :caption: Cutting Cloud Costs
 
-   ../examples/spot-jobs
+   Managed Spot Jobs <../examples/spot-jobs>
    ../reference/auto-stop
    ../reference/benchmark/index
 
