@@ -792,8 +792,8 @@ class ManagedJobCodeGen:
         # TODO: change to utils.stream_logs(job_name, job_id, follow) in v0.8.0.
         code = textwrap.dedent(f"""\
         {inspect.getsource(stream_logs)}
-        msg = stream_logs({job_name!r}, {job_id!r}, '
-        '                 follow={follow}, controller={controller})
+        msg = stream_logs({job_name!r}, {job_id!r}, 
+                           follow={follow}, controller={controller})
         print(msg, flush=True)
         """)
         return cls._build(code)
