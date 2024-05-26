@@ -147,8 +147,7 @@ def verify_gcs_bucket(name: str) -> bool:
 
 
 def create_az_client(client_type: str,
-                     storage_account_name: Optional[str] = None,
-                     container_name: Optional[str] = None) -> Client:
+                     **kwargs) -> Client:
     """Helper method that connects to AZ client for diverse Resources.
 
     Args:
@@ -159,12 +158,15 @@ def create_az_client(client_type: str,
     Returns:
       Client object facing AZ Resource of the 'type'.
     """
+    storage_account_name = kwargs.pop('storage_account_name', None)
+    container_name = kwargs.pop('container_name', None)
     if client_type == 'container':
         assert storage_account_name is not None
         assert container_name is not None
     subscription_id = azure.get_subscription_id()
-    return azure.get_client(client_type, subscription_id, storage_account_name,
-                            container_name)
+    return azure.get_client(client_type, subscription_id,
+                            storage_account_name=storage_account_name,
+                            container_name=container_name)
 
 
 def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
@@ -176,8 +178,10 @@ def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
     Returns:
       boolean; shows either or not the container exists.
     """
-    container_client = create_az_client('container', storage_account_name,
-                                        container_name)
+    container_client = create_az_client(
+        'container',
+        storage_account_name=storage_account_name,
+        container_name=container_name)
     return container_client.exists()
 
 
@@ -243,7 +247,8 @@ def get_az_storage_account_key(
             storage_account_keys = [
                 key.value for key in storage_account_keys.keys
             ]
-    return storage_account_keys[0]
+    storage_account_key = storage_account_keys[0]
+    return storage_account_key
 
 
 def get_az_container_sas_token(

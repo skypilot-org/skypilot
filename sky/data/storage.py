@@ -2289,9 +2289,10 @@ class AzureBlobStore(AbstractStore):
                 'sky storage delete' or 'sky start'
         """
         try:
-            container = data_utils.create_az_client('container',
-                                                    self.storage_account_name,
-                                                    self.name)
+            container = data_utils.create_az_client(
+                'container',
+                storage_account_name=self.storage_account_name,
+                container_name=self.name)
             if container.exists():
                 is_private = True if container.get_container_properties(
                 )['public_access'] is None else False

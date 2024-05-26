@@ -44,8 +44,7 @@ def exceptions():
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_client(name: str,
                subscription_id: str,
-               storage_account_name: Optional[str] = None,
-               container_name: Optional[str] = None):
+               **kwargs):
     # Sky only supports Azure CLI credential for now.
     # Increase the timeout to fix the Azure get-access-token timeout issue.
     # Tracked in
@@ -73,6 +72,8 @@ def get_client(name: str,
             return GraphServiceClient(credential)
         elif name == 'container':
             from azure.storage.blob import ContainerClient
+            storage_account_name = kwargs.pop('storage_account_name', None)
+            container_name = kwargs.pop('container_name', None)
             container_url = (f'https://{storage_account_name}.'
                              f'blob.core.windows.net/{container_name}')
             container_client = ContainerClient.from_container_url(container_url)
@@ -97,8 +98,10 @@ def get_client(name: str,
                         container_client.exists()
                         azure_logger.setLevel(original_level)
                     except exceptions().ClientAuthenticationError as error:
-                        # Caught when user attempted to use incorrect public
-                        # container name.
+                        # Caught when user attempted to use private container
+                        # without access rights.
+                        # Reference:
+                        # https://learn.microsoft.com/en-us/troubleshoot/azure/entra/entra-id/app-integration/error-code-aadsts50020-user-account-identity-provider-does-not-exist # pylint: disable=line-too-long
                         if 'ERROR: AADSTS50020' in error.message:
                             with ux_utils.print_exception_no_traceback():
                                 raise sky_exceptions.StorageBucketGetError(
