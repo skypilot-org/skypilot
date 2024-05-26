@@ -55,7 +55,7 @@ def split_az_path(az_path: str) -> Tuple[str, str, str]:
     """Splits Path into Storage account and Container names and Relative Path
 
     Args:
-        az_path: str; Container Path, e.g. az://storage_account/container/
+        az_path: str; Container Path, e.g. az://azuremlexampledata/data/
 
     Returns:
         str; Name of the container
@@ -202,6 +202,8 @@ def get_az_resource_group(
     for account in storage_client.storage_accounts.list():
         if account.name == storage_account_name:
             # Extract the resource group name from the account ID
+            # An example of account.id would be the following:
+            # /subscriptions/{subscription_id}/resourceGroups/{resource_group_name}/providers/Microsoft.Storage/storageAccounts/{container_name} # pylint: disable=line-too-long
             resource_group_name = account.id.split('/')[4]
             return resource_group_name
     # resource group cannot be found when using container not created
@@ -265,22 +267,19 @@ def get_az_container_sas_token(
         container_name: str; name of the mounting container
 
     Returns:
-        SAS token prepended with the delimiter character, ?
+        SAS token prepended with the delimiter character, "?"
     """
-    expiry_time_utc = datetime.datetime.now(datetime.timezone.utc) \
-        + datetime.timedelta(hours=1)
-    expiry_time_utc = expiry_time_utc.strftime('%Y-%m-%dT%H:%MZ')
-    cmd = ('az storage container generate-sas '
-           f'--account-name {storage_account_name} '
-           f'--account-key {storage_account_key} --expiry {expiry_time_utc} '
-           f'--name {container_name} --permissions rwcl')
-    p = subprocess.run(cmd,
-                       stdout=subprocess.PIPE,
-                       shell=True,
-                       check=True,
-                       executable='/bin/bash')
-    sas_token = p.stdout.decode().strip('\n').strip('"')
-    # ? is a delimiter character used when SAS token is attached to the
+    from azure.storage.blob import generate_container_sas, ContainerSasPermissions
+    sas_token = generate_container_sas(
+        account_name=storage_account_name,
+        container_name=container_name,
+        account_key=storage_account_key,
+        permission=ContainerSasPermissions(
+            read=True, write=True, list=True, create=True),
+        expiry=datetime.datetime.now(
+            datetime.timezone.utc) + datetime.timedelta(hours=1)
+    )
+    # "?" is a delimiter character used when SAS token is attached to the
     # container endpoint.
     # Reference: https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/how-to-guides/create-sas-tokens?tabs=Containers # pylint: disable=line-too-long
     return f'?{sas_token}'
@@ -298,24 +297,20 @@ def get_az_blob_sas_token(storage_account_name: str, storage_account_key: str,
         blob_name: str; path to the blob(file)
 
     Returns:
-        SAS token prepended with the delimiter character, ?
+        SAS token prepended with the delimiter character, "?"
     """
-    expiry_time_utc = datetime.datetime.now(datetime.timezone.utc) \
-        + datetime.timedelta(hours=1)
-    expiry_time_utc = expiry_time_utc.strftime('%Y-%m-%dT%H:%MZ')
-    blob_url = (f'https://{storage_account_name}.blob.core.windows.net/'
-                f'{container_name}/{blob_name}')
-    cmd = (
-        f'az storage blob generate-sas --account-name {storage_account_name} '
-        f'--account-key {storage_account_key} --expiry {expiry_time_utc} '
-        f'--blob-url {blob_url} --permissions rwc')
-    p = subprocess.run(cmd,
-                       stdout=subprocess.PIPE,
-                       shell=True,
-                       check=True,
-                       executable='/bin/bash')
-    sas_token = p.stdout.decode().strip('\n').strip('"')
-    # ? is a delimiter character used when SAS token is attached to the
+    from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+    sas_token = generate_blob_sas(
+        account_name=storage_account_name,
+        container_name=container_name,
+        blob_name=blob_name,
+        account_key=storage_account_key,
+        permission=BlobSasPermissions(
+            read=True, write=True, list=True, create=True),
+        expiry=datetime.datetime.now(
+            datetime.timezone.utc) + datetime.timedelta(hours=1)
+    )
+    # "?" is a delimiter character used when SAS token is attached to the
     # blob endpoint.
     return f'?{sas_token}'
 
