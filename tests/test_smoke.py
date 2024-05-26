@@ -983,7 +983,8 @@ def test_azure_storage_mounts_with_stop():
     name = _get_cluster_name()
     cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
-    storage_account_name = f'sky{common_utils.get_user_hash()}'
+    default_region = 'eastus'
+    storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
     resource_group_name = data_utils.get_az_resource_group(storage_account_name)
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name, resource_group_name)
@@ -3919,7 +3920,8 @@ class TestStorageWithCredentials:
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             return f'{alias_gen}; {gsutil_alias} rm -r {url}'
         if store_type == storage_lib.StoreType.AZURE:
-            storage_account_name = f'sky{common_utils.get_user_hash()}'
+            default_region = 'eastus'
+            storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
             url = f'az://{storage_account_name}/{bucket_name}'
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
@@ -3953,7 +3955,8 @@ class TestStorageWithCredentials:
                 url = f'gs://{bucket_name}'
             return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.AZURE:
-            storage_account_name = f'sky{common_utils.get_user_hash()}'
+            default_region = 'eastus'
+            storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
@@ -4002,7 +4005,8 @@ class TestStorageWithCredentials:
             else:
                 return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
-            storage_account_name = f'sky{common_utils.get_user_hash()}'
+            default_region = 'eastus'
+            storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
@@ -4028,7 +4032,8 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.GCS:
             return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
-            storage_account_name = f'sky{common_utils.get_user_hash()}'
+            default_region = 'eastus'
+            storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
@@ -4230,7 +4235,8 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_az_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using gsutil
-        storage_account_name = f'sky{common_utils.get_user_hash()}'
+        default_region = 'eastus'
+        storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
@@ -4459,7 +4465,8 @@ class TestStorageWithCredentials:
                 command = f'gsutil ls {nonexist_bucket_url.format(random_name=nonexist_bucket_name)}'
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('az'):
-                storage_account_name = f'sky{common_utils.get_user_hash()}'
+                default_region = 'eastus'
+                storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
                 resource_group_name = data_utils.get_az_resource_group(
                     storage_account_name)
                 storage_account_key = data_utils.get_az_storage_account_key(
