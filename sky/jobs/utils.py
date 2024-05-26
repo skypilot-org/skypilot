@@ -747,8 +747,8 @@ class ManagedJobCodeGen:
     _PREFIX = textwrap.dedent("""\
         managed_job_version = 0
         try:
-            from sky.jobs import state as managed_job_state
             from sky.jobs import constants, utils
+            from sky.jobs import state as managed_job_state
             managed_job_version = constants.MANAGED_JOBS_VERSION
         except ImportError:
             from sky.spot import spot_state as state, spot_utils as utils
@@ -803,13 +803,13 @@ class ManagedJobCodeGen:
         dag_name = managed_job_dag.name
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            state.set_job_name({job_id}, {dag_name!r})
+            managed_job_state.set_job_name({job_id}, {dag_name!r})
             """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
             code += textwrap.dedent(f"""\
-                state.set_pending({job_id}, {task_id}, 
+                managed_job_state.set_pending({job_id}, {task_id}, 
                                   {task.name!r}, {resources_str!r})
                 """)
         return cls._build(code)
