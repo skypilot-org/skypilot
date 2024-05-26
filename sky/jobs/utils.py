@@ -747,11 +747,11 @@ class ManagedJobCodeGen:
     _PREFIX = textwrap.dedent("""\
         managed_job_version = 0
         try:
-            from sky.jobs import constants, utils
-            from sky.jobs.utils import stream_logs_by_id
+            from sky.jobs import utils
+            from sky.jobs import constants as managed_job_constants
             from sky.jobs import state as managed_job_state
             from typing import Optional
-            managed_job_version = constants.MANAGED_JOBS_VERSION
+            managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
         except ImportError:
             from sky.spot import spot_state as state, spot_utils as utils
         """)
@@ -792,7 +792,15 @@ class ManagedJobCodeGen:
         # We inspect the source code of the function here for backward
         # compatibility.
         # TODO: change to utils.stream_logs(job_id, job_name, follow) in v0.8.0.
-        code = inspect.getsource(stream_logs)
+        # Import libraries required by `stream_logs`
+        code = textwrap.dedent("""\
+        import os
+
+        from sky.skylet import job_lib, log_lib
+        from sky.skylet import constants
+        from sky.jobs.utils import stream_logs_by_id
+        """)
+        code += inspect.getsource(stream_logs)
         code += textwrap.dedent(f"""\
 
         msg = stream_logs({job_id!r}, {job_name!r}, 
