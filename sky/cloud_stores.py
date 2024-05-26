@@ -154,12 +154,12 @@ class GcsCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
-class AzureCloudStorage(CloudStorage):
+class AzureBlobCloudStorage(CloudStorage):
     """Azure Blob Storage."""
     # AzCopy is utilized for downloading data from Azure Blob Storage
-    # containers to local systems due to its superior performance compared to
+    # containers to remote systems due to its superior performance compared to
     # az-cli. While az-cli's `az storage blob sync` can synchronize data from
-    # local to container, it lacks support for container to local
+    # local to container, it lacks support to sync from container to remote
     # synchronization. Moreover, `az storage blob download-batch` in az-cli
     # does not leverage AzCopy's efficient multi-threaded capabilities, leading
     # to slower performance.
@@ -167,33 +167,12 @@ class AzureCloudStorage(CloudStorage):
     # AzCopy requires appending SAS tokens directly in commands, as it does not
     # support using STORAGE_ACCOUNT_KEY, unlike az-cli, which can generate
     # SAS tokens but lacks direct multi-threading support like AzCopy.
-    # Hence, both tools are necessary: az-cli for SAS token generation and
-    # AzCopy for efficient data transfer from containers to local systems.
+    # Hence, az-cli for SAS token generation is ran on the local machine and
+    # AzCopy is installed at the remote machine for efficient data transfer
+    # from containers to remote systems.
     # Note that on Azure instances, both az-cli and AzCopy are typically
     # pre-installed. And installing both would be used with AZ container is
     # used from non-Azure instances.
-
-    # Installation reference: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux?pivots=apt#option-2-step-by-step-installation-instructions # pylint: disable=line-too-long
-    _AZ_CLI_VERSION = '2.58.0'
-    _GET_AZCLI = [
-        'az --version >/dev/null 2>&1 || '
-        '(sudo apt-get update; '
-        'sudo apt-get install ca-certificates curl apt-transport-https '
-        'lsb-release gnupg -y; '
-        'sudo mkdir -p /etc/apt/keyrings; '
-        'curl -sLS https://packages.microsoft.com/keys/microsoft.asc | '
-        'gpg --dearmor | '
-        'sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null; '
-        'sudo chmod go+r /etc/apt/keyrings/microsoft.gpg; '
-        'AZ_DIST=$(lsb_release -cs); '
-        'echo "deb [arch=`dpkg --print-architecture` '
-        'signed-by=/etc/apt/keyrings/microsoft.gpg] '
-        'https://packages.microsoft.com/repos/azure-cli/ $AZ_DIST main" | '
-        'sudo tee /etc/apt/sources.list.d/azure-cli.list; '
-        'sudo apt-get update; '
-        f'AZ_VER={_AZ_CLI_VERSION}; '
-        'sudo apt-get install azure-cli=$AZ_VER-1~$AZ_DIST -y)'
-    ]
 
     _GET_AZCOPY = [
         'azcopy --version > /dev/null 2>&1 || '
@@ -253,8 +232,7 @@ class AzureCloudStorage(CloudStorage):
         destination = f'{destination}/'
         download_command = (f'azcopy sync {source} {destination} '
                             '--recursive --delete-destination=false')
-        all_commands = list(self._GET_AZCLI)
-        all_commands.extend(self._GET_AZCOPY)
+        all_commands = list(self._GET_AZCOPY)
         all_commands.append(download_command)
         return ' && '.join(all_commands)
 
@@ -277,8 +255,7 @@ class AzureCloudStorage(CloudStorage):
                   f'{container_name}/{blob_path}{sas_token}')
         source = shlex.quote(source)
         download_command = f'azcopy copy {source} {destination}'
-        all_commands = list(self._GET_AZCLI)
-        all_commands.extend(self._GET_AZCOPY)
+        all_commands = list(self._GET_AZCOPY)
         all_commands.append(download_command)
         return ' && '.join(all_commands)
 
@@ -430,5 +407,5 @@ _REGISTRY = {
     's3': S3CloudStorage(),
     'r2': R2CloudStorage(),
     'cos': IBMCosCloudStorage(),
-    'az': AzureCloudStorage()
+    'az': AzureBlobCloudStorage()
 }
