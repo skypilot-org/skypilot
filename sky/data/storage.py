@@ -2294,8 +2294,8 @@ class AzureBlobStore(AbstractStore):
                 storage_account_name=self.storage_account_name,
                 container_name=self.name)
             if container.exists():
-                is_private = True if container.get_container_properties(
-                )['public_access'] is None else False
+                is_private = (True if container.get_container_properties(
+                )['public_access'] is None else False)
                 # when user attempts to use private container without
                 # access rights
                 if self.resource_group_name is None and is_private:
