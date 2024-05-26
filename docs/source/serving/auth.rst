@@ -3,14 +3,14 @@
 Authorization
 =============
 
-SkyServe provides robust authorization capabilities at the replica level, allowing you to control access to service endpoints. By leveraging the authorization features of the underlying inference engine, you can manage who can read and write data, making it ideal for securing sensitive information or operations.
+SkyServe provides robust authorization capabilities at the replica level, allowing you to control access to service endpoints with API keys.
 
-vLLM Example
+Setup API Keys
 ------------
 
-Let's walk through an example of setting up authorization on a replica using the vLLM inference engine. The vLLM engine supports authorization via the :code:`--api-key` flag, which specifies a static API key needed to access the service endpoint. This key is defined in the :code:`AUTH_TOKEN` environment variable.
+SkyServe relies on the authorization of the service running on underlying service replicas, e.g., the inference engine. We take an example vLLM inference engine, which supports static API key authorization with an argument :code`--api-key`.
 
-Here's a sample configuration in YAML:
+We first define a normal SkyPilot job with an LLM service setup with vLLM and an API key set:
 
 .. code-block:: yaml
     :emphasize-lines: 26
@@ -25,17 +25,11 @@ Here's a sample configuration in YAML:
       ports: 8000
 
     setup: |
-      conda activate vllm
-      if [ $? -ne 0 ]; then
-          conda create -n vllm python=3.10 -y
-          conda activate vllm
-      fi
       pip install transformers==4.38.0
       pip install vllm==0.3.2
       python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
     run: |
-      conda activate vllm
       echo 'Starting vllm openai api server...'
       python -m vllm.entrypoints.openai.api_server \
         --model $MODEL_NAME --tokenizer hf-internal-testing/llama-tokenizer \
