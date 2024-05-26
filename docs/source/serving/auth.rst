@@ -56,7 +56,8 @@ With the :code:`--api-key` set, a user's request needs to include an Authorizati
 
 .. code-block:: bash
 
-  $ ENDPOINT=$(sky serve status -n auth)
+  $ ENDPOINT=$(sky serve status --endpoint auth)
+  $ AUTH_TOKEN=sky-authkey-3d2105b9-a9ba-4f13
   $ curl http://$ENDPOINT/v1/chat/completions \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $AUTH_TOKEN" \
