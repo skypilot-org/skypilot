@@ -140,10 +140,6 @@ class RunPod(clouds.Cloud):
     def get_egress_cost(self, num_gigabytes: float) -> float:
         return 0.0
 
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, RunPod)
-
     @classmethod
     def get_default_instance_type(
             cls,

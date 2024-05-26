@@ -23,6 +23,7 @@ R2_CREDENTIALS_PATH = '~/.cloudflare/r2.credentials'
 R2_PROFILE_NAME = 'r2'
 _INDENT_PREFIX = '    '
 NAME = 'Cloudflare'
+SKY_CHECK_NAME = 'Cloudflare (for R2 object store)'
 
 
 @contextlib.contextmanager

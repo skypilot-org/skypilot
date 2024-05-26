@@ -340,9 +340,6 @@ class AWS(clouds.Cloud):
         cost += 0.0
         return cost
 
-    def is_same_cloud(self, other: clouds.Cloud):
-        return isinstance(other, AWS)
-
     @classmethod
     def get_default_instance_type(
             cls,

@@ -154,7 +154,7 @@ ENDPOINT=$(sky serve status --endpoint vllm-llama2)
 4. Once it status is `READY`, you can use the endpoint to interact with the model:
 
 ```bash
-curl -L $ENDPOINT/v1/chat/completions \
+curl $ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-2-7b-chat-hf",
@@ -171,7 +171,7 @@ curl -L $ENDPOINT/v1/chat/completions \
   }'
 ```
 
-Notice that it is the same with previously curl command, except for thr `-L` argument. You should get a similar response as the following:
+Notice that it is the same with previously curl command. You should get a similar response as the following:
 
 ```console
 {
