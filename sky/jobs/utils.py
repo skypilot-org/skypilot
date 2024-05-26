@@ -748,7 +748,9 @@ class ManagedJobCodeGen:
         managed_job_version = 0
         try:
             from sky.jobs import constants, utils
+            from sky.jobs.utils import stream_logs_by_id
             from sky.jobs import state as managed_job_state
+            from typing import Optional
             managed_job_version = constants.MANAGED_JOBS_VERSION
         except ImportError:
             from sky.spot import spot_state as state, spot_utils as utils
@@ -789,10 +791,11 @@ class ManagedJobCodeGen:
                     controller: bool = False) -> str:
         # We inspect the source code of the function here for backward
         # compatibility.
-        # TODO: change to utils.stream_logs(job_name, job_id, follow) in v0.8.0.
-        code = textwrap.dedent(f"""\
-        {inspect.getsource(stream_logs)}
-        msg = stream_logs({job_name!r}, {job_id!r}, 
+        # TODO: change to utils.stream_logs(job_id, job_name, follow) in v0.8.0.
+        code = inspect.getsource(stream_logs)
+        code += textwrap.dedent(f"""\
+
+        msg = stream_logs({job_id!r}, {job_name!r}, 
                            follow={follow}, controller={controller})
         print(msg, flush=True)
         """)

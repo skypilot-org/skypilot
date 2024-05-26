@@ -11,6 +11,7 @@ file_mounts:
 
 setup: |
   {{ sky_activate_python_env }}
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
 
   {%- for cmd in cloud_dependencies_installation_commands %}
   {{cmd}}
