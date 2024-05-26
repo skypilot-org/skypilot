@@ -207,7 +207,7 @@ def _get_cloud_dependencies_installation_commands(
             # fluidstack and paperspace
             continue
         if isinstance(cloud, clouds.AWS):
-            commands.append(f'echo -n "{prefix_str}AWS{empty_str}" && ' +
+            commands.append(f'echo -en "\r{prefix_str}AWS{empty_str}" && ' +
                             aws_dependencies_installation)
         elif isinstance(cloud, clouds.Azure):
             commands.append(
