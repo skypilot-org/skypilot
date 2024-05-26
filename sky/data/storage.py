@@ -1079,7 +1079,7 @@ class S3Store(AbstractStore):
                     'the same as AZ bucket.')
                 assert data_utils.verify_az_bucket(
                     storage_account_name, self.name), (
-                        f'Source specified as {self.source}, a AZ bucket. ',
+                        f'Source specified as {self.source}, an AZ bucket. ',
                         'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
@@ -1498,7 +1498,7 @@ class GcsStore(AbstractStore):
                     'the same as AZ bucket.')
                 assert data_utils.verify_az_bucket(
                     storage_account_name, self.name), (
-                        f'Source specified as {self.source}, a AZ bucket. ',
+                        f'Source specified as {self.source}, an AZ bucket. ',
                         'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
@@ -2480,7 +2480,7 @@ class R2Store(AbstractStore):
                     'the same as AZ bucket.')
                 assert data_utils.verify_az_bucket(
                     storage_account_name, self.name), (
-                        f'Source specified as {self.source}, a AZ bucket. ',
+                        f'Source specified as {self.source}, an AZ bucket. ',
                         'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (
@@ -2866,7 +2866,7 @@ class IBMCosStore(AbstractStore):
                     'the same as AZ bucket.')
                 assert data_utils.verify_az_bucket(
                     storage_account_name, self.name), (
-                        f'Source specified as {self.source}, a AZ bucket. ',
+                        f'Source specified as {self.source}, an AZ bucket. ',
                         'AZ Bucket should exist.')
             elif self.source.startswith('r2://'):
                 assert self.name == data_utils.split_r2_path(self.source)[0], (

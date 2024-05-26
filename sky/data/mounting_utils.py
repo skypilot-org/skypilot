@@ -170,7 +170,8 @@ def _get_mount_binary(mount_cmd: str) -> str:
         return 'gcsfuse'
     elif 'blobfuse2' in mount_cmd:
         return 'blobfuse2'
-    else:  # 'rclone' in mount_cmd
+    else:
+        assert 'rclone' in mount_cmd
         return 'rclone'
 
 
