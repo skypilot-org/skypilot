@@ -470,7 +470,7 @@ def stream_logs(job_id: Optional[int],
             if len(managed_jobs) == 0:
                 return f'No managed job found with name {job_name!r}.'
             if len(managed_jobs) > 1:
-                job_ids_str = ", ".join(job['job_id'] for job in managed_jobs)
+                job_ids_str = ', '.join(job['job_id'] for job in managed_jobs)
                 raise ValueError(
                     f'Multiple managed jobs found with name {job_name!r} (Job '
                     f'IDs: {job_ids_str}). Please specify the job_id instead.')
