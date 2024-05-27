@@ -93,6 +93,8 @@ class SkyServeLoadBalancer:
             request_url_path_without_service_id = request_url_path[
                 len(f"/{KOMODO_SERVICE_ID}")+1 :
             ]
+            if request_url_path_without_service_id.startswith("/"):
+                request_url_path_without_service_id = request_url_path_without_service_id[1:]
             path = f"http://{ready_replica_url}/{request_url_path_without_service_id}"
         else:
             path = f"http://{ready_replica_url}{request.url.path}"
