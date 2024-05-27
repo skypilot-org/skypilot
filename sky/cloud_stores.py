@@ -12,6 +12,7 @@ import subprocess
 import urllib.parse
 
 from sky.adaptors import aws
+from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import gcp
@@ -224,7 +225,7 @@ class AzureBlobCloudStorage(CloudStorage):
             # public containers does not require SAS token for access
             sas_token = ''
         else:
-            sas_token = data_utils.get_az_container_sas_token(
+            sas_token = azure.get_az_container_sas_token(
                 storage_account_name, storage_account_key, container_name)
         source = (f'https://{storage_account_name}.blob.core.windows.net/'
                   f'{container_name}/{sas_token}')
@@ -248,7 +249,7 @@ class AzureBlobCloudStorage(CloudStorage):
             # public containers does not require SAS token for access
             sas_token = ''
         else:
-            sas_token = data_utils.get_az_blob_sas_token(
+            sas_token = azure.get_az_blob_sas_token(
                 storage_account_name, storage_account_key, container_name,
                 blob_path)
         source = (f'https://{storage_account_name}.blob.core.windows.net/'
