@@ -8,25 +8,25 @@ SkyServe provides robust authorization capabilities at the replica level, allowi
 Setup API Keys
 --------------
 
-SkyServe relies on the authorization of the service running on underlying service replicas, e.g., the inference engine. We take the vLLM inference engine as an example, which supports static API key authorization with an argument :code`--api-key`.
+SkyServe relies on the authorization of the service running on underlying service replicas, e.g., the inference engine. We take the vLLM inference engine as an example, which supports static API key authorization with an argument :code:`--api-key`.
 
-We define a SkyServe service spec for serving Llama-3 chatbot with vLLM and an API key. In the example YAML below, we define the authorization token as an environment variable, :code:`AUTH_TOKEN`, and pass it to both the service field to enable readiness_probe to access the replicas and the vllm entrypoint to start services on replicas with the API key.
+We define a SkyServe service spec for serving Llama-3 chatbot with vLLM and an API key. In the example YAML below, we define the authorization token as an environment variable, :code:`AUTH_TOKEN`, and pass it to both the service field to enable :code:`readiness_probe` to access the replicas and the vllm entrypoint to start services on replicas with the API key.
 
 .. code-block:: yaml
-  :emphasize-lines: 5-6,12,28
+  :emphasize-lines: 5,10-11,28
 
   # auth.yaml
+  envs:
+    MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
+    HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+    AUTH_TOKEN: # TODO: Fill with your own auth token (a random string), or use --env to pass.
+
   service:
     readiness_probe:
       path: /v1/models
       headers:
         Authorization: Bearer $AUTH_TOKEN
     replicas: 2
-
-  envs:
-    MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
-    HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
-    AUTH_TOKEN: # TODO: Fill with your own auth token (a random string), or use --env to pass.
 
   resources:
     accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB}
@@ -53,6 +53,7 @@ To deploy the service, run the following command:
 To send a request to the service endpoint, a service client need to include the static API key in a request's header:
 
 .. code-block:: bash
+  :emphasize-lines: 5
 
   $ ENDPOINT=$(sky serve status --endpoint auth)
   $ AUTH_TOKEN=yyy
@@ -72,10 +73,32 @@ To send a request to the service endpoint, a service client need to include the 
           }
         ],
         "stop_token_ids": [128009, 128001]
-      }'
-  {"id":"cmpl-0e93e6ea6e9c40f5805135afec75f163","object":"chat.completion","created":1716714050,"model":"meta-llama/Meta-Llama-3-8B-Instruct","choices":[{"index":0,"message":{"role":"assistant","content":"I'm your friendly AI assistant! I'm a computer program designed to help you with a wide range of tasks and answer your questions to the best of my ability. I'm here to provide information, offer suggestions, and assist you in any way I can. I'm constantly learning and improving, so the more you interact with me, the better I'll become at understanding your needs and providing helpful responses.\n\nI can help with things like:\n\n* Answering general knowledge questions\n* Providing definitions for words and phrases\n* Giving advice on topics like science, history, and technology\n* Assisting with language-related tasks, such as grammar and proofreading\n* Generating text and writing articles or stories\n* Even having fun conversations and playing games with you!\n\nSo, what can I help you with today?"},"logprobs":null,"finish_reason":"stop","stop_reason":128009}],"usage":{"prompt_tokens":26,"total_tokens":188,"completion_tokens":162}}
+      }' | jq
+  {
+    "id": "cmpl-cad2c1a2a6ee44feabed0b28be294d6f",
+    "object": "chat.completion",
+    "created": 1716819147,
+    "model": "meta-llama/Meta-Llama-3-8B-Instruct",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "I'm so glad you asked! I'm LLaMA, an AI assistant developed by Meta AI that can understand and respond to human input in a conversational manner. I'm here to help you with any questions, tasks, or topics you'd like to discuss. I can provide information on a wide range of subjects, from science and history to entertainment and culture. I can also assist with language-related tasks such as language translation, text summarization, and even writing and proofreading. My goal is to provide accurate and helpful responses to your inquiries, while also being friendly and engaging. So, what's on your mind? How can I assist you today?"
+        },
+        "logprobs": null,
+        "finish_reason": "stop",
+        "stop_reason": 128009
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 26,
+      "total_tokens": 160,
+      "completion_tokens": 134
+    }
+  }
 
-If the Authorization header is missing or invalid, the service will return a 401 Unauthorized error:
+A service client without an API key will not be able to access the service and get a :code:`401 Unauthorized` error:
 
 .. code-block:: bash
 
