@@ -462,17 +462,24 @@ def stream_logs(job_id: Optional[int],
         if job_id is None:
             assert job_name is not None
             managed_jobs = managed_job_state.get_managed_jobs()
+            # We manually filter the jobs by name, instead of using
+            # get_nonterminal_job_ids_by_name, as with `controller=True`, we
+            # should be able to show the logs for jobs in terminal states.
             managed_jobs = list(
                 filter(lambda job: job['job_name'] == job_name, managed_jobs))
             if len(managed_jobs) == 0:
                 return f'No managed job found with name {job_name!r}.'
             if len(managed_jobs) > 1:
+                job_ids_str = ", ".join(job['job_id'] for job in managed_jobs)
                 raise ValueError(
-                    f'Multiple managed jobs found with name {job_name!r}. '
-                    'Please specify the job_id instead.')
+                    f'Multiple managed jobs found with name {job_name!r} (Job '
+                    f'IDs: {job_ids_str}). Please specify the job_id instead.')
             job_id = managed_jobs[0]['job_id']
         assert job_id is not None, (job_id, job_name)
-        # TODO: keep sync with job_lib.JobLibCodeGen.tail_logs
+        # TODO: keep the following code sync with
+        # job_lib.JobLibCodeGen.tail_logs, we do not directly call that function
+        # as the following code need to be run in the current machine, instead
+        # of running remotely.
         run_timestamp = job_lib.get_run_timestamp(job_id)
         if run_timestamp is None:
             return f'No managed job contrller log found with job_id {job_id}.'
@@ -750,10 +757,11 @@ class ManagedJobCodeGen:
             from sky.jobs import utils
             from sky.jobs import constants as managed_job_constants
             from sky.jobs import state as managed_job_state
-            from typing import Optional
+
             managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
         except ImportError:
-            from sky.spot import spot_state as state, spot_utils as utils
+            from sky.spot import spot_state as managed_job_state
+            from sky.spot import spot_utils as utils
         """)
 
     @classmethod
@@ -799,6 +807,7 @@ class ManagedJobCodeGen:
         from sky.skylet import job_lib, log_lib
         from sky.skylet import constants
         from sky.jobs.utils import stream_logs_by_id
+        from typing import Optional
         """)
         code += inspect.getsource(stream_logs)
         code += textwrap.dedent(f"""\
