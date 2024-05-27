@@ -33,7 +33,7 @@ Fill the access token in the [chatbot-hf.yaml](https://github.com/skypilot-org/s
 ```yaml
 envs:
   MODEL_SIZE: 7
-  HF_TOKEN: <your-huggingface-token>
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 ```
 
 

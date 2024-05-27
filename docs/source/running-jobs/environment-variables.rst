@@ -12,6 +12,20 @@ You can specify environment variables to be made available to a task in two ways
 - The ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`
 - The ``--env`` flag in the ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
 
+.. tip::
+
+  If an environment variable is required to be specified with `--env` during
+  ``sky launch/exec``, you can set it to ``null`` in task YAML to raise an
+  error when it is forgotten to be specified. For example, the ``WANDB_API_KEY``
+  and ``HF_TOKEN`` in the following task YAML:
+
+  .. code-block:: yaml
+
+    envs:
+      WANDB_API_KEY:
+      HF_TOKEN: null
+      MYVAR: val
+
 The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via the ``${MYVAR}`` syntax.
 
 Using in ``file_mounts``
@@ -96,7 +110,7 @@ Environment variables for ``setup``
 
 
 .. list-table::
-   :widths: 20 70 10
+   :widths: 20 60 10
    :header-rows: 1
 
    * - Name
@@ -108,17 +122,32 @@ Environment variables for ``setup``
    * - ``SKYPILOT_SETUP_NODE_IPS``
      - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
      - 1.2.3.4
+   * - ``SKYPILOT_TASK_ID``
+     - A unique ID assigned to each task.
+       
+       This environment variable is available only when the task is submitted 
+       with :code:`sky launch --detach-setup`, or run as a managed spot job.
+       
+       Refer to the description in the :ref:`environment variables for run <env-vars-for-run>`.
+     - sky-2023-07-06-21-18-31-563597_myclus_1
+     
+       For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
+   * - ``SKYPILOT_CLUSTER_INFO``
+     - A JSON string containing information about the cluster. To access the information, you could parse the JSON string in bash ``echo $SKYPILOT_CLUSTER_INFO | jq .cloud`` or in Python ``json.loads(os.environ['SKYPILOT_CLUSTER_INFO'])['cloud']``.
+     - {"cluster_name": "my-cluster-name", "cloud": "GCP", "region": "us-central1", "zone": "us-central1-a"}
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
 
 Since setup commands always run on all nodes of a cluster, SkyPilot ensures both of these environment variables (the ranks and the IP list) never change across multiple setups on the same cluster.
 
+.. _env-vars-for-run:
+
 Environment variables for ``run``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
-   :widths: 20 70 10
+   :widths: 20 60 10
    :header-rows: 1
 
    * - Name
@@ -136,13 +165,18 @@ Environment variables for ``run``
        more :ref:`here <dist-jobs>`.
      - 0
    * - ``SKYPILOT_TASK_ID``
-     - A unique ID assigned to each task.
+     - A unique ID assigned to each task in the format "sky-<timestamp>_<cluster-name>_<task-id>".
        Useful for logging purposes: e.g., use a unique output path on the cluster; pass to Weights & Biases; etc.
        Each task's logs are stored on the cluster at ``~/sky_logs/${SKYPILOT_TASK_ID%%_*}/tasks/*.log``.
 
        If a task is run as a :ref:`managed spot job <spot-jobs>`, then all
-       recoveries of that job will have the same ID value. Read more :ref:`here <spot-jobs-end-to-end>`.
-     - sky-2023-07-06-21-18-31-563597_myclus_id-1
+       recoveries of that job will have the same ID value. The ID is in the format "sky-managed-<timestamp>_<job-name>(_<task-name>)_<job-id>-<task-id>", where ``<task-name>`` will appear when a pipeline is used, i.e., more than one task in a managed spot job. Read more :ref:`here <spot-jobs-end-to-end>`.
+     - sky-2023-07-06-21-18-31-563597_myclus_1
+     
+       For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
+   * - ``SKYPILOT_CLUSTER_INFO``
+     - A JSON string containing information about the cluster. To access the information, you could parse the JSON string in bash ``echo $SKYPILOT_CLUSTER_INFO | jq .cloud`` or in Python ``json.loads(os.environ['SKYPILOT_CLUSTER_INFO'])['cloud']``.
+     - {"cluster_name": "my-cluster-name", "cloud": "GCP", "region": "us-central1", "zone": "us-central1-a"}
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1

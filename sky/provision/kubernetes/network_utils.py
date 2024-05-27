@@ -9,6 +9,7 @@ import sky
 from sky import exceptions
 from sky import skypilot_config
 from sky.adaptors import kubernetes
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 
@@ -19,6 +20,14 @@ _LOADBALANCER_TEMPLATE_NAME = 'kubernetes-loadbalancer.yml.j2'
 def get_port_mode(
         mode_str: Optional[str] = None) -> kubernetes_enums.KubernetesPortMode:
     """Get the port mode from the provider config."""
+
+    curr_kube_config = kubernetes_utils.get_current_kube_config_context_name()
+    running_kind = curr_kube_config == kubernetes_utils.KIND_CONTEXT_NAME
+
+    if running_kind:
+        # If running in kind (`sky local up`), use ingress mode
+        return kubernetes_enums.KubernetesPortMode.INGRESS
+
     mode_str = mode_str or skypilot_config.get_nested(
         ('kubernetes', 'ports'),
         kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
@@ -98,7 +107,7 @@ def create_or_replace_namespaced_ingress(
     try:
         networking_api.read_namespaced_ingress(
             ingress_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             networking_api.create_namespaced_ingress(
                 namespace,
@@ -120,7 +129,7 @@ def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
     try:
         networking_api.delete_namespaced_ingress(
             ingress_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             raise exceptions.PortDoesNotExistError(
                 f'Port {ingress_name.split("--")[-1]} does not exist.')
@@ -136,7 +145,7 @@ def create_or_replace_namespaced_service(
     try:
         core_api.read_namespaced_service(
             service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             core_api.create_namespaced_service(
                 namespace,
@@ -158,7 +167,7 @@ def delete_namespaced_service(namespace: str, service_name: str) -> None:
     try:
         core_api.delete_namespaced_service(
             service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-    except kubernetes.get_kubernetes().client.ApiException as e:
+    except kubernetes.kubernetes.client.ApiException as e:
         if e.status == 404:
             raise exceptions.PortDoesNotExistError(
                 f'Port {service_name.split("--")[-1]} does not exist.')
@@ -190,11 +199,17 @@ def get_ingress_external_ip_and_ports(
 
     ingress_service = ingress_services[0]
     if ingress_service.status.load_balancer.ingress is None:
-        # Try to use assigned external IP if it exists,
-        # otherwise return 'localhost'
+        # We try to get an IP/host for the service in the following order:
+        # 1. Try to use assigned external IP if it exists
+        # 2. Use the skypilot.co/external-ip annotation in the service
+        # 3. Otherwise return 'localhost'
+        ip = None
         if ingress_service.spec.external_i_ps is not None:
             ip = ingress_service.spec.external_i_ps[0]
-        else:
+        elif ingress_service.metadata.annotations is not None:
+            ip = ingress_service.metadata.annotations.get(
+                'skypilot.co/external-ip', None)
+        if ip is None:
             ip = 'localhost'
         ports = ingress_service.spec.ports
         http_port = [port for port in ports if port.name == 'http'][0].node_port
@@ -219,3 +234,13 @@ def get_loadbalancer_ip(namespace: str, service_name: str) -> Optional[str]:
     ip = service.status.load_balancer.ingress[
         0].ip or service.status.load_balancer.ingress[0].hostname
     return ip if ip is not None else None
+
+
+def get_pod_ip(namespace: str, pod_name: str) -> Optional[str]:
+    """Returns the IP address of the pod."""
+    core_api = kubernetes.core_api()
+    pod = core_api.read_namespaced_pod(pod_name,
+                                       namespace,
+                                       _request_timeout=kubernetes.API_TIMEOUT)
+
+    return pod.status.pod_ip if pod.status.pod_ip is not None else None
