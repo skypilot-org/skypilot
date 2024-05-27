@@ -3051,7 +3051,7 @@ def show_gpus(
                                  'must be same.')
         if len(counts) == 0:
             err_msg = 'No GPUs found in Kubernetes cluster. '
-            debug_msg = 'To further debug, run: sky check.'
+            debug_msg = 'To further debug, run: sky check '
             if name_filter is not None:
                 gpu_info_msg = f' {name_filter!r}'
                 if quantity_filter is not None:
@@ -3060,7 +3060,7 @@ def show_gpus(
                 err_msg = (f'Resources{gpu_info_msg} not found '
                            'in Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
-                             ' run: sky show-gpus --cloud kubernetes')
+                             ' run: sky show-gpus --cloud kubernetes ')
             full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
@@ -3102,12 +3102,10 @@ def show_gpus(
                     # print the warning at the end.
                     k8s_realtime_table = _get_kubernetes_realtime_gpu_table()
                 except ValueError as e:
-                    if cloud_is_kubernetes:
-                        # Immediately show the error msg if --cloud kubernetes
-                        yield str(e)
-                    else:
-                        # Show the error message at the end if not specified
-                        k8s_messages += f'Note: {str(e)}'
+                    if not cloud_is_kubernetes:
+                        # Make it a note if cloud is not kubernetes
+                        k8s_messages += f'Note: '
+                    k8s_messages += str(e)
                 else:
                     print_section_titles = True
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
@@ -3123,6 +3121,12 @@ def show_gpus(
                            'sky check kubernetes ')
                 yield k8s_messages
                 return
+
+            # For show_all, show the k8s message at the start since output is
+            # long and the user may not scroll to the end.
+            if show_all and k8s_messages:
+                yield k8s_messages
+                yield '\n\n'
 
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
@@ -3157,14 +3161,11 @@ def show_gpus(
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
-                if k8s_messages:
-                    yield k8s_messages
-                    yield '\n\n'
             else:
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
                 if k8s_messages:
-                    yield '\n\n'
+                    yield '\n'
                     yield k8s_messages
                 return
         else:
@@ -3208,12 +3209,12 @@ def show_gpus(
             if kubernetes_autoscaling:
                 k8s_messages += ('\n' +
                                  kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+            yield k8s_messages
         if cloud_is_kubernetes:
             # Do not show clouds if --cloud kubernetes is specified
             if not kubernetes_is_enabled:
                 yield ('Kubernetes is not enabled. To fix, run: '
                        'sky check kubernetes ')
-            yield k8s_messages
             return
 
         # For clouds other than Kubernetes, get the accelerator details
@@ -3265,10 +3266,6 @@ def show_gpus(
             cloud_str = f' on {cloud_obj}.' if cloud else ' in cloud catalogs.'
             yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
             yield 'To show available accelerators, run: sky show-gpus --all'
-
-            if k8s_messages:
-                yield '\n'
-                yield k8s_messages
             return
 
         for i, (gpu, items) in enumerate(result.items()):
@@ -3326,9 +3323,6 @@ def show_gpus(
             if i != 0:
                 yield '\n\n'
             yield from accelerator_table.get_string()
-            if k8s_messages:
-                yield '\n'
-                yield k8s_messages
 
     if show_all:
         click.echo_via_pager(_output())
