@@ -9,7 +9,7 @@ from sky.utils import kubernetes_enums
 from sky.utils.resources_utils import port_ranges_to_set
 
 _PATH_PREFIX = '/skypilot/{namespace}/{cluster_name_on_cloud}/{port}'
-_LOADBALANCER_SERVICE_NAME = '{cluster_name_on_cloud}-skypilot-lb'
+_LOADBALANCER_SERVICE_NAME = '{cluster_name_on_cloud}--skypilot-lb'
 
 
 def open_ports(
@@ -74,7 +74,7 @@ def _open_ports_using_ingress(
         )
 
     # Prepare service names, ports,  for template rendering
-    service_details = [(f'{cluster_name_on_cloud}-skypilot-svc--{port}',
+    service_details = [(f'{cluster_name_on_cloud}--skypilot-svc--{port}',
                         port,
                         _PATH_PREFIX.format(
                             cluster_name_on_cloud=cluster_name_on_cloud,
@@ -162,7 +162,7 @@ def _cleanup_ports_for_ingress(
 ) -> None:
     # Delete services for each port
     for port in ports:
-        service_name = f'{cluster_name_on_cloud}-skypilot-service--{port}'
+        service_name = f'{cluster_name_on_cloud}--skypilot-svc--{port}'
         network_utils.delete_namespaced_service(
             namespace=provider_config.get('namespace', 'default'),
             service_name=service_name,
