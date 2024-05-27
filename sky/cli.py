@@ -3190,8 +3190,8 @@ def show_gpus(
                 name, quantity = accelerator_str, None
 
         print_section_titles = False
-        if (kubernetes_is_enabled and (cloud is None or
-                                       cloud_is_kubernetes) and not show_all):
+        if (kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes) and
+                not show_all):
             # Print section title if not showing all and instead a specific
             # accelerator is requested
             print_section_titles = True
