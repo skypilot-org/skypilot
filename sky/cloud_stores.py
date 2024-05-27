@@ -198,10 +198,12 @@ class AzureBlobCloudStorage(CloudStorage):
         if len(path) == 0:
             return True
         # If there's more, we'd need to check if it's a directory or a file.
-        container_client = data_utils.create_az_client(
-            client_type='container',
+        container_url = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=storage_account_name,
             container_name=container_name)
+        container_client = data_utils.create_az_client(
+            client_type='container',
+            container_url=container_url)
         num_objects = 0
         for blob in container_client.list_blobs(name_starts_with=path):
             if blob.name == path:

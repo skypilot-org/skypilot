@@ -25,6 +25,9 @@ Client = Any
 
 logger = sky_logging.init_logger(__name__)
 
+AZURE_CONTAINER_URL = (
+    'https://{storage_account_name}.blob.core.windows.net/{container_name}')
+
 
 def split_s3_path(s3_path: str) -> Tuple[str, str]:
     """Splits S3 Path into Bucket name and Relative Path to Bucket
@@ -157,15 +160,12 @@ def create_az_client(client_type: str,
     Returns:
       Client object facing AZ Resource of the 'type'.
     """
-    storage_account_name = kwargs.pop('storage_account_name', None)
-    container_name = kwargs.pop('container_name', None)
+    container_url = kwargs.pop('container_url', None)
     if client_type == 'container':
-        assert storage_account_name is not None
-        assert container_name is not None
+        assert container_url is not None
     subscription_id = azure.get_subscription_id()
     return azure.get_client(client_type, subscription_id,
-                            storage_account_name=storage_account_name,
-                            container_name=container_name)
+                            container_url=container_url)
 
 
 def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
@@ -177,10 +177,12 @@ def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
     Returns:
       boolean; shows either or not the container exists.
     """
-    container_client = create_az_client(
-        'container',
+    container_url = AZURE_CONTAINER_URL.format(
         storage_account_name=storage_account_name,
         container_name=container_name)
+    container_client = create_az_client(
+        'container',
+        container_url=container_url)
     return container_client.exists()
 
 

@@ -2289,12 +2289,14 @@ class AzureBlobStore(AbstractStore):
                 'sky storage delete' or 'sky start'
         """
         try:
-            container = data_utils.create_az_client(
-                'container',
+            container_url = data_utils.AZURE_CONTAINER_URL.format(
                 storage_account_name=self.storage_account_name,
                 container_name=self.name)
-            if container.exists():
-                is_private = (True if container.get_container_properties(
+            container_client = data_utils.create_az_client(
+                'container',
+                container_url=container_url)
+            if container_client.exists():
+                is_private = (True if container_client.get_container_properties(
                 )['public_access'] is None else False)
                 # when user attempts to use private container without
                 # access rights
@@ -2303,7 +2305,7 @@ class AzureBlobStore(AbstractStore):
                         raise exceptions.StorageBucketGetError(
                             _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
                                 name=self.name))
-                return container.container_name, False
+                return container_client.container_name, False
             # when the container name does not exist under the provided
             # storage account name and credentials, and user has the rights to
             # access the storage account.

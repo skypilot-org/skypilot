@@ -73,10 +73,8 @@ def get_client(name: str,
             return GraphServiceClient(credential)
         elif name == 'container':
             from azure.storage.blob import ContainerClient
-            storage_account_name = kwargs.pop('storage_account_name', None)
-            container_name = kwargs.pop('container_name', None)
-            container_url = (f'https://{storage_account_name}.'
-                             f'blob.core.windows.net/{container_name}')
+            container_url = kwargs.pop('container_url', None)
+            assert container_url is not None
             container_client = ContainerClient.from_container_url(container_url)
             try:
                 container_client.exists()
