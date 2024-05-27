@@ -8,9 +8,9 @@ SkyServe provides robust authorization capabilities at the replica level, allowi
 Setup API Keys
 --------------
 
-SkyServe relies on the authorization of the service running on underlying service replicas, e.g., the inference engine. We take an example vLLM inference engine, which supports static API key authorization with an argument :code`--api-key`.
+SkyServe relies on the authorization of the service running on underlying service replicas, e.g., the inference engine. We take the vLLM inference engine as an example, which supports static API key authorization with an argument :code`--api-key`.
 
-We first define the SkyServe service spec with an LLM service setup with vLLM and an API key set:
+We define a SkyServe service spec for serving Llama-3 chatbot with vLLM and an API key. In the example YAML below, we define the authorization token as an environment variable, :code:`AUTH_TOKEN`, and pass it to both the service field to enable readiness_probe to access the replicas and the vllm entrypoint to start services on replicas with the API key.
 
 .. code-block:: yaml
   :emphasize-lines: 5-6,12,28
@@ -44,20 +44,18 @@ We first define the SkyServe service spec with an LLM service setup with vLLM an
       --host 0.0.0.0 --port 8000 \
       --api-key $AUTH_TOKEN
 
-To enable this feature in SkyServe, you need to configure the readiness probe to include the access token (see the :code:`service.readiness_probe` section above). This ensures the readiness probe passes the authorization check. Use the following command to deploy the service:
+To deploy the service, run the following command:
 
 .. code-block:: bash
 
-  sky serve up auth.yaml -n auth --env HF_TOKEN=<your-hf-token> --env AUTH_TOKEN=sky-authkey-3d2105b9-a9ba-4f13
+  HF_TOKEN=xxx AUTH_TOKEN=yyy sky serve up auth.yaml -n auth --env HF_TOKEN --env AUTH_TOKEN
 
-SkyServe's proxy design ensures that all headers in the original request, including the authorization token, are forwarded to the vLLM inference engine. The engine then validates the token. Notice that we will automatically replace the :code:`$AUTH_TOKEN` in the service section with the actual token value as well.
-
-With the :code:`--api-key` set, a user's request needs to include an Authorization header to access the service:
+To send a request to the service endpoint, a service client need to include the static API key in a request's header:
 
 .. code-block:: bash
 
   $ ENDPOINT=$(sky serve status --endpoint auth)
-  $ AUTH_TOKEN=sky-authkey-3d2105b9-a9ba-4f13
+  $ AUTH_TOKEN=yyy
   $ curl http://$ENDPOINT/v1/chat/completions \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $AUTH_TOKEN" \
