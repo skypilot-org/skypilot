@@ -3104,7 +3104,7 @@ def show_gpus(
                 except ValueError as e:
                     if not cloud_is_kubernetes:
                         # Make it a note if cloud is not kubernetes
-                        k8s_messages += f'Note: '
+                        k8s_messages += 'Note: '
                     k8s_messages += str(e)
                 else:
                     print_section_titles = True
