@@ -180,6 +180,12 @@ provider:
         - apiGroups: [ "networking.k8s.io" ]   # Required for exposing services.
           resources: [ "ingressclasses" ]
           verbs: [ "get", "list", "watch" ]
+        - apiGroups: [ "kueue.x-k8s.io" ]
+          resources: [ "workloadpriorityclasses" ] # Required for checking kueue priorities
+          verbs: [ "get", "list", "watch" ]
+        - apiGroups: [ "kueue.x-k8s.io" ]
+          resources: [ "localqueues" ] # Required for checking kueue localqueues
+          verbs: [ "get", "list", "watch" ]
 
     # Bind cluster role to the service account
     autoscaler_cluster_role_binding:
