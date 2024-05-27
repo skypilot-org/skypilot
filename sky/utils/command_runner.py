@@ -452,8 +452,7 @@ class SSHCommandRunner(CommandRunner):
             cmd,
             process_stream,
             separate_stderr,
-            # +1 to skip first new line.
-            skip_lines=skip_lines + 1,
+            skip_lines=skip_lines,
             source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
