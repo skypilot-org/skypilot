@@ -62,4 +62,3 @@ run: |
   echo -e '\n##### SkyPilot Storage COPY mode setup bandwidth #####'
   echo -n 'aws s3 cp reported bandwidth: ' && ( tail -2 /skystorage-mount/perf_copymode_log.txt | head -1 | grep -o '([^)]* MiB/s)' )
   echo -n 'Actual aws s3 cp -> EBS bandwidth (MB/s): ' && ( bc <<< $(stat -c %s ~/64kseqreads.0.0)/$(cat /skystorage-mount/perf_copymode_time.txt)/1000000)
-  
