@@ -8,8 +8,8 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils.resources_utils import port_ranges_to_set
 
-_PATH_PREFIX = '/skypilot/{cluster_name_on_cloud}/{port}'
-_LOADBALANCER_SERVICE_NAME = '{cluster_name_on_cloud}-skypilot-loadbalancer'
+_PATH_PREFIX = '/skypilot/{namespace}/{cluster_name_on_cloud}/{port}'
+_LOADBALANCER_SERVICE_NAME = '{cluster_name_on_cloud}--skypilot-lb'
 
 
 def open_ports(
@@ -73,13 +73,14 @@ def _open_ports_using_ingress(
             'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
         )
 
-    # Prepare service names, ports, for template rendering
-    service_details = [
-        (f'{cluster_name_on_cloud}-skypilot-service--{port}', port,
-         _PATH_PREFIX.format(cluster_name_on_cloud=cluster_name_on_cloud,
-                             port=port).rstrip('/').lstrip('/'))
-        for port in ports
-    ]
+    # Prepare service names, ports,  for template rendering
+    service_details = [(f'{cluster_name_on_cloud}--skypilot-svc--{port}', port,
+                        _PATH_PREFIX.format(
+                            cluster_name_on_cloud=cluster_name_on_cloud,
+                            port=port,
+                            namespace=kubernetes_utils.
+                            get_current_kube_config_context_namespace()).rstrip(
+                                '/').lstrip('/')) for port in ports]
 
     # Generate ingress and services specs
     # We batch ingress rule creation because each rule triggers a hot reload of
@@ -160,7 +161,7 @@ def _cleanup_ports_for_ingress(
 ) -> None:
     # Delete services for each port
     for port in ports:
-        service_name = f'{cluster_name_on_cloud}-skypilot-service--{port}'
+        service_name = f'{cluster_name_on_cloud}--skypilot-svc--{port}'
         network_utils.delete_namespaced_service(
             namespace=provider_config.get('namespace', 'default'),
             service_name=service_name,
@@ -245,7 +246,10 @@ def _query_ports_for_ingress(
     result: Dict[int, List[common.Endpoint]] = {}
     for port in ports:
         path_prefix = _PATH_PREFIX.format(
-            cluster_name_on_cloud=cluster_name_on_cloud, port=port)
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            port=port,
+            namespace=kubernetes_utils.
+            get_current_kube_config_context_namespace())
 
         http_port, https_port = external_ports \
             if external_ports is not None else (None, None)
