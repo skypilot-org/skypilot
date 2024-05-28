@@ -67,8 +67,9 @@ def update_prices():
             accelerator_name = utils.cudo_gpu_to_skypilot_gpu(hc['gpu_model'])
             row = {
                 'instance_type': get_instance_type(hc['machine_type'],
-                                                   spec['gpu'], spec['vcpu'],
-                                                   spec['mem']),
+                                                   spec['vcpu'],
+                                                   spec['mem'],
+                                                   spec['gpu']),
                 'accelerator_name': accelerator_name,
                 'accelerator_count': str(spec['gpu']) + '.0',
                 'vcpus': str(spec['vcpu']),
