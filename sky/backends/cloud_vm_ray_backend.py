@@ -3175,11 +3175,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 process_stream=False,
                 # We do not source bashrc for setup, since bashrc is sourced
                 # in the script already.
-                # Skip two lines due to the /bin/bash -i and source ~/.bashrc
-                # in the setup_cmd.
+                # Skip an empty line and two lines due to the /bin/bash -i and
+                # source ~/.bashrc in the setup_cmd.
                 #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
                 #   bash: no job control in this shell
-                skip_lines=2,
+                skip_lines=3,
             )
 
             def error_message() -> str:
@@ -3668,6 +3668,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   job_id: Optional[int],
                   managed_job_id: Optional[int] = None,
                   follow: bool = True) -> int:
+        """Tail the logs of a job.
+
+        Args:
+            handle: The handle to the cluster.
+            job_id: The job ID to tail the logs of.
+            managed_job_id: The managed job ID for display purpose only.
+            follow: Whether to follow the logs.
+        """
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
                                                follow=follow)
@@ -3702,15 +3710,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               handle: CloudVmRayResourceHandle,
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
+                              controller: bool = False,
                               follow: bool = True) -> None:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
-        if job_name is not None:
-            code = managed_jobs.ManagedJobCodeGen.stream_logs_by_name(
-                job_name, follow)
-        else:
-            code = managed_jobs.ManagedJobCodeGen.stream_logs_by_id(
-                job_id, follow)
+        code = managed_jobs.ManagedJobCodeGen.stream_logs(
+            job_name, job_id, follow, controller)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.

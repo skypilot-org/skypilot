@@ -278,7 +278,8 @@ def cancel(name: Optional[str] = None,
 
 
 @usage_lib.entrypoint
-def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
+def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
+              controller: bool) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
@@ -300,11 +301,12 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool) -> None:
         raise ValueError('Cannot specify both name and job_id.')
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
-    # Stream the realtime logs
+
     backend.tail_managed_job_logs(handle,
                                   job_id=job_id,
                                   job_name=name,
-                                  follow=follow)
+                                  follow=follow,
+                                  controller=controller)
 
 
 spot_launch = common_utils.deprecated_function(
