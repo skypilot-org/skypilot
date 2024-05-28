@@ -807,7 +807,13 @@ def write_cluster_config(
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
         excluded_clouds = [cloud]
-    credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
+
+    # this environment variable decides if we want to authenticate the remote task
+    # with the user's clouds
+    if os.environ.get('SKYPILOT_DISABLE_REMOTE_TASK_AUTHENTICATION', '').strip() == '1':
+        credentials = {}
+    else:
+        credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
     region_name = resources_vars.get('region')
