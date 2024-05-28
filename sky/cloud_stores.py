@@ -203,7 +203,7 @@ class AzureBlobCloudStorage(CloudStorage):
             container_name=container_name)
         container_client = data_utils.create_az_client(
             client_type='container',
-            container_url=container_url)
+            container_url=container_url)       
         num_objects = 0
         for blob in container_client.list_blobs(name_starts_with=path):
             if blob.name == path:
@@ -216,7 +216,7 @@ class AzureBlobCloudStorage(CloudStorage):
         return True
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Downloads a directory using AZCOPY."""
+        """Fetches a directory using AZCOPY from storage to remote instance."""
         container_name, _, storage_account_name = data_utils.split_az_path(
             source)
         resource_group_name = data_utils.get_az_resource_group(
@@ -229,8 +229,10 @@ class AzureBlobCloudStorage(CloudStorage):
         else:
             sas_token = azure.get_az_container_sas_token(
                 storage_account_name, storage_account_key, container_name)
-        source = (f'https://{storage_account_name}.blob.core.windows.net/'
-                  f'{container_name}/{sas_token}')
+        container_url = data_utils.AZURE_CONTAINER_URL.format(
+            storage_account_name=storage_account_name,
+            container_name=container_name)
+        source = f'{container_url}/{sas_token}'
         source = shlex.quote(source)
         destination = f'{destination}/'
         download_command = (f'azcopy sync {source} {destination} '
@@ -240,7 +242,7 @@ class AzureBlobCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
-        """Downloads a file using AZCOPY."""
+        """Fetches a file using AZCOPY from storage to remote instance."""
         container_name, blob_path, storage_account_name = (
             data_utils.split_az_path(source))
         resource_group_name = data_utils.get_az_resource_group(
@@ -254,8 +256,10 @@ class AzureBlobCloudStorage(CloudStorage):
             sas_token = azure.get_az_blob_sas_token(
                 storage_account_name, storage_account_key, container_name,
                 blob_path)
-        source = (f'https://{storage_account_name}.blob.core.windows.net/'
-                  f'{container_name}/{blob_path}{sas_token}')
+        container_url = data_utils.AZURE_CONTAINER_URL.format(
+            storage_account_name=storage_account_name,
+            container_name=container_name)
+        source = f'{container_url}/{blob_path}{sas_token}'
         source = shlex.quote(source)
         download_command = f'azcopy copy {source} {destination}'
         all_commands = list(self._GET_AZCOPY)

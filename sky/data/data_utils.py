@@ -205,7 +205,9 @@ def get_az_resource_group(
             # Extract the resource group name from the account ID
             # An example of account.id would be the following:
             # /subscriptions/{subscription_id}/resourceGroups/{resource_group_name}/providers/Microsoft.Storage/storageAccounts/{container_name} # pylint: disable=line-too-long
-            resource_group_name = account.id.split('/')[4]
+            split_account_id = account.id.split('/')
+            assert len(split_account_id) == 9
+            resource_group_name = split_account_id[4]
             return resource_group_name
     # resource group cannot be found when using container not created
     # under the user's subscription id, i.e. public container or
