@@ -3760,13 +3760,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool):
     """Tail the log of a managed job."""
     try:
-        if controller:
-            core.tail_logs(
-                controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name,
-                job_id=job_id,
-                follow=follow)
-        else:
-            managed_jobs.tail_logs(name=name, job_id=job_id, follow=follow)
+        managed_jobs.tail_logs(name=name,
+                               job_id=job_id,
+                               follow=follow,
+                               controller=controller)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

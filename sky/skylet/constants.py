@@ -130,6 +130,9 @@ RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 # backend_utils.write_cluster_config.
 RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
+    # Disable the pip version check to avoid the warning message, which makes
+    # the output hard to read.
+    'export PIP_DISABLE_PIP_VERSION_CHECK=1;'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
