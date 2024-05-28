@@ -72,7 +72,7 @@ Why use SkyPilot on Kubernetes?
 Table of Contents
 -----------------
 
-.. grid:: 3
+.. grid:: 1 1 3 3
     :gutter: 3
 
     .. grid-item-card::  👋 Get Started
