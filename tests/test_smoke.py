@@ -999,6 +999,36 @@ def test_aws_storage_mounts_with_stop():
         run_one_test(test)
 
 
+@pytest.mark.aws
+def test_aws_mount_rclone():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+        storage_name, Rclone.RcloneClouds.AWS)
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_rclone_mount.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(store_type=f'{storage_lib.StoreType.S3.value}',
+                              storage_name=storage_name,
+                              bucket_rclone_profile=bucket_rclone_profile)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud aws {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+        ]
+        test = Test(
+            'aws_mount_rclone',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
 @pytest.mark.gcp
 def test_gcp_storage_mounts_with_stop():
     name = _get_cluster_name()
@@ -1024,6 +1054,36 @@ def test_gcp_storage_mounts_with_stop():
         ]
         test = Test(
             'gcp_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_gcp_mount_rclone():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+        storage_name, Rclone.RcloneClouds.GCP)
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_rclone_mount.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(store_type=storage_lib.StoreType.GCS.value,
+                              storage_name=storage_name,
+                              bucket_rclone_profile=bucket_rclone_profile)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud gcp {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+        ]
+        test = Test(
+            'gcp_mount_rclone',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
