@@ -751,6 +751,8 @@ class ManagedJobCodeGen:
 
       >> codegen = ManagedJobCodeGen.show_jobs(...)
     """
+    # TODO: the try..except.. block is for backward compatibility. Remove it in
+    # v0.8.0.
     _PREFIX = textwrap.dedent("""\
         managed_job_version = 0
         try:
@@ -800,7 +802,8 @@ class ManagedJobCodeGen:
         # We inspect the source code of the function here for backward
         # compatibility.
         # TODO: change to utils.stream_logs(job_id, job_name, follow) in v0.8.0.
-        # Import libraries required by `stream_logs`
+        # Import libraries required by `stream_logs`. The try...except... block
+        # should be removed in v0.8.0.
         code = textwrap.dedent("""\
         import os
 
