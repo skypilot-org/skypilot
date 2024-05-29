@@ -165,6 +165,7 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
+    RCLONE = 'RCLONE'
 
 
 class AbstractStore:
@@ -1036,6 +1037,9 @@ class S3Store(AbstractStore):
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
+        self.bucket_rclone_profile = \
+          Rclone.generate_rclone_bucket_profile_name(
+            self.name, Rclone.RcloneClouds.AWS)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1354,6 +1358,22 @@ class S3Store(AbstractStore):
                                                     mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
+    
+    def mount_command_rclone(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_mount_install_cmd_rclone()
+        rclone_config_data = Rclone.get_rclone_config(
+            self.bucket.name,
+            Rclone.RcloneClouds.AWS,
+            None
+        )
+        mount_cmd = mounting_utils.get_mount_cmd_rclone(rclone_config_data,
+                                                            Rclone.RCLONE_CONFIG_PATH,
+                                                            self.bucket_rclone_profile,
+                                                            self.bucket.name,
+                                                            mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                    mount_cmd)
+
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -1445,6 +1465,9 @@ class GcsStore(AbstractStore):
         self.bucket: StorageHandle
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
+        self.bucket_rclone_profile = \
+          Rclone.generate_rclone_bucket_profile_name(
+            self.name, Rclone.RcloneClouds.GCP)
 
     def _validate(self):
         if self.source is not None:
@@ -1794,6 +1817,23 @@ class GcsStore(AbstractStore):
             f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
+            
+    
+    def mount_command_rclone(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_mount_install_cmd_rclone()
+        rclone_config_data = Rclone.get_rclone_config(
+            self.bucket.name,
+            Rclone.RcloneClouds.GCP,
+            None
+        )
+        mount_cmd = mounting_utils.get_mount_cmd_rclone(rclone_config_data,
+                                                            Rclone.RCLONE_CONFIG_PATH,
+                                                            self.bucket_rclone_profile,
+                                                            self.bucket.name,
+                                                            mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                    mount_cmd)
+
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -2585,7 +2625,7 @@ class IBMCosStore(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         # install rclone if not installed.
-        install_cmd = mounting_utils.get_cos_mount_install_cmd()
+        install_cmd = mounting_utils.get_mount_install_cmd_rclone()
         rclone_config_data = Rclone.get_rclone_config(
             self.bucket.name,
             Rclone.RcloneClouds.IBM,
