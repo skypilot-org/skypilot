@@ -132,6 +132,17 @@ class SCP(clouds.Cloud):
                                                zone=zone,
                                                clouds='scp')
 
+    def instance_type_to_hourly_carbon_cost(
+            self,
+            instance_type: str,
+            accelerators: Dict[str, int],
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> float:
+        # TODO: Investigate carbon cost for SCP compute.
+        # For now, assume negative costs which interprets to 'unknown'
+        # for SCP cloud.
+        return -1.0
+
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
                                     use_spot: bool,

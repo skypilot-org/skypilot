@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from sky import sky_logging
 from sky.adaptors import ibm
 from sky.clouds import cloud
+from sky.clouds.service_catalog import carbon_utils
 from sky.clouds.service_catalog import common
 from sky.utils import resources_utils
 
@@ -19,6 +20,14 @@ _DEFAULT_NUM_VCPUS = '8'
 _DEFAULT_MEMORY = 32
 
 _df = common.read_catalog('ibm/vms.csv')
+
+_carbon_df = carbon_utils.read_carbon_file('gcp/cloudProviders_datacenters.csv',
+                                           filter_col='provider',
+                                           filter_val='ibm')
+
+_carbon_pue_df = carbon_utils.read_carbon_file('gcp/defaults_PUE.csv',
+                                               filter_col='provider',
+                                               filter_val='Unknown')
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -35,6 +44,30 @@ def get_hourly_cost(instance_type: str,
                     zone: Optional[str] = None) -> float:
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
+
+
+def get_hourly_carbon_cost(
+    instance_type: str,
+    accelerators: Dict[str, int],
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+) -> float:
+    """Returns the hourly enery cost of a VM instance in the given region
+    and zone.
+
+    Refer to get_hourly_energy_cost in service_catalog/__init__.py for
+    the docstring.
+    """
+    assert region is not None
+
+    if accelerators is not None and len(accelerators) > 0:
+        acc_name, n_gpus = list(accelerators.items())[0]
+    else:
+        acc_name = ''
+        n_gpus = 0
+    return common.get_hourly_carbon_cost_impl(_df, _carbon_df, _carbon_pue_df,
+                                              instance_type, acc_name, n_gpus,
+                                              region, zone)
 
 
 def get_vcpus_mem_from_instance_type(

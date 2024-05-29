@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.clouds import cloud_registry
+from sky.clouds.service_catalog import carbon_utils
 from sky.clouds.service_catalog import constants
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -28,6 +29,33 @@ logger = sky_logging.init_logger(__name__)
 _ABSOLUTE_VERSIONED_CATALOG_DIR = os.path.join(
     os.path.expanduser(constants.CATALOG_DIR), constants.CATALOG_SCHEMA_VERSION)
 os.makedirs(_ABSOLUTE_VERSIONED_CATALOG_DIR, exist_ok=True)
+
+_PUE_DEFAULT = 1.67
+
+# Carbon Intensity
+_ci_df = carbon_utils.read_carbon_file(
+    'CI_aggregated.csv',
+    filter_col='',
+    filter_val='',
+    pull_frequency_hours=carbon_utils.CARBON_PULL_FREQUENCY_HOURS)
+
+_tdp_gpu_df = carbon_utils.read_carbon_file(
+    'TDP_gpu.csv',
+    filter_col='',
+    filter_val='',
+    pull_frequency_hours=carbon_utils.CARBON_PULL_FREQUENCY_HOURS)
+
+_tdp_cpu_df = carbon_utils.read_carbon_file(
+    'TDP_cpu.csv',
+    filter_col='',
+    filter_val='',
+    pull_frequency_hours=carbon_utils.CARBON_PULL_FREQUENCY_HOURS)
+
+_reference_vals_df = carbon_utils.read_carbon_file(
+    'referenceValues.csv',
+    filter_col='',
+    filter_val='',
+    pull_frequency_hours=carbon_utils.CARBON_PULL_FREQUENCY_HOURS)
 
 
 class InstanceTypeInfo(NamedTuple):
@@ -359,6 +387,116 @@ def get_hourly_cost_impl(
     return cheapest[price_str]
 
 
+# Includes carbon cost for accelerator. From Green Algorithm
+# Calulator: https://github.com/GreenAlgorithms/green-algorithms-tool.
+def get_hourly_carbon_cost_impl(
+    df: pd.DataFrame,
+    carbon_df: pd.DataFrame,
+    carbon_pue_df: pd.DataFrame,
+    instance_type: str,
+    acc_name: str,
+    n_gpus: int,
+    region: Optional[str],
+    zone: Optional[str],
+) -> float:
+    """Returns the hourly carbon cost of a VM instance in the given region
+    any zone.
+
+    Refer to get_carbon_cost in service_catalog/__init__.py for the docstring.
+    """
+    assert region is not None
+
+    # INSTANCE
+    df = _get_instance_type(df, instance_type, region, zone)
+    if df.empty:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Instance type {instance_type!r} not found.')
+
+    # PUE
+    pue_used = _PUE_DEFAULT
+    if not carbon_pue_df.empty:
+        pue = _get_value(carbon_pue_df.iloc[0]['PUE'])
+        if pue is not None:
+            pue_used = pue
+
+    # CPU
+    n_cpu_cores = _get_value(df.iloc[0]['vCPUs'])
+    if n_cpu_cores is None:
+        n_cpu_cores = 0
+
+    # Finding Thermal Design Power (TDP) value per core usually 10-15W.
+    # TODO(dmatch01): Find a way to get cpu model from instance
+    tdp_cpu_df = _tdp_cpu_df[(_tdp_cpu_df['model'].str.lower() == 'any')]
+    if tdp_cpu_df.empty:
+        power_needed_cpu = 0
+    else:
+        cpu_power = tdp_cpu_df.iloc[0]['TDP_per_core']
+        power_needed_cpu = pue_used * n_cpu_cores * cpu_power
+
+    # GPU
+    if n_gpus > 0:
+        fuzzy_tdp_gpu_df = _tdp_gpu_df[(_tdp_gpu_df['model'].str.contains(
+            acc_name, case=False))]
+        if fuzzy_tdp_gpu_df.empty:
+            # Default
+            fuzzy_tdp_gpu_df = _tdp_gpu_df[(
+                _tdp_gpu_df['model'].str.lower() == 'any')]
+        assert len(fuzzy_tdp_gpu_df) == 1
+
+        # Finding Thermal Design Power (TDP) value per core usually 10-15W.
+        gpu_power = fuzzy_tdp_gpu_df.iloc[0]['TDP_per_core']
+        power_needed_gpu = pue_used * n_gpus * gpu_power
+    else:
+        power_needed_gpu = 0
+
+    # MEMORY
+    memory = _get_value(df.iloc[0]['MemoryGiB'])
+    if memory is None:
+        memory = 0
+
+    memory_power = 0.3725
+    ref_vals_df = _reference_vals_df[(
+        _reference_vals_df['variable'].str.lower() == 'memorypower')]
+    if not ref_vals_df.empty:
+        memory_power_val = _get_value(ref_vals_df.iloc[0]['value'])
+        if memory_power_val is not None:
+            memory_power = memory_power_val
+
+    # SERVER/LOCATION
+    # First get the region code
+    carbon_df = carbon_df[(carbon_df['Name'].str.lower() == region.lower())]
+    region_code = 'World'
+    if not carbon_df.empty:
+        location = carbon_df.iloc[0]['location']
+        if not pd.isnull(location) and len(location) > 0:
+            region_code = location
+
+    # From the region code get the carbon intensity
+    ci_df = _ci_df[(_ci_df['location'].str.lower() == region_code.lower())]
+    if ci_df.empty:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Carbon intesity metrics not found '
+                             f'for {region}.')
+
+    carbon_intensity = ci_df.iloc[0]['carbonIntensity']
+
+    # Pragmatic Scaling Factor (PSF)
+    psf_used = 1
+
+    # Power needed, in Watt
+    power_needed_core = power_needed_cpu + power_needed_gpu
+    power_needed_memory = pue_used * (memory * memory_power)
+    power_needed = power_needed_core + power_needed_memory
+
+    # Energy needed, in kWh (so dividing by 1000 to convert to kW)
+    energy_needed = power_needed * psf_used / 1000
+
+    # Carbon emissions: carbonIntensity is in g per kWh, so results in gCO2
+    carbon_emissions = energy_needed * carbon_intensity
+
+    return carbon_emissions
+
+
 def _get_value(value):
     if pd.isna(value):
         return None
@@ -504,6 +642,7 @@ def get_instance_type_for_accelerator_impl(
     result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
                 (df['AcceleratorCount'] == acc_count)]
     result = _filter_region_zone(result, region, zone)
+
     if len(result) == 0:
         fuzzy_result = df[
             (df['AcceleratorName'].str.contains(acc_name, case=False)) &

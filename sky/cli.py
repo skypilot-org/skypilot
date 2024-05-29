@@ -155,6 +155,16 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     return list(env_dict.items())
 
 
+_TASK_OPTIMIZE_OPTIONS = [
+    click.option('--optimize-cost-target',
+                 default=sky.OptimizeObjectiveTarget.PRICE.value,
+                 type=click.Choice(
+                     sky.OptimizeObjectiveTarget.supported_targets(),
+                     case_sensitive=False),
+                 required=False,
+                 help=sky.OptimizeObjectiveTarget.cli_help_message()),
+]
+
 _TASK_OPTIONS = [
     click.option(
         '--workdir',
@@ -256,7 +266,7 @@ _TASK_OPTIONS = [
 
         3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
         same value of ``$MY_ENV3`` in the local environment.""",
-    )
+    ),
 ]
 _TASK_OPTIONS_WITH_NAME = [
     click.option('--name',
@@ -265,7 +275,7 @@ _TASK_OPTIONS_WITH_NAME = [
                  type=str,
                  help=('Task name. Overrides the "name" '
                        'config in the YAML if both are supplied.')),
-] + _TASK_OPTIONS
+] + _TASK_OPTIONS + _TASK_OPTIMIZE_OPTIONS
 _EXTRA_RESOURCES_OPTIONS = [
     click.option(
         '--gpus',
@@ -473,6 +483,7 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
+        optimize_cost_target: Optional[str] = None,
         ports: Optional[Tuple[str]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
@@ -525,6 +536,8 @@ def _parse_override_params(
             override_params['disk_tier'] = None
         else:
             override_params['disk_tier'] = disk_tier
+    if optimize_cost_target is not None:
+        override_params['optimize_cost_target'] = optimize_cost_target
     if ports:
         override_params['ports'] = ports
     return override_params
@@ -544,6 +557,7 @@ def _launch_with_confirm(
     retry_until_up: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    optimize_cost_target: Optional[str] = None,
 ):
     """Launch a cluster with a Task."""
     if cluster is None:
@@ -569,7 +583,13 @@ def _launch_with_confirm(
             # only print the error message without the error type.
             click.secho(e, fg='yellow')
             sys.exit(1)
-        dag = sky.optimize(dag)
+
+        # Set the optimize objective
+        if optimize_cost_target == sky.OptimizeObjectiveTarget.CARBON_FOOTPRINT.value:
+            optimize_cost_target_enum = sky.OptimizeObjectiveTarget.CARBON_FOOTPRINT
+        else:
+            optimize_cost_target_enum = sky.OptimizeObjectiveTarget.PRICE
+        dag = sky.optimize(dag, objective_target=optimize_cost_target_enum)
     task = dag.tasks[0]
 
     if handle is not None:
@@ -607,6 +627,7 @@ def _launch_with_confirm(
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        optimize_cost_target=optimize_cost_target,
     )
 
 
@@ -706,6 +727,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
     ports: Optional[Tuple[str]] = None,
+    optimize_cost_target: Optional[str] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
@@ -748,6 +770,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
                                              ports=ports)
+
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
                                                   field_to_ignore)
@@ -1052,6 +1075,7 @@ def launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
+    optimize_cost_target: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -1092,6 +1116,7 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
+        optimize_cost_target=optimize_cost_target,
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
@@ -1126,7 +1151,8 @@ def launch(
                          down=down,
                          retry_until_up=retry_until_up,
                          no_setup=no_setup,
-                         clone_disk_from=clone_disk_from)
+                         clone_disk_from=clone_disk_from,
+                         optimize_cost_target=optimize_cost_target)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1149,28 +1175,15 @@ def launch(
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def exec(
-    cluster: str,
-    entrypoint: List[str],
-    detach_run: bool,
-    name: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    workdir: Optional[str],
-    gpus: Optional[str],
-    ports: Tuple[str],
-    instance_type: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    cpus: Optional[str],
-    memory: Optional[str],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-):
+def exec(cluster: str, entrypoint: List[str], detach_run: bool,
+         name: Optional[str], cloud: Optional[str], region: Optional[str],
+         zone: Optional[str], workdir: Optional[str], gpus: Optional[str],
+         ports: Tuple[str], instance_type: Optional[str],
+         num_nodes: Optional[int], use_spot: Optional[bool],
+         image_id: Optional[str], env_file: Optional[Dict[str, str]],
+         env: List[Tuple[str, str]], cpus: Optional[str], memory: Optional[str],
+         disk_size: Optional[int], disk_tier: Optional[str],
+         optimize_cost_target: Optional[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
 
@@ -1256,6 +1269,7 @@ def exec(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
+        optimize_cost_target=optimize_cost_target,
         field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
     )
 
@@ -3770,7 +3784,8 @@ def _generate_task_with_service(
               type=str,
               help='A service name. Unique for each service. If not provided, '
               'a unique name is autogenerated.')
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS +
+                    _TASK_OPTIMIZE_OPTIONS)
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3879,7 +3894,8 @@ def serve_up(
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS +
+                    _TASK_OPTIMIZE_OPTIONS)
 @click.option('--mode',
               default=serve_lib.DEFAULT_UPDATE_MODE.value,
               type=click.Choice([m.value for m in serve_lib.UpdateMode],
@@ -4356,6 +4372,7 @@ def benchmark_launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     ports: Tuple[str],
+    optimize_cost_target: Optional[str],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ) -> None:
@@ -4419,6 +4436,10 @@ def benchmark_launch(
         if ports:
             if any('ports' in candidate for candidate in candidates):
                 raise click.BadParameter(f'ports {message}')
+        if optimize_cost_target:
+            if any('optimize_cost_target' in candidate
+                   for candidate in candidates):
+                raise click.BadParameter(f'optimize_cost_target {message}')
 
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
@@ -4455,17 +4476,19 @@ def benchmark_launch(
         config['workdir'] = workdir
     if num_nodes is not None:
         config['num_nodes'] = num_nodes
-    override_params = _parse_override_params(cloud=cloud,
-                                             region=region,
-                                             zone=zone,
-                                             gpus=override_gpu,
-                                             cpus=cpus,
-                                             memory=memory,
-                                             use_spot=use_spot,
-                                             image_id=image_id,
-                                             disk_size=disk_size,
-                                             disk_tier=disk_tier,
-                                             ports=ports)
+    override_params = _parse_override_params(
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=override_gpu,
+        cpus=cpus,
+        memory=memory,
+        use_spot=use_spot,
+        optimize_cost_target=optimize_cost_target,
+        image_id=image_id,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports)
     _pop_and_ignore_fields_in_override_params(
         override_params, field_to_ignore=['cpus', 'memory'])
     resources_config.update(override_params)

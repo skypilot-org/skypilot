@@ -239,6 +239,13 @@ class Cloud:
         """Returns the hourly on-demand price for accelerators."""
         raise NotImplementedError
 
+    def instance_type_to_hourly_carbon_cost(self, instance_type: str,
+                                            accelerators: Dict[str, int],
+                                            region: Optional[str],
+                                            zone: Optional[str]) -> float:
+        """Returns the hourly carbon cost for an instance type."""
+        return -1
+
     def get_egress_cost(self, num_gigabytes: float):
         """Returns the egress cost.
 
