@@ -32,21 +32,10 @@ resources:
   accelerators: A100:1
   use_spot: true
 
-# file_mounts:
-#   ~/.cache/huggingface: gs://gpt2-data-skypilot
+file_mounts:
+  ~/.cache/huggingface: gs://gpt2-data-skypilot
 
 setup: |
-  export PATH="$PATH:$HOME/.local/bin"
-  # Create a gpt2 conda version with the latest gxx
-  # conda activate gpt2
-  # if [ $? -eq 0 ]; then
-  #   echo "gpt2 environment already exists"
-  # else
-  #   conda create -n gpt2 gxx=12 -y
-  #   conda activate gpt2
-  # fi
-
-
   cd ~
   pip install tqdm tiktoken requests datasets
 
