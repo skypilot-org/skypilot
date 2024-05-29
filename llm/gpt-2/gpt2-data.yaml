@@ -1,0 +1,24 @@
+name: gpt2-data
+
+resources:
+  cpus: 64+
+
+file_mounts:
+  /cache:
+    name: gpt2-data-skypilot
+    store: gcs
+    mode: MOUNT
+
+setup: |
+  pip install tqdm tiktoken requests datasets
+  # tokenize the FineWeb dataset 10B tokens sample (takes ~1 hour, get lunch?)
+  # writes ~19GB of raw GPT-2 tokens to dev/data/fineweb10B
+  # and ~46GB in ~/.cache/huggingface/datasets/HuggingFaceFW___fineweb
+  git clone https://github.com/karpathy/llm.c.git || true
+
+run: |
+  cd llm.c
+  python dev/data/fineweb.py --version 10B
+
+  rsync -Pavz --exclude "datasets/downloads/" ~/.cache/huggingface /cache/
+  rsync -Pavz dev/data/fineweb10B /cache/
