@@ -64,7 +64,7 @@ setup: |
     sudo dpkg -i cudnn-installer.deb
     sudo cp /var/cudnn-local-repo-${system_version}-9.1.1/cudnn-*-keyring.gpg /usr/share/keyrings/
     # Remove problematic kubernetes.list source
-    sudo apt-get update --allow-releaseinfo-change
+    sudo apt-get update --allow-releaseinfo-change || true
 
     sudo apt-get -y install cudnn-cuda-12
 
@@ -94,7 +94,7 @@ setup: |
 run: |
   cd ~/llm.c
   # train on multiple GPUs
-  mpirun -np 8 ./train_gpt2cu \
+  mpirun -np $SKYPILOT_NUM_GPUS_PER_NODE ./train_gpt2cu \
       -i "dev/data/fineweb10B/fineweb_train_*.bin" \
       -j "dev/data/fineweb10B/fineweb_val_*.bin" \
       -o log124M \
