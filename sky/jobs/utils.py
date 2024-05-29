@@ -806,7 +806,10 @@ class ManagedJobCodeGen:
 
         from sky.skylet import job_lib, log_lib
         from sky.skylet import constants
-        from sky.jobs.utils import stream_logs_by_id
+        try:
+            from sky.jobs.utils import stream_logs_by_id
+        except ImportError:
+            from sky.spot.utils import stream_logs_by_id
         from typing import Optional
         """)
         code += inspect.getsource(stream_logs)
