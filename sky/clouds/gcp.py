@@ -453,7 +453,7 @@ class GCP(clouds.Cloud):
                     # CUDA driver version 470.57.02, CUDA Library 11.4
                     image_id = 'skypilot:k80-debian-10'
                 else:
-                    # CUDA driver version 535.86.10, CUDA Library 12.4
+                    # CUDA driver version 550.54.15, CUDA Library 12.4
                     image_id = 'skypilot:gpu-ubuntu-2204'
 
         if (resources.image_id is not None and
