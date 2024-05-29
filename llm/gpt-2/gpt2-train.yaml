@@ -3,6 +3,18 @@ name: train
 
 resources:
   accelerators: A100:8
+  any_of:
+    - cloud: gcp
+      # Need to switch to Ubuntu image on GCP for C++ dependencies
+      image_id: projects/deeplearning-platform-release/global/images/common-cu122-v20240514-ubuntu-2204-py310
+    # List all possible cloud below.
+    - cloud: aws
+    - cloud: azure
+    - cloud: lambda
+    - cloud: runpod
+    - cloud: paperspace
+    - cloud: fluidstack
+    - cloud: kubernetes
 
 file_mounts:
   ~/.cache/huggingface: gs://gpt2-data-skypilot
