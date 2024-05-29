@@ -46,7 +46,7 @@ setup: |
 
   git clone https://github.com/karpathy/llm.c.git || true
   cd llm.c
-  mv ~/.cache/huggingface/fineweb10B dev/data/
+  ln -s ~/.cache/huggingface/fineweb10B dev/data/
   # compile llm.c (mixed precision, with cuDNN flash-attention)
   # first compilation is ~1 minute, mostly due to cuDNN
   make train_gpt2cu USE_CUDNN=1
