@@ -34,7 +34,7 @@ _image_df = common.read_catalog('gcp/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 if _image_df[_image_df['Tag'] == 'skypilot:cpu-ubuntu-2004'].empty:
     # Update the image catalog if it does not include the updated images
-    # https://github.com/skypilot-org/skypilot-catalog/pull/25.
+    # https://github.com/skypilot-org/skypilot-catalog/pull/71.
     _image_df = common.read_catalog('gcp/images.csv', pull_frequency_hours=0)
 
 _quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv',
