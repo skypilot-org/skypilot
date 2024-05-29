@@ -126,6 +126,19 @@ available_node_types:
             # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
             value: |-
               skypilot:ssh_user:skypilot:ssh_public_key_content
+          - key: user-data
+            value: |
+              #cloud-config
+              write_files:
+                - path: /etc/apt/apt.conf.d/20auto-upgrades
+                  content: |
+                    APT::Periodic::Update-Package-Lists "0";
+                    APT::Periodic::Download-Upgradeable-Packages "0";
+                    APT::Periodic::AutocleanInterval "0";
+                    APT::Periodic::Unattended-Upgrade "0";
+                - path: /etc/apt/apt.conf.d/10cloudinit-disable
+                  content: |
+                    APT::Periodic::Enable "0";
   {%- if gpu is not none %}
           - key: install-nvidia-driver
             value: "True"
@@ -174,19 +187,7 @@ setup_commands:
   # Line 'sudo systemctl stop jupyter ..': stop jupyter service to avoid port conflict on 8080
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
-    {%- if docker_image is none %}
-    sudo systemctl stop unattended-upgrades || true;
-    sudo systemctl disable unattended-upgrades || true;
-    sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
-    {%- endif %}
-    p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
-    sudo kill -9 `echo "$p" | tail -n 1` || true;
-    sudo rm /var/lib/dpkg/lock-frontend;
-    sudo pkill -9 dpkg;
-    sudo pkill -9 apt-get;
-    sudo dpkg --configure --force-overwrite -a;
-    mkdir -p ~/.ssh; touch ~/.ssh/config;
+  - mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     source ~/.bashrc;
   {%- if tpu_vm %}
