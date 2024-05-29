@@ -29,8 +29,7 @@ name: train
 
 
 resources:
-  accelerators: A100:1
-  use_spot: true
+  accelerators: A100:8
 
 file_mounts:
   ~/.cache/huggingface: gs://gpt2-data-skypilot
