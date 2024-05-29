@@ -809,7 +809,7 @@ class ManagedJobCodeGen:
         try:
             from sky.jobs.utils import stream_logs_by_id
         except ImportError:
-            from sky.spot.utils import stream_logs_by_id
+            from sky.spot.spot_utils import stream_logs_by_id
         from typing import Optional
         """)
         code += inspect.getsource(stream_logs)
