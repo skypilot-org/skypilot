@@ -17,7 +17,9 @@ resources:
     - cloud: kubernetes
 
 file_mounts:
-  ~/.cache/huggingface: gs://gpt2-data-skypilot
+  ~/.cache/huggingface:
+    name: gpt2-data-skypilot
+    mode: COPY
 
 setup: |
   cd ~
