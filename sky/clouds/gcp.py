@@ -402,9 +402,7 @@ class GCP(clouds.Cloud):
         # gcloud compute images list \
         # --project deeplearning-platform-release \
         # --no-standard-images
-        # We use the debian image, as the ubuntu image has some connectivity
-        # issue when first booted.
-        image_id = 'skypilot:cpu-debian-11'
+        image_id = 'skypilot:cpu-ubuntu-2204'
 
         r = resources
         # Find GPU spec, if any.
@@ -456,7 +454,7 @@ class GCP(clouds.Cloud):
                     image_id = 'skypilot:k80-debian-10'
                 else:
                     # CUDA driver version 535.86.10, CUDA Library 12.2
-                    image_id = 'skypilot:gpu-debian-11'
+                    image_id = 'skypilot:gpu-ubuntu-2204'
 
         if (resources.image_id is not None and
                 resources.extract_docker_image() is None):
