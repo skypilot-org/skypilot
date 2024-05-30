@@ -5,6 +5,18 @@ max_workers: {{num_nodes - 1}}
 upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
+{%- if docker_image is not none %}
+docker:
+  image: {{docker_image}}
+  container_name: {{docker_container_name}}
+  run_options:
+    - --ulimit nofile=1048576:1048576
+    {%- if custom_resources is not none %}
+      --gpus all
+    {%- endif %}
+{%- endif %}
+
+
 provider:
   type: external
   module: sky.skylet.providers.lambda_cloud.LambdaNodeProvider
@@ -15,6 +27,15 @@ provider:
   # The upper-level SkyPilot code has make sure there will not be resource
   # leakage.
   disable_launch_config_check: true
+{%- if docker_login_config is not none %}
+  # We put docker login config in provider section because ray's schema disabled
+  # additionalProperties for docker config.
+  # See: https://github.com/ray-project/ray/blob/d2fc4823126927b2c54f89ec72fa3d24b442e6a3/python/ray/autoscaler/ray-schema.json#L227
+  docker_login_config:
+    username: {{docker_login_config.username}}
+    password: {{docker_login_config.password}}
+    server: {{docker_login_config.server}}
+{%- endif %}
 
 auth:
   ssh_user: ubuntu
@@ -77,7 +98,9 @@ setup_commands:
     {{ ray_skypilot_installation_commands }}
     touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+    {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    {%- endif %}
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
 

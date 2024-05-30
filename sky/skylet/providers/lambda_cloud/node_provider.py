@@ -4,6 +4,7 @@ from threading import RLock
 import time
 from typing import Any, Dict, List, Optional
 
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import NODE_KIND_HEAD
 from ray.autoscaler.tags import NODE_KIND_WORKER
@@ -16,6 +17,8 @@ from ray.autoscaler.tags import TAG_RAY_USER_NODE_TYPE
 
 from sky import authentication as auth
 from sky.clouds.utils import lambda_utils
+from sky.provision import docker_utils
+from sky.skylet.providers.command_runner import SkyDockerCommandRunner
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -318,3 +321,31 @@ class LambdaNodeProvider(NodeProvider):
         if node_id in self.cached_nodes:
             return self.cached_nodes[node_id]
         return self._get_node(node_id=node_id)
+
+    def get_command_runner(
+        self,
+        log_prefix,
+        node_id,
+        auth_config,
+        cluster_name,
+        process_runner,
+        use_internal_ip,
+        docker_config=None,
+    ):
+        common_args = {
+            "log_prefix": log_prefix,
+            "node_id": node_id,
+            "provider": self,
+            "auth_config": auth_config,
+            "cluster_name": cluster_name,
+            "process_runner": process_runner,
+            "use_internal_ip": use_internal_ip,
+        }
+        if docker_config and docker_config["container_name"] != "":
+            if "docker_login_config" in self.provider_config:
+                docker_config[
+                    "docker_login_config"] = docker_utils.DockerLoginConfig(
+                        **self.provider_config["docker_login_config"])
+            return SkyDockerCommandRunner(docker_config, **common_args)
+        else:
+            return SSHCommandRunner(**common_args)
