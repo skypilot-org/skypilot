@@ -14,6 +14,7 @@ pip install skypilot-nightly
 sky check
 ```
 Please check the instructions for enabling clouds at [SkyPilot doc](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
+
 3. Download the YAMLs in this directory for data processing and training:
 ```bash
 wget https://github.com/skypilot-org/skypilot/blob/master/llm/gpt-2/gpt2-data.yaml
