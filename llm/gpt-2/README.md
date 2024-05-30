@@ -16,6 +16,11 @@ sky launch -c gpt2-data gpt2-data.yaml --env BUCKET_NAME=your-bucket-name
 sky launch -c gpt2-train --detach-setup gpt2-train.yaml --env BUCKET_NAME=your-bucket-name
 ```
 
+Or you can train the model with a single A100:
+```bash
+sky launch -c gpt2-train --detach-setup gpt2-train.yaml --gpu a100 --env BUCKET_NAME=your-bucket-name
+```
+
 
 ## Run in a Pipeline
 We can also combine the two steps into a single SkyPilot job:
