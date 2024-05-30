@@ -721,7 +721,8 @@ def open_ports(
         if existing_rule['IpProtocol'] not in ['tcp', '-1']:
             continue
         # Skip any rules that don't have a FromPort or ToPort.
-        if 'FromPort' not in existing_rule or 'ToPort' not in existing_rule:
+        if existing_rule[
+                'IpProtocol'] == 'tcp' and 'FromPort' not in existing_rule or 'ToPort' not in existing_rule:
             continue
         existing_ports.update(
             range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
