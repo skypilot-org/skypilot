@@ -5,21 +5,9 @@ envs:
 
 resources:
   accelerators: A100:8
-  any_of:
-    - cloud: gcp
-      # Use ubuntu 22.04 as the C++ compiler is not latest enough in SkyPillot's
-      # default debian 11 image. We use our custom image with CUDA 12.2
-      # installed.
-      image_id: projects/skypilot-375900/global/images/ubuntu2204-gpu
-    - cloud: lambda
-    - cloud: azure
-    - cloud: runpod
-    - cloud: fluidstack
-    - cloud: ibm
-    - cloud: oci
-    # TODO: AWS's C++ version is too old to compile llm.c. A update of base AMI
-    # is needed.
-    # - cloud: aws
+  # Use docker image for latest version g++ to enable the compilation of llm.c.
+  image_id: docker:nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+
 
 file_mounts:
   ~/.cache/huggingface:
@@ -52,6 +40,7 @@ setup: |
   fi
 
   # "install" cudnn-frontend to ~/
+  sudo apt -y install git
   git clone https://github.com/NVIDIA/cudnn-frontend.git || true
 
   # install MPI (optional, if you intend to use multiple GPUs)
@@ -74,7 +63,7 @@ setup: |
 run: |
   cd ~/llm.c
   # train on multiple GPUs
-  mpirun -np $SKYPILOT_NUM_GPUS_PER_NODE ./train_gpt2cu \
+  mpirun -np $SKYPILOT_NUM_GPUS_PER_NODE --allow-run-as-root ./train_gpt2cu \
       -i "dev/data/fineweb10B/fineweb_train_*.bin" \
       -j "dev/data/fineweb10B/fineweb_val_*.bin" \
       -o log124M \

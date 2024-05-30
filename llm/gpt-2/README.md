@@ -13,7 +13,7 @@ sky launch -c gpt2-data gpt2-data.yaml --env BUCKET_NAME=your-bucket-name
 ## Training
 
 ```bash
-sky launch -c gpt2-train gpt2-train.yaml --env BUCKET_NAME=your-bucket-name
+sky launch -c gpt2-train --detach-setup gpt2-train.yaml --env BUCKET_NAME=your-bucket-name
 ```
 
 
