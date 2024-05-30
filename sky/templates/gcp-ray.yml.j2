@@ -174,9 +174,6 @@ setup_commands:
   # Line 'sudo systemctl stop jupyter ..': stop jupyter service to avoid port conflict on 8080
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  # Line 'while ! nvidia-smi; do sleep 2...', as for
-  # some deep learning images with Ubuntu, CUDA driver will not be immediately available, due
-  # to `install-nvidia-driver`
   - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
     {%- if docker_image is none %}
     sudo systemctl stop unattended-upgrades || true;
@@ -208,9 +205,6 @@ setup_commands:
     {%- endif %}
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
-  {%- if gpu is not none %}
-    while ! nvidia-smi; do sleep 2; echo "Waiting for CUDA driver to be installed"; done;
-  {% endif %}
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
 # We do not need to list it here anymore.
