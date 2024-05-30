@@ -7,12 +7,20 @@ resources:
   accelerators: A100:8
   # Use docker image for latest version g++ to enable the compilation of llm.c.
   image_id: docker:nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
-
-
+  image_id:
+    # Avoid using docker image for lambda due to the docker is not supported on
+    # Lambda yet, but the base image works.
+    - cloud: lambda
+      image_id: null
+    - cloud: aws
+    - cloud: gcp
+    - cloud: azure
+    - cloud: fluidstack
+  
 file_mounts:
-  ~/.cache/huggingface:
-    name: $BUCKET_NAME
-    mode: COPY
+  ~/.cache/huggingface: gs://$BUCKET_NAME
+    # name: $BUCKET_NAME
+    # mode: COPY
 
 setup: |
   cd ~
