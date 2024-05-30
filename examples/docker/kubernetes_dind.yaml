@@ -1,0 +1,49 @@
+# Example showing how to use docker-in-docker (dind) in a SkyPilot Kubernetes pod
+#
+# This example installs the docker runtime, but you can have it pre-installed in your image.
+#
+# Make sure your config allows for privileged containers. Add this to your ~/.sky/config.yaml:
+#
+# kubernetes:
+#   pod_config:
+#     spec:
+#       containers:
+#         - securityContext:
+#             privileged: true
+#
+# NOTE - Here be dragons! Docker-in-docker in a Kubernetes cluster is generally
+# not recommended. It is a security risk since pods must run in privileged mode
+# and cause resource leaks. If you need to use a docker container in a Kubernetes
+# cluster, specify it under resources.image_id in your task.yaml and use the
+# ENTRYPOINT in the `run` section of the SkyPilot YAML.
+# Suggested reading - https://jpetazzo.github.io/2015/09/03/do-not-use-docker-in-docker-for-ci/
+
+resources:
+  cloud: kubernetes
+
+setup: |
+  # ==== Install Docker ====
+  # You can also bake this in your base image.
+  # Add Docker's official GPG key:
+  sudo apt-get update
+  sudo apt-get install ca-certificates curl
+  sudo install -m 0755 -d /etc/apt/keyrings
+  sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+  sudo chmod a+r /etc/apt/keyrings/docker.asc
+  
+  # Add the repository to Apt sources:
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  sudo apt-get update
+  sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  
+  # Issue with docker-ce 25 (https://github.com/docker/cli/issues/4807)
+  # So we need to manually set ulimit
+  sudo sed -i 's/ulimit -Hn/# ulimit -Hn/g' /etc/init.d/docker
+  
+  # Start Docker
+  sudo service docker start
+
+run: |
+  # Use docker run as usual
+  sudo docker run --rm hello-world
