@@ -10,7 +10,7 @@ resources:
       # Use ubuntu 22.04 as the C++ compiler is not latest enough in SkyPillot's
       # default debian 11 image. We use our custom image with CUDA 12.2
       # installed.
-      image_id: projects/skypilot-375900/global/images/llm-c
+      image_id: projects/skypilot-375900/global/images/gpu
     - cloud: aws
     - cloud: azure
     - cloud: lambda
