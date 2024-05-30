@@ -1273,21 +1273,30 @@ def parallel_data_transfer_to_nodes(
 
     def _sync_node(runner: 'command_runner.CommandRunner') -> None:
         if cmd is not None:
-            rc, stdout, stderr = runner.run(cmd,
-                                            log_path=log_path,
-                                            stream_logs=stream_logs,
-                                            require_outputs=True,
-                                            source_bashrc=source_bashrc)
-            err_msg = ('Failed to run command before rsync '
-                       f'{origin_source} -> {target}. '
-                       'Ensure that the network is stable, then retry. '
-                       f'{cmd}')
-            if log_path != os.devnull:
-                err_msg += f' See logs in {log_path}'
-            subprocess_utils.handle_returncode(rc,
-                                               cmd,
-                                               err_msg,
-                                               stderr=stdout + stderr)
+            retry_cnt = 0
+            while retry_cnt < 3:
+                rc, stdout, stderr = runner.run(cmd,
+                                                log_path=log_path,
+                                                stream_logs=stream_logs,
+                                                require_outputs=True,
+                                                source_bashrc=source_bashrc)
+                if rc == 255:
+                    retry_cnt += 1
+                    logger.warning(
+                        f'Failed to run command on {runner.node_id}, likely '
+                        f'due to a reboot. Retrying... (Attempt {retry_cnt})')
+                    time.sleep(5)
+                    continue
+                err_msg = ('Failed to run command before rsync '
+                           f'{origin_source} -> {target}. '
+                           'Ensure that the network is stable, then retry. '
+                           f'{cmd}')
+                if log_path != os.devnull:
+                    err_msg += f' See logs in {log_path}'
+                subprocess_utils.handle_returncode(rc,
+                                                   cmd,
+                                                   err_msg,
+                                                   stderr=stdout + stderr)
 
         if run_rsync:
             assert source is not None
@@ -1299,6 +1308,7 @@ def parallel_data_transfer_to_nodes(
                 up=True,
                 log_path=log_path,
                 stream_logs=stream_logs,
+                max_retry=3,
             )
 
     num_nodes = len(runners)

@@ -1,12 +1,14 @@
 name: gpt2-data
 
+envs:
+  BUCKET_NAME: # Fill in your bucket name
+
 resources:
   cpus: 64+
 
 file_mounts:
   /cache:
-    name: gpt2-data-skypilot
-    store: gcs
+    name: $BUCKET_NAME
     mode: MOUNT
 
 setup: |
