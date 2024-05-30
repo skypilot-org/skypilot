@@ -209,7 +209,8 @@ setup_commands:
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
   {%- if gpu is not none %}
-    nvidia-smi || { while ! nvidia-smi; do sleep 2; echo "Waiting for CUDA driver to be installed"; done; }
+    curl -L https://github.com/GoogleCloudPlatform/compute-gpu-installation/releases/download/cuda-installer-v1.0.0/cuda_installer.pyz --output cuda_installer.pyz
+    while ! python3 cuda_installer.pyz verify_cuda; do sleep 2; echo "Waiting for CUDA driver to be installed"; done;
   {% endif %}
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
