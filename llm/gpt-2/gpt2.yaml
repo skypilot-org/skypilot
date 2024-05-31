@@ -57,6 +57,12 @@ setup: |
 
   git clone https://github.com/karpathy/llm.c.git || true
   cd llm.c
+
+  # add revision to fix the dataset version, as the latest fineweb
+  # dataset removed the samples, causing error:
+  #   Please pass `features` or at least one example when writing data
+  sed -i 's/fw = load_dataset("HuggingFaceFW\/fineweb", name=remote_name, split="train")/fw = load_dataset("HuggingFaceFW\/fineweb", name=remote_name, split="train", revision="9767af12bf8f0f7d3c91e0345b89bc6b9cbe1a94")/' dev/data/fineweb.py
+
   # compile llm.c (mixed precision, with cuDNN flash-attention)
   # first compilation is ~1 minute, mostly due to cuDNN
   make train_gpt2cu USE_CUDNN=1

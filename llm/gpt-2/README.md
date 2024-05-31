@@ -28,10 +28,14 @@ Run the following command to start GPT-2 (124M) training on a GPU VM with 8 A100
 sky launch -c gpt2 gpt2.yaml
 ```
 
+![GPT-2 training with 8 A100 GPUs](https://imgur.com/v8SGpsF.png)
+
 Or, you can train the model with a single A100, by adding `--gpu A100`:
 ```bash
 sky launch -c gpt2 gpt2.yaml --gpu A100
 ```
+
+![GPT-2 training with a single A100](https://imgur.com/hN65g4r.png)
 
 ## Advanced: Run GPT-2 training in two stages
 
