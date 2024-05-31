@@ -772,6 +772,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
+        # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
+        task.update_envs(env)
 
     # Override.
     if workdir is not None:
@@ -787,7 +789,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
-    task.update_envs(env)
     return task
 
 
