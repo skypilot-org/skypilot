@@ -234,6 +234,9 @@ class AzureBlobCloudStorage(CloudStorage):
             container_name=container_name)
         source = f'{container_url}/{sas_token}'
         source = shlex.quote(source)
+        # destination is guaranteed to not have '/' at the end of the string
+        # by tasks.py/set_file_mounts(). It is necessary to add from this
+        # method due to syntax of azcopy.
         destination = f'{destination}/'
         download_command = (f'azcopy sync {source} {destination} '
                             '--recursive --delete-destination=false')
