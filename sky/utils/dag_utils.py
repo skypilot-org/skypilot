@@ -90,12 +90,6 @@ def load_chain_dag_from_yaml(
         # YAML has only `name: xxx`. Still instantiate a task.
         configs = [{'name': dag_name}]
 
-    if len(configs) > 1:
-        # TODO(zongheng): in a chain DAG of N tasks, cli.py currently makes the
-        # decision to not apply overrides. Here we maintain this behavior. We
-        # can listen to user feedback to change this.
-        env_overrides = None
-
     current_task = None
     with dag_lib.Dag() as dag:
         for task_config in configs:
