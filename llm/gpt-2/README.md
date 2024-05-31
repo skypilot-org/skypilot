@@ -43,10 +43,10 @@ After the training is finished, you can download the logs and visualizations wit
 ```bash
 scp -r gpt2:~/llm.c/log124M .
 ```
-We can visualize the training progress with the notebook provided in [llm.c](https://github.com/karpathy/llm.c/blob/master/dev/vislog.ipynb). (Note: we cut off the training after 8000 steps, which already achieve similar validation loss as OpenAI GPT-2 checkpoint.)
+We can visualize the training progress with the notebook provided in [llm.c](https://github.com/karpathy/llm.c/blob/master/dev/vislog.ipynb). (Note: we cut off the training after 10K steps, which already achieve similar validation loss as OpenAI GPT-2 checkpoint.)
 
 <div align="center">
-<img src="https://imgur.com/qeNNlIB.png" width="60%">
+<img src="https://imgur.com/lskPEAQ.png" width="60%">
 </div>
 
 > Yes! We are able to reproduce the training of GPT-2 (124M) on any cloud with SkyPilot.
