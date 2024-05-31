@@ -1,7 +1,7 @@
 # Run GPT-2 in llm.c on any cloud with SkyPilot
 
-This is a reproducible package of llm.c's GPT-2 (124M) training by @karpathy (https://github.com/karpathy/llm.c/discussions/481)
-With SkyPilot, you can run GPT-2 (124M) training on any cloud.
+This is a reproducible package of llm.c's GPT-2 (124M) training by @karpathy (https://github.com/karpathy/llm.c/discussions/481).
+With SkyPilot, you can run GPT-2 (124M) training on any cloud. SkyPilot looks for the cheapest resources available on the clouds enabled for a user, launches and manages the whole data processing and training pipeline, leading to a close to ~\$20 target training cost as @karpathy mentioned in the discussion.
 
 ## Prerequisites
 
@@ -30,12 +30,20 @@ sky launch -c gpt2 gpt2.yaml
 
 ![GPT-2 training with 8 A100 GPUs](https://imgur.com/v8SGpsF.png)
 
-Or, you can train the model with a single A100, by adding `--gpu A100`:
+Or, you can train the model with a single A100, by adding `--gpus A100`:
 ```bash
-sky launch -c gpt2 gpt2.yaml --gpu A100
+sky launch -c gpt2 gpt2.yaml --gpus A100
 ```
 
 ![GPT-2 training with a single A100](https://imgur.com/hN65g4r.png)
+
+
+It is also possible to speed up the training of the model on 8 H100:
+```bash
+sky launch -c gpt2 gpt2.yaml --gpus H100:8
+```
+
+![GPT-2 training with 8 H100](https://imgur.com/STbi80b.png)
 
 ### Download logs and visualizations
 
@@ -85,9 +93,9 @@ After the data is processed, you can then train the model on a GPU VM with 8 A10
 sky launch -c gpt2-train --detach-setup gpt2-train.yaml --env BUCKET_NAME=your-bucket-name
 ```
 
-Or, you can train the model with a single A100, by adding `--gpu A100`:
+Or, you can train the model with a single A100, by adding `--gpus A100`:
 ```bash
-sky launch -c gpt2-train --detach-setup gpt2-train.yaml --gpu A100 --env BUCKET_NAME=your-bucket-name
+sky launch -c gpt2-train --detach-setup gpt2-train.yaml --gpus A100 --env BUCKET_NAME=your-bucket-name
 ```
 
 
@@ -95,10 +103,14 @@ sky launch -c gpt2-train --detach-setup gpt2-train.yaml --gpu A100 --env BUCKET_
 
 We can also combine the two steps into a single SkyPilot job, and let SkyPilot to handle the dependencies between the two steps. Here is an example of how to do this (replace `your-bucket-name` with your bucket name):
 ```bash
+sky jobs launch -n gpt2 gpt2-pipeline.yaml --env BUCKET_NAME=your-bucket-name
+```
+
+> Note: the pipeline yaml can be retrieved with the following command:
+```bash
 cat gpt2-data.yaml > gpt2-pipeline.yaml
 echo "---" >> gpt2-pipeline.yaml
 cat gpt2-train.yaml >> gpt2-pipeline.yaml
-sky jobs launch -n gpt2 gpt2-pipeline.yaml --env BUCKET_NAME=your-bucket-name
 ```
 
 SkyPilot will first download and process the dataset on a CPU VM and store the
