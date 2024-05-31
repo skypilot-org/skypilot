@@ -4,7 +4,7 @@ envs:
   BUCKET_NAME: # Fill in your bucket name
 
 resources:
-  cpus: 32+
+  cpus: 8+
 
 file_mounts:
   /cache:

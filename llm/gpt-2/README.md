@@ -58,7 +58,7 @@ We can visualize the training progress with the notebook provided in [llm.c](htt
 The data processing for GPT-2 training is CPU-bound, while the training is GPU-bound. Having the data processing on a GPU VM is not cost-effective. With SkyPilot, you can easily
 separate the data processing and training into two stages and execute them sequantially manually, or let SkyPilot manage the dependencies between the two stages.
 
-With this data processing can be run on cheaper CPU VMs (e.g., ~\$1.5/hour), and run the training on more expensive GPU VMs (e.g., ~\$1.3-\$3.6/hour for a single A100 GPU, or \$10.3-\$32.8/hour for 8 A100 GPUs).
+With this data processing can be run on cheaper CPU VMs (e.g., ~\$0.4/hour), and run the training on more expensive GPU VMs (e.g., ~\$1.3-\$3.6/hour for a single A100 GPU, or \$10.3-\$32.8/hour for 8 A100 GPUs).
 
 We can run the data processing on a CPU VM and store the processed data in a cloud bucket. Then, we can run the training on a GPU VM with the processed data.
 
