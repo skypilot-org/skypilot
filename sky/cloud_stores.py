@@ -215,25 +215,41 @@ class AzureBlobCloudStorage(CloudStorage):
         # A directory with few or no items
         return True
 
-    def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Fetches a directory using AZCOPY from storage to remote instance."""
-        container_name, _, storage_account_name = data_utils.split_az_path(
+    def _get_azcopy_source(self, source: str, is_dir: bool) -> str:
+        """Converts the source so it can be used as an argument for azcopy."""
+        container_name, blob_path, storage_account_name = data_utils.split_az_path(
             source)
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
+        
         if storage_account_key is None:
-            # public containers does not require SAS token for access
+            # public containers do not require SAS token for access
             sas_token = ''
         else:
-            sas_token = azure.get_az_container_sas_token(
-                storage_account_name, storage_account_key, container_name)
+            if is_dir:
+                sas_token = azure.get_az_container_sas_token(
+                    storage_account_name, storage_account_key, container_name)
+            else:
+                sas_token = azure.get_az_blob_sas_token(
+                    storage_account_name, storage_account_key, container_name, blob_path)
+
         container_url = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=storage_account_name,
-            container_name=container_name)
-        source = f'{container_url}/{sas_token}'
-        source = shlex.quote(source)
+            container_name=container_name
+        )
+
+        if is_dir:
+            source = f'{container_url}/{sas_token}'
+        else:
+            source = f'{container_url}/{blob_path}{sas_token}'
+        
+        return shlex.quote(source)
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Fetches a directory using AZCOPY from storage to remote instance."""
+        source = self._get_azcopy_source(source, is_dir=True)
         # destination is guaranteed to not have '/' at the end of the string
         # by tasks.py/set_file_mounts(). It is necessary to add from this
         # method due to syntax of azcopy.
@@ -246,24 +262,7 @@ class AzureBlobCloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Fetches a file using AZCOPY from storage to remote instance."""
-        container_name, blob_path, storage_account_name = (
-            data_utils.split_az_path(source))
-        resource_group_name = data_utils.get_az_resource_group(
-            storage_account_name)
-        storage_account_key = data_utils.get_az_storage_account_key(
-            storage_account_name, resource_group_name)
-        if storage_account_key is None:
-            # public containers does not require SAS token for access
-            sas_token = ''
-        else:
-            sas_token = azure.get_az_blob_sas_token(
-                storage_account_name, storage_account_key, container_name,
-                blob_path)
-        container_url = data_utils.AZURE_CONTAINER_URL.format(
-            storage_account_name=storage_account_name,
-            container_name=container_name)
-        source = f'{container_url}/{blob_path}{sas_token}'
-        source = shlex.quote(source)
+        source = self._get_azcopy_source(source, is_dir=False)
         download_command = f'azcopy copy {source} {destination}'
         all_commands = list(self._GET_AZCOPY)
         all_commands.append(download_command)
