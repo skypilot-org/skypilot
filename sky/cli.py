@@ -765,8 +765,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'WARNING: override params {override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
-            for task in dag.tasks:
-                task.update_envs(env)
             return dag
         assert len(dag.tasks) == 1, (
             f'If you see this, please file an issue; tasks: {dag.tasks}')
@@ -774,6 +772,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
+        task.update_envs(env)
 
     # Override.
     if workdir is not None:
@@ -789,7 +788,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
-    task.update_envs(env)
     return task
 
 
