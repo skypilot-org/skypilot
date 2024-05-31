@@ -108,9 +108,7 @@ sky jobs launch -n gpt2 gpt2-pipeline.yaml --env BUCKET_NAME=your-bucket-name
 
 > Note: the pipeline yaml can be retrieved with the following command:
 ```bash
-cat gpt2-data.yaml > gpt2-pipeline.yaml
-echo "---" >> gpt2-pipeline.yaml
-cat gpt2-train.yaml >> gpt2-pipeline.yaml
+cat gpt2-data.yaml > gpt2-pipeline.yaml; echo "---" >> gpt2-pipeline.yaml; cat gpt2-train.yaml >> gpt2-pipeline.yaml
 ```
 
 SkyPilot will first download and process the dataset on a CPU VM and store the
