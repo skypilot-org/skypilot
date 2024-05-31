@@ -37,6 +37,20 @@ sky launch -c gpt2 gpt2.yaml --gpu A100
 
 ![GPT-2 training with a single A100](https://imgur.com/hN65g4r.png)
 
+### ## Download logs and visualizations
+
+After the training is finished, you can download the logs and visualizations with the following command:
+```bash
+scp -r gpt2:~/llm.c/log124M .
+```
+We can visualize the training progress with the notebook provided in [llm.c](https://github.com/karpathy/llm.c/blob/master/dev/vislog.ipynb). (Note: we cut off the training after 8000 steps, which already achieve similar validation loss as OpenAI GPT-2 checkpoint.)
+
+![Training progress](https://imgur.com/qeNNlIB.png)
+
+> Yes! We are able to reproduce the training of GPT-2 (124M) on any cloud with SkyPilot.
+
+
+
 ## Advanced: Run GPT-2 training in two stages
 
 The data processing for GPT-2 training is CPU-bound, while the training is GPU-bound. Having the data processing on a GPU VM is not cost-effective. With SkyPilot, you can easily
@@ -88,4 +102,6 @@ sky jobs launch -n gpt2 gpt2-pipeline.yaml --env BUCKET_NAME=your-bucket-name
 SkyPilot will first download and process the dataset on a CPU VM and store the
 processed data in a GCS bucket. Then, it will launch a GPT-2 training job on a
 GPU VM. The training job will train GPT-2 (124M) on the processed data.
+
+
 

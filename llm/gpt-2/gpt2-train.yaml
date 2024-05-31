@@ -88,3 +88,6 @@ run: |
       -n 5000 \
       -v 250 -s 20000 \
       -h 1
+
+  # Upload the log and model to the bucket
+  rsync -Pavz log124M ~/.cache/huggingface
