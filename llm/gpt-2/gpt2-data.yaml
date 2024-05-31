@@ -1,7 +1,7 @@
 name: gpt2-data
 
 envs:
-  BUCKET_NAME: # Fill in your bucket name
+  BUCKET_NAME: # TODO: Fill in your bucket name
   BUCKET_STORE: s3 # Can be s3, gcs, or r2.
 
 resources:

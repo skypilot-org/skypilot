@@ -70,9 +70,9 @@ def load_chain_dag_from_yaml(
     Has special handling for an initial section in YAML that contains only the
     'name' field, which is the DAG name.
 
-    'env_overrides' is in effect only when there's exactly one task. It is a
-    list of (key, value) pairs that will be used to update the task's 'envs'
-    section.
+    'env_overrides' is a list of (key, value) pairs that will be used to update
+    the task's 'envs' section. If it is a chain dag, the envs will be updated
+    for all tasks in the chain.
 
     Returns:
       A chain Dag with 1 or more tasks (an empty entrypoint would create a
