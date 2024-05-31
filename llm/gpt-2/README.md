@@ -1,7 +1,7 @@
 # Run GPT-2 in llm.c on any cloud with SkyPilot
 
 This is a reproducible package of llm.c's GPT-2 (124M) training by @karpathy (https://github.com/karpathy/llm.c/discussions/481).
-With SkyPilot, you can run GPT-2 (124M) training on any cloud. SkyPilot looks for the cheapest resources available on the clouds enabled for a user, launches and manages the whole data processing and training pipeline, leading to a close to ~\$20 target training cost as @karpathy mentioned in the discussion.
+With SkyPilot, you can run GPT-2 (124M) training on any cloud. SkyPilot looks for the cheapest resources available on the clouds enabled for a user, launches and manages the whole data processing and training pipeline, leading to a close to ~\$20 target cost as @karpathy mentioned in the discussion.
 
 ## Prerequisites
 
