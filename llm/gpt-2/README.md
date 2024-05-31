@@ -38,7 +38,7 @@ sky launch -c gpt2 gpt2.yaml --gpus A100
 ![GPT-2 training with a single A100](https://imgur.com/hN65g4r.png)
 
 
-It is also possible to speed up the training of the model on 8 H100:
+It is also possible to speed up the training of the model on 8 H100 (2.3x more tok/s than 8x A100s):
 ```bash
 sky launch -c gpt2 gpt2.yaml --gpus H100:8
 ```
