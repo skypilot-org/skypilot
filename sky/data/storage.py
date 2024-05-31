@@ -2339,8 +2339,9 @@ class AzureBlobStore(AbstractStore):
         # Raised when Storage object is reconstructed for sky storage
         # delete or to re-mount Storages with sky start but the storage
         # is already removed externally.
-        raise exceptions.StorageExternalDeletionError(
-            f'Attempted to fetch a non-existent bucket: {self.name}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.StorageExternalDeletionError(
+                f'Attempted to fetch a non-existent bucket: {self.name}')
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on AZ container.

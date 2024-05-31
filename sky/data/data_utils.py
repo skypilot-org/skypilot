@@ -243,6 +243,7 @@ def get_az_storage_account_key(
         storage_client = create_az_client('storage')
     resources = resource_client.resources.list_by_resource_group(
         resource_group_name)
+    # resource group is either created or read when Storage initializes.
     assert resources is not None
     for resource in resources:
         if (resource.type == 'Microsoft.Storage/storageAccounts' and
