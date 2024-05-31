@@ -12,7 +12,7 @@ _STAT_CACHE_CAPACITY = 4096
 _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
-GCSFUSE_VERSION = '1.3.0'
+GCSFUSE_VERSION = '2.2.0'
 
 
 def get_s3_mount_install_cmd() -> str:
