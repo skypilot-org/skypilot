@@ -37,7 +37,7 @@ sky launch -c gpt2 gpt2.yaml --gpu A100
 
 ![GPT-2 training with a single A100](https://imgur.com/hN65g4r.png)
 
-### ## Download logs and visualizations
+### Download logs and visualizations
 
 After the training is finished, you can download the logs and visualizations with the following command:
 ```bash
@@ -45,7 +45,9 @@ scp -r gpt2:~/llm.c/log124M .
 ```
 We can visualize the training progress with the notebook provided in [llm.c](https://github.com/karpathy/llm.c/blob/master/dev/vislog.ipynb). (Note: we cut off the training after 8000 steps, which already achieve similar validation loss as OpenAI GPT-2 checkpoint.)
 
-![Training progress](https://imgur.com/qeNNlIB.png)
+<div align="center">
+<img src="https://imgur.com/qeNNlIB.png" width="60%">
+</div>
 
 > Yes! We are able to reproduce the training of GPT-2 (124M) on any cloud with SkyPilot.
 
