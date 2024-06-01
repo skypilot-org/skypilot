@@ -1368,15 +1368,87 @@ class GCPTPUVMInstance(GCPInstance):
         cls.wait_for_operation(operation, project_id, zone)
 
     @classmethod
-    def resize_disk(cls, project_id: str, availability_zone: str,
-                    node_config: dict, instance_name: str) -> None:
-        """Resize the disk a machine image with a different size is used.
+    def resize_disk(cls, project_id: str, availability_zone: str, node_config: dict,
+                    instance_name: str) -> None:
+        """Resizes disk for TPU VMs by adding a persistent disk when needed."""
+        import time
+        from googleapiclient.errors import HttpError
+        from googleapiclient import discovery
 
-        TODO: Implement the feature to attach persistent disks for TPU VMs.
-        The boot disk of TPU VMs is not resizable, and users need to add a
-        persistent disk to expand disk capacity. Related issue: #2387
-        """
-        return
+        resource = discovery.build("compute", "v1")
+
+
+        # Determine the required disk size from configuration
+        default_disk_size = 100  # Default boot disk size for TPUVMs
+        requested_size = int(node_config['metadata'].get(
+            'diskSize', default_disk_size))
+
+        # Calculate additional disk size needed
+        additional_size = requested_size - default_disk_size
+        if additional_size <= 0:
+            return  # No additional disk needed
+
+        # Log the disk size request
+        logger.info(
+            f"Requesting additional persistent disk of size: {additional_size}GB")
+
+        # Set disk specifications
+        tpu_name = instance_name.split("/")[-1]
+        disk_name = f"{tpu_name}-extra-disk"
+        disk_type = f"zones/{availability_zone}/diskTypes/pd-standard"
+
+        # Prepare the disk creation body
+        disk_body = {
+            "name": disk_name,
+            "sizeGb": str(additional_size),
+            "type": disk_type,
+        }
+
+        # Create the disk
+        try:
+            resource.disks().insert(project=project_id, zone=availability_zone,
+                                    body=disk_body).execute()
+            time.sleep(3)  # Short pause after disk creation
+        except HttpError as e:
+            logger.warning(f"Disk creation failed: {e.reason}")
+            return
+
+        # Attach the newly created disk
+        attach_command = (
+            f"gcloud alpha compute tpus tpu-vm attach-disk {tpu_name} "
+            f"--zone {availability_zone} --disk {disk_name} --mode read-write"
+        )
+        if cls.execute_command_with_log(attach_command) != 0:
+            logger.warning("Failed to attach disk to TPU VMs.")
+
+        # Format and mount the disk
+        mount_command = (
+            f"gcloud compute tpus tpu-vm ssh {tpu_name} --zone={availability_zone} "
+            f"--command='sudo mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,"
+            f"discard /dev/sdb ; sudo mkdir -p /mnt/disks/persist ; sudo mount -o "
+            f"discard,defaults /dev/sdb /mnt/disks/persist'"
+        )
+        if cls.execute_command_with_log(mount_command) != 0:
+            logger.warning("Failed to format and mount persistent disk.")
+
+    @classmethod
+    def execute_command_with_log(cls, command: str) -> int:
+        """Executes a shell command and logs the output, returning the return code."""
+        from sky.skylet import log_lib
+        import os
+
+        rcode, stdout, stderr = log_lib.run_with_log(
+            command,
+            os.devnull,
+            shell=True,
+            stream_logs=False,
+            require_outputs=True,
+        )
+        if rcode != 0:
+            logger.warning(f"Command failed.\n**** STDOUT ****\n{stdout}\n**** STDERR ****"
+                           f"\n{stderr}")
+        return rcode
+
 
     @classmethod
     def get_instance_info(cls, project_id: str, availability_zone: str,
