@@ -6,7 +6,7 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, cast, Dict, Iterable, List, Optional, Set
 
 import colorama
 
@@ -741,8 +741,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_type = store_types[0]
             store_prefix = store_type.store_prefix()
             if store_type is storage_lib.StoreType.AZURE:
-                storage_account_name = storage_obj.stores[store_type].storage_account_name
-                storage_obj.source = f'{store_prefix}{storage_account_name}/{storage_obj.name}'
+                store_object = cast(storage_lib.AzureBlobStore,
+                                    storage_obj.stores[store_type])
+                storage_account_name = store_object.storage_account_name
+                storage_obj.source = (f'{store_prefix}{storage_account_name}/'
+                                      f'{storage_obj.name}')
             else:
                 storage_obj.source = f'{store_prefix}{storage_obj.name}'
             storage_obj.force_delete = True

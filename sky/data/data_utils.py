@@ -148,8 +148,7 @@ def verify_gcs_bucket(name: str) -> bool:
         return False
 
 
-def create_az_client(client_type: str,
-                     **kwargs) -> Client:
+def create_az_client(client_type: str, **kwargs) -> Client:
     """Helper method that connects to AZ client for diverse Resources.
 
     Args:
@@ -164,7 +163,8 @@ def create_az_client(client_type: str,
     if client_type == 'container':
         assert container_url is not None
     subscription_id = azure.get_subscription_id()
-    return azure.get_client(client_type, subscription_id,
+    return azure.get_client(client_type,
+                            subscription_id,
                             container_url=container_url)
 
 
@@ -180,9 +180,8 @@ def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
     container_url = AZURE_CONTAINER_URL.format(
         storage_account_name=storage_account_name,
         container_name=container_name)
-    container_client = create_az_client(
-        'container',
-        container_url=container_url)
+    container_client = create_az_client('container',
+                                        container_url=container_url)
     return container_client.exists()
 
 

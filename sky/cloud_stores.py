@@ -179,7 +179,7 @@ class AzureBlobCloudStorage(CloudStorage):
         'azcopy --version > /dev/null 2>&1 || '
         '(mkdir -p /usr/local/bin; '
         'curl -L https://aka.ms/downloadazcopy-v10-linux -o azcopy.tar.gz; '
-        'sudo tar -xvzf azcopy.tar.gz --strip-components=1 -C /usr/local/bin --exclude=*.txt; '
+        'sudo tar -xvzf azcopy.tar.gz --strip-components=1 -C /usr/local/bin --exclude=*.txt; '  # pylint: disable=line-too-long
         'sudo chmod +x /usr/local/bin/azcopy; '
         'rm azcopy.tar.gz)'
     ]
@@ -202,8 +202,7 @@ class AzureBlobCloudStorage(CloudStorage):
             storage_account_name=storage_account_name,
             container_name=container_name)
         container_client = data_utils.create_az_client(
-            client_type='container',
-            container_url=container_url)       
+            client_type='container', container_url=container_url)
         num_objects = 0
         for blob in container_client.list_blobs(name_starts_with=path):
             if blob.name == path:
@@ -217,13 +216,13 @@ class AzureBlobCloudStorage(CloudStorage):
 
     def _get_azcopy_source(self, source: str, is_dir: bool) -> str:
         """Converts the source so it can be used as an argument for azcopy."""
-        container_name, blob_path, storage_account_name = data_utils.split_az_path(
-            source)
+        container_name, blob_path, storage_account_name = (
+            data_utils.split_az_path(source))
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
-        
+
         if storage_account_key is None:
             # public containers do not require SAS token for access
             sas_token = ''
@@ -232,19 +231,20 @@ class AzureBlobCloudStorage(CloudStorage):
                 sas_token = azure.get_az_container_sas_token(
                     storage_account_name, storage_account_key, container_name)
             else:
-                sas_token = azure.get_az_blob_sas_token(
-                    storage_account_name, storage_account_key, container_name, blob_path)
+                sas_token = azure.get_az_blob_sas_token(storage_account_name,
+                                                        storage_account_key,
+                                                        container_name,
+                                                        blob_path)
 
         container_url = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=storage_account_name,
-            container_name=container_name
-        )
+            container_name=container_name)
 
         if is_dir:
             source = f'{container_url}/{sas_token}'
         else:
             source = f'{container_url}/{blob_path}{sas_token}'
-        
+
         return shlex.quote(source)
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:

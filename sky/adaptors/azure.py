@@ -5,7 +5,6 @@ import datetime
 import functools
 import logging
 import threading
-from typing import Optional
 
 from sky import exceptions as sky_exceptions
 from sky.adaptors import common
@@ -43,9 +42,7 @@ def exceptions():
 
 @functools.lru_cache()
 @common.load_lazy_modules(modules=_LAZY_MODULES)
-def get_client(name: str,
-               subscription_id: str,
-               **kwargs):
+def get_client(name: str, subscription_id: str, **kwargs):
     # Sky only supports Azure CLI credential for now.
     # Increase the timeout to fix the Azure get-access-token timeout issue.
     # Tracked in
@@ -131,16 +128,18 @@ def get_az_container_sas_token(
     Returns:
         SAS token prepended with the delimiter character, "?"
     """
-    from azure.storage.blob import generate_container_sas, ContainerSasPermissions
+    from azure.storage.blob import ContainerSasPermissions
+    from azure.storage.blob import generate_container_sas
     sas_token = generate_container_sas(
         account_name=storage_account_name,
         container_name=container_name,
         account_key=storage_account_key,
-        permission=ContainerSasPermissions(
-            read=True, write=True, list=True, create=True),
-        expiry=datetime.datetime.now(
-            datetime.timezone.utc) + datetime.timedelta(hours=1)
-    )
+        permission=ContainerSasPermissions(read=True,
+                                           write=True,
+                                           list=True,
+                                           create=True),
+        expiry=datetime.datetime.now(datetime.timezone.utc) +
+        datetime.timedelta(hours=1))
     # "?" is a delimiter character used when SAS token is attached to the
     # container endpoint.
     # Reference: https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/how-to-guides/create-sas-tokens?tabs=Containers # pylint: disable=line-too-long
@@ -163,17 +162,19 @@ def get_az_blob_sas_token(storage_account_name: str, storage_account_key: str,
     Returns:
         SAS token prepended with the delimiter character, "?"
     """
-    from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+    from azure.storage.blob import BlobSasPermissions
+    from azure.storage.blob import generate_blob_sas
     sas_token = generate_blob_sas(
         account_name=storage_account_name,
         container_name=container_name,
         blob_name=blob_name,
         account_key=storage_account_key,
-        permission=BlobSasPermissions(
-            read=True, write=True, list=True, create=True),
-        expiry=datetime.datetime.now(
-            datetime.timezone.utc) + datetime.timedelta(hours=1)
-    )
+        permission=BlobSasPermissions(read=True,
+                                      write=True,
+                                      list=True,
+                                      create=True),
+        expiry=datetime.datetime.now(datetime.timezone.utc) +
+        datetime.timedelta(hours=1))
     # "?" is a delimiter character used when SAS token is attached to the
     # blob endpoint.
     return f'?{sas_token}'
