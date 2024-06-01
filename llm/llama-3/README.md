@@ -44,7 +44,7 @@
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3-70B-Instruct
   # MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
-  HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token, or use --env to pass.
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 service:
   replicas: 2
@@ -74,10 +74,10 @@ setup: |
     conda activate vllm
   fi
 
-  pip install vllm==0.4.0.post1
+  pip install vllm==0.4.2
   # Install Gradio for web UI.
   pip install gradio openai
-  pip install flash-attn==2.5.7
+  pip install flash-attn==2.5.9.post1
 
 
 run: |
@@ -226,7 +226,7 @@ ENDPOINT=$(sky status --endpoint 8081 llama3)
 curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "meta-llama/Meta-Llama-3-8B-Instruct",
+    "model": "meta-llama/Meta-Llama-3-70B-Instruct",
     "messages": [
       {
         "role": "system",

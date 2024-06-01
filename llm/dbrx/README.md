@@ -22,7 +22,7 @@ In this recipe, you will serve `databricks/dbrx-instruct` on your own infra  -- 
 ```yaml
 envs:
   MODEL_NAME: databricks/dbrx-instruct
-  HF_TOKEN: <your-huggingface-token>  # Change to your own huggingface token, or use --env to pass.
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 service:
   replicas: 2
@@ -256,7 +256,7 @@ ENDPOINT=$(sky serve status --endpoint dbrx)
 
 To curl the endpoint:
 ```console
-curl -L $ENDPOINT/v1/chat/completions \
+curl $ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "databricks/dbrx-instruct",

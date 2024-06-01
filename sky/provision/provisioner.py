@@ -24,7 +24,6 @@ from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
-from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -444,8 +443,6 @@ def _post_provision_setup(
             'status with: sky status -r; and retry provisioning.')
 
     # TODO(suquark): Move wheel build here in future PRs.
-    ip_list = cluster_info.get_feasible_ips()
-    port_list = cluster_info.get_ssh_ports()
     # We don't set docker_user here, as we are configuring the VM itself.
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         cluster_yaml, ssh_user=cluster_info.ssh_user)
@@ -482,7 +479,7 @@ def _post_provision_setup(
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
-        # (1) spot controllers need permission to launch/down nodes of
+        # (1) jobs controllers need permission to launch/down nodes of
         #     multiple clouds
         # (2) head instances need permission for auto stop or auto down
         #     nodes for the current cloud
@@ -505,9 +502,9 @@ def _post_provision_setup(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_info, ssh_credentials)
 
-        head_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                      port=port_list[0],
-                                                      **ssh_credentials)
+        runners = provision.get_command_runners(cloud_name, cluster_info,
+                                                **ssh_credentials)
+        head_runner = runners[0]
 
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
@@ -544,7 +541,7 @@ def _post_provision_setup(
         #     if provision_record.is_instance_just_booted(inst.instance_id):
         #         worker_ips.append(inst.public_ip)
 
-        if len(ip_list) > 1:
+        if cluster_info.num_instances > 1:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,

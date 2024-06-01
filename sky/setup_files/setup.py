@@ -190,7 +190,7 @@ remote = [
     'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3',
 ]
 
-# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
+# NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
     # botocore does not work with urllib3>=2.0.0, according to https://github.com/boto/botocore/issues/2926
@@ -235,7 +235,7 @@ extras_require: Dict[str, List[str]] = {
     'remote': remote,
     'runpod': ['runpod>=1.5.1'],
     'fluidstack': [],  # No dependencies needed for fluidstack
-    'cudo': ['cudo-compute>=0.1.8'],
+    'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
     'vsphere': [
         'pyvmomi==8.0.1.0.2',

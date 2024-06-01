@@ -37,7 +37,7 @@ logger = sky_logging.init_logger(__name__)
 # It has the following purposes:
 #   - make all nodes (any cloud) able to access private S3 buckets
 #   - make some remote nodes able to launch new nodes on AWS (i.e., makes
-#     AWS head node able to launch AWS workers, or any-cloud spot controller
+#     AWS head node able to launch AWS workers, or any-cloud jobs controller
 #     able to launch spot clusters on AWS).
 #
 # If we detect the current user identity is AWS SSO, we will not upload this
@@ -80,6 +80,8 @@ class AWSIdentityType(enum.Enum):
     ENV = 'env'
 
     IAM_ROLE = 'iam-role'
+
+    CONTAINER_ROLE = 'container-role'
 
     #       Name                    Value             Type    Location
     #       ----                    -----             ----    --------
@@ -338,9 +340,6 @@ class AWS(clouds.Cloud):
         cost += 0.0
         return cost
 
-    def is_same_cloud(self, other: clouds.Cloud):
-        return isinstance(other, AWS)
-
     @classmethod
     def get_default_instance_type(
             cls,
@@ -541,10 +540,16 @@ class AWS(clouds.Cloud):
         elif identity_type == AWSIdentityType.IAM_ROLE:
             # When using an IAM role, the credentials may not exist in the
             # ~/.aws/credentials file. So we don't check for the existence of the
-            # file. This will happen when the user is on a VM (or spot-controller)
-            # created by an SSO account, i.e. the VM will be assigned the IAM
-            # role: skypilot-v1.
+            # file. This will happen when the user is on a VM (or
+            # jobs-controller) created by an SSO account, i.e. the VM will be
+            # assigned the IAM role: skypilot-v1.
             hints = f'AWS IAM role is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.CONTAINER_ROLE:
+            # Similar to the IAM ROLE, an ECS container may not store credentials
+            # in the~/.aws/credentials file. So we don't check for the existence of
+            # the file. i.e. the container will be assigned the IAM role of the
+            # task: skypilot-v1.
+            hints = f'AWS container-role is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -604,6 +609,8 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.SSO
         elif _is_access_key_of_type(AWSIdentityType.IAM_ROLE.value):
             return AWSIdentityType.IAM_ROLE
+        elif _is_access_key_of_type(AWSIdentityType.CONTAINER_ROLE.value):
+            return AWSIdentityType.CONTAINER_ROLE
         elif _is_access_key_of_type(AWSIdentityType.ENV.value):
             return AWSIdentityType.ENV
         else:
@@ -745,7 +752,7 @@ class AWS(clouds.Cloud):
         # credentials. We need to define a mechanism to find out the cloud
         # provider of the cluster to be launched in this function and make sure
         # the cluster will not be used for launching clusters in other clouds,
-        # e.g. spot controller.
+        # e.g. jobs controller.
         if self._current_identity_type(
         ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}
@@ -962,3 +969,22 @@ class AWS(clouds.Cloud):
             error_msg=f'Failed to delete image {image_id!r} on {region}.',
             stderr=stderr,
             stream_logs=True)
+
+    @classmethod
+    def is_label_valid(cls, label_key: str,
+                       label_value: str) -> Tuple[bool, Optional[str]]:
+        key_regex = re.compile(r'^[^aws:][\S]{0,127}$')
+        value_regex = re.compile(r'^[\S]{0,255}$')
+        key_valid = bool(key_regex.match(label_key))
+        value_valid = bool(value_regex.match(label_value))
+        error_msg = None
+        if not key_valid:
+            error_msg = (f'Invalid tag key {label_key} for AWS. '
+                         'Key must start with any character except \'aws:\' '
+                         'and must be 128 characters or fewer in length.')
+        if not value_valid:
+            error_msg = (f'Invalid tag value {label_value} for AWS. '
+                         'Value must be 256 characters or fewer in length.')
+        if not key_valid or not value_valid:
+            return False, error_msg
+        return True, None

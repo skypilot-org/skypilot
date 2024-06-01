@@ -114,14 +114,14 @@ Contents
    ../getting-started/installation
    ../getting-started/quickstart
    ../getting-started/tutorial
-   ../examples/gpu-jupyter
+   ../examples/interactive-development
 
 
 .. toctree::
    :maxdepth: 1
    :caption: Running Jobs
 
-   ../examples/spot-jobs
+   ../examples/managed-jobs
    ../reference/job-queue
    ../examples/auto-failover
    ../reference/kubernetes/index
@@ -139,7 +139,7 @@ Contents
    :maxdepth: 1
    :caption: Cutting Cloud Costs
 
-   ../examples/spot-jobs
+   Managed Spot Jobs <../examples/spot-jobs>
    ../reference/auto-stop
    ../reference/benchmark/index
 

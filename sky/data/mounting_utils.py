@@ -5,6 +5,7 @@ import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky.utils import command_runner
 
 # Values used to construct mounting commands
 _STAT_CACHE_TTL = '5s'
@@ -12,7 +13,7 @@ _STAT_CACHE_CAPACITY = 4096
 _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
-GCSFUSE_VERSION = '1.3.0'
+GCSFUSE_VERSION = '2.2.0'
 BLOBFUSE2_VERSION = '2.2.0'
 _BLOBFUSE_CACHE_DIR = '~/.sky/blobfuse2_cache'
 
@@ -206,6 +207,8 @@ def get_mounting_script(
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
+                             
+        {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
         MOUNT_PATH={mount_path}
         MOUNT_BINARY={mount_binary}

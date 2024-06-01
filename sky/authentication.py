@@ -15,7 +15,7 @@ in ray yaml config as input,
 The local machine's public key should not be uploaded to the
 `~/.ssh/sky-key.pub` on the remote VM, because it will cause private/public
 key pair mismatch when the user tries to launch new VM from that remote VM
-using SkyPilot, e.g., the node is used as a spot controller. (Lambda cloud
+using SkyPilot, e.g., the node is used as a jobs controller. (Lambda cloud
 is an exception, due to the limitation of the cloud provider. See the
 comments in setup_lambda_authentication)
 """
@@ -408,7 +408,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Add the user's public key to the SkyPilot cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
-    secret_field_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_FIELD_NAME
+    secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
     k8s = kubernetes.kubernetes
     with open(public_key_path, 'r', encoding='utf-8') as f:

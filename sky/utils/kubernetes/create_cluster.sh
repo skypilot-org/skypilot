@@ -195,7 +195,7 @@ if $ENABLE_GPUS; then
     echo "Enabling GPU support..."
     # Run patch for missing ldconfig.real
     # https://github.com/NVIDIA/nvidia-docker/issues/614#issuecomment-423991632
-    docker exec -ti skypilot-control-plane ln -s /sbin/ldconfig /sbin/ldconfig.real
+    docker exec -ti skypilot-control-plane /bin/bash -c '[ ! -f /sbin/ldconfig.real ] && ln -s /sbin/ldconfig /sbin/ldconfig.real || echo "/sbin/ldconfig.real already exists"'
 
     echo "Installing NVIDIA GPU operator..."
     # Install the NVIDIA GPU operator

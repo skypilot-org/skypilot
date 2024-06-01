@@ -315,9 +315,6 @@ class GCP(clouds.Cloud):
         else:
             return 0.08 * num_gigabytes
 
-    def is_same_cloud(self, other):
-        return isinstance(other, GCP)
-
     @classmethod
     def _is_machine_image(cls, image_id: str) -> bool:
         find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
@@ -841,13 +838,14 @@ class GCP(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
-    def need_cleanup_after_preemption(self,
-                                      resources: 'resources.Resources') -> bool:
-        """Returns whether a spot resource needs cleanup after preeemption."""
+    def need_cleanup_after_preemption_or_failure(
+            self, resources: 'resources.Resources') -> bool:
+        """Whether a resource needs cleanup after preeemption or failure."""
         # Spot TPU VMs require manual cleanup after preemption.
         # "If your Cloud TPU is preempted,
         # you must delete it and create a new one ..."
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
+        # On-demand TPU VMs are likely to require manual cleanup as well.
 
         return gcp_utils.is_tpu_vm(resources)
 
@@ -1069,3 +1067,25 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to delete image {image_name!r}',
             stderr=stderr,
             stream_logs=True)
+
+    @classmethod
+    def is_label_valid(cls, label_key: str,
+                       label_value: str) -> Tuple[bool, Optional[str]]:
+        key_regex = re.compile(r'^[a-z]([a-z0-9_-]{0,62})?$')
+        value_regex = re.compile(r'^[a-z0-9_-]{0,63}$')
+        key_valid = bool(key_regex.match(label_key))
+        value_valid = bool(value_regex.match(label_value))
+        error_msg = None
+        condition_msg = ('can include lowercase alphanumeric characters, '
+                         'dashes, and underscores, with a total length of 63 '
+                         'characters or less.')
+        if not key_valid:
+            error_msg = (f'Invalid label key {label_key} for GCP. '
+                         f'Key must start with a lowercase letter '
+                         f'and {condition_msg}')
+        if not value_valid:
+            error_msg = (f'Invalid label value {label_value} for GCP. Value '
+                         f'{condition_msg}')
+        if not key_valid or not value_valid:
+            return False, error_msg
+        return True, None
