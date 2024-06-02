@@ -107,7 +107,6 @@ def _add_env_vars_to_body(body: Dict[str, Any]):
     body['env_vars'] = env_vars
 
 
-
 @usage_lib.entrypoint
 @_check_health
 def launch(
