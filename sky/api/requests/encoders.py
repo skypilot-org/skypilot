@@ -1,7 +1,17 @@
 """Handlers for the REST API return values."""
-from typing import Any, Dict, List
+import base64
+import pickle
+import typing
+from typing import Any, Dict, List, Optional, Tuple
+
+if typing.TYPE_CHECKING:
+    from sky import backends
 
 handlers: Dict[str, Any] = {}
+
+
+def _pickle_and_encode(obj: Any) -> str:
+    return base64.b64encode(pickle.dumps(obj)).decode('utf-8')
 
 
 def register_handler(name: str):
@@ -29,5 +39,16 @@ def default_handler(return_value: Any) -> Any:
 def encode_status(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for cluster in clusters:
         cluster['status'] = cluster['status'].value
-        cluster['handle'] = cluster['handle'].to_config()
+        cluster['handle'] = _pickle_and_encode(cluster['handle'])
     return clusters
+
+
+@register_handler('launch')
+def encode_launch(
+    job_id_handle: Tuple[Optional[int], Optional['backends.ResourceHandle']]
+) -> Dict[str, Any]:
+    job_id, handle = job_id_handle
+    return {
+        'job_id': job_id,
+        'handle': _pickle_and_encode(handle),
+    }

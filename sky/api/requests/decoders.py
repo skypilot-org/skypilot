@@ -1,10 +1,15 @@
 """Handlers for the REST API return values."""
+import base64
+import pickle
 from typing import Any, Dict, List
 
-from sky import backends
 from sky.utils import status_lib
 
 handlers: Dict[str, Any] = {}
+
+
+def _decode_and_unpickle(obj: str) -> Any:
+    return pickle.loads(base64.b64decode(obj.encode('utf-8')))
 
 
 def register_handler(name: str):
@@ -32,9 +37,15 @@ def default_decode_handler(return_value: Any) -> Any:
 def decode_status(return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     clusters = return_value
     for cluster in clusters:
-        # TODO(zhwu): We should make backends.ResourceHandle serializable.
-        cluster['handle'] = backends.CloudVmRayResourceHandle.from_config(
-            cluster['handle'])
+        cluster['handle'] = _decode_and_unpickle(cluster['handle'])
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
 
     return clusters
+
+
+@register_handler('launch')
+def decode_launch(return_value: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'job_id': return_value['job_id'],
+        'handle': _decode_and_unpickle(return_value['handle']),
+    }

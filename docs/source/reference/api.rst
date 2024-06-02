@@ -14,7 +14,7 @@ SkyPilot offers a programmatic API in Python, which is used under the hood by th
   Your feedback is much appreciated in evolving this API!
 
 
-Core API
+Cluster API
 -----------
 
 sky.launch
@@ -53,9 +53,6 @@ sky.autostop
 .. autofunction:: sky.autostop
 
 
-Job Queue API
------------------
-
 sky.queue
 ~~~~~~~~~~
 
@@ -84,29 +81,29 @@ sky.cancel
 .. autofunction:: sky.cancel
 
 
-Managed Spot Jobs API
+Managed (Spot) Jobs API
 -----------------------
 
-sky.spot_launch
+sky.jobs.launch
 ~~~~~~~~~~~~~~~~~
 
-.. autofunction:: sky.spot_launch
+.. autofunction:: sky.jobs.launch
 
-sky.spot_queue
+sky.jobs.queue
 ~~~~~~~~~~~~~~~
 
-.. autofunction:: sky.spot_queue
+.. autofunction:: sky.jobs.queue
 
-sky.spot_cancel
+sky.jobs.cancel
 ~~~~~~~~~~~~~~~~~
 
-.. autofunction:: sky.spot_cancel
+.. autofunction:: sky.jobs.cancel
 
 
-sky.spot_tail_logs
+sky.jobs_tail_logs
 ~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: sky.spot_tail_logs
+.. autofunction:: sky.jobs.tail_logs
 
 .. _sky-dag-ref:
 

@@ -99,6 +99,15 @@ def _check_health(func):
     return wrapper
 
 
+def _add_env_vars_to_body(body: Dict[str, Any]):
+    env_vars = {}
+    for env_var in os.environ:
+        if env_var.startswith('SKYPILOT_'):
+            env_vars[env_var] = os.environ[env_var]
+    body['env_vars'] = env_vars
+
+
+
 @usage_lib.entrypoint
 @_check_health
 def launch(
@@ -146,6 +155,7 @@ def launch(
         '_is_launched_by_sky_serve_controller': _is_launched_by_sky_serve_controller,
         '_disable_controller_check': _disable_controller_check,
     }
+    _add_env_vars_to_body(body)
     response = requests.post(
         f'{_get_server_url()}/launch',
         json=body,
@@ -308,4 +318,4 @@ def api_logs(follow: bool = True, tail: str = 'all'):
         except ValueError as e:
             raise ValueError(f'Invalid tail argument: {tail}') from e
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
-    subprocess.run(['tail', *tail_args, log_path], check=False)
+    subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
