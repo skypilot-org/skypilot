@@ -12,7 +12,7 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
+# Message thrown when APIs sky.{exec,launch,jobs.launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
 # this.
 _ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\

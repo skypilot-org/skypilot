@@ -6,10 +6,9 @@ import functools
 import json
 import os
 import pathlib
-import pickle
 import sqlite3
 import traceback
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import filelock
 
@@ -48,6 +47,18 @@ REQUEST_TASK_COLUMNS = [
 
 
 @dataclasses.dataclass
+class RequestTaskPayload:
+    request_id: str
+    name: str
+    entrypoint: str
+    request_body: str
+    status: str
+    return_value: str
+    error: str
+    pid: Optional[int]
+
+
+@dataclasses.dataclass
 class RequestTask:
     """A REST task."""
 
@@ -68,16 +79,26 @@ class RequestTask:
         log_path = (log_path_prefix / self.request_id).with_suffix('.log')
         return log_path
 
-    def set_error(self, error: Exception):
+    def set_error(self, error: Exception) -> None:
         """Set the error."""
-        # TODO(zhwu): handle other members of Exception.
+
         self.error = {
+            'object': encoders._pickle_and_encode(error),
             'type': type(error).__name__,
             'message': str(error),
-            'traceback': traceback.format_exc(),
         }
 
-    def set_return_value(self, return_value: Any):
+    def get_error(self) -> Optional[Dict[str, Any]]:
+        """Get the error."""
+        if self.error is None:
+            return None
+        return {
+            'object': decoders._decode_and_unpickle(self.error['object']),
+            'type': self.error['type'],
+            'message': self.error['message'],
+        }
+
+    def set_return_value(self, return_value: Any) -> None:
         """Set the return value."""
         self.return_value = encoders.get_handler(self.name)(return_value)
 
@@ -87,21 +108,39 @@ class RequestTask:
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'RequestTask':
-        return cls(
-            request_id=row[0],
-            name=row[1],
-            entrypoint=row[2],
-            request_body=json.loads(row[3]),
-            status=RequestStatus(row[4]),
-            return_value=json.loads(row[5]),
-            error=json.loads(row[6]),
-            pid=row[7],
-        )
+        return cls.decode(
+            RequestTaskPayload(**dict(zip(REQUEST_TASK_COLUMNS, row))))
 
     def to_row(self) -> Tuple[Any, ...]:
-        return (self.request_id, self.name, self.entrypoint,
-                json.dumps(self.request_body), self.status.value,
-                json.dumps(self.return_value), json.dumps(self.error), self.pid)
+        payload = self.encode()
+        return tuple(getattr(payload, k) for k in REQUEST_TASK_COLUMNS)
+
+    def encode(self) -> RequestTaskPayload:
+        """Serialize the request task."""
+        return RequestTaskPayload(
+            request_id=self.request_id,
+            name=self.name,
+            entrypoint=self.entrypoint,
+            request_body=json.dumps(self.request_body),
+            status=self.status.value,
+            return_value=json.dumps(self.return_value),
+            error=json.dumps(self.error),
+            pid=self.pid,
+        )
+
+    @classmethod
+    def decode(cls, payload: RequestTaskPayload) -> 'RequestTask':
+        """Deserialize the request task."""
+        return cls(
+            request_id=payload.request_id,
+            name=payload.name,
+            entrypoint=payload.entrypoint,
+            request_body=json.loads(payload.request_body),
+            status=RequestStatus(payload.status),
+            return_value=json.loads(payload.return_value),
+            error=json.loads(payload.error),
+            pid=payload.pid,
+        )
 
 
 _DB_PATH = os.path.expanduser('~/.sky/api_server/tasks.db')

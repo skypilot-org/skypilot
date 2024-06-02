@@ -7,6 +7,7 @@ import os
 import pathlib
 import sys
 import tempfile
+import traceback
 from typing import Any, Callable, Dict, List, Optional
 import uuid
 
@@ -23,6 +24,8 @@ from sky.api.requests import tasks
 from sky.utils import dag_utils
 from sky.utils import registry
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
+from sky.usage import usage_lib
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -110,13 +113,17 @@ def wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
             sky_logging.reload_logger()
             return_value = func(*args, **kwargs)
         except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.enable_traceback():
+                stacktrace = traceback.format_exc()
+            e.stacktrace = stacktrace
+            usage_lib.store_exception(e)
             with tasks.update_rest_task(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = tasks.RequestStatus.FAILED
                 request_task.set_error(e)
             restore_output(original_stdout, original_stderr)
             logger.info(f'Task {request_id} failed')
-            raise
+            return None
         else:
             with tasks.update_rest_task(request_id) as request_task:
                 assert request_task is not None, request_id
@@ -283,7 +290,7 @@ class RequestIdBody(pydantic.BaseModel):
 
 
 @app.get('/get')
-async def get(get_body: RequestIdBody) -> tasks.RequestTask:
+async def get(get_body: RequestIdBody) -> tasks.RequestTaskPayload:
     while True:
         request_task = tasks.get_request(get_body.request_id)
         if request_task is None:
@@ -292,7 +299,7 @@ async def get(get_body: RequestIdBody) -> tasks.RequestTask:
                 status_code=404,
                 detail=f'Request {get_body.request_id} not found')
         if request_task.status > tasks.RequestStatus.RUNNING:
-            return request_task
+            return request_task.encode()
         await asyncio.sleep(1)
 
 
