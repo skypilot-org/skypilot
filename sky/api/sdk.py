@@ -28,6 +28,8 @@ from sky.api.requests import tasks
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import dag_utils
+from sky.utils import env_options
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
@@ -61,13 +63,13 @@ def _start_uvicorn_in_background():
             time.sleep(0.1)
 
 
-def _handle_response(response) -> Tuple[str, Dict[str, Any]]:
+def _get_request_id(response) -> str:
     if response.status_code != 200:
         raise RuntimeError(
             f'Failed to connect to SkyPilot server at {_get_server_url()}. '
             f'Response: {response.content}')
     request_id = response.headers.get('X-Request-ID')
-    return request_id, response.json()
+    return request_id
 
 
 def _check_health(func):
@@ -172,8 +174,7 @@ def tail_logs(cluster_name: str, job_id: int, follow: bool) -> str:
                                 'job_id': job_id,
                                 'follow': follow
                             })
-    request_id, _ = _handle_response(response)
-    return request_id
+    return _get_request_id(response)
 
 
 @usage_lib.entrypoint
@@ -187,8 +188,7 @@ def status(cluster_names: Optional[List[str]] = None,
                                 'cluster_names': cluster_names,
                                 'refresh': refresh,
                             })
-    request_id, _ = _handle_response(response)
-    return request_id
+    return _get_request_id(response)
 
 
 @usage_lib.entrypoint
@@ -197,12 +197,17 @@ def get(request_id: str) -> Any:
     response = requests.get(f'{_get_server_url()}/get',
                             json={'request_id': request_id},
                             timeout=300)
-    _, return_value = _handle_response(response)
-    request_task = tasks.RequestTask(**return_value)
-    if request_task.error:
-        # TODO(zhwu): we should have a better way to handle errors.
-        # Is it possible to raise the original exception?
-        raise RuntimeError(request_task.error)
+    request_task = tasks.RequestTask.decode(
+        tasks.RequestTaskPayload(**response.json()))
+    error = request_task.get_error()
+    if error is not None:
+        error_obj = error['object']
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            logger.error(
+                f'=== Traceback on SkyPilot API Server ===\n{error_obj.stacktrace}'
+            )
+        with ux_utils.print_exception_no_traceback():
+            raise error_obj
     return request_task.get_return_value()
 
 
@@ -250,12 +255,7 @@ def down(cluster_name: str, purge: bool = False) -> str:
         },
         timeout=5,
     )
-    _handle_response(response)
-    request_id = response.headers.get('X-Request-ID')
-    assert request_id is not None, response
-    logger.debug(f'Tearing down {cluster_name!r} with request ID: '
-                 f'{request_id}')
-    return request_id
+    return _get_request_id(response)
 
 
 # === API server management ===

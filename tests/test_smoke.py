@@ -3852,15 +3852,6 @@ def test_user_dependencies(generic_cloud: str):
     run_one_test(test)
 
 
-_CODE_PREFIX = ['import sky']
-
-
-def _build(code: List[str]) -> str:
-    code = _CODE_PREFIX + code
-    code = ';'.join(code)
-    return f'python3 -u -c {shlex.quote(code)}'
-
-
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.
