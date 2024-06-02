@@ -132,7 +132,9 @@ class LaunchBody(pydantic.BaseModel):
     clone_disk_from: Optional[str] = None
     # Internal only:
     # pylint: disable=invalid-name
-    _is_launched_by_spot_controller: bool = False
+    _is_launched_by_jobs_controller: bool = False
+    _is_launched_by_sky_serve_controller: bool = False
+    _disable_controller_check: bool = False
 
 
 @app.post('/launch')
@@ -166,8 +168,11 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
         detach_run=True,
         no_setup=launch_body.no_setup,
         clone_disk_from=launch_body.clone_disk_from,
-        _is_launched_by_spot_controller=launch_body.  # pylint: disable=protected-access
-        _is_launched_by_spot_controller,
+        _is_launched_by_jobs_controller=launch_body.
+        _is_launched_by_jobs_controller,
+        _is_launched_by_sky_serve_controller=launch_body.
+        _is_launched_by_sky_serve_controller,
+        _disable_controller_check=launch_body._disable_controller_check,
     )
 
 
@@ -277,7 +282,7 @@ async def abort(abort_body: RequestIdBody):
             return
         rest_task.status = tasks.RequestStatus.ABORTED
         if rest_task.pid is not None:
-            subprocess_utils.kill_children_processes(parent_pid=rest_task.pid)
+            subprocess_utils.kill_children_processes(parent_pids=rest_task.pid)
     print(f'Killed request: {abort_body.request_id}')
 
 

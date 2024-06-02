@@ -92,9 +92,8 @@ def handle_returncode(returncode: int,
                                           stderr)
 
 
-def kill_children_processes(first_pid_to_kill: Optional[int] = None,
-                            force: bool = False,
-                            parent_pid: Optional[int] = None):
+def kill_children_processes(parent_pids: Optional[List[Optional[int]]] = None,
+                            force: bool = False) -> None:
     """Kill children processes recursively.
 
     We need to kill the children, so that
@@ -104,12 +103,16 @@ def kill_children_processes(first_pid_to_kill: Optional[int] = None,
        etc. while we are cleaning up the clusters.
 
     Args:
-        first_pid_to_kill: Optional PID of a process, or PIDs of a series of
-         processes to be killed first. If a list of PID is specified, it is
-         killed by the order in the list.
-         This is for guaranteeing the order of cleaning up and suppress
-         flaky errors.
+        parent_pids: Optional PIDs of a series of processes. The processes and
+          their children will be killed.  If a list of PID is specified, it is
+          killed by the order in the list. This is for guaranteeing the order
+          of cleaning up and suppress flaky errors.
+        force: bool, send SIGKILL if force, otherwise, use SIGTERM for
+          gracefully kill the process.
+        
     """
+    if isinstance(parent_pids, int):
+        parent_pids = [parent_pids]
 
     def kill(proc: psutil.Process):
         try:
@@ -122,24 +125,19 @@ def kill_children_processes(first_pid_to_kill: Optional[int] = None,
             # The child process may have already been terminated.
             pass
 
-    if parent_pid is None:
-        parent_process = psutil.Process()
+    parent_processes = []
+    if parent_pids is None:
+        parent_processes = [psutil.Process()]
     else:
-        parent_process = psutil.Process(parent_pid)
+        parent_processes = [psutil.Process(pid) for pid in parent_pids]
 
-    child_processes = parent_process.children(recursive=True)
-    if parent_pid is not None:
-        kill(parent_process)
+    for parent_process in parent_processes:
+        child_processes = parent_process.children(recursive=True)
+        if parent_pids is not None:
+            kill(parent_process)
 
-    remaining_child_processes = []
-    for child in child_processes:
-        if child.pid == first_pid_to_kill:
+        for child in child_processes:
             kill(child)
-        else:
-            remaining_child_processes.append(child)
-
-    for child in remaining_child_processes:
-        kill(child)
 
 
 def run_with_retries(

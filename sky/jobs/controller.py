@@ -492,8 +492,8 @@ def start(job_id, dag_yaml, retry_until_up):
             # Kill the controller process first; if its child process is
             # killed first, then the controller process will raise errors.
             # Kill any possible remaining children processes recursively.
-            subprocess_utils.kill_children_processes(controller_process.pid,
-                                                     force=True)
+            subprocess_utils.kill_children_processes(
+                parent_pids=[controller_process.pid], force=True)
             controller_process.join()
             logger.info(f'Controller process {controller_process.pid} killed.')
 

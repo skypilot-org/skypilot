@@ -10,8 +10,8 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import optimizer
-from sky.utils import resources_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 
 
 def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
