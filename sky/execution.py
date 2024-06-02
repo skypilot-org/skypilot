@@ -331,8 +331,11 @@ def _execute(
             # pollute the controller logs.
             #
             # Disable the usage collection for this status command.
-            env = dict(os.environ,
-                       **{env_options.Options.DISABLE_LOGGING.value: '1'})
+            env = dict(
+                os.environ, **{
+                    env_options.Options.DISABLE_LOGGING.value: '1',
+                    env_options.Options.CLI_LOCAL_MODE.value: '1'
+                })
             subprocess_utils.run(
                 'sky status --no-show-managed-jobs --no-show-services', env=env)
         print()
