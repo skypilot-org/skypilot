@@ -282,7 +282,8 @@ async def abort(abort_body: RequestIdBody):
             return
         rest_task.status = tasks.RequestStatus.ABORTED
         if rest_task.pid is not None:
-            subprocess_utils.kill_children_processes(parent_pids=rest_task.pid)
+            subprocess_utils.kill_children_processes(
+                parent_pids=[rest_task.pid])
     print(f'Killed request: {abort_body.request_id}')
 
 
