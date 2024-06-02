@@ -16,6 +16,9 @@ class Options(enum.Enum):
     # robustness.
     SKIP_CLOUD_IDENTITY_CHECK = 'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK'
 
+    # Run SkyPilot in local mode, without using API server.
+    CLI_LOCAL_MODE = 'SKYPILOT_CLI_LOCAL_MODE'
+
     def get(self):
         """Check if an environment variable is set to True."""
         return os.getenv(self.value, 'False').lower() in ('true', '1')

@@ -156,6 +156,19 @@ def launch(
 
 @usage_lib.entrypoint
 @_check_health
+def tail_logs(cluster_name: str, job_id: int, follow: bool) -> str:
+    response = requests.get(f'{_get_server_url()}/tail_logs',
+                            json={
+                                'cluster_name': cluster_name,
+                                'job_id': job_id,
+                                'follow': follow
+                            })
+    request_id, _ = _handle_response(response)
+    return request_id
+
+
+@usage_lib.entrypoint
+@_check_health
 def status(cluster_names: Optional[List[str]] = None,
            refresh: bool = False) -> str:
     # TODO(zhwu): this does not stream the logs output by logger back to the

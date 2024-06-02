@@ -68,6 +68,7 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -77,9 +78,6 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
-
-if typing.TYPE_CHECKING:
-    from sky.backends import backend as backend_lib
 
 pd = adaptors_common.LazyImport('pandas')
 logger = sky_logging.init_logger(__name__)
@@ -99,12 +97,14 @@ _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify {cause} '
     'cluster to show its {property}.\nUsage: `sky status --{flag} <cluster>`')
 
-_ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
-                            'please retry after a while.')
-
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
+
+if env_options.Options.get(env_options.Options.CLI_LOCAL_MODE):
+    from sky import core
+    setattr(core, 'get', lambda args: args)
+    sdk = core
 
 
 def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
@@ -1984,7 +1984,7 @@ def logs(
             'Both --sync_down and --status are specified '
             '(ambiguous). To fix: specify at most one of them.')
 
-    if job_ids and not sync_down:
+    if len(job_ids) > 1 and not sync_down:
         raise click.UsageError(
             f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
             '\nPass -s/--sync-down to download the logs instead.')
@@ -2029,7 +2029,8 @@ def logs(
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    sdk.tail_logs(cluster, job_id, follow)
+    request = sdk.tail_logs(cluster, job_id, follow)
+    sdk.stream_and_get(request)
 
 
 @cli.command()

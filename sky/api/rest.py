@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import json
 import multiprocessing
+import os
 import pathlib
 import sys
 import tempfile
@@ -30,6 +31,8 @@ else:
     from typing_extensions import ParamSpec
 
 P = ParamSpec('P')
+
+logger = sky_logging.init_logger(__name__)
 
 
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -64,18 +67,37 @@ events = [
 def wrapper(func: Callable[P, Any], request_id: str, *args: P.args,
             **kwargs: P.kwargs):
     """Wrapper for a request task."""
-    print(f'Running task {request_id}')
+
+    def redirect_output(file):
+        """Redirect stdout and stderr to the log file."""
+        fd = file.fileno()  # Get the file descriptor from the file object
+        # Store copies of the original stdout and stderr file descriptors
+        original_stdout = os.dup(sys.stdout.fileno())
+        original_stderr = os.dup(sys.stderr.fileno())
+
+        # Copy this fd to stdout and stderr
+        os.dup2(fd, sys.stdout.fileno())
+        os.dup2(fd, sys.stderr.fileno())
+        return original_stdout, original_stderr
+
+    def restore_output(original_stdout, original_stderr):
+        """Restore stdout and stderr to their original file descriptors. """
+        os.dup2(original_stdout, sys.stdout.fileno())
+        os.dup2(original_stderr, sys.stderr.fileno())
+
+        # Close the duplicate file descriptors
+        os.close(original_stdout)
+        os.close(original_stderr)
+
+    logger.info(f'Running task {request_id}')
     with tasks.update_rest_task(request_id) as request_task:
         assert request_task is not None, request_id
         log_path = request_task.log_path
         request_task.pid = multiprocessing.current_process().pid
         request_task.status = tasks.RequestStatus.RUNNING
     with log_path.open('w') as f:
-        # Redirect stdout and stderr to the log file.
-        sys.stdout = sys.stderr = f
-        # reconfigure logger since the logger is initialized before
-        # with previous stdout/stderr
-        sky_logging.reload_logger()
+        # Store copies of the original stdout and stderr file descriptors
+        original_stdout, original_stderr = redirect_output(f)
         try:
             return_value = func(*args, **kwargs)
         except Exception as e:  # pylint: disable=broad-except
@@ -83,14 +105,16 @@ def wrapper(func: Callable[P, Any], request_id: str, *args: P.args,
                 assert request_task is not None, request_id
                 request_task.status = tasks.RequestStatus.FAILED
                 request_task.set_error(e)
-            print(f'Task {request_id} failed')
+            restore_output(original_stdout, original_stderr)
+            logger.info(f'Task {request_id} failed')
             raise
         else:
             with tasks.update_rest_task(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = tasks.RequestStatus.SUCCEEDED
                 request_task.set_return_value(return_value)
-            print(f'Task {request_id} finished')
+            restore_output(original_stdout, original_stderr)
+            logger.info(f'Task {request_id} finished')
         return return_value
 
 
@@ -99,12 +123,13 @@ def _start_background_request(request_id: str, request_name: str,
                                                                            Any],
                               *args: P.args, **kwargs: P.kwargs):
     """Start a task."""
-    rest_task = tasks.RequestTask(request_id=request_id,
-                                  name=request_name,
-                                  entrypoint=func.__module__,
-                                  request_body=request_body,
-                                  status=tasks.RequestStatus.PENDING)
-    tasks.dump_reqest(rest_task)
+    request_task = tasks.RequestTask(request_id=request_id,
+                                     name=request_name,
+                                     entrypoint=func.__module__,
+                                     request_body=request_body,
+                                     status=tasks.RequestStatus.PENDING)
+    tasks.dump_reqest(request_task)
+    request_task.log_path.touch()
     process = multiprocessing.Process(target=wrapper,
                                       args=(func, request_id, *args),
                                       kwargs=kwargs)
@@ -173,6 +198,26 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
         _is_launched_by_sky_serve_controller=launch_body.
         _is_launched_by_sky_serve_controller,
         _disable_controller_check=launch_body._disable_controller_check,
+    )
+
+
+class ClusterJobBody(pydantic.BaseModel):
+    cluster_name: str
+    job_id: int
+    follow: bool = True
+
+
+@app.get('/tail_logs')
+async def tail_logs(request: fastapi.Request,
+                    cluster_job_body: ClusterJobBody) -> None:
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='logs',
+        request_body=json.loads(cluster_job_body.json()),
+        func=core.tail_logs,
+        cluster_name=cluster_job_body.cluster_name,
+        job_id=cluster_job_body.job_id,
+        follow=cluster_job_body.follow,
     )
 
 
