@@ -93,7 +93,7 @@ class RequestTask:
             entrypoint=row[2],
             request_body=json.loads(row[3]),
             status=RequestStatus(row[4]),
-            return_value=pickle.loads(row[5]),
+            return_value=json.loads(row[5]),
             error=json.loads(row[6]),
             pid=row[7],
         )
@@ -101,8 +101,7 @@ class RequestTask:
     def to_row(self) -> Tuple[Any, ...]:
         return (self.request_id, self.name, self.entrypoint,
                 json.dumps(self.request_body), self.status.value,
-                pickle.dumps(self.return_value), json.dumps(self.error),
-                self.pid)
+                json.dumps(self.return_value), json.dumps(self.error), self.pid)
 
 
 _DB_PATH = os.path.expanduser('~/.sky/api_server/tasks.db')

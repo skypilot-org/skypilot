@@ -2541,37 +2541,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # so the head IP in the database is not updated.
                 pass
 
-    def to_config(self) -> Dict[str, Any]:
-        result: Dict[str, Any] = {}
-        result['cluster_name'] = self.cluster_name
-        result['cluster_name_on_cloud'] = self.cluster_name_on_cloud
-        result['cluster_yaml'] = self.cluster_yaml
-        result[
-            'stable_internal_external_ips'] = self.stable_internal_external_ips
-        result['stable_ssh_ports'] = self.stable_ssh_ports
-        result['launched_nodes'] = self.launched_nodes
-        result['launched_resources'] = self.launched_resources.to_yaml_config()
-        result['docker_user'] = self.docker_user
-        result['tpu_create_script'] = self.tpu_create_script
-        result['tpu_delete_script'] = self.tpu_delete_script
-        return result
-
-    @classmethod
-    def from_config(cls, config: dict) -> 'CloudVmRayResourceHandle':
-        result = cls(
-            cluster_name=config['cluster_name'],
-            cluster_name_on_cloud=config['cluster_name_on_cloud'],
-            cluster_yaml=config['cluster_yaml'],
-            launched_nodes=config['launched_nodes'],
-            launched_resources=resources_lib.Resources.from_yaml_config(
-                config['launched_resources']),
-            stable_internal_external_ips=config['stable_internal_external_ips'],
-            stable_ssh_ports=config['stable_ssh_ports'],
-            tpu_create_script=config['tpu_create_script'],
-            tpu_delete_script=config['tpu_delete_script'])
-        result.docker_user = config['docker_user']
-        return result
-
 
 @registry.BACKEND_REGISTRY.register
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):

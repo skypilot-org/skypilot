@@ -63,8 +63,11 @@ events = [
     refresh_cluster_status_event,
 ]
 
+class RequestBody(pydantic.BaseModel):
+    env_vars: Dict[str, str] = {}
 
-def wrapper(func: Callable[P, Any], request_id: str, *args: P.args,
+
+def wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str], *args: P.args,
             **kwargs: P.kwargs):
     """Wrapper for a request task."""
 
@@ -99,6 +102,11 @@ def wrapper(func: Callable[P, Any], request_id: str, *args: P.args,
         # Store copies of the original stdout and stderr file descriptors
         original_stdout, original_stderr = redirect_output(f)
         try:
+            os.environ.update(env_vars)
+            # Make sure the logger takes the new environment variables. This is
+            # necessary because the logger is initialized before the environment
+            # variables are set, such as SKYPILOT_DEBUG.
+            sky_logging.reload_logger()
             return_value = func(*args, **kwargs)
         except Exception as e:  # pylint: disable=broad-except
             with tasks.update_rest_task(request_id) as request_task:
@@ -130,6 +138,7 @@ def _start_background_request(request_id: str, request_name: str,
                                      status=tasks.RequestStatus.PENDING)
     tasks.dump_reqest(request_task)
     request_task.log_path.touch()
+    kwargs['env_vars'] = request_body.get('env_vars', {})
     process = multiprocessing.Process(target=wrapper,
                                       args=(func, request_id, *args),
                                       kwargs=kwargs)
@@ -142,7 +151,7 @@ async def startup():
         asyncio.create_task(event())
 
 
-class LaunchBody(pydantic.BaseModel):
+class LaunchBody(RequestBody):
     """The request body for the launch endpoint."""
     task: str
     cluster_name: Optional[str] = None
@@ -153,6 +162,7 @@ class LaunchBody(pydantic.BaseModel):
     backend: Optional[str] = None
     optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST
     detach_setup: bool = False
+    detach_run: bool = False
     no_setup: bool = False
     clone_disk_from: Optional[str] = None
     # Internal only:
@@ -190,7 +200,7 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
         backend=backend,
         optimize_target=launch_body.optimize_target,
         detach_setup=launch_body.detach_setup,
-        detach_run=True,
+        detach_run=launch_body.detach_run,
         no_setup=launch_body.no_setup,
         clone_disk_from=launch_body.clone_disk_from,
         _is_launched_by_jobs_controller=launch_body.
