@@ -68,6 +68,10 @@ def get_user_hash() -> str:
     We cache the user hash in a file to avoid potential user_name or
     hostname changes causing a new user hash to be generated.
     """
+    hash_str = os.environ.get('SKYPILOT_USER_HASH_STR', None)
+    if hash_str:
+        user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
+        return user_hash
 
     def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
         if user_hash is None:
