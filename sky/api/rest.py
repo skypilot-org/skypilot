@@ -63,12 +63,13 @@ events = [
     refresh_cluster_status_event,
 ]
 
+
 class RequestBody(pydantic.BaseModel):
     env_vars: Dict[str, str] = {}
 
 
-def wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str], *args: P.args,
-            **kwargs: P.kwargs):
+def wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
+            *args: P.args, **kwargs: P.kwargs):
     """Wrapper for a request task."""
 
     def redirect_output(file):
