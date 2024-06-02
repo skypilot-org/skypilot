@@ -48,7 +48,7 @@ def _start_uvicorn_in_background():
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     # The command to run uvicorn. Adjust the app:app to your application's
     # location.
-    cmd = f'{API_SERVER_CMD} &> {log_path}'
+    cmd = f'{API_SERVER_CMD} > {log_path} 2>&1'
 
     # Start the uvicorn process in the background and don't wait for it.
     subprocess.Popen(cmd, shell=True)

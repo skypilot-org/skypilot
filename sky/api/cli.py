@@ -608,9 +608,7 @@ def _launch_with_confirm(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
     )
-    sdk.stream_and_get(
-        request_id
-    )
+    sdk.stream_and_get(request_id)
 
 
 def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
@@ -1639,8 +1637,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         query_clusters: Optional[List[str]] = None
         if clusters:
             query_clusters = _get_glob_clusters(clusters, silent=ip)
-        request = sdk.status(cluster_names=query_clusters,
-                                      refresh=refresh)
+        request = sdk.status(cluster_names=query_clusters, refresh=refresh)
         cluster_records = sdk.get(request)
         if ip or show_endpoints:
             if len(cluster_records) != 1:
@@ -1677,8 +1674,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             if show_endpoints:
                 if endpoint:
                     cluster_endpoint = sdk.endpoints(cluster_record['name'],
-                                                      endpoint).get(
-                                                          endpoint, None)
+                                                     endpoint).get(
+                                                         endpoint, None)
                     if not cluster_endpoint:
                         raise click.Abort(
                             f'Endpoint {endpoint} not found for cluster '
@@ -2491,10 +2488,10 @@ def start(
     for name in to_start:
         try:
             sdk.start(name,
-                       idle_minutes_to_autostop,
-                       retry_until_up,
-                       down=down,
-                       force=force)
+                      idle_minutes_to_autostop,
+                      retry_until_up,
+                      down=down,
+                      force=force)
         except (exceptions.NotSupportedError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             click.echo(str(e))
@@ -5232,10 +5229,12 @@ def local_down():
         click.echo(
             f'{colorama.Fore.GREEN}Local cluster removed.{style.RESET_ALL}')
 
+
 @cli.group(cls=_NaturalOrderGroup)
 def api():
     """Managed Spot commands (spot instances with auto-recovery)."""
     pass
+
 
 @api.command('start', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
@@ -5243,22 +5242,26 @@ def api_start():
     """Starts the API server locally."""
     sdk.api_start()
 
+
 @api.command('stop', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
 def api_stop():
     """Stops the API server locally."""
     sdk.api_stop()
 
+
 @api.command('logs', cls=_DocumentedCodeCommand)
 @click.option('--follow',
               '-f',
-                is_flag=True,
-                default=False,
-                required=False,
-                help='Follow the logs.')
-@click.option('--tail', '-n', default='all',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Follow the logs.')
+@click.option('--tail',
+              '-n',
+              default='all',
               help=('Number of lines to show from the end of the logs '
-              '(default "all")'))
+                    '(default "all")'))
 # Follow the arguments of `docker logs` command.
 @usage_lib.entrypoint
 def api_logs(follow: bool, tail: str):
