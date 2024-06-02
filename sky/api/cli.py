@@ -598,7 +598,6 @@ def _launch_with_confirm(
     request_id = sdk.launch(
         dag,
         dryrun=dryrun,
-        stream_logs=True,
         cluster_name=cluster,
         detach_setup=detach_setup,
         detach_run=detach_run,
@@ -1642,8 +1641,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             query_clusters = _get_glob_clusters(clusters, silent=ip)
         request = sdk.status(cluster_names=query_clusters,
                                       refresh=refresh)
+        cluster_records = sdk.get(request)
         if ip or show_endpoints:
-            cluster_records = sdk.get(request)
             if len(cluster_records) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(cluster_records) > 1 else ''

@@ -116,7 +116,9 @@ def launch(
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
-    _is_launched_by_spot_controller: bool = False,
+    _is_launched_by_jobs_controller: bool = False,
+    _is_launched_by_sky_serve_controller: bool = False,
+    _disable_controller_check: bool = False,
 ) -> str:
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
@@ -140,7 +142,9 @@ def launch(
         'detach_run': detach_run,
         'no_setup': no_setup,
         'clone_disk_from': clone_disk_from,
-        '_is_launched_by_spot_controller': _is_launched_by_spot_controller,
+        '_is_launched_by_jobs_controller': _is_launched_by_jobs_controller,
+        '_is_launched_by_sky_serve_controller': _is_launched_by_sky_serve_controller,
+        '_disable_controller_check': _disable_controller_check,
     }
     response = requests.post(
         f'{_get_server_url()}/launch',
