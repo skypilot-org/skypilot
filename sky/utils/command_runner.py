@@ -224,7 +224,7 @@ class CommandRunner:
             stream_logs: bool = True,
             max_retry: int = 1,
             prefix_command: Optional[str] = None,
-            get_remote_home_dir: Callable[[], str] = lambda: '~'):
+            get_remote_home_dir: Callable[[], str] = lambda: '~') -> None:
         """Builds the rsync command."""
         # Build command.
         rsync_command = []
