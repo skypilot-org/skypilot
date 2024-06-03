@@ -98,10 +98,10 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     """Returns the accelerator name for GKE clusters
 
     Uses the format - nvidia-tesla-<accelerator>.
-    A100-80GB, H100-80GB and L4 are an exception. They use nvidia-<accelerator>.
+    A100-80GB, H100 and L4 are an exception. They use nvidia-<accelerator>.
     """
-    if accelerator in ('A100-80GB', 'L4', 'H100-80GB'):
-        # A100-80GB, L4 and H100-80GB have a different name pattern.
+    if accelerator in ('A100-80GB', 'L4', 'H100'):
+        # A100-80GB, L4 and H100 have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
