@@ -101,7 +101,8 @@ class CommandRunner:
               *,
               up: bool,
               log_path: str = ...,
-              stream_logs: bool = ...) -> None:
+              stream_logs: bool = ...,
+              max_retry: int = ...) -> None:
         ...
 
     @classmethod
@@ -191,7 +192,8 @@ class SSHCommandRunner(CommandRunner):
               *,
               up: bool,
               log_path: str = ...,
-              stream_logs: bool = ...) -> None:
+              stream_logs: bool = ...,
+              max_retry: int = ...) -> None:
         ...
 
 
@@ -260,5 +262,6 @@ class KubernetesCommandRunner(CommandRunner):
               *,
               up: bool,
               log_path: str = ...,
-              stream_logs: bool = ...) -> None:
+              stream_logs: bool = ...,
+              max_retry: int = ...) -> None:
         ...
