@@ -3650,7 +3650,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 runner.rsync(
                     # Require a `/` at the end to make sure the parent dir
                     # are not created locally. We do not add additional '*' as
-                    # kubernets's rsync does not work with an ending '*'.
+                    # kubernetes's rsync does not work with an ending '*'.
                     source=f'{remote_log_dir}/',
                     target=local_log_dir,
                     up=False,
