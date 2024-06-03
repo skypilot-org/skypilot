@@ -714,8 +714,7 @@ class KubernetesCommandRunner(CommandRunner):
             cmd,
             process_stream,
             separate_stderr,
-            # +1 to skip first new line.
-            skip_lines=skip_lines + 1,
+            skip_lines=skip_lines,
             source_bashrc=source_bashrc)
         command = kubectl_base_command + [
             # It is important to use /bin/bash -c here to make sure we quote the
