@@ -690,6 +690,7 @@ class KubernetesCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
+        # TODO(zhwu): implement port_forward for k8s.
         assert port_forward is None, ('port_forward is not supported for k8s '
                                       f'for now, but got: {port_forward}')
         if connect_timeout is None:
