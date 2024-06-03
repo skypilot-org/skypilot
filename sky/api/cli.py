@@ -546,57 +546,8 @@ def _launch_with_confirm(
     clone_disk_from: Optional[str] = None,
 ):
     """Launch a cluster with a Task."""
-    if cluster is None:
-        cluster = backend_utils.generate_cluster_name()
-
-    clone_source_str = ''
-    if clone_disk_from is not None:
-        clone_source_str = f' from the disk of {clone_disk_from!r}'
-        task, _ = backend_utils.check_can_clone_disk_and_override_task(
-            clone_disk_from, cluster, task)
-
-    with sky.Dag() as dag:
-        dag.add(task)
-
-    maybe_status, handle = backend_utils.refresh_cluster_status_handle(cluster)
-    if maybe_status is None:
-        # Show the optimize log before the prompt if the cluster does not exist.
-        try:
-            sky_check.get_cached_enabled_clouds_or_refresh(
-                raise_if_no_cloud_access=True)
-        except exceptions.NoCloudAccessError as e:
-            # Catch the exception where the public cloud is not enabled, and
-            # make it yellow for better visibility.
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(f'{colorama.Fore.YELLOW}{e}'
-                                   f'{colorama.Style.RESET_ALL}') from e
-        dag = sky.optimize(dag)
-    task = dag.tasks[0]
-
-    if handle is not None:
-        backend.check_resources_fit_cluster(handle, task)
-
-    confirm_shown = False
-    if not no_confirm:
-        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
-        prompt = None
-        if maybe_status is None:
-            cluster_str = '' if cluster is None else f' {cluster!r}'
-            prompt = (
-                f'Launching a new cluster{cluster_str}{clone_source_str}. '
-                'Proceed?')
-        elif maybe_status == status_lib.ClusterStatus.STOPPED:
-            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
-        if prompt is not None:
-            confirm_shown = True
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
-    if not confirm_shown:
-        click.secho(f'Running task on cluster {cluster}...', fg='yellow')
-
     request_id = sdk.launch(
-        dag,
+        task,
         dryrun=dryrun,
         cluster_name=cluster,
         detach_setup=detach_setup,
@@ -607,6 +558,7 @@ def _launch_with_confirm(
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        need_confirmation=not no_confirm,
     )
     sdk.stream_and_get(request_id)
 

@@ -17,6 +17,7 @@ import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import click
 import colorama
 import psutil
 import requests
@@ -25,10 +26,12 @@ from sky import backends
 from sky import optimizer
 from sky import sky_logging
 from sky.api.requests import tasks
+from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -111,6 +114,21 @@ def _add_env_vars_to_body(body: Dict[str, Any]):
 
 @usage_lib.entrypoint
 @_check_health
+def optimize(dag: 'sky.Dag') -> str:
+    with tempfile.NamedTemporaryFile(mode='r') as f:
+        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+        dag_str = f.read()
+
+    body = {
+        'dag': dag_str,
+    }
+    _add_env_vars_to_body(body)
+    response = requests.get(f'{_get_server_url()}/optimize', json=body)
+    return response.headers['X-Request-ID']
+
+
+@usage_lib.entrypoint
+@_check_health
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -124,6 +142,7 @@ def launch(
     detach_run: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    need_confirmation: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_jobs_controller: bool = False,
@@ -131,7 +150,46 @@ def launch(
     _disable_controller_check: bool = False,
 ) -> str:
 
+    if cluster_name is None:
+        cluster_name = backend_utils.generate_cluster_name()
+
+    # clone_source_str = ''
+    # if clone_disk_from is not None:
+    #     clone_source_str = f' from the disk of {clone_disk_from!r}'
+    #     task, _ = backend_utils.check_can_clone_disk_and_override_task(
+    #         clone_disk_from, cluster_name, task)
+
     dag = dag_utils.convert_entrypoint_to_dag(task)
+
+    cluster_status = None
+    request_id = status([cluster_name])
+    clusters = get(request_id)
+    if not clusters:
+        # Show the optimize log before the prompt if the cluster does not exist.
+        request_id = optimize(dag)
+        stream_and_get(request_id)
+    else:
+        cluster_record = clusters[0]
+        cluster_status = cluster_record['status']
+
+    confirm_shown = False
+    if need_confirmation:
+        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
+        # it exists but is STOPPED.
+        prompt = None
+        if cluster_status is None:
+            prompt = (
+                f'Launching a new cluster{cluster_name!r}. '
+                # '{clone_source_str}. '
+                'Proceed?')
+        elif cluster_status == status_lib.ClusterStatus.STOPPED:
+            prompt = f'Restarting the stopped cluster {cluster_name!r}. Proceed?'
+        if prompt is not None:
+            confirm_shown = True
+            click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    if not confirm_shown:
+        click.secho(f'Running task on cluster {cluster_name}...', fg='yellow')
 
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
@@ -152,6 +210,7 @@ def launch(
         'detach_run': detach_run,
         'no_setup': no_setup,
         'clone_disk_from': clone_disk_from,
+        '_quiet_optimizer': need_confirmation,
         '_is_launched_by_jobs_controller': _is_launched_by_jobs_controller,
         '_is_launched_by_sky_serve_controller': _is_launched_by_sky_serve_controller,
         '_disable_controller_check': _disable_controller_check,
