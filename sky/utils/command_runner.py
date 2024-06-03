@@ -710,12 +710,11 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_base_command.append('-i')
         kubectl_base_command += [*kubectl_args, '--']
 
-        command_str = self._get_command_to_run(
-            cmd,
-            process_stream,
-            separate_stderr,
-            skip_lines=skip_lines,
-            source_bashrc=source_bashrc)
+        command_str = self._get_command_to_run(cmd,
+                                               process_stream,
+                                               separate_stderr,
+                                               skip_lines=skip_lines,
+                                               source_bashrc=source_bashrc)
         command = kubectl_base_command + [
             # It is important to use /bin/bash -c here to make sure we quote the
             # command to be run properly. Otherwise, directly appending commands
