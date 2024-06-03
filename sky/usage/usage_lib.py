@@ -392,6 +392,7 @@ def _send_local_messages():
                 logger.debug(f'Usage logging for {msg_type.value} '
                              f'exception caught: {type(e)}({e})')
 
+
 def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
     with ux_utils.enable_traceback():
         if hasattr(e, 'stacktrace') and e.stacktrace is not None:
@@ -403,6 +404,7 @@ def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
             messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
         messages.usage.exception = common_utils.remove_color(
             common_utils.format_exception(e))
+
 
 @contextlib.contextmanager
 def entrypoint_context(name: str, fallback: bool = False):

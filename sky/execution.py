@@ -108,6 +108,7 @@ def _execute(
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
+    _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
@@ -253,7 +254,9 @@ def _execute(
                     # no-credential machine should not enter optimize(), which
                     # would directly error out ('No cloud is enabled...').  Fix
                     # by moving `sky check` checks out of optimize()?
-                    dag = sky.optimize(dag, minimize=optimize_target)
+                    dag = sky.optimize(dag,
+                                       minimize=optimize_target,
+                                       quiet=_quiet_optimizer)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
@@ -361,6 +364,7 @@ def launch(
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
+    _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
@@ -473,6 +477,7 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        _quiet_optimizer=_quiet_optimizer,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,

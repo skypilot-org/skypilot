@@ -21,11 +21,11 @@ from sky import execution
 from sky import optimizer
 from sky import sky_logging
 from sky.api.requests import tasks
+from sky.usage import usage_lib
 from sky.utils import dag_utils
 from sky.utils import registry
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.usage import usage_lib
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -72,7 +72,7 @@ class RequestBody(pydantic.BaseModel):
 
 
 def wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
-            *args: P.args, **kwargs: P.kwargs):
+            ignore_return_value: bool, *args: P.args, **kwargs: P.kwargs):
     """Wrapper for a request task."""
 
     def redirect_output(file):
@@ -128,16 +128,20 @@ def wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
             with tasks.update_rest_task(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = tasks.RequestStatus.SUCCEEDED
-                request_task.set_return_value(return_value)
+                if not ignore_return_value:
+                    request_task.set_return_value(return_value)
             restore_output(original_stdout, original_stderr)
             logger.info(f'Task {request_id} finished')
         return return_value
 
 
-def _start_background_request(request_id: str, request_name: str,
-                              request_body: Dict[str, Any], func: Callable[P,
-                                                                           Any],
-                              *args: P.args, **kwargs: P.kwargs):
+def _start_background_request(request_id: str,
+                              request_name: str,
+                              request_body: Dict[str, Any],
+                              func: Callable[P, Any],
+                              ignore_return_value: bool = False,
+                              *args: P.args,
+                              **kwargs: P.kwargs):
     """Start a task."""
     request_task = tasks.RequestTask(request_id=request_id,
                                      name=request_name,
@@ -147,6 +151,7 @@ def _start_background_request(request_id: str, request_name: str,
     tasks.dump_reqest(request_task)
     request_task.log_path.touch()
     kwargs['env_vars'] = request_body.get('env_vars', {})
+    kwargs['ignore_return_value'] = ignore_return_value
     process = multiprocessing.Process(target=wrapper,
                                       args=(func, request_id, *args),
                                       kwargs=kwargs)
@@ -157,6 +162,29 @@ def _start_background_request(request_id: str, request_name: str,
 async def startup():
     for event in events:
         asyncio.create_task(event())
+
+
+class OptimizeBody(pydantic.BaseModel):
+    dag: str
+    minimize: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST
+
+
+@app.get('/optimize')
+async def optimize(optimize_body: OptimizeBody, request: fastapi.Request):
+    with tempfile.NamedTemporaryFile(mode='w') as f:
+        f.write(optimize_body.dag)
+        f.flush()
+        dag = dag_utils.load_chain_dag_from_yaml(f.name)
+    request_id = request.state.request_id
+    _start_background_request(
+        request_id,
+        request_name='optimize',
+        request_body=json.loads(optimize_body.json()),
+        ignore_return_value=True,
+        func=optimizer.Optimizer.optimize,
+        dag=dag,
+        minimize=optimize_body.minimize,
+    )
 
 
 class LaunchBody(RequestBody):
@@ -175,6 +203,7 @@ class LaunchBody(RequestBody):
     clone_disk_from: Optional[str] = None
     # Internal only:
     # pylint: disable=invalid-name
+    _quiet_optimizer: bool = False
     _is_launched_by_jobs_controller: bool = False
     _is_launched_by_sky_serve_controller: bool = False
     _disable_controller_check: bool = False
@@ -211,6 +240,7 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
         detach_run=launch_body.detach_run,
         no_setup=launch_body.no_setup,
         clone_disk_from=launch_body.clone_disk_from,
+        _quiet_optimizer=launch_body._quiet_optimizer,
         _is_launched_by_jobs_controller=launch_body.
         _is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=launch_body.
