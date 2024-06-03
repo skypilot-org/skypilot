@@ -1,57 +1,77 @@
 .. _spot_policy:
 
-Using Spot Instances
-====================
+Using Spot Instances for Serving
+================================
 
 SkyServe supports serving models on a mixture of spot and on-demand replicas with two options: :code:`base_ondemand_fallback_replicas` and :code:`dynamic_ondemand_fallback`.
+
+
+Base on-demand Fallback
+-----------------------
 
 :code:`base_ondemand_fallback_replicas` sets the number of on-demand replicas to keep running at all times. This is useful for ensuring service availability and making sure that there is always some capacity available, even if spot replicas are not available. :code:`use_spot` should be set to :code:`true` to enable spot replicas.
 
 .. code-block:: yaml
 
     service:
-        readiness_probe: /health
-        replica_policy:
-            min_replicas: 2
-            max_replicas: 3
-            target_qps_per_replica: 1
-            base_ondemand_fallback_replicas: 1
+      readiness_probe: /health
+      replica_policy:
+        min_replicas: 2
+        max_replicas: 3
+        target_qps_per_replica: 1
+        # Ensures that one of the replicas is run on on-demand instances
+        base_ondemand_fallback_replicas: 1
 
     resources:
-        ports: 8081
-        cpus: 2+
-        use_spot: true
+      ports: 8081
+      cpus: 2+
+      use_spot: true
 
     workdir: examples/serve/http_server
 
     run: python3 server.py
 
-Dynamic On-demand Fallback
-==========================
 
-SkyServe supports dynamically fallback to on-demand replicas when spot replicas are not available. This is enabled by setting :code:`dynamic_ondemand_fallback` to be :code:`true`. This is useful for ensuring the required capacity of replicas in the case of spot instance interruptions. When spot replicas are available, SkyServe will automatically switch back to using spot replicas to maximize cost savings. SkyServe supports both specifying :code:`base_ondemand_fallback_replicas` and :code:`dynamic_ondemand_fallback`.
+.. tip::
+
+    Kubernetes instances are considered on-demand instances. You can use the :code:`base_ondemand_fallback_replicas` option to have some replicas run on Kubernetes, while others run on cloud spot instances.
+
+
+Dynamic on-demand Fallback
+--------------------------
+
+SkyServe supports dynamically fallback to on-demand replicas when spot replicas are not available.
+This is enabled by setting :code:`dynamic_ondemand_fallback` to be :code:`true`.
+This is useful for ensuring the required capacity of replicas in the case of spot instance interruptions.
+When spot replicas are available, SkyServe will automatically switch back to using spot replicas to maximize cost savings.
 
 .. code-block:: yaml
 
     service:
-        readiness_probe: /health
-        replica_policy:
-            min_replicas: 2
-            max_replicas: 3
-            target_qps_per_replica: 1
-            dynamic_ondemand_fallback: true
+      readiness_probe: /health
+      replica_policy:
+        min_replicas: 2
+        max_replicas: 3
+        target_qps_per_replica: 1
+        # Allows replicas to be run on on-demand instances if spot instances are not available
+        dynamic_ondemand_fallback: true
 
     resources:
-        ports: 8081
-        cpus: 2+
-        use_spot: true
+      ports: 8081
+      cpus: 2+
+      use_spot: true
 
     workdir: examples/serve/http_server
 
     run: python3 server.py
 
+
+.. tip::
+
+    SkyServe supports specifying both :code:`base_ondemand_fallback_replicas` and :code:`dynamic_ondemand_fallback`. Specifying both will set a base number of on-demand replicas and dynamically fallback to on-demand replicas when spot replicas are not available.
+
 Example
-=======
+-------
 
 The following example demonstrates how to use spot replicas with SkyServe with dynamic fallback. The example is a simple HTTP server that listens on port 8081 with :code:`dynamic_ondemand_fallback: true`. To run: 
 
