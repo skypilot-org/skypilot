@@ -236,8 +236,8 @@ class CommandRunner:
         rsync_command.append(RSYNC_FILTER_OPTION)
 
         if up:
+            # Build --exclude-from argument.
             # The source is a local path, so we need to resolve it.
-            # --exclude-from
             resolved_source = pathlib.Path(source).expanduser().resolve()
             if (resolved_source / GIT_EXCLUDE).exists():
                 # Ensure file exists; otherwise, rsync will error out.
@@ -249,7 +249,7 @@ class CommandRunner:
                     RSYNC_EXCLUDE_OPTION.format(
                         shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
-        rsync_command.append(f'-e "{rsh_option}"')
+        rsync_command.append(f'-e {shlex.quote(rsh_option)}')
 
         if up:
             resolved_target = target
