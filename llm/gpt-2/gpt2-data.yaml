@@ -1,0 +1,34 @@
+name: gpt2-data
+
+envs:
+  BUCKET_NAME: # TODO: Fill in your bucket name
+  BUCKET_STORE: s3 # Can be s3, gcs, or r2.
+
+resources:
+  cpus: 8+
+
+file_mounts:
+  /cache:
+    name: $BUCKET_NAME
+    store: $BUCKET_STORE
+    mode: MOUNT
+
+setup: |
+  pip install tqdm tiktoken requests datasets
+  git clone https://github.com/karpathy/llm.c.git@ed37d9261ba13ef212c01e2de8b309cbb46a2aa7 || true
+
+  # Adding revision to fix the dataset version, as the latest fineweb
+  # dataset removed the samples, causing error:
+  #   Please pass `features` or at least one example when writing data
+  sed -i 's/fw = load_dataset("HuggingFaceFW\/fineweb", name=remote_name, split="train")/fw = load_dataset("HuggingFaceFW\/fineweb", name=remote_name, split="train", revision="9767af12bf8f0f7d3c91e0345b89bc6b9cbe1a94")/' dev/data/fineweb.py
+
+
+run: |
+  cd llm.c
+  # tokenize the FineWeb dataset 10B tokens sample (takes ~1 hour, get lunch?)
+  # writes ~19GB of raw GPT-2 tokens to dev/data/fineweb10B
+  # and ~46GB in ~/.cache/huggingface/datasets/HuggingFaceFW___fineweb
+  python dev/data/fineweb.py --version 10B
+
+  rsync -Pavz --exclude "datasets/downloads/" ~/.cache/huggingface /cache/
+  rsync -Pavz dev/data/fineweb10B /cache/

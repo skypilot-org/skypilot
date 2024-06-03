@@ -539,13 +539,11 @@ class SSHCommandRunner(CommandRunner):
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
 
-        command_str = self._get_command_to_run(
-            cmd,
-            process_stream,
-            separate_stderr,
-            # +1 to skip first new line.
-            skip_lines=skip_lines + 1,
-            source_bashrc=source_bashrc)
+        command_str = self._get_command_to_run(cmd,
+                                               process_stream,
+                                               separate_stderr,
+                                               skip_lines=skip_lines,
+                                               source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))

@@ -1,3 +1,5 @@
+.. _ai-gallery:
+
 AI Gallery
 ====================
 

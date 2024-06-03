@@ -11,6 +11,9 @@ file_mounts:
 
 setup: |
   {{ sky_activate_python_env }}
+  # Disable the pip version check to avoid the warning message, which makes the
+  # output hard to read.
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
 
   {%- for cmd in cloud_dependencies_installation_commands %}
   {{cmd}}

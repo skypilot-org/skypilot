@@ -141,6 +141,8 @@ def _get_single_resources_schema():
                 }, {
                     'type': 'object',
                     'required': [],
+                }, {
+                    'type': 'null',
                 }]
             },
             # The following fields are for internal use only.

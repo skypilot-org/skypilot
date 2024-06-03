@@ -1,5 +1,4 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
-import base64
 import copy
 import enum
 import functools
@@ -10,6 +9,7 @@ import math
 import os
 import pathlib
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -141,9 +141,9 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # https://github.com/torvalds/linux/blob/master/include/uapi/linux/binfmts.h
 #
 # If a user have very long run or setup commands, the generated command may
-# exceed the limit, as we encode the script in base64 and directly include it in
-# the job submission command. If the command is too long, we instead write it to
-# a file, rsync and execute it.
+# exceed the limit, as we directly include scripts in job submission commands.
+# If the command is too long, we instead write it to a file, rsync and execute
+# it.
 #
 # We use 120KB as a threshold to be safe for other arguments that
 # might be added during ssh.
@@ -3149,8 +3149,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             runner = runners[node_id]
             setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
-            encoded_script = base64.b64encode(
-                setup_script.encode('utf-8')).decode('utf-8')
+            encoded_script = shlex.quote(setup_script)
             if (detach_setup or
                     len(encoded_script) > _MAX_INLINE_SCRIPT_LENGTH):
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
@@ -3163,9 +3162,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  stream_logs=False)
                 create_script_code = 'true'
             else:
-                create_script_code = (
-                    f'{{ echo "{encoded_script}" | base64 --decode > '
-                    f'{remote_setup_file_name}; }}')
+                create_script_code = (f'{{ echo {encoded_script} > '
+                                      f'{remote_setup_file_name}; }}')
 
             if detach_setup:
                 return
@@ -3177,11 +3175,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 process_stream=False,
                 # We do not source bashrc for setup, since bashrc is sourced
                 # in the script already.
-                # Skip two lines due to the /bin/bash -i and source ~/.bashrc
-                # in the setup_cmd.
+                # Skip an empty line and two lines due to the /bin/bash -i and
+                # source ~/.bashrc in the setup_cmd.
                 #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
                 #   bash: no job control in this shell
-                skip_lines=2,
+                skip_lines=3,
             )
 
             def error_message() -> str:
@@ -3251,10 +3249,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
-        encoded_script = base64.b64encode(
-            codegen.encode('utf-8')).decode('utf-8')
-        create_script_code = (f'{{ echo "{encoded_script}" | base64 --decode > '
-                              f'{script_path}; }}')
+        encoded_script = shlex.quote(codegen)
+        create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
         job_submit_cmd = (
             f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
@@ -3675,6 +3671,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   job_id: Optional[int],
                   managed_job_id: Optional[int] = None,
                   follow: bool = True) -> int:
+        """Tail the logs of a job.
+
+        Args:
+            handle: The handle to the cluster.
+            job_id: The job ID to tail the logs of.
+            managed_job_id: The managed job ID for display purpose only.
+            follow: Whether to follow the logs.
+        """
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
                                                follow=follow)
@@ -3709,15 +3713,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               handle: CloudVmRayResourceHandle,
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
+                              controller: bool = False,
                               follow: bool = True) -> None:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
-        if job_name is not None:
-            code = managed_jobs.ManagedJobCodeGen.stream_logs_by_name(
-                job_name, follow)
-        else:
-            code = managed_jobs.ManagedJobCodeGen.stream_logs_by_id(
-                job_id, follow)
+        code = managed_jobs.ManagedJobCodeGen.stream_logs(
+            job_name, job_id, follow, controller)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
