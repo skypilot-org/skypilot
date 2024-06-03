@@ -160,7 +160,7 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
 
 
 def _raise_command_running_error(message: str, command: str, pod_name: str,
-                                 rc: int, stdout: str):
+                                 rc: int, stdout: str) -> None:
     if rc == 0:
         return
     raise config_lib.KubernetesError(
