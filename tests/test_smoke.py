@@ -308,7 +308,7 @@ def test_minimal(generic_cloud: str):
     test = Test(
         'minimal',
         [
-            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
