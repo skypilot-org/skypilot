@@ -30,6 +30,7 @@ RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
 
 _HASH_MAX_LENGTH = 10
+_DEFAULT_CONNECT_TIMEOUT = 30
 
 
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
@@ -60,7 +61,7 @@ def ssh_options_list(
 ) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     if connect_timeout is None:
-        connect_timeout = 30
+        connect_timeout = _DEFAULT_CONNECT_TIMEOUT
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
     arg_dict = {
@@ -657,7 +658,7 @@ class KubernetesCommandRunner(CommandRunner):
         assert port_forward is None, ('port_forward is not supported for k8s '
                                       f'for now, but got: {port_forward}')
         if connect_timeout is None:
-            connect_timeout = 30
+            connect_timeout = _DEFAULT_CONNECT_TIMEOUT
         kubectl_args = [
             '--pod-running-timeout', f'{connect_timeout}s', '-n',
             self.namespace, self.pod_name
@@ -669,9 +670,6 @@ class KubernetesCommandRunner(CommandRunner):
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
 
-        # Ignore ssh_mode for k8s.
-        assert port_forward is None, ('port_forward is not supported for k8s, '
-                                      f'but got: {port_forward}')
         kubectl_base_command = ['kubectl', 'exec']
 
         if ssh_mode == SshMode.INTERACTIVE:
@@ -686,7 +684,12 @@ class KubernetesCommandRunner(CommandRunner):
             skip_lines=skip_lines + 1,
             source_bashrc=source_bashrc)
         command = kubectl_base_command + [
-            'bash', '-c', shlex.quote(command_str)
+            # It is important to use /bin/bash -c here to make sure we quote the
+            # command to be run properly. Otherwise, directly appending commands
+            # after '--' will not work for some commands, such as '&&', '>' etc.
+            '/bin/bash',
+            '-c',
+            shlex.quote(command_str)
         ]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -810,8 +813,9 @@ class KubernetesCommandRunner(CommandRunner):
         logger.debug(f'Running rsync command: {command}')
 
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        assert max_retry > 0, f'max_retry {max_retry} must be positive.'
         while max_retry >= 0:
-            returncode, _, stderr = log_lib.run_with_log(
+            returncode, stdout, stderr = log_lib.run_with_log(
                 command,
                 log_path=log_path,
                 stream_logs=stream_logs,
@@ -828,5 +832,5 @@ class KubernetesCommandRunner(CommandRunner):
         subprocess_utils.handle_returncode(returncode,
                                            command,
                                            error_msg,
-                                           stderr=stderr,
+                                           stderr=stdout + stderr,
                                            stream_logs=stream_logs)

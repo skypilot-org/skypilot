@@ -351,6 +351,7 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
         # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
 
+    # TODO(romilb): Parallelize the setup of SSH in pods for multi-node clusters
     for new_node in new_nodes:
         pod_name = new_node.metadata.name
         runner = command_runner.KubernetesCommandRunner((namespace, pod_name))
@@ -761,7 +762,7 @@ def query_instances(
 
 def get_command_runners(
     cluster_info: common.ClusterInfo,
-    **crednetials: Dict[str, Any],
+    **credentials: Dict[str, Any],
 ) -> List[command_runner.CommandRunner]:
     """Get a command runner for the given cluster."""
     assert cluster_info.provider_config is not None, cluster_info
@@ -774,4 +775,4 @@ def get_command_runners(
                      for pod_name in instances.keys()
                      if pod_name != cluster_info.head_instance_id)
     return command_runner.KubernetesCommandRunner.make_runner_list(
-        node_list=node_list, **crednetials)
+        node_list=node_list, **credentials)
