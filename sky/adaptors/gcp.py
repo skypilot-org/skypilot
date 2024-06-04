@@ -10,6 +10,8 @@ _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '
 googleapiclient = common.LazyImport('googleapiclient',
                                     import_error_message=_IMPORT_ERROR_MESSAGE)
 google = common.LazyImport('google', import_error_message=_IMPORT_ERROR_MESSAGE)
+compute_v1 = common.LazyImport('google.cloud.compute_v1',
+                               import_error_message=_IMPORT_ERROR_MESSAGE)
 _LAZY_MODULES = (google, googleapiclient)
 
 

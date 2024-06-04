@@ -1,51 +1,58 @@
-from __future__ import annotations
-
+"""Managed Instance Group Utils"""
 import subprocess
 import sys
 import time
+import typing
 from typing import Any
 import zlib
 
 from google.api_core.extended_operation import ExtendedOperation
-from google.cloud import compute_v1
 
 from sky import sky_logging
 from sky.provision import common
 from sky.provision.gcp.constants import TAG_RAY_CLUSTER_NAME
 from sky.provision.gcp.constants import TAG_RAY_NODE_KIND
 
+if typing.TYPE_CHECKING:
+    from google.cloud import compute_v1
+else:
+    from sky.adaptors.gcp import compute_v1
+
 logger = sky_logging.init_logger(__name__)
-"""Managed Instance Group Utils"""
 
 
 def create_node_config_hash(cluster_name_on_cloud, node_config) -> int:
-    """Create a hash value for the node config to be used as a unique identifier for the instance template and mig names."""
+    """Create a hash value for the node config.
+
+    This is to be used as a unique identifier for the instance template and mig
+    names.
+    """
     properties = create_regional_instance_template_properties(
         cluster_name_on_cloud, node_config)
     return zlib.adler32(repr(properties).encode())
 
 
 def create_regional_instance_template_properties(
-        cluster_name_on_cloud, node_config) -> compute_v1.InstanceProperties:
+        cluster_name_on_cloud, node_config) -> 'compute_v1.InstanceProperties':
     labels = node_config.get('labels', {}) | {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         # Assume all nodes are workers, we can update the head node once the instances are created
-        TAG_RAY_NODE_KIND: "worker"
+        TAG_RAY_NODE_KIND: 'worker'
     }
     # All label values must be string
     labels = {key: str(val).lower() for key, val in labels.items()}
 
     return compute_v1.InstanceProperties(
         description=
-        f"A temp instance template for {cluster_name_on_cloud} to support DWS requests.",
+        f'A temp instance template for {cluster_name_on_cloud} to support DWS requests.',
         machine_type=node_config['machineType'],
         # We have to ignore reservations for DWS.
         # TODO: Add a warning log for this behvaiour.
         reservation_affinity=compute_v1.ReservationAffinity(
-            consume_reservation_type="NO_RESERVATION"),
+            consume_reservation_type='NO_RESERVATION'),
         # We have to ignore user defined scheduling for DWS.
         # TODO: Add a warning log for this behvaiour.
-        scheduling=compute_v1.Scheduling(on_host_maintenance="TERMINATE"),
+        scheduling=compute_v1.Scheduling(on_host_maintenance='TERMINATE'),
         guest_accelerators=[
             compute_v1.AcceleratorConfig(
                 accelerator_count=accelerator['acceleratorCount'],
@@ -95,7 +102,7 @@ def create_regional_instance_template_properties(
 def check_instance_template_exits(project_id, region, template_name) -> bool:
     with compute_v1.RegionInstanceTemplatesClient() as compute_client:
         request = compute_v1.ListRegionInstanceTemplatesRequest(
-            filter=f"name eq {template_name}",
+            filter=f'name eq {template_name}',
             project=project_id,
             region=region,
         )
@@ -123,24 +130,23 @@ def create_regional_instance_template(project_id, region, template_name,
         # Send the request to create the regional instance template
         response = compute_client.insert(request=request)
         # Wait for the operation to complete
-        print(response)
+        # logger.debug(response)
         wait_for_extended_operation(response,
-                                    "create regional instance template", 600)
+                                    'create regional instance template', 600)
         # TODO: Error handling
         # operation = compute_client.wait(response.operation)
         # if operation.error:
-        # raise Exception(f"Failed to create regional instance template: {operation.error}")
+        # raise Exception(f'Failed to create regional instance template: {operation.error}')
 
         listRequest = compute_v1.ListRegionInstanceTemplatesRequest(
-            filter=f"name eq {template_name}",
+            filter=f'name eq {template_name}',
             project=project_id,
             region=region,
         )
         list_response = compute_client.list(listRequest)
-        print(list_response)
-        print(
-            f"Regional instance template '{template_name}' created successfully."
-        )
+        # logger.debug(list_response)
+        logger.debug(f'Regional instance template {template_name!r} '
+                     'created successfully.')
 
 
 def delete_regional_instance_template(project_id, region,
@@ -156,9 +162,9 @@ def delete_regional_instance_template(project_id, region,
         # Send the request to delete the regional instance template
         response = compute_client.delete(request=request)
         # Wait for the operation to complete
-        print(response)
+        logger.debug(response)
         wait_for_extended_operation(response,
-                                    "delete regional instance template", 600)
+                                    'delete regional instance template', 600)
 
 
 def create_managed_instance_group(project_id, zone, group_name,
@@ -177,9 +183,9 @@ def create_managed_instance_group(project_id, zone, group_name,
                 target_size=size,
                 instance_lifecycle_policy=compute_v1.
                 InstanceGroupManagerInstanceLifecyclePolicy(
-                    default_action_on_failure="DO_NOTHING",),
+                    default_action_on_failure='DO_NOTHING',),
                 update_policy=compute_v1.InstanceGroupManagerUpdatePolicy(
-                    type="OPPORTUNISTIC",),
+                    type='OPPORTUNISTIC',),
             ),
         )
 
@@ -187,12 +193,13 @@ def create_managed_instance_group(project_id, zone, group_name,
         response = compute_client.insert(request=request)
 
         # Wait for the operation to complete
-        print(
-            f"Request submitted, waiting for operation to complete. {response}")
-        wait_for_extended_operation(response, "create managed instance group",
+        logger.debug(
+            f'Request submitted, waiting for operation to complete. {response}')
+        wait_for_extended_operation(response, 'create managed instance group',
                                     600)
         # TODO: Error handling
-        print(f"Managed instance group '{group_name}' created successfully.")
+        logger.debug(
+            f'Managed instance group {group_name!r} created successfully.')
 
 
 def check_managed_instance_group_exists(project_id, zone, group_name) -> bool:
@@ -200,7 +207,7 @@ def check_managed_instance_group_exists(project_id, zone, group_name) -> bool:
         request = compute_v1.ListInstanceGroupManagersRequest(
             project=project_id,
             zone=zone,
-            filter=f"name eq {group_name}",
+            filter=f'name eq {group_name}',
         )
         page_result = compute_client.list(request)
         return len(page_result.items) > 0 and (next(page_result.pages)
@@ -210,31 +217,31 @@ def check_managed_instance_group_exists(project_id, zone, group_name) -> bool:
 def resize_managed_instance_group(project_id, zone, group_name, size,
                                   run_duration) -> None:
     try:
-        resize_request_name = f"resize-request-{str(int(time.time()))}"
+        resize_request_name = f'resize-request-{str(int(time.time()))}'
 
         cmd = (
-            f"gcloud beta compute instance-groups managed resize-requests create {group_name} "
-            f"--resize-request={resize_request_name} "
-            f"--resize-by={size} "
-            f"--requested-run-duration={run_duration} "
-            f"--zone={zone} "
-            f"--project={project_id} ")
-        logger.info(f"Resizing MIG {group_name} with command:\n{cmd}")
+            f'gcloud beta compute instance-groups managed resize-requests create {group_name} '
+            f'--resize-request={resize_request_name} '
+            f'--resize-by={size} '
+            f'--requested-run-duration={run_duration} '
+            f'--zone={zone} '
+            f'--project={project_id} ')
+        logger.info(f'Resizing MIG {group_name} with command:\n{cmd}')
         proc = subprocess.run(
-            f"yes | {cmd}",
+            f'yes | {cmd}',
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=True,
             check=True,
         )
-        stdout = proc.stdout.decode("ascii")
+        stdout = proc.stdout.decode('ascii')
         logger.info(stdout)
         wait_for_managed_group_to_be_stable(project_id, zone, group_name)
 
     except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode("ascii")
+        stderr = e.stderr.decode('ascii')
         logger.info(stderr)
-        provisioner_err = common.ProvisionerError("Failed to resize MIG")
+        provisioner_err = common.ProvisionerError('Failed to resize MIG')
         provisioner_err.errors = [{
             'code': 'UNKNOWN',
             'domain': 'mig',
@@ -246,52 +253,52 @@ def resize_managed_instance_group(project_id, zone, group_name, size,
 
 def view_resize_requests(project_id, zone, group_name) -> None:
     try:
-        cmd = ("gcloud beta compute instance-groups managed resize-requests "
-               f"list {group_name} "
-               f"--zone={zone} "
-               f"--project={project_id}")
+        cmd = ('gcloud beta compute instance-groups managed resize-requests '
+               f'list {group_name} '
+               f'--zone={zone} '
+               f'--project={project_id}')
         logger.info(
-            f"Listing resize requests for MIG {group_name} with command:\n{cmd}"
+            f'Listing resize requests for MIG {group_name} with command:\n{cmd}'
         )
         proc = subprocess.run(
-            f"yes | {cmd}",
+            f'yes | {cmd}',
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=True,
             check=True,
         )
-        stdout = proc.stdout.decode("ascii")
+        stdout = proc.stdout.decode('ascii')
         logger.info(stdout)
     except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode("ascii")
+        stderr = e.stderr.decode('ascii')
         logger.info(stderr)
 
 
 def wait_for_managed_group_to_be_stable(project_id, zone, group_name) -> None:
     try:
-        cmd = ("gcloud compute instance-groups managed wait-until "
-               f"{group_name} "
-               "--stable "
-               f"--zone={zone} "
-               f"--project={project_id}")
+        cmd = ('gcloud compute instance-groups managed wait-until '
+               f'{group_name} '
+               '--stable '
+               f'--zone={zone} '
+               f'--project={project_id}')
         logger.info(
-            f"Waiting for MIG {group_name} to be stable with command:\n{cmd}")
+            f'Waiting for MIG {group_name} to be stable with command:\n{cmd}')
         proc = subprocess.run(
-            f"yes | {cmd}",
+            f'yes | {cmd}',
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=True,
             check=True,
         )
-        stdout = proc.stdout.decode("ascii")
+        stdout = proc.stdout.decode('ascii')
         logger.info(stdout)
     except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode("ascii")
+        stderr = e.stderr.decode('ascii')
         logger.info(stderr)
 
 
 def wait_for_extended_operation(operation: ExtendedOperation,
-                                verbose_name: str = "operation",
+                                verbose_name: str = 'operation',
                                 timeout: int = 300) -> Any:
     # Taken from Google's samples
     # https://cloud.google.com/compute/docs/samples/compute-operation-extended-wait?hl=en
@@ -324,20 +331,24 @@ def wait_for_extended_operation(operation: ExtendedOperation,
     result = operation.result(timeout=timeout)
 
     if operation.error_code:
-        print(
-            f"Error during {verbose_name}: [Code: {operation.error_code}]: {operation.error_message}",
+        logger.debug(
+            f'Error during {verbose_name}: [Code: {operation.error_code}]: {operation.error_message}',
             file=sys.stderr,
             flush=True,
         )
-        print(f"Operation ID: {operation.name}", file=sys.stderr, flush=True)
+        logger.debug(f'Operation ID: {operation.name}',
+                     file=sys.stderr,
+                     flush=True)
         # TODO gurc: wrap this in a custom skypilot exception
         raise operation.exception() or RuntimeError(operation.error_message)
 
     if operation.warnings:
-        print(f"Warnings during {verbose_name}:\n", file=sys.stderr, flush=True)
+        logger.debug(f'Warnings during {verbose_name}:\n',
+                     file=sys.stderr,
+                     flush=True)
         for warning in operation.warnings:
-            print(f" - {warning.code}: {warning.message}",
-                  file=sys.stderr,
-                  flush=True)
+            logger.debug(f' - {warning.code}: {warning.message}',
+                         file=sys.stderr,
+                         flush=True)
 
     return result
