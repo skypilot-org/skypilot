@@ -699,6 +699,12 @@ def get_current_kube_config_context_namespace() -> str:
             the default namespace.
     """
     k8s = kubernetes.kubernetes
+    # Get namespace if using in-cluster config
+    ns_path = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+    if os.path.exists(ns_path):
+        with open(ns_path) as f:
+            return f.read().strip()
+    # If not in-cluster, get the namespace from kubeconfig
     try:
         _, current_context = k8s.config.list_kube_config_contexts()
         if 'namespace' in current_context['context']:

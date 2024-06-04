@@ -31,7 +31,7 @@ SkyPilot can operate using either of the following three authentication methods:
          remote_identity: SERVICE_ACCOUNT
 
    For details on the permissions that are granted to the service account,
-   refer to the `Permissions required for SkyPilot`_ section below.
+   refer to the `Minimum Permissions Required for SkyPilot`_ section below.
 
 3. **Using a custom service account**: If you have a custom service account
    with the `necessary permissions <k8s-permissions_>`__, you can configure
@@ -53,8 +53,8 @@ Below are the permissions required by SkyPilot and an example service account YA
 
 .. _k8s-permissions:
 
-Permissions required for SkyPilot
----------------------------------
+Minimum Permissions Required for SkyPilot
+-----------------------------------------
 
 SkyPilot requires permissions equivalent to the following roles to be able to manage the resources in the Kubernetes cluster:
 
@@ -85,35 +85,31 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
       - apiGroups: [""]
         resources: ["nodes"]  # Required for getting node resources.
         verbs: ["get", "list", "watch"]
-      - apiGroups: ["rbac.authorization.k8s.io"]
-        resources: ["clusterroles", "clusterrolebindings"]  # Required for launching more SkyPilot clusters from within the pod.
-        verbs: ["get", "list", "watch"]
       - apiGroups: ["node.k8s.io"]
         resources: ["runtimeclasses"]   # Required for autodetecting the runtime class of the nodes.
         verbs: ["get", "list", "watch"]
-    ---
-    # Optional: If using ingresses, role for accessing ingress service IP
-    apiVersion: rbac.authorization.k8s.io/v1
-    kind: Role
-    metadata:
-      namespace: ingress-nginx
-      name: sky-sa-role-ingress-nginx
-    rules:
-      - apiGroups: [""]
-        resources: ["services"]
-        verbs: ["list", "get"]
+
 
 .. tip::
 
-    The sky-sa-role above
+    If you are using a different namespace than ``default``, make sure to change the namespace in the above manifests.
 
 These roles must apply to both the user account configured in the kubeconfig file and the service account used by SkyPilot (if configured).
 
-If your tasks use object store mounting (e.g., S3, GCS, etc.), you will need to also create a `skypilot-system` namespace and grant the necessary permissions to the service account in that namespace.
+If your tasks use object store mounting or require access to ingress resources, you will need to grant additional permissions as described below.
+
+Permissions for object store mounting
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If your tasks use object store mounting (e.g., S3, GCS, etc.), SkyPilot will need to run a DaemonSet to expose the FUSE device as a Kubernetes resource to SkyPilot pods.
+
+To allow this, you will need to also create a ``skypilot-system`` namespace which will run the DaemonSet and grant the necessary permissions to the service account in that namespace.
+
 
 .. code-block:: yaml
 
-    # Create namespace for SkyPilot
+    # Required only if using object store mounting
+    # Create namespace for SkyPilot system
     apiVersion: v1
     kind: Namespace
     metadata:
@@ -136,14 +132,39 @@ If your tasks use object store mounting (e.g., S3, GCS, etc.), you will need to 
         resources: ["*"]
         verbs: ["*"]
 
+
+Permissions for using ingress
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If your tasks use :ref:`Ingress <kubernetes-ingress>` for exposing ports, you will need to grant the necessary permissions to the service account in the ``ingress-nginx`` namespace.
+
+.. code-block:: yaml
+
+    # Required only if using ingresses
+    # Role for accessing ingress service IP
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      namespace: ingress-nginx
+      name: sky-sa-role-ingress-nginx
+    rules:
+      - apiGroups: [""]
+        resources: ["services"]
+        verbs: ["list", "get"]
+
+
 .. _k8s-sa-example:
 
 Example using Custom Service Account
 ------------------------------------
 
 To create a service account that has all necessary permissions for SkyPilot (including for accessing object stores), you can use the following YAML.
-In the example below, the service account is named `sky-sa` and is created in the `default` namespace.
-Change the namespace and service account name as needed.
+
+.. tip::
+
+    In this example, the service account is named ``sky-sa`` and is created in the ``default`` namespace.
+    Change the namespace and service account name as needed.
+
 
 .. code-block:: yaml
 
@@ -197,13 +218,10 @@ Change the namespace and service account name as needed.
       - apiGroups: [""]
         resources: ["nodes"]  # Required for getting node resources.
         verbs: ["get", "list", "watch"]
-      - apiGroups: ["rbac.authorization.k8s.io"]
-        resources: ["clusterroles", "clusterrolebindings"]  # Required for launching more SkyPilot clusters from within the pod.
-        verbs: ["get", "list", "watch"]
       - apiGroups: ["node.k8s.io"]
         resources: ["runtimeclasses"]   # Required for autodetecting the runtime class of the nodes.
         verbs: ["get", "list", "watch"]
-      - apiGroups: ["networking.k8s.io"]   # Required for exposing services.
+      - apiGroups: ["networking.k8s.io"]   # Required for exposing services through ingresses
         resources: ["ingressclasses"]
         verbs: ["get", "list", "watch"]
     ---
@@ -299,11 +317,12 @@ Create the service account using the following command:
 
     $ kubectl apply -f create-sky-sa.yaml
 
-After creating the service account, the cluster admin may distribute kubeconfigs with the `sky-sa` service account to users who need to access the cluster.
+After creating the service account, the cluster admin may distribute kubeconfigs with the ``sky-sa`` service account to users who need to access the cluster.
 
-Users should configure SkyPilot to use the `sky-sa` service account through ``~/.sky/config.yaml``:
+Users should also configure SkyPilot to use the ``sky-sa`` service account through ``~/.sky/config.yaml``:
 
 .. code-block:: yaml
 
+    # ~/.sky/config.yaml
     kubernetes:
       remote_identity: sky-sa   # Or your service account name

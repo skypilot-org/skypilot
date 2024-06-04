@@ -18,7 +18,7 @@ SkyPilot's Kubernetes support is designed to work with most Kubernetes distribut
 To connect to a Kubernetes cluster, SkyPilot needs:
 
 * An existing Kubernetes cluster running Kubernetes v1.20 or later.
-* A `Kubeconfig <kubeconfig>`_ file containing access credentials and namespace to be used.
+* A `Kubeconfig <kubeconfig>`_ file containing access credentials and namespace to be used. Refer to :ref:`required permissions <cloud-permissions-kubernetes>` guide for details.
 
 
 Deployment Guides
