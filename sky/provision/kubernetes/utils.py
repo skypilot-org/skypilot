@@ -196,7 +196,7 @@ class GFDLabelFormatter(GPULabelFormatter):
     NVIDIA GPU Operator:
     https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html
 
-    This LabelFormatter cannot be used in autoscaling clusters since accelerators
+    This LabelFormatter can't be used in autoscaling clusters since accelerators
     may map to multiple label, so we're not implementing `get_label_value`
     """
 
