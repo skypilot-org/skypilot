@@ -62,12 +62,12 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
 
     # Namespaced role for the service account
     # Required for creating pods, services and other necessary resources in the namespace.
-    # Note these permissions only apply in the namespace where SkyPilot is deployed.
+    # Note these permissions only apply in the namespace where SkyPilot is deployed, and the namespace can be changed below.
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-        name: sky-sa-role
-        namespace: default
+      name: sky-sa-role
+      namespace: default  # Change to your namespace if using a different one.
     rules:
       - apiGroups: ["*"]
         resources: ["*"]
@@ -77,20 +77,20 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
     kind: ClusterRole
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-        name: sky-sa-cluster-role
-        namespace: default
-        labels:
-            parent: skypilot
+      name: sky-sa-cluster-role
+      namespace: default  # Change to your namespace if using a different one.
+      labels:
+        parent: skypilot
     rules:
-    - apiGroups: [""]
-      resources: ["nodes"]  # Required for getting node resources.
-      verbs: ["get", "list", "watch"]
-    - apiGroups: ["rbac.authorization.k8s.io"]
-      resources: ["clusterroles", "clusterrolebindings"]  # Required for launching more SkyPilot clusters from within the pod.
-      verbs: ["get", "list", "watch"]
-    - apiGroups: ["node.k8s.io"]
-      resources: ["runtimeclasses"]   # Required for autodetecting the runtime class of the nodes.
-      verbs: ["get", "list", "watch"]
+      - apiGroups: [""]
+        resources: ["nodes"]  # Required for getting node resources.
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        resources: ["clusterroles", "clusterrolebindings"]  # Required for launching more SkyPilot clusters from within the pod.
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["node.k8s.io"]
+        resources: ["runtimeclasses"]   # Required for autodetecting the runtime class of the nodes.
+        verbs: ["get", "list", "watch"]
     ---
     # Optional: If using ingresses, role for accessing ingress service IP
     apiVersion: rbac.authorization.k8s.io/v1
@@ -99,18 +99,51 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
       namespace: ingress-nginx
       name: sky-sa-role-ingress-nginx
     rules:
-    - apiGroups: [""]
-      resources: ["services"]
-      verbs: ["list", "get"]
+      - apiGroups: [""]
+        resources: ["services"]
+        verbs: ["list", "get"]
+
+.. tip::
+
+    The sky-sa-role above
 
 These roles must apply to both the user account configured in the kubeconfig file and the service account used by SkyPilot (if configured).
+
+If your tasks use object store mounting (e.g., S3, GCS, etc.), you will need to also create a `skypilot-system` namespace and grant the necessary permissions to the service account in that namespace.
+
+.. code-block:: yaml
+
+    # Create namespace for SkyPilot
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: skypilot-system
+      labels:
+        parent: skypilot
+    ---
+    # Role for the skypilot-system namespace to create FUSE device manager and
+    # any other system components required by SkyPilot.
+    # This role must be bound in the skypilot-system namespace to the service account used for SkyPilot.
+    kind: Role
+    apiVersion: rbac.authorization.k8s.io/v1
+    metadata:
+      name: skypilot-system-service-account-role
+      namespace: skypilot-system  # Do not change this namespace
+      labels:
+        parent: skypilot
+    rules:
+      - apiGroups: ["*"]
+        resources: ["*"]
+        verbs: ["*"]
 
 .. _k8s-sa-example:
 
 Example using Custom Service Account
 ------------------------------------
 
-To create a service account that has the necessary permissions for SkyPilot, you can use the following YAML:
+To create a service account that has all necessary permissions for SkyPilot (including for accessing object stores), you can use the following YAML.
+In the example below, the service account is named `sky-sa` and is created in the `default` namespace.
+Change the namespace and service account name as needed.
 
 .. code-block:: yaml
 
@@ -118,8 +151,8 @@ To create a service account that has the necessary permissions for SkyPilot, you
     kind: ServiceAccount
     apiVersion: v1
     metadata:
-      name: sky-sa
-      namespace: default
+      name: sky-sa  # Change to your service account name
+      namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
     ---
@@ -128,7 +161,7 @@ To create a service account that has the necessary permissions for SkyPilot, you
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
       name: sky-sa-role
-      namespace: default
+      namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
     rules:
@@ -141,44 +174,15 @@ To create a service account that has the necessary permissions for SkyPilot, you
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
       name: sky-sa-rb
-      namespace: default
+      namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
     subjects:
-    - kind: ServiceAccount
-      name: sky-sa
-    roleRef:
-        kind: Role
-        name: sky-sa-role
-        apiGroup: rbac.authorization.k8s.io
-    ---
-    # Role for accessing ingress resources
-    apiVersion: rbac.authorization.k8s.io/v1
-    kind: Role
-    metadata:
-      namespace: ingress-nginx
-      name: sky-sa-role-ingress-nginx
-    rules:
-    - apiGroups: [""]
-      resources: ["services"]
-      verbs: ["list", "get", "watch"]
-    - apiGroups: ["rbac.authorization.k8s.io"]
-      resources: ["roles", "rolebindings"]
-      verbs: ["list", "get", "watch"]
-    ---
-    # RoleBinding for accessing ingress resources
-    apiVersion: rbac.authorization.k8s.io/v1
-    kind: RoleBinding
-    metadata:
-      name: sky-sa-rolebinding-ingress-nginx
-      namespace: ingress-nginx
-    subjects:
-    - kind: ServiceAccount
-      name: sky-sa
-      namespace: default
+      - kind: ServiceAccount
+        name: sky-sa  # Change to your service account name
     roleRef:
       kind: Role
-      name: sky-sa-role-ingress-nginx
+      name: sky-sa-role
       apiGroup: rbac.authorization.k8s.io
     ---
     # ClusterRole for the service account
@@ -186,39 +190,108 @@ To create a service account that has the necessary permissions for SkyPilot, you
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
       name: sky-sa-cluster-role
-      namespace: default
+      namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
     rules:
-    - apiGroups: [""]
-      resources: ["nodes"]  # Required for getting node resources.
-      verbs: ["get", "list", "watch"]
-    - apiGroups: ["rbac.authorization.k8s.io"]
-      resources: ["clusterroles", "clusterrolebindings"]  # Required for launching more SkyPilot clusters from within the pod.
-      verbs: ["get", "list", "watch"]
-    - apiGroups: ["node.k8s.io"]
-      resources: ["runtimeclasses"]   # Required for autodetecting the runtime class of the nodes.
-      verbs: ["get", "list", "watch"]
-    - apiGroups: ["networking.k8s.io"]   # Required for exposing services.
-      resources: ["ingressclasses"]
-      verbs: ["get", "list", "watch"]
+      - apiGroups: [""]
+        resources: ["nodes"]  # Required for getting node resources.
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        resources: ["clusterroles", "clusterrolebindings"]  # Required for launching more SkyPilot clusters from within the pod.
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["node.k8s.io"]
+        resources: ["runtimeclasses"]   # Required for autodetecting the runtime class of the nodes.
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["networking.k8s.io"]   # Required for exposing services.
+        resources: ["ingressclasses"]
+        verbs: ["get", "list", "watch"]
     ---
     # ClusterRoleBinding for the service account
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRoleBinding
     metadata:
       name: sky-sa-cluster-role-binding
-      namespace: default
+      namespace: default  # Change to your namespace if using a different one.
       labels:
-          parent: skypilot
+        parent: skypilot
     subjects:
-    - kind: ServiceAccount
-      name: sky-sa
-      namespace: default
+      - kind: ServiceAccount
+        name: sky-sa  # Change to your service account name
+        namespace: default  # Change to your namespace if using a different one.
     roleRef:
-        kind: ClusterRole
-        name: sky-sa-cluster-role
-        apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: sky-sa-cluster-role
+      apiGroup: rbac.authorization.k8s.io
+    ---
+    # Optional: If using object store mounting, create the skypilot-system namespace
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: skypilot-system
+      labels:
+        parent: skypilot
+    ---
+    # Optional: If using object store mounting, create role in the skypilot-system
+    # namespace to create FUSE device manager.
+    kind: Role
+    apiVersion: rbac.authorization.k8s.io/v1
+    metadata:
+      name: skypilot-system-service-account-role
+      namespace: skypilot-system  # Do not change this namespace
+      labels:
+        parent: skypilot
+    rules:
+      - apiGroups: ["*"]
+        resources: ["*"]
+        verbs: ["*"]
+    ---
+    # Optional: If using object store mounting, create rolebinding in the skypilot-system
+    # namespace to create FUSE device manager.
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: sky-sa-skypilot-system-role-binding
+      namespace: skypilot-system  # Do not change this namespace
+      labels:
+        parent: skypilot
+    subjects:
+      - kind: ServiceAccount
+        name: sky-sa  # Change to your service account name
+        namespace: default  # Change this to the namespace where the service account is created
+    roleRef:
+      kind: Role
+      name: skypilot-system-service-account-role
+      apiGroup: rbac.authorization.k8s.io
+    ---
+    # Optional: Role for accessing ingress resources
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      name: sky-sa-role-ingress-nginx
+      namespace: ingress-nginx  # Do not change this namespace
+    rules:
+      - apiGroups: [""]
+        resources: ["services"]
+        verbs: ["list", "get", "watch"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        resources: ["roles", "rolebindings"]
+        verbs: ["list", "get", "watch"]
+    ---
+    # Optional: RoleBinding for accessing ingress resources
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: sky-sa-rolebinding-ingress-nginx
+      namespace: ingress-nginx  # Do not change this namespace
+    subjects:
+      - kind: ServiceAccount
+        name: sky-sa  # Change to your service account name
+        namespace: default  # Change this to the namespace where the service account is created
+    roleRef:
+      kind: Role
+      name: sky-sa-role-ingress-nginx
+      apiGroup: rbac.authorization.k8s.io
 
 Create the service account using the following command:
 
@@ -226,7 +299,9 @@ Create the service account using the following command:
 
     $ kubectl apply -f create-sky-sa.yaml
 
-After creating the service account, configure SkyPilot to use it through ``~/.sky/config.yaml``:
+After creating the service account, the cluster admin may distribute kubeconfigs with the `sky-sa` service account to users who need to access the cluster.
+
+Users should configure SkyPilot to use the `sky-sa` service account through ``~/.sky/config.yaml``:
 
 .. code-block:: yaml
 

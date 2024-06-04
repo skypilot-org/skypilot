@@ -33,8 +33,10 @@ else
     exit 1
 fi
 
-echo "Creating the Kubernetes Service Account with minimal RBAC permissions."
-kubectl apply -f - <<EOF
+# Check if SKYPILOT_SA_NAME env var exists
+if [ -z ${SKYPILOT_SA_NAME+x} ]; then
+  echo "Creating the Kubernetes Service Account with minimal RBAC permissions."
+  kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -68,6 +70,7 @@ subjects:
   name: ${SKYPILOT_SA}
   namespace: ${NAMESPACE}
 EOF
+fi
 
 # Checks if secret entry was defined for Service account. If defined it means that Kubernetes server has a
 # version bellow 1.24, otherwise one must manually create the secret and bind it to the Service account to have a non expiring token.
@@ -87,6 +90,8 @@ metadata:
   namespace: ${NAMESPACE}
   annotations:
     kubernetes.io/service-account.name: "${SKYPILOT_SA}"
+  labels:
+    parent: skypilot
 EOF
 
 SA_SECRET_NAME=${SKYPILOT_SA}
@@ -114,6 +119,7 @@ contexts:
 - context:
     cluster: ${CURRENT_CLUSTER}
     user: ${CURRENT_CLUSTER}-${SKYPILOT_SA}
+    namespace: ${NAMESPACE}
   name: ${CURRENT_CONTEXT}
 current-context: ${CURRENT_CONTEXT}
 kind: Config
