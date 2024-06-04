@@ -74,6 +74,16 @@ To send a request to the service endpoint, a service client need to include the 
         ],
         "stop_token_ids": [128009, 128001]
       }' | jq
+
+.. raw:: HTML
+
+  <details>
+  
+  <summary>Example output</summary>
+  
+  
+.. code-block:: console
+
   {
     "id": "cmpl-cad2c1a2a6ee44feabed0b28be294d6f",
     "object": "chat.completion",
@@ -97,6 +107,10 @@ To send a request to the service endpoint, a service client need to include the 
       "completion_tokens": 134
     }
   }
+  
+.. raw:: html
+
+  </details>
 
 A service client without an API key will not be able to access the service and get a :code:`401 Unauthorized` error:
 
