@@ -33,6 +33,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils import controller_utils
 
 if typing.TYPE_CHECKING:
     import sky
@@ -160,6 +161,12 @@ def launch(
     #         clone_disk_from, cluster_name, task)
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
+
+    # TODO(zhwu): optimize the upload to share the same bucket for the same
+    # cluster.
+    for task_ in dag.tasks:
+        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+            task_, path='api')
 
     cluster_status = None
     request_id = status([cluster_name])
