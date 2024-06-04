@@ -59,6 +59,9 @@ class CommandRunner:
             process_stream: bool = ...,
             stream_logs: bool = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_lines: int = ...,
             **kwargs) -> int:
         ...
 
@@ -71,6 +74,9 @@ class CommandRunner:
             process_stream: bool = ...,
             stream_logs: bool = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_lines: int = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -83,6 +89,9 @@ class CommandRunner:
             process_stream: bool = ...,
             stream_logs: bool = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_lines: int = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -92,7 +101,8 @@ class CommandRunner:
               *,
               up: bool,
               log_path: str = ...,
-              stream_logs: bool = ...) -> None:
+              stream_logs: bool = ...,
+              max_retry: int = 1) -> None:
         ...
 
     @classmethod
@@ -136,6 +146,9 @@ class SSHCommandRunner(CommandRunner):
             stream_logs: bool = ...,
             ssh_mode: SshMode = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_lines: int = ...,
             **kwargs) -> int:
         ...
 
@@ -150,6 +163,9 @@ class SSHCommandRunner(CommandRunner):
             stream_logs: bool = ...,
             ssh_mode: SshMode = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_lines: int = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -164,6 +180,9 @@ class SSHCommandRunner(CommandRunner):
             stream_logs: bool = ...,
             ssh_mode: SshMode = ...,
             separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_lines: int = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -173,5 +192,6 @@ class SSHCommandRunner(CommandRunner):
               *,
               up: bool,
               log_path: str = ...,
-              stream_logs: bool = ...) -> None:
+              stream_logs: bool = ...,
+              max_retry: int = 1) -> None:
         ...

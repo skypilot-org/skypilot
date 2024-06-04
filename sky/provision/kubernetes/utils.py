@@ -35,10 +35,10 @@ MEMORY_SIZE_UNITS = {
     'T': 2**40,
     'P': 2**50,
 }
-NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. \
-If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
-(e.g., skypilot.co/accelerator) are setup correctly. \
-To further debug, run: sky check.'
+NO_GPU_HELP_MESSAGE = ('If your cluster contains GPUs, make sure '
+                       'nvidia.com/gpu resource is available on the nodes and '
+                       'the node labels for identifying GPUs '
+                       '(e.g., skypilot.co/accelerator) are setup correctly. ')
 
 KUBERNETES_AUTOSCALER_NOTE = (
     'Note: Kubernetes cluster autoscaling is enabled. '
@@ -100,6 +100,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     Uses the format - nvidia-tesla-<accelerator>.
     A100-80GB, H100-80GB and L4 are an exception. They use nvidia-<accelerator>.
     """
+    if accelerator == 'H100':
+        # H100 is named as H100-80GB in GKE.
+        accelerator = 'H100-80GB'
     if accelerator in ('A100-80GB', 'L4', 'H100-80GB'):
         # A100-80GB, L4 and H100-80GB have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
@@ -183,7 +186,11 @@ class GKELabelFormatter(GPULabelFormatter):
         if value.startswith('nvidia-tesla-'):
             return value.replace('nvidia-tesla-', '').upper()
         elif value.startswith('nvidia-'):
-            return value.replace('nvidia-', '').upper()
+            acc = value.replace('nvidia-', '').upper()
+            if acc == 'H100-80GB':
+                # H100 is named as H100-80GB in GKE.
+                return 'H100'
+            return acc
         else:
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
@@ -278,6 +285,18 @@ def get_kubernetes_nodes() -> List[Any]:
             'Timed out when trying to get node info from Kubernetes cluster. '
             'Please check if the cluster is healthy and retry.') from None
     return nodes
+
+
+def get_kubernetes_pods() -> List[Any]:
+    try:
+        ns = get_current_kube_config_context_namespace()
+        pods = kubernetes.core_api().list_namespaced_pod(
+            ns, _request_timeout=kubernetes.API_TIMEOUT).items
+    except kubernetes.max_retry_error():
+        raise exceptions.ResourcesUnavailableError(
+            'Timed out when trying to get pod info from Kubernetes cluster. '
+            'Please check if the cluster is healthy and retry.') from None
+    return pods
 
 
 def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:

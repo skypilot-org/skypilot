@@ -444,6 +444,11 @@ Autoscaling
 
 See :ref:`Autoscaling <serve-autoscaling>` for more information.
 
+Authorization
+-------------
+
+See :ref:`Authorization <serve-auth>` for more information.
+
 
 SkyServe Architecture
 ---------------------

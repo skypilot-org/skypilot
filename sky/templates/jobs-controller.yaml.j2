@@ -10,6 +10,11 @@ file_mounts:
   {%- endfor %}
 
 setup: |
+  {{ sky_activate_python_env }}
+  # Disable the pip version check to avoid the warning message, which makes the
+  # output hard to read.
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
+
   {%- for cmd in cloud_dependencies_installation_commands %}
   {{cmd}}
   {%- endfor %}
@@ -25,6 +30,7 @@ setup: |
   ((ps aux | grep -v nohup | grep -v grep | grep -q -- "-m sky.jobs.dashboard.dashboard") || (nohup {{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard >> ~/.sky/job-dashboard.log 2>&1 &));
 
 run: |
+  {{ sky_activate_python_env }}
   # Start the controller for the current managed job.
   python -u -m sky.jobs.controller {{remote_user_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
