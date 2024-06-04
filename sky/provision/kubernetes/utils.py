@@ -100,6 +100,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     Uses the format - nvidia-tesla-<accelerator>.
     A100-80GB, H100-80GB and L4 are an exception. They use nvidia-<accelerator>.
     """
+    if accelerator == 'H100':
+        # H100 is named as H100-80GB in GKE.
+        accelerator = 'H100-80GB'
     if accelerator in ('A100-80GB', 'L4', 'H100-80GB'):
         # A100-80GB, L4 and H100-80GB have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
@@ -183,7 +186,11 @@ class GKELabelFormatter(GPULabelFormatter):
         if value.startswith('nvidia-tesla-'):
             return value.replace('nvidia-tesla-', '').upper()
         elif value.startswith('nvidia-'):
-            return value.replace('nvidia-', '').upper()
+            acc = value.replace('nvidia-', '').upper()
+            if acc == 'H100-80GB':
+                # H100 is named as H100-80GB in GKE.
+                return 'H100'
+            return acc
         else:
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
