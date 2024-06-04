@@ -195,6 +195,9 @@ class GFDLabelFormatter(GPULabelFormatter):
     GPU feature discovery is included as part of the
     NVIDIA GPU Operator:
     https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html
+
+    This LabelFormatter cannot be used in autoscaling clusters since accelerators
+    map to multiple label, so we're not implementing `get_label_value`
     """
 
     LABEL_KEY = 'nvidia.com/gpu.product'
