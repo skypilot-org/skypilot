@@ -729,7 +729,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                              'Skipping syncing down job logs.')
                 return
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
-            replica_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+            replica_job_logs_dir = os.path.join(serve_constants.LOGS_DIR,
                                                 'replica_jobs')
             job_log_file_name = (
                 controller_utils.download_and_stream_latest_job_log(
@@ -871,7 +871,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     # Teardown after update replica info since
                     # _terminate_replica will update the replica info too.
                     self._terminate_replica(replica_id,
-                                            sync_down_logs=True,
+                                            sync_down_logs=False,
                                             replica_drain_delay_seconds=0)
         for replica_id, p in list(self._down_process_pool.items()):
             if not p.is_alive():
@@ -1001,7 +1001,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     f'Service job for replica {info.replica_id} FAILED. '
                     'Terminating...')
                 self._terminate_replica(info.replica_id,
-                                        sync_down_logs=True,
+                                        sync_down_logs=False,
                                         replica_drain_delay_seconds=0)
 
     def _job_status_fetcher(self) -> None:
@@ -1117,7 +1117,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                                                   info.replica_id, info)
                 if should_teardown:
                     self._terminate_replica(info.replica_id,
-                                            sync_down_logs=True,
+                                            sync_down_logs=False,
                                             replica_drain_delay_seconds=0)
 
     def _replica_prober(self) -> None:

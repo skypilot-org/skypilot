@@ -5,6 +5,7 @@ import os
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = f'{SKY_HOME}/serve'
+LOGS_DIR = f'{SKY_HOME}/sky_logs'
 
 # The filelock for selecting service ports on controller VM when starting a
 # service. We need to have a filelock to avoid port collision when starting
