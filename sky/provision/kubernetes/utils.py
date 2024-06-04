@@ -204,6 +204,13 @@ class GFDLabelFormatter(GPULabelFormatter):
         return cls.LABEL_KEY
 
     @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        """An accelerator can map to many Nvidia GFD labels
+        (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
+        As a result, we do not support get_label_value for GFDLabelFormatter."""
+        raise NotImplementedError
+
+    @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         """Searches against a canonical list of NVIDIA GPUs and pattern
         matches the canonical GPU name against the GFD label.
