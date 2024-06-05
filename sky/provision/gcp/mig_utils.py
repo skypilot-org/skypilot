@@ -38,7 +38,7 @@ def create_regional_instance_template_properties(
 
     return compute_v1.InstanceProperties(
         description=('SkyPilot instance template for '
-                    f'{cluster_name_on_cloud!r} to support DWS requests.'),
+                     f'{cluster_name_on_cloud!r} to support DWS requests.'),
         machine_type=node_config['machineType'],
         # We have to ignore reservations for DWS.
         # TODO: Add a warning log for this behvaiour.

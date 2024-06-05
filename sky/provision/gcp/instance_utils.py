@@ -253,10 +253,11 @@ class GCPInstance:
                         instances: List[str], labels: Dict[str,
                                                            str]) -> List[str]:
         """Start multiple instances.
-        
+
         Returns:
             List of instance names that are started.
         """
+        del cluster_name  # Unused
         for instance_id in instances:
             cls.start_instance(instance_id, project_id, zone)
             cls.set_labels(project_id, zone, instance_id, labels)
@@ -1021,8 +1022,9 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             else:
                 logger.debug(
                     f'Instance template {instance_template_name!r} '
-                    'exists and no instance group is using it. This is a leftover '
-                    'of a previous autodown. Delete it and recreate it.')
+                    'exists and no instance group is using it. This is a '
+                    'leftover of a previous autodown. Delete it and recreate '
+                    'it.')
                 # TODO(zhwu): this is a bit hacky as we cannot delete instance
                 # template during an autodown, we can only defer the deletion
                 # to the next launch of a cluster with the same name. We should
@@ -1042,7 +1044,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         instance_template_url = (f'projects/{project_id}/regions/{region}/'
                                  f'instanceTemplates/{instance_template_name}')
         if mig_exists:
-            # TODO: if we already have one, we should resize it.
+            # If we already have one, we should resize it.
             logger.debug(
                 f'Managed instance group {managed_instance_group_name!r} '
                 'already exists. Resizing it...')
