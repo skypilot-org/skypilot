@@ -235,6 +235,7 @@ def get_loadbalancer_ip(namespace: str,
     ip = None
 
     start_time = time.time()
+    retry_cnt = 0
     while ip is None and time.time() - start_time < timeout:
         service = core_api.read_namespaced_service(
             service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
@@ -242,7 +243,10 @@ def get_loadbalancer_ip(namespace: str,
             ip = (service.status.load_balancer.ingress[0].ip or
                   service.status.load_balancer.ingress[0].hostname)
         if ip is None:
-            logger.debug('Waiting for load balancer IP to be assigned.')
+            retry_cnt += 1
+            if retry_cnt % 5 == 0:
+                logger.debug('Waiting for load balancer IP to be assigned'
+                             '...')
             time.sleep(1)
     return ip if ip is not None else None
 
