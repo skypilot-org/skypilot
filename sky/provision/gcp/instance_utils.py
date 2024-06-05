@@ -14,12 +14,10 @@ from sky.adaptors import gcp
 from sky.clouds import gcp as gcp_cloud
 from sky.provision import common
 from sky.provision.gcp import constants
+from sky.provision.gcp import mig_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
-# Tag uniquely identifying all nodes of a cluster
-TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
-TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 # Tag for the name of the node
 INSTANCE_NAME_MAX_LEN = 64
 INSTANCE_NAME_UUID_LEN = 8
@@ -219,7 +217,7 @@ class GCPInstance:
         firewall_rule_name: str,
         project_id: str,
         vpc_name: str,
-        cluster_name_on_cloud: str,
+        cluster_name: str,
         ports: List[str],
     ) -> dict:
         raise NotImplementedError
@@ -243,6 +241,7 @@ class GCPInstance:
         node_config: dict,
         labels: dict,
         count: int,
+        total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
         """Creates multiple instances and returns result.
@@ -621,6 +620,7 @@ class GCPComputeInstance(GCPInstance):
         node_config: dict,
         labels: dict,
         count: int,
+        total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
         # NOTE: The syntax for bulkInsert() is different from insert().
@@ -647,8 +647,8 @@ class GCPComputeInstance(GCPInstance):
         config.update({
             'labels': dict(
                 labels, **{
-                    TAG_RAY_CLUSTER_NAME: cluster_name,
-                    TAG_SKYPILOT_CLUSTER_NAME: cluster_name
+                    constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+                    constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name
                 }),
         })
 
@@ -941,6 +941,110 @@ class GCPComputeInstance(GCPInstance):
 
         cls.wait_for_operation(operation, project_id, availability_zone)
 
+class GCPMIGComputeInstance(GCPComputeInstance):
+    @classmethod
+    def create_instances(
+        cls,
+        cluster_name: str,
+        project_id: str,
+        zone: str,
+        node_config: dict,
+        labels: dict,
+        count: int,
+        total_count: int,   
+        include_head_node: bool,
+    ) -> Tuple[Optional[List], List[str]]:
+        logger.debug(f'Creating cluster with MIG: mig-{cluster_name!r}')
+        config = copy.deepcopy(node_config)
+        labels = dict(config.get('labels', {}), **labels)
+
+        config.update({
+            'labels': dict(
+                labels, **{
+                    constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+                    # Assume all nodes are workers, we can update the head node once the instances are created
+                    constants.TAG_RAY_NODE_KIND: 'worker',
+                    constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
+                }),
+        })
+        # Convert label values to string and lowercase per MIG API requirement.
+        config['labels'] = {k: str(v).lower() for k, v in config['labels'].items()}
+
+        label_filters = {
+            constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+        }
+        potential_head_instances = cls.filter(project_id, zone, label_filters={
+            constants.TAG_RAY_NODE_KIND: 'head',
+            **label_filters,
+        }, status_filters=cls.NEED_TO_TERMINATE_STATES)
+
+        # TODO: add instance template name to the task definition if the user
+        # wants to use it.
+        region = zone.rpartition('-')[0]
+        instance_template_name = 'it-' + cluster_name
+        if not mig_utils.check_instance_template_exits(project_id, region,
+                                                    instance_template_name):
+            mig_utils.create_regional_instance_template(project_id, region,
+                                                        instance_template_name,
+                                                        config,
+                                                        cluster_name)
+        else:
+            logger.debug(f'Instance template {instance_template_name} already '
+                         'exists...')
+
+        # create managed instance group
+        instance_template_url = (f'projects/{project_id}/regions/{region}/'
+                                 f'instanceTemplates/{instance_template_name}')
+        managed_instance_group_name = 'mig-' + cluster_name
+        mig_exist = mig_utils.check_managed_instance_group_exists(
+                project_id, zone, managed_instance_group_name)
+        if mig_exist:
+            # TODO: if we already have one, we should resize it.
+            logger.debug(
+                f'Managed instance group {managed_instance_group_name!r} '
+                'already exists. Resizing it...'
+            )
+            mig_utils.resize_managed_instance_group(project_id, zone, managed_instance_group_name, total_count)
+        else:
+            assert count == total_count, (
+                f'The count {count} should be the same as the total_count '
+                f'{total_count} when creating a new managed instance group.')
+            mig_utils.create_managed_instance_group(project_id,
+                                                    zone,
+                                                    managed_instance_group_name,
+                                                    instance_template_url,
+                                                    size=total_count)
+
+        # TODO: This will block the provisioning until the nodes are ready,
+        # which makes the failover not effective.
+        mig_utils.wait_for_managed_group_to_be_stable(project_id, zone,
+                                                  managed_instance_group_name)
+        
+        head_instance_name = None
+        running_instances = cls.filter(project_id, zone, label_filters, status_filters=[cls.RUNNING_STATE])
+        for running_instance_name in running_instances.keys():
+            if running_instance_name in potential_head_instances:
+                head_instance_name = running_instance_name
+                break
+        else:
+            head_instance_name = list(running_instances.keys())[0]
+
+        if mig_exist:
+            # We need to update the node's label if mig already exists, as the
+            # config is not updated during the resize operation.
+            for instance_name in running_instances.keys():
+                cls.set_labels(project_id=project_id,
+                                availability_zone=zone,
+                                node_id=instance_name,
+                                labels=config['labels'])
+        cls.create_node_tag(
+            project_id,
+            zone,
+            head_instance_name,
+            is_head=True,
+        )
+        
+
 
 class GCPTPUVMInstance(GCPInstance):
     """Instance handler for GCP TPU VM."""
@@ -1180,6 +1284,7 @@ class GCPTPUVMInstance(GCPInstance):
         node_config: dict,
         labels: dict,
         count: int,
+        total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
         config = copy.deepcopy(node_config)
@@ -1202,8 +1307,8 @@ class GCPTPUVMInstance(GCPInstance):
         config.update({
             'labels': dict(
                 labels, **{
-                    TAG_RAY_CLUSTER_NAME: cluster_name,
-                    TAG_SKYPILOT_CLUSTER_NAME: cluster_name
+                    constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+                    constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name
                 }),
         })
 
@@ -1410,10 +1515,11 @@ class GCPNodeType(enum.Enum):
     """Enum for GCP node types (compute & tpu)"""
 
     COMPUTE = 'compute'
+    MIG = 'mig'
     TPU = 'tpu'
 
 
-def get_node_type(node: dict) -> GCPNodeType:
+def get_node_type(config: common.ProvisionConfig) -> GCPNodeType:
     """Returns node type based on the keys in ``node``.
 
     This is a very simple check. If we have a ``machineType`` key,
@@ -1423,17 +1529,22 @@ def get_node_type(node: dict) -> GCPNodeType:
 
     This works for both node configs and API returned nodes.
     """
-
-    if 'machineType' not in node and 'acceleratorType' not in node:
+    provider_config = config.provider_config
+    node_config = config.node_config
+    if 'machineType' not in node_config and 'acceleratorType' not in node_config:
         raise ValueError(
             'Invalid node. For a Compute instance, "machineType" is '
             'required. '
             'For a TPU instance, "acceleratorType" and no "machineType" '
             'is required. '
-            f'Got {list(node)}')
+            f'Got {list(node_config)}')
 
-    if 'machineType' not in node and 'acceleratorType' in node:
+    if 'machineType' not in node_config and 'acceleratorType' in node_config:
         return GCPNodeType.TPU
+
+    if provider_config.get(constants.USE_MANAGED_INSTANCE_GROUP_CONFIG, False):
+        return GCPNodeType.MIG
+    
     return GCPNodeType.COMPUTE
 
 

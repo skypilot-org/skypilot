@@ -219,3 +219,9 @@ TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
+TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
+
+# MIG constants
+USE_MANAGED_INSTANCE_GROUP_CONFIG = 'use_managed_instance_group'
+TAG_MANAGED_INSTANCE_GROUP_NAME = 'managed-instance-group-name'
+DEFAULT_MAANGED_INSTANCE_GROUP_CREATION_TIMEOUT = 1200 # 20 minutes

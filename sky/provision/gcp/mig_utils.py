@@ -3,15 +3,14 @@ import subprocess
 import sys
 import time
 import typing
-from typing import Any
+from typing import Any, Dict
 import zlib
 
 from google.api_core.extended_operation import ExtendedOperation
 
 from sky import sky_logging
 from sky.provision import common
-from sky.provision.gcp.constants import TAG_RAY_CLUSTER_NAME
-from sky.provision.gcp.constants import TAG_RAY_NODE_KIND
+from sky.provision.gcp import constants
 
 if typing.TYPE_CHECKING:
     from google.cloud import compute_v1
@@ -21,7 +20,7 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 
-def create_node_config_hash(cluster_name_on_cloud, node_config) -> int:
+def create_node_config_hash(cluster_name_on_cloud: str, node_config: Dict[str, Any]) -> int:
     """Create a hash value for the node config.
 
     This is to be used as a unique identifier for the instance template and mig
@@ -34,13 +33,6 @@ def create_node_config_hash(cluster_name_on_cloud, node_config) -> int:
 
 def create_regional_instance_template_properties(
         cluster_name_on_cloud, node_config) -> 'compute_v1.InstanceProperties':
-    labels = node_config.get('labels', {}) | {
-        TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-        # Assume all nodes are workers, we can update the head node once the instances are created
-        TAG_RAY_NODE_KIND: 'worker'
-    }
-    # All label values must be string
-    labels = {key: str(val).lower() for key, val in labels.items()}
 
     return compute_v1.InstanceProperties(
         description=
@@ -96,7 +88,7 @@ def create_regional_instance_template_properties(
             }])
         ]),
         # Create labels from node config
-        labels=labels)
+        labels=node_config.get('labels', {}))
 
 
 def check_instance_template_exits(project_id, region, template_name) -> bool:
@@ -214,28 +206,33 @@ def check_managed_instance_group_exists(project_id, zone, group_name) -> bool:
                                                is not None)
 
 
-def resize_managed_instance_group(project_id, zone, group_name, size,
-                                  run_duration) -> None:
+def resize_managed_instance_group(project_id: str, zone: str, group_name: str, size: int) -> None:
     try:
-        resize_request_name = f'resize-request-{str(int(time.time()))}'
+        with compute_v1.InstanceGroupManagersClient() as compute_client:
+            response = compute_client.resize(project=project_id,
+                                  zone=zone,
+                                  instance_group_manager=group_name,
+                                  size=size)
+            wait_for_extended_operation(response, 'resize managed instance group', timeout=constants.DEFAULT_MAANGED_INSTANCE_GROUP_CREATION_TIMEOUT)
+        # resize_request_name = f'resize-request-{str(int(time.time()))}'
 
-        cmd = (
-            f'gcloud beta compute instance-groups managed resize-requests create {group_name} '
-            f'--resize-request={resize_request_name} '
-            f'--resize-by={size} '
-            f'--requested-run-duration={run_duration} '
-            f'--zone={zone} '
-            f'--project={project_id} ')
-        logger.info(f'Resizing MIG {group_name} with command:\n{cmd}')
-        proc = subprocess.run(
-            f'yes | {cmd}',
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=True,
-            check=True,
-        )
-        stdout = proc.stdout.decode('ascii')
-        logger.info(stdout)
+        # cmd = (
+        #     f'gcloud beta compute instance-groups managed resize-requests create {group_name} '
+        #     f'--resize-request={resize_request_name} '
+        #     f'--resize-by={size} '
+        #     f'--requested-run-duration={run_duration} '
+        #     f'--zone={zone} '
+        #     f'--project={project_id} ')
+        # logger.info(f'Resizing MIG {group_name} with command:\n{cmd}')
+        # proc = subprocess.run(
+        #     f'yes | {cmd}',
+        #     stdout=subprocess.PIPE,
+        #     stderr=subprocess.PIPE,
+        #     shell=True,
+        #     check=True,
+        # )
+        # stdout = proc.stdout.decode('ascii')
+        # logger.info(stdout)
         wait_for_managed_group_to_be_stable(project_id, zone, group_name)
 
     except subprocess.CalledProcessError as e:
@@ -275,12 +272,16 @@ def view_resize_requests(project_id, zone, group_name) -> None:
 
 
 def wait_for_managed_group_to_be_stable(project_id, zone, group_name) -> None:
+    """Wait until the managed instance group is stable."""
     try:
         cmd = ('gcloud compute instance-groups managed wait-until '
                f'{group_name} '
                '--stable '
                f'--zone={zone} '
-               f'--project={project_id}')
+               f'--project={project_id} '
+                # TODO(zhwu): Allow users to specify timeout.
+                # 20 minutes timeout
+               '--timeout=1200')
         logger.info(
             f'Waiting for MIG {group_name} to be stable with command:\n{cmd}')
         proc = subprocess.run(

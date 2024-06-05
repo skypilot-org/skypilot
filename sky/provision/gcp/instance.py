@@ -3,6 +3,7 @@ import collections
 import copy
 from multiprocessing import pool
 import re
+import sys
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
@@ -138,15 +139,93 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
 def _run_instances_in_managed_instance_group(
         region: str, cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionRecord:
-    print("Managed instance group is enabled.")
+    logger.debug("Managed instance group is enabled.")
 
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
 
-    node_type = instance_utils.get_node_type(config.node_config)
+    node_type = instance_utils.get_node_type(config)
     project_id = config.provider_config['project_id']
     availability_zone = config.provider_config['availability_zone']
-    head_instance_id = ""
+    head_instance_id = ''
+
+    resource: Type[instance_utils.GCPInstance]
+    if node_type == instance_utils.GCPNodeType.COMPUTE:
+        resource = instance_utils.GCPComputeInstance
+    elif node_type == instance_utils.GCPNodeType.TPU:
+        resource = instance_utils.GCPTPUVMInstance
+    else:
+        raise ValueError(f'Unknown node type {node_type}')
+    filter_labels = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    exist_instances = resource.filter(
+        project_id=project_id,
+        zone=availability_zone,
+        label_filters=filter_labels,
+        status_filters=None,
+    )
+    exist_instances = list(exist_instances.values())
+    head_instance_id = _get_head_instance_id(exist_instances)
+
+    # NOTE: We are not handling REPAIRING, SUSPENDING, SUSPENDED status.
+    pending_instances = []
+    running_instances = []
+    stopping_instances = []
+    stopped_instances = []
+
+    # SkyPilot: We try to use the instances with the same matching launch_config
+    # first. If there is not enough instances with matching launch_config, we
+    # then use all the instances with the same matching launch_config plus some
+    # instances with wrong launch_config.
+    def get_order_key(node):
+        import datetime  # pylint: disable=import-outside-toplevel
+
+        timestamp = node.get('lastStartTimestamp')
+        if timestamp is not None:
+            return datetime.datetime.strptime(timestamp,
+                                              '%Y-%m-%dT%H:%M:%S.%f%z')
+        return node['id']
+
+    logger.info(str(exist_instances))
+    for inst in exist_instances:
+        state = inst[resource.STATUS_FIELD]
+        if state in resource.PENDING_STATES:
+            pending_instances.append(inst)
+        elif state == resource.RUNNING_STATE:
+            running_instances.append(inst)
+        elif state in resource.STOPPING_STATES:
+            stopping_instances.append(inst)
+        elif state in resource.STOPPED_STATES:
+            stopped_instances.append(inst)
+        else:
+            raise RuntimeError(f'Unsupported state "{state}".')
+
+    pending_instances.sort(key=get_order_key, reverse=True)
+    running_instances.sort(key=get_order_key, reverse=True)
+    stopping_instances.sort(key=get_order_key, reverse=True)
+    stopped_instances.sort(key=get_order_key, reverse=True)
+
+    if stopping_instances:
+        raise RuntimeError(
+            'Some instances are being stopped during provisioning. '
+            'Please wait a while and retry.')
+
+    if head_instance_id is None:
+        if running_instances:
+            head_instance_id = resource.create_node_tag(
+                project_id,
+                availability_zone,
+                running_instances[0]['name'],
+                is_head=True,
+            )
+        elif pending_instances:
+            head_instance_id = resource.create_node_tag(
+                project_id,
+                availability_zone,
+                pending_instances[0]['name'],
+                is_head=True,
+            )
+    
+
 
     # check instance templates
 
@@ -162,7 +241,7 @@ def _run_instances_in_managed_instance_group(
                                                     config.node_config,
                                                     cluster_name_on_cloud)
     else:
-        print(f"Instance template {instance_template_name} already exists...")
+        logger.debug(f"Instance template {instance_template_name} already exists...")
 
     # create managed instance group
     instance_template_url = f"projects/{project_id}/regions/{region}/instanceTemplates/{instance_template_name}"
@@ -176,7 +255,7 @@ def _run_instances_in_managed_instance_group(
                                                 size=config.count)
     else:
         # TODO: if we already have one, we should resize it.
-        print(
+        logger.debug(
             f"Managed instance group {managed_instance_group_name} already exists..."
         )
         # mig_utils.resize_managed_instance_group(project_id, zone, group_name, size, run_duration)
@@ -184,29 +263,21 @@ def _run_instances_in_managed_instance_group(
     mig_utils.wait_for_managed_group_to_be_stable(project_id, availability_zone,
                                                   managed_instance_group_name)
 
-    resource: Type[instance_utils.GCPInstance]
-    if node_type == instance_utils.GCPNodeType.COMPUTE:
-        resource = instance_utils.GCPComputeInstance
-    elif node_type == instance_utils.GCPNodeType.TPU:
-        resource = instance_utils.GCPTPUVMInstance
-    else:
-        raise ValueError(f'Unknown node type {node_type}')
 
-    # filter_labels = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
-    # running_instances = resource.filter(
-    #     project_id=project_id,
-    #     zone=availability_zone,
-    #     label_filters=filter_labels,
-    #     status_filters=resource.RUNNING_STATE,
-    # ).values()
+    running_instances = list(resource.filter(
+        project_id=project_id,
+        zone=availability_zone,
+        label_filters=filter_labels,
+        status_filters=resource.RUNNING_STATE,
+    ).values())
 
-    # # TODO: Can not tag individual nodes as they are part of the mig
-    # head_instance_id = resource.create_node_tag(
-    #             project_id,
-    #             availability_zone,
-    #             running_instances[0]['name'],
-    #             is_head=True,
-    #         )
+    # TODO: Can not tag individual nodes as they are part of the mig
+    head_instance_id = resource.create_node_tag(
+                project_id,
+                availability_zone,
+                running_instances[0]['name'],
+                is_head=True,
+            )
 
     # created_instance_ids = [n['name'] for n in running_instances]
 
@@ -229,7 +300,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
 
-    node_type = instance_utils.get_node_type(config.node_config)
+    node_type = instance_utils.get_node_type(config)
     project_id = config.provider_config['project_id']
     availability_zone = config.provider_config['availability_zone']
 
@@ -239,6 +310,8 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     resource: Type[instance_utils.GCPInstance]
     if node_type == instance_utils.GCPNodeType.COMPUTE:
         resource = instance_utils.GCPComputeInstance
+    elif node_type == instance_utils.GCPNodeType.MIG:
+        resource = instance_utils.GCPMIGComputeInstance
     elif node_type == instance_utils.GCPNodeType.TPU:
         resource = instance_utils.GCPTPUVMInstance
     else:
@@ -363,8 +436,8 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     if to_start_count > 0:
         errors, created_instance_ids = resource.create_instances(
             cluster_name_on_cloud, project_id, availability_zone,
-            config.node_config, labels, to_start_count,
-            head_instance_id is None)
+            config.node_config, labels, to_start_count, total_count=config.count,
+            include_head_node=head_instance_id is None)
         if errors:
             error = common.ProvisionerError('Failed to launch instances.')
             error.errors = errors
@@ -427,11 +500,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     try:
-        if gcp_utils.is_use_managed_instance_group():
-            return _run_instances_in_managed_instance_group(
-                region, cluster_name_on_cloud, config)
-        else:
-            return _run_instances(region, cluster_name_on_cloud, config)
+        return _run_instances(region, cluster_name_on_cloud, config)
     except gcp.http_error_exception() as e:
         error_details = getattr(e, 'error_details')
         errors = []
