@@ -179,20 +179,19 @@ class GCP(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        unsupported = {}
         if gcp_utils.is_tpu_vm_pod(resources):
-            return {
+            unsupported = {
                 clouds.CloudImplementationFeatures.STOP: (
                     'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
                 )
             }
         if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
             # TPU node does not support multi-node.
-            return {
-                clouds.CloudImplementationFeatures.MULTI_NODE:
-                    ('TPU node does not support multi-node. Please set '
-                     'num_nodes to 1.')
-            }
-        return {}
+            unsupported[clouds.CloudImplementationFeatures.MULTI_NODE] = (
+                'TPU node does not support multi-node. Please set '
+                'num_nodes to 1.')
+        return unsupported
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:

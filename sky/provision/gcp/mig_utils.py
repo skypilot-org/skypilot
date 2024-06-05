@@ -2,18 +2,15 @@
 import re
 import subprocess
 import sys
-import time
 import typing
-from typing import Any, Dict
-import zlib
-
-from google.api_core.extended_operation import ExtendedOperation
+from typing import Any, Optional
 
 from sky import sky_logging
 from sky.adaptors import gcp
 from sky.provision.gcp import constants
 
 if typing.TYPE_CHECKING:
+    from google.api_core import extended_operation
     from google.cloud import compute_v1
 else:
     from sky.adaptors.gcp import compute_v1
@@ -21,27 +18,27 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 _MIG_RESOURCE_NOT_FOUND_PATTERN = re.compile(
-    r'The resource \'projects/.*/zones/.*/instanceGroupManagers/.*\' was not found'
-)
+    r'The resource \'projects/.*/zones/.*/instanceGroupManagers/.*\' was not '
+    r'found')
 
 _IT_RESOURCE_NOT_FOUND_PATTERN = re.compile(
     r'The resource \'projects/.*/zones/.*/instanceTemplates/.*\' was not found')
 
 
 def get_instance_template_name(cluster_name: str) -> str:
-    return f'it-{cluster_name}'
+    return f'{constants.INSTANCE_TEMPLATE_NAME_PREFIX}{cluster_name}'
 
 
 def get_managed_instance_group_name(cluster_name: str) -> str:
-    return f'mig-{cluster_name}'
+    return f'{constants.MIG_NAME_PREFIX}{cluster_name}'
 
 
 def create_regional_instance_template_properties(
         cluster_name_on_cloud, node_config) -> 'compute_v1.InstanceProperties':
 
     return compute_v1.InstanceProperties(
-        description=
-        f'A temp instance template for {cluster_name_on_cloud} to support DWS requests.',
+        description=(f'A temp instance template for {cluster_name_on_cloud} to '
+                     'support DWS requests.'),
         machine_type=node_config['machineType'],
         # We have to ignore reservations for DWS.
         # TODO: Add a warning log for this behvaiour.
@@ -135,18 +132,20 @@ def create_regional_instance_template(project_id, region, template_name,
         # if operation.error:
         # raise Exception(f'Failed to create regional instance template: {operation.error}')
 
-        listRequest = compute_v1.ListRegionInstanceTemplatesRequest(
+        list_request = compute_v1.ListRegionInstanceTemplatesRequest(
             filter=f'name eq {template_name}',
             project=project_id,
             region=region,
         )
-        list_response = compute_client.list(listRequest)
+        compute_client.list(list_request)
         # logger.debug(list_response)
         logger.debug(f'Regional instance template {template_name!r} '
                      'created successfully.')
 
 
-def delete_regional_instance_template(project_id, zone, template_name) -> dict:
+def delete_regional_instance_template(
+        project_id, zone,
+        template_name) -> Optional['extended_operation.ExtendedOperation']:
     region = zone.rsplit('-', 1)[0]
     with compute_v1.RegionInstanceTemplatesClient() as compute_client:
         # Create the regional instance template request
@@ -164,10 +163,12 @@ def delete_regional_instance_template(project_id, zone, template_name) -> dict:
                 raise
             logger.warning(f'Instance template {template_name!r} does not '
                            'exist. Skip deletion.')
-        return {}
+        return None
 
 
-def delete_managed_instance_group(project_id, zone, group_name) -> dict:
+def delete_managed_instance_group(
+        project_id, zone,
+        group_name) -> Optional['extended_operation.ExtendedOperation']:
     with compute_v1.InstanceGroupManagersClient() as compute_client:
         # Create the managed instance group request
         request = compute_v1.DeleteInstanceGroupManagerRequest(
@@ -180,16 +181,15 @@ def delete_managed_instance_group(project_id, zone, group_name) -> dict:
             # Send the request to delete the managed instance group
             response = compute_client.delete(request=request)
             # Do not wait for the deletion of MIG, so we can send the deletion
-            # request for the instance template, immediately after this, which is
-            # important when we are autodown a cluster from the head node.
+            # request for the instance template, immediately after this, which
+            # is important when we are autodown a cluster from the head node.
             return response
         except gcp.google.api_core.exceptions.NotFound as e:
-            print(e)
             if re.search(_MIG_RESOURCE_NOT_FOUND_PATTERN, str(e)) is None:
                 raise
             logger.warning(f'MIG {group_name!r} does not exist. Skip '
                            'deletion.')
-        return {}
+        return None
 
 
 def create_managed_instance_group(project_id, zone, group_name,
@@ -333,13 +333,14 @@ def wait_for_managed_group_to_be_stable(project_id, zone, group_name) -> None:
         logger.info(stderr)
 
 
-def wait_for_extended_operation(operation: ExtendedOperation,
-                                verbose_name: str = 'operation',
-                                timeout: int = 300) -> Any:
-    # Taken from Google's samples
-    # https://cloud.google.com/compute/docs/samples/compute-operation-extended-wait?hl=en
-    """
-    Waits for the extended (long-running) operation to complete.
+def wait_for_extended_operation(
+        operation: 'extended_operation.ExtendedOperation',
+        verbose_name: str = 'operation',
+        timeout: int = 300) -> Any:
+    """Waits for the extended (long-running) operation to complete.
+
+    Taken from Google's samples
+    https://cloud.google.com/compute/docs/samples/compute-operation-extended-wait?hl=en
 
     If the operation is successful, it will return its result.
     If the operation ends with an error, an exception will be raised.
@@ -357,18 +358,22 @@ def wait_for_extended_operation(operation: ExtendedOperation,
         Whatever the operation.result() returns.
 
     Raises:
-        This method will raise the exception received from `operation.exception()`
-        or RuntimeError if there is no exception set, but there is an `error_code`
-        set for the `operation`.
+        This method will raise the exception received from
+        `operation.exception()` or RuntimeError if there is no exception set,
+        but there is an `error_code` set for the `operation`.
 
-        In case of an operation taking longer than `timeout` seconds to complete,
-        a `concurrent.futures.TimeoutError` will be raised.
+        In case of an operation taking longer than `timeout` seconds to
+        complete, a `concurrent.futures.TimeoutError` will be raised.
     """
+    if operation is None:
+        return None
+
     result = operation.result(timeout=timeout)
 
     if operation.error_code:
         logger.debug(
-            f'Error during {verbose_name}: [Code: {operation.error_code}]: {operation.error_message}',
+            f'Error during {verbose_name}: [Code: {operation.error_code}]: '
+            f'{operation.error_message}',
             file=sys.stderr,
             flush=True,
         )

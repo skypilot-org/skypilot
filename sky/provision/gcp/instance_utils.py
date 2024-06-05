@@ -131,7 +131,7 @@ def instance_to_handler(instance: str):
         return GCPComputeInstance
     elif instance_type == 'tpu':
         return GCPTPUVMInstance
-    elif instance.startswith('mig-'):
+    elif instance.startswith(constants.MIG_NAME_PREFIX):
         return GCPManagedInstanceGroup
     else:
         raise ValueError(f'Unknown instance type: {instance_type}')
@@ -215,7 +215,7 @@ class GCPInstance:
         firewall_rule_name: str,
         project_id: str,
         vpc_name: str,
-        cluster_name: str,
+        cluster_name_on_cloud: str,
         ports: List[str],
     ) -> dict:
         raise NotImplementedError
@@ -941,6 +941,7 @@ class GCPComputeInstance(GCPInstance):
 
 
 class GCPManagedInstanceGroup(GCPComputeInstance):
+    """Handler for GCP Managed Instance Group."""
 
     @classmethod
     def create_instances(
@@ -954,7 +955,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
-        logger.debug(f'Creating cluster with MIG: mig-{cluster_name!r}')
+        logger.debug(f'Creating cluster with MIG: {cluster_name!r}')
         config = copy.deepcopy(node_config)
         labels = dict(config.get('labels', {}), **labels)
 
@@ -963,48 +964,70 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
                 labels,
                 **{
                     constants.TAG_RAY_CLUSTER_NAME: cluster_name,
-                    # Assume all nodes are workers, we can update the head node once the instances are created
+                    # Assume all nodes are workers, we can update the head node
+                    # once the instances are created.
                     constants.TAG_RAY_NODE_KIND: 'worker',
                     constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
                 }),
         })
         # Convert label values to string and lowercase per MIG API requirement.
-        config['labels'] = {
-            k: str(v).lower() for k, v in config['labels'].items()
-        }
+        region = zone.rpartition('-')[0]
+        instance_template_name = mig_utils.get_instance_template_name(
+            cluster_name)
+        managed_instance_group_name = mig_utils.get_managed_instance_group_name(
+            cluster_name)
+
+        instance_template_exists = mig_utils.check_instance_template_exits(
+            project_id, region, instance_template_name)
+        mig_exists = mig_utils.check_managed_instance_group_exists(
+            project_id, zone, managed_instance_group_name)
 
         label_filters = {
             constants.TAG_RAY_CLUSTER_NAME: cluster_name,
         }
-        potential_head_instances = cls.filter(
-            project_id,
-            zone,
-            label_filters={
-                constants.TAG_RAY_NODE_KIND: 'head',
-                **label_filters,
-            },
-            status_filters=cls.NEED_TO_TERMINATE_STATES)
+        potential_head_instances = {}
+        if mig_exists:
+            potential_head_instances = cls.filter(
+                project_id,
+                zone,
+                label_filters={
+                    constants.TAG_RAY_NODE_KIND: 'head',
+                    **label_filters,
+                },
+                status_filters=cls.NEED_TO_TERMINATE_STATES)
 
-        # TODO: add instance template name to the task definition if the user
-        # wants to use it.
-        region = zone.rpartition('-')[0]
-        instance_template_name = 'it-' + cluster_name
-        if not mig_utils.check_instance_template_exits(project_id, region,
-                                                       instance_template_name):
+        config['labels'] = {
+            k: str(v).lower() for k, v in config['labels'].items()
+        }
+        if instance_template_exists:
+            if mig_exists:
+                logger.debug(
+                    f'Instance template {instance_template_name} already '
+                    'exists. Skip creating it.')
+            else:
+                logger.debug(
+                    f'Instance template {instance_template_name!r} '
+                    'exists and no instance group is using it. This is a leftover '
+                    'of a previous autodown. Delete it and recreate it.')
+                # TODO(zhwu): this is a bit hacky as we cannot delete instance
+                # template during an autodown, we can only defer the deletion
+                # to the next launch of a cluster with the same name. We should
+                # find a better way to handle this.
+                operation = mig_utils.delete_regional_instance_template(
+                    project_id, region, instance_template_name)
+                mig_utils.wait_for_extended_operation(
+                    operation, verbose_name='Deletion of Instance Template')
+                instance_template_exists = False
+
+        if not instance_template_exists:
             mig_utils.create_regional_instance_template(project_id, region,
                                                         instance_template_name,
                                                         config, cluster_name)
-        else:
-            logger.debug(f'Instance template {instance_template_name} already '
-                         'exists...')
 
         # create managed instance group
         instance_template_url = (f'projects/{project_id}/regions/{region}/'
                                  f'instanceTemplates/{instance_template_name}')
-        managed_instance_group_name = 'mig-' + cluster_name
-        mig_exist = mig_utils.check_managed_instance_group_exists(
-            project_id, zone, managed_instance_group_name)
-        if mig_exist:
+        if mig_exists:
             # TODO: if we already have one, we should resize it.
             logger.debug(
                 f'Managed instance group {managed_instance_group_name!r} '
@@ -1026,7 +1049,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         mig_utils.wait_for_managed_group_to_be_stable(
             project_id, zone, managed_instance_group_name)
 
-        head_instance_name = None
+        head_instance_name: Optional[str] = None
         running_instances = cls.filter(project_id,
                                        zone,
                                        label_filters,
@@ -1038,7 +1061,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         else:
             head_instance_name = list(running_instances.keys())[0]
 
-        if mig_exist:
+        if mig_exists:
             # We need to update the node's label if mig already exists, as the
             # config is not updated during the resize operation.
             for instance_name in running_instances.keys():
@@ -1056,14 +1079,20 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
 
     @classmethod
     def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> None:
-        mig_utils.delete_managed_instance_group(
+        response = mig_utils.delete_managed_instance_group(
             project_id, zone,
             mig_utils.get_managed_instance_group_name(cluster_name))
-        response = mig_utils.delete_regional_instance_template(
-            project_id, zone,
-            mig_utils.get_instance_template_name(cluster_name))
         mig_utils.wait_for_extended_operation(
             response, verbose_name='Deletion of Instance Template')
+        # In the autostop case, the following deletion of instance template
+        # will not be executed as the instance that runs the deletion will be
+        # terminated with the managed instance group. It is ok to leave the
+        # instance template there as when a user creates a new cluster with the
+        # same name, the instance template will be updated in our
+        # create_instances method.
+        mig_utils.delete_regional_instance_template(
+            project_id, zone,
+            mig_utils.get_instance_template_name(cluster_name))
 
 
 class GCPTPUVMInstance(GCPInstance):
@@ -1551,7 +1580,8 @@ def get_node_type(config: common.ProvisionConfig) -> GCPNodeType:
     """
     provider_config = config.provider_config
     node_config = config.node_config
-    if 'machineType' not in node_config and 'acceleratorType' not in node_config:
+    if ('machineType' not in node_config and
+            'acceleratorType' not in node_config):
         raise ValueError(
             'Invalid node. For a Compute instance, "machineType" is '
             'required. '

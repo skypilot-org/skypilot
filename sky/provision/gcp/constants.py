@@ -225,3 +225,5 @@ TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 USE_MANAGED_INSTANCE_GROUP_CONFIG = 'use_managed_instance_group'
 TAG_MANAGED_INSTANCE_GROUP_NAME = 'managed-instance-group-name'
 DEFAULT_MAANGED_INSTANCE_GROUP_CREATION_TIMEOUT = 1200  # 20 minutes
+MIG_NAME_PREFIX = 'sky-mig-'
+INSTANCE_TEMPLATE_NAME_PREFIX = 'sky-it-'

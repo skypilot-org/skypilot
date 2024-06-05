@@ -3,18 +3,15 @@ import collections
 import copy
 from multiprocessing import pool
 import re
-import sys
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
-from sky.clouds.gcp import gcp_utils
 from sky.provision import common
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
-from sky.provision.gcp import mig_utils
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
