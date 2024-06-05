@@ -230,7 +230,7 @@ def _query_ports_for_loadbalancer(
         service_name=service_name,
         # Timeout is set so that we can retry the query when the
         # cluster is firstly created and the load balancer is not ready yet.
-        timeout=30,
+        timeout=60,
     )
 
     if external_ip is None:

@@ -248,7 +248,7 @@ def get_loadbalancer_ip(namespace: str,
                 logger.debug('Waiting for load balancer IP to be assigned'
                              '...')
             time.sleep(1)
-    return ip if ip is not None else None
+    return ip
 
 
 def get_pod_ip(namespace: str, pod_name: str) -> Optional[str]:
