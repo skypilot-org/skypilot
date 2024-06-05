@@ -54,7 +54,7 @@ else:
 #         PRIMARY KEY (service_name, replica_id))""")
 #     cursor.execute("""\
 #         CREATE TABLE IF NOT EXISTS version_specs (
-#         version INTEGER, 
+#         version INTEGER,
 #         service_name TEXT,
 #         spec BLOB,
 #         PRIMARY KEY (service_name, version))""")
@@ -430,15 +430,26 @@ def add_or_update_replica(service_name: str, replica_id: int,
     """Adds a replica to the database."""
     service_id, service_name = _parse_name_values(service_name)
     with engine.connect() as cursor:
-        d = replica_info.to_info_dict(False)
+        d = replica_info.to_info_dict(with_handle=True)
+        handle = d.pop('handle')
+
+        region = None
+        zone = None
+        if handle:
+            region = handle.launched_resources.region
+            zone = handle.launched_resources.zone
+
         d.update({'status_property': d['status_property'].to_dict()})
         ri = json.dumps(d)
-        cursor.execute(
-            f"""\
-            INSERT INTO replicas
-            (service_id, replica_id, replica_info)
-            VALUES ('{service_id}', '{replica_id}', '{ri}')
-            ON CONFLICT (service_id, replica_id) DO UPDATE SET replica_info=EXCLUDED.replica_info""")
+        query = """\
+        INSERT INTO replicas
+        (service_id, replica_id, replica_info, region, zone)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (service_id, replica_id)
+        DO UPDATE SET replica_info=EXCLUDED.replica_info,
+                      region=EXCLUDED.region,
+                      zone=EXCLUDED.zone"""
+        cursor.execute(query, (service_id, replica_id, ri, region, zone))
 
 
 def remove_replica(service_name: str, replica_id: int) -> None:
