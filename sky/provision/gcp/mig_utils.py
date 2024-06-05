@@ -207,45 +207,45 @@ def check_managed_instance_group_exists(project_id, zone, group_name) -> bool:
 
 
 def resize_managed_instance_group(project_id: str, zone: str, group_name: str, size: int) -> None:
-    try:
-        with compute_v1.InstanceGroupManagersClient() as compute_client:
-            response = compute_client.resize(project=project_id,
-                                  zone=zone,
-                                  instance_group_manager=group_name,
-                                  size=size)
-            wait_for_extended_operation(response, 'resize managed instance group', timeout=constants.DEFAULT_MAANGED_INSTANCE_GROUP_CREATION_TIMEOUT)
-        # resize_request_name = f'resize-request-{str(int(time.time()))}'
+    # try:
+    with compute_v1.InstanceGroupManagersClient() as compute_client:
+        response = compute_client.resize(project=project_id,
+                                zone=zone,
+                                instance_group_manager=group_name,
+                                size=size)
+        wait_for_extended_operation(response, 'resize managed instance group', timeout=constants.DEFAULT_MAANGED_INSTANCE_GROUP_CREATION_TIMEOUT)
+    # resize_request_name = f'resize-request-{str(int(time.time()))}'
 
-        # cmd = (
-        #     f'gcloud beta compute instance-groups managed resize-requests create {group_name} '
-        #     f'--resize-request={resize_request_name} '
-        #     f'--resize-by={size} '
-        #     f'--requested-run-duration={run_duration} '
-        #     f'--zone={zone} '
-        #     f'--project={project_id} ')
-        # logger.info(f'Resizing MIG {group_name} with command:\n{cmd}')
-        # proc = subprocess.run(
-        #     f'yes | {cmd}',
-        #     stdout=subprocess.PIPE,
-        #     stderr=subprocess.PIPE,
-        #     shell=True,
-        #     check=True,
-        # )
-        # stdout = proc.stdout.decode('ascii')
-        # logger.info(stdout)
-        wait_for_managed_group_to_be_stable(project_id, zone, group_name)
+    # cmd = (
+    #     f'gcloud beta compute instance-groups managed resize-requests create {group_name} '
+    #     f'--resize-request={resize_request_name} '
+    #     f'--resize-by={size} '
+    #     f'--requested-run-duration={run_duration} '
+    #     f'--zone={zone} '
+    #     f'--project={project_id} ')
+    # logger.info(f'Resizing MIG {group_name} with command:\n{cmd}')
+    # proc = subprocess.run(
+    #     f'yes | {cmd}',
+    #     stdout=subprocess.PIPE,
+    #     stderr=subprocess.PIPE,
+    #     shell=True,
+    #     check=True,
+    # )
+    # stdout = proc.stdout.decode('ascii')
+    # logger.info(stdout)
+    wait_for_managed_group_to_be_stable(project_id, zone, group_name)
 
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode('ascii')
-        logger.info(stderr)
-        provisioner_err = common.ProvisionerError('Failed to resize MIG')
-        provisioner_err.errors = [{
-            'code': 'UNKNOWN',
-            'domain': 'mig',
-            'message': stderr
-        }]
-        # _log_errors(provisioner_err.errors, e, zone)
-        raise provisioner_err from e
+    # except subprocess.CalledProcessError as e:
+    #     stderr = e.stderr.decode('ascii')
+    #     logger.info(stderr)
+    #     provisioner_err = common.ProvisionerError('Failed to resize MIG')
+    #     provisioner_err.errors = [{
+    #         'code': 'UNKNOWN',
+    #         'domain': 'mig',
+    #         'message': stderr
+    #     }]
+    #     # _log_errors(provisioner_err.errors, e, zone)
+    #     raise provisioner_err from e
 
 
 def view_resize_requests(project_id, zone, group_name) -> None:

@@ -1043,6 +1043,7 @@ class GCPMIGComputeInstance(GCPComputeInstance):
             head_instance_name,
             is_head=True,
         )
+        return None, list(running_instances.keys())
         
 
 
