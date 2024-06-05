@@ -1,5 +1,6 @@
 """Kubernetes network provisioning utils."""
 import os
+import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import jinja2
@@ -222,7 +223,9 @@ def get_ingress_external_ip_and_ports(
     return external_ip, None
 
 
-def get_loadbalancer_ip(namespace: str, service_name: str) -> Optional[str]:
+def get_loadbalancer_ip(namespace: str,
+                        service_name: str,
+                        timeout: int = 0) -> Optional[str]:
     """Returns the IP address of the load balancer."""
     core_api = kubernetes.core_api()
     service = core_api.read_namespaced_service(
@@ -233,6 +236,12 @@ def get_loadbalancer_ip(namespace: str, service_name: str) -> Optional[str]:
 
     ip = service.status.load_balancer.ingress[
         0].ip or service.status.load_balancer.ingress[0].hostname
+    start_time = time.time()
+    while ip is None and time.time() - start_time < timeout:
+        service = core_api.read_namespaced_service(
+            service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+        ip = (service.status.load_balancer.ingress[0].ip or
+              service.status.load_balancer.ingress[0].hostname)
     return ip if ip is not None else None
 
 

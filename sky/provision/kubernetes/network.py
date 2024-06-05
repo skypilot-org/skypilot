@@ -223,7 +223,9 @@ def _query_ports_for_loadbalancer(
         cluster_name_on_cloud=cluster_name_on_cloud)
     external_ip = network_utils.get_loadbalancer_ip(
         namespace=provider_config.get('namespace', 'default'),
-        service_name=service_name)
+        service_name=service_name,
+        timeout=10,
+    )
 
     if external_ip is None:
         return {}
