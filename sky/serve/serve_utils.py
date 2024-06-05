@@ -237,6 +237,18 @@ def generate_replica_log_file_name(service_name: str, replica_id: int) -> str:
     return os.path.join(dir_name, f'replica_{replica_id}.log')
 
 
+def generate_remote_ssl_keyfile_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'ssl_keyfile')
+
+
+def generate_remote_ssl_certfile_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'ssl_certfile')
+
+
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
