@@ -51,6 +51,13 @@ class Kubernetes(clouds.Cloud):
     timeout = skypilot_config.get_nested(['kubernetes', 'provision_timeout'],
                                          10)
 
+    # Limit the length of the cluster name to avoid exceeding the limit of 63
+    # characters for Kubernetes resources. We limit to 42 characters (63-21) to
+    # allow additional characters for creating ingress services to expose ports.
+    # These services are named as {cluster_name_on_cloud}--skypilot-svc--{port},
+    # where the suffix is 21 characters long.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 42
+
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _DEFAULT_NUM_VCPUS = 2
@@ -103,6 +110,10 @@ class Kubernetes(clouds.Cloud):
             unsupported_features[
                 clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
         return unsupported_features
+
+    @classmethod
+    def max_cluster_name_length(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
