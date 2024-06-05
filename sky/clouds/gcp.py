@@ -197,9 +197,6 @@ class GCP(clouds.Cloud):
         # Clusters created with MIG (only GPU clusters) cannot be stopped.
         if (skypilot_config.get_nested(('gcp', 'managed_instance_group'), None)
                 is not None and resources.accelerators):
-            unsupported[clouds.CloudImplementationFeatures.MULTI_NODE] = (
-                'Managed Instance Group (MIG) does not support multi-node yet. '
-                'Please set num_nodes to 1.')
             unsupported[clouds.CloudImplementationFeatures.STOP] = (
                 'Managed Instance Group (MIG) does not support stopping yet.')
         return unsupported
