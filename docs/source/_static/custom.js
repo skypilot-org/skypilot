@@ -28,7 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.caption-text', text: 'SkyServe: Model Serving' },
         { selector: '.toctree-l1 > a', text: 'Managed Jobs' },
         { selector: '.toctree-l1 > a', text: 'Running on Kubernetes' },
-        { selector: '.toctree-l1 > a', text: 'DBRX (Databricks)' },
         { selector: '.toctree-l1 > a', text: 'Ollama' },
         { selector: '.toctree-l1 > a', text: 'Llama-3 (Meta)' },
         { selector: '.toctree-l1 > a', text: 'Qwen (Alibaba)' },
