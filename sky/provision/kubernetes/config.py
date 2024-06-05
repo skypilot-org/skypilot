@@ -60,8 +60,7 @@ def bootstrap_instances(
         #    using DEFAULT_SERVICE_ACCOUNT_NAME, it does not have the necessary
         #    permissions to create a role for itself to create the FUSE manager.
         # 4. The job fails to launch.
-        _configure_skypilot_system_namespace(config.provider_config,
-                                             requested_service_account)
+        _configure_skypilot_system_namespace(config.provider_config)
         if config.provider_config.get('port_mode', 'loadbalancer') == 'ingress':
             logger.info('Port mode is set to ingress, setting up ingress role '
                         'and role binding.')
@@ -500,8 +499,7 @@ def _configure_ssh_jump(namespace, config: common.ProvisionConfig):
 
 
 def _configure_skypilot_system_namespace(
-        provider_config: Dict[str,
-                              Any], service_account: Optional[str]) -> None:
+        provider_config: Dict[str, Any]) -> None:
     """Creates the namespace for skypilot-system mounting if it does not exist.
 
     Also patches the SkyPilot service account to have the necessary permissions
@@ -521,9 +519,8 @@ def _configure_skypilot_system_namespace(
     # running in, so we override the name with a unique name identifying
     # the namespace. This is required for multi-tenant setups where
     # different SkyPilot instances may be running in different namespaces.
-    override_name = provider_config[
-        'autoscaler_skypilot_system_role_binding']['metadata'][
-            'name'] + '-' + svc_account_namespace
+    override_name = provider_config['autoscaler_skypilot_system_role_binding'][
+        'metadata']['name'] + '-' + svc_account_namespace
 
     # Create the role binding in the skypilot-system namespace, and have
     # the subject namespace be the namespace that the SkyPilot service
