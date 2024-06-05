@@ -14,6 +14,7 @@ import colorama
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
@@ -191,6 +192,16 @@ class GCP(clouds.Cloud):
             unsupported[clouds.CloudImplementationFeatures.MULTI_NODE] = (
                 'TPU node does not support multi-node. Please set '
                 'num_nodes to 1.')
+        # TODO(zhwu): We probably need to store the MIG requirement in resources
+        # because `skypilot_config` may change for an existing cluster.
+        # Clusters created with MIG (only GPU clusters) cannot be stopped.
+        if (skypilot_config.get_nested(('gcp', 'managed_instance_group'), None)
+                is not None and resources.accelerators):
+            unsupported[clouds.CloudImplementationFeatures.MULTI_NODE] = (
+                'Managed Instance Group (MIG) does not support multi-node yet. '
+                'Please set num_nodes to 1.')
+            unsupported[clouds.CloudImplementationFeatures.STOP] = (
+                'Managed Instance Group (MIG) does not support stopping yet.')
         return unsupported
 
     @classmethod
@@ -421,8 +432,6 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
-            'gcp_use_managed_instance_group':
-                gcp_utils.is_use_managed_instance_group(),
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -497,6 +506,12 @@ class GCP(clouds.Cloud):
 
         resources_vars['tpu_node_name'] = tpu_node_name
 
+        managed_instance_group_config = skypilot_config.get_nested(
+            ('gcp', 'managed_instance_group'), None)
+        use_mig = managed_instance_group_config is not None
+        resources_vars['gcp_use_managed_instance_group'] = use_mig
+        if use_mig:
+            resources_vars.update(managed_instance_group_config)
         return resources_vars
 
     def _get_feasible_launchable_resources(
@@ -633,9 +648,6 @@ class GCP(clouds.Cloud):
             # Check google-api-python-client installation.
             from google import auth  # type: ignore
             import googleapiclient
-
-            if gcp_utils.is_use_managed_instance_group():
-                from google.cloud import compute_v1
 
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')

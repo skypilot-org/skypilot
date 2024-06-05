@@ -176,8 +176,11 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
-    def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: Optional[str]) -> None:
+    def wait_for_operation(cls,
+                           operation: dict,
+                           project_id: str,
+                           region: Optional[str] = None,
+                           zone: Optional[str] = None) -> None:
         raise NotImplementedError
 
     @classmethod
@@ -416,11 +419,17 @@ class GCPComputeInstance(GCPInstance):
         return instances
 
     @classmethod
-    def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: Optional[str]) -> None:
+    def wait_for_operation(cls,
+                           operation: dict,
+                           project_id: str,
+                           region: Optional[str] = None,
+                           zone: Optional[str] = None) -> None:
         if zone is not None:
             kwargs = {'zone': zone}
             operation_caller = cls.load_resource().zoneOperations()
+        elif region is not None:
+            kwargs = {'region': region}
+            operation_caller = cls.load_resource().regionOperations()
         else:
             kwargs = {}
             operation_caller = cls.load_resource().globalOperations()
@@ -622,7 +631,7 @@ class GCPComputeInstance(GCPInstance):
             body=body,
         ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
-        cls.wait_for_operation(operation, project_id, availability_zone)
+        cls.wait_for_operation(operation, project_id, zone=availability_zone)
 
     @classmethod
     def create_instances(
@@ -757,6 +766,19 @@ class GCPComputeInstance(GCPInstance):
         return operations
 
     @classmethod
+    def _convert_selflinks_in_config(cls, config: dict) -> None:
+        """Convert selflinks to names in the config."""
+        for disk in config.get('disks', []):
+            disk_type = disk.get('initializeParams', {}).get('diskType')
+            if disk_type is not None:
+                disk['initializeParams']['diskType'] = selflink_to_name(
+                    disk_type)
+        config['machineType'] = selflink_to_name(config['machineType'])
+        for accelerator in config.get('guestAccelerators', []):
+            accelerator['acceleratorType'] = selflink_to_name(
+                accelerator['acceleratorType'])
+
+    @classmethod
     def _bulk_insert(cls, names: List[str], project_id: str, zone: str,
                      config: dict) -> List[dict]:
         source_instance_template = config.pop('sourceInstanceTemplate', None)
@@ -769,15 +791,7 @@ class GCPComputeInstance(GCPInstance):
                 k: v for d in config['scheduling'] for k, v in d.items()
             }
 
-        for disk in config.get('disks', []):
-            disk_type = disk.get('initializeParams', {}).get('diskType')
-            if disk_type is not None:
-                disk['initializeParams']['diskType'] = selflink_to_name(
-                    disk_type)
-        config['machineType'] = selflink_to_name(config['machineType'])
-        for accelerator in config.get('guestAccelerators', []):
-            accelerator['acceleratorType'] = selflink_to_name(
-                accelerator['acceleratorType'])
+        cls._convert_selflinks_in_config(config)
 
         body = {
             'count': len(names),
@@ -872,7 +886,7 @@ class GCPComputeInstance(GCPInstance):
         logger.debug('Waiting GCP instances to be ready ...')
         try:
             for operation in operations:
-                cls.wait_for_operation(operation, project_id, zone)
+                cls.wait_for_operation(operation, project_id, zone=zone)
         except common.ProvisionerError as e:
             return e.errors
         except gcp.http_error_exception() as e:
@@ -893,7 +907,7 @@ class GCPComputeInstance(GCPInstance):
             instance=node_id,
         ).execute())
 
-        cls.wait_for_operation(operation, project_id, zone)
+        cls.wait_for_operation(operation, project_id, zone=zone)
 
     @classmethod
     def get_instance_info(cls, project_id: str, availability_zone: str,
@@ -952,7 +966,7 @@ class GCPComputeInstance(GCPInstance):
             logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
             return
 
-        cls.wait_for_operation(operation, project_id, availability_zone)
+        cls.wait_for_operation(operation, project_id, zone=availability_zone)
 
 
 class GCPManagedInstanceGroup(GCPComputeInstance):
@@ -985,6 +999,8 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
                     constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
                 }),
         })
+        cls._convert_selflinks_in_config(config)
+
         # Convert label values to string and lowercase per MIG API requirement.
         region = zone.rpartition('-')[0]
         instance_template_name = mig_utils.get_instance_template_name(
@@ -1029,41 +1045,52 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
                 # template during an autodown, we can only defer the deletion
                 # to the next launch of a cluster with the same name. We should
                 # find a better way to handle this.
-                operation = mig_utils.delete_regional_instance_template(
-                    project_id, region, instance_template_name)
-                mig_utils.wait_for_extended_operation(
-                    operation, verbose_name='Deletion of Instance Template')
+                cls._delete_instance_template(project_id, zone,
+                                              instance_template_name)
                 instance_template_exists = False
 
         if not instance_template_exists:
-            mig_utils.create_regional_instance_template(project_id, region,
-                                                        instance_template_name,
-                                                        config, cluster_name)
-
+            operation = mig_utils.create_region_instance_template(
+                cluster_name, project_id, region, instance_template_name,
+                config)
+            cls.wait_for_operation(operation, project_id, region=region)
         # create managed instance group
         instance_template_url = (f'projects/{project_id}/regions/{region}/'
                                  f'instanceTemplates/{instance_template_name}')
-        if mig_exists:
-            # If we already have one, we should resize it.
-            logger.debug(
-                f'Managed instance group {managed_instance_group_name!r} '
-                'already exists. Resizing it...')
-            mig_utils.resize_managed_instance_group(
-                project_id, zone, managed_instance_group_name, total_count)
-        else:
-            assert count == total_count, (
-                f'The count {count} should be the same as the total_count '
-                f'{total_count} when creating a new managed instance group.')
-            mig_utils.create_managed_instance_group(project_id,
-                                                    zone,
-                                                    managed_instance_group_name,
-                                                    instance_template_url,
-                                                    size=total_count)
+        if not mig_exists:
+            # Create a new MIG with size 0 and resize it later for triggering
+            # DWS, according to the doc: https://cloud.google.com/compute/docs/instance-groups/create-mig-with-gpu-vms # pylint: disable=line-too-long
+            operation = mig_utils.create_managed_instance_group(
+                project_id,
+                zone,
+                managed_instance_group_name,
+                instance_template_url,
+                size=0)
+            cls.wait_for_operation(operation, project_id, zone=zone)
 
-        # TODO: This will block the provisioning until the nodes are ready,
-        # which makes the failover not effective.
+        managed_instance_group_config = config[
+            constants.MANAGED_INSTANCE_GROUP_CONFIG]
+        if count > 0:
+            # Use resize to trigger DWS for creating VMs.
+            logger.debug(f'Resizing Managed instance group '
+                         f'{managed_instance_group_name!r} by {count}...')
+            operation = mig_utils.resize_managed_instance_group(
+                project_id,
+                zone,
+                managed_instance_group_name,
+                count,
+                run_duration_seconds=managed_instance_group_config[
+                    'run_duration_seconds'])
+            cls.wait_for_operation(operation, project_id, zone=zone)
+
+        # This will block the provisioning until the nodes are ready, which
+        # makes the failover not effective. We rely on the request timeout set
+        # by user to trigger failover.
         mig_utils.wait_for_managed_group_to_be_stable(
-            project_id, zone, managed_instance_group_name)
+            project_id,
+            zone,
+            managed_instance_group_name,
+            timeout=managed_instance_group_config['creation_timeout_seconds'])
 
         running_instance_names = cls._add_labels_and_find_head(
             cluster_name, project_id, zone, labels, potential_head_instances)
@@ -1078,19 +1105,45 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         return None, running_instance_names
 
     @classmethod
+    def _delete_instance_template(cls, project_id: str, zone: str,
+                                  instance_template_name: str) -> None:
+        region = zone.rpartition('-')[0]
+        try:
+            operation = cls.load_resource().regionInstanceTemplates().delete(
+                project=project_id,
+                region=region,
+                instanceTemplate=instance_template_name).execute()
+            cls.wait_for_operation(operation, project_id, region=region)
+        except gcp.http_error_exception() as e:
+            if re.search(mig_utils.IT_RESOURCE_NOT_FOUND_PATTERN,
+                         str(e)) is None:
+                raise
+            logger.warning(
+                f'Instance template {instance_template_name!r} does not exist. '
+                'Skip deletion.')
+
+    @classmethod
     def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> None:
-        response = mig_utils.delete_managed_instance_group(
-            project_id, zone,
-            mig_utils.get_managed_instance_group_name(cluster_name))
-        mig_utils.wait_for_extended_operation(
-            response, verbose_name='Deletion of Instance Template')
+        mig_name = mig_utils.get_managed_instance_group_name(cluster_name)
+        try:
+            operation = cls.load_resource().instanceGroupManagers().delete(
+                project=project_id, zone=zone,
+                instanceGroupManager=mig_name).execute()
+            cls.wait_for_operation(operation, project_id, zone=zone)
+        except gcp.http_error_exception() as e:
+            if re.search(mig_utils.MIG_RESOURCE_NOT_FOUND_PATTERN,
+                         str(e)) is None:
+                raise
+            logger.warning(f'MIG {mig_name!r} does not exist. Skip '
+                           'deletion.')
+
         # In the autostop case, the following deletion of instance template
         # will not be executed as the instance that runs the deletion will be
         # terminated with the managed instance group. It is ok to leave the
         # instance template there as when a user creates a new cluster with the
         # same name, the instance template will be updated in our
         # create_instances method.
-        mig_utils.delete_regional_instance_template(
+        cls._delete_instance_template(
             project_id, zone,
             mig_utils.get_instance_template_name(cluster_name))
 
@@ -1166,10 +1219,13 @@ class GCPTPUVMInstance(GCPInstance):
             discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
 
     @classmethod
-    def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: Optional[str]) -> None:
+    def wait_for_operation(cls,
+                           operation: dict,
+                           project_id: str,
+                           region: Optional[str] = None,
+                           zone: Optional[str] = None) -> None:
         """Poll for TPU operation until finished."""
-        del project_id, zone  # unused
+        del project_id, region, zone  # unused
 
         @_retry_on_http_exception(
             f'Failed to wait for operation {operation["name"]}')
@@ -1618,7 +1674,7 @@ class GCPNodeType(enum.Enum):
     TPU = 'tpu'
 
 
-def get_node_type(config: common.ProvisionConfig) -> GCPNodeType:
+def get_node_type(config: Dict[str, Any]) -> GCPNodeType:
     """Returns node type based on the keys in ``node``.
 
     This is a very simple check. If we have a ``machineType`` key,
@@ -1628,21 +1684,20 @@ def get_node_type(config: common.ProvisionConfig) -> GCPNodeType:
 
     This works for both node configs and API returned nodes.
     """
-    provider_config = config.provider_config
-    node_config = config.node_config
-    if ('machineType' not in node_config and
-            'acceleratorType' not in node_config):
+    if ('machineType' not in config and 'acceleratorType' not in config):
         raise ValueError(
             'Invalid node. For a Compute instance, "machineType" is '
             'required. '
             'For a TPU instance, "acceleratorType" and no "machineType" '
             'is required. '
-            f'Got {list(node_config)}')
+            f'Got {list(config)}')
 
-    if 'machineType' not in node_config and 'acceleratorType' in node_config:
+    if 'machineType' not in config and 'acceleratorType' in config:
         return GCPNodeType.TPU
 
-    if provider_config.get(constants.USE_MANAGED_INSTANCE_GROUP_CONFIG, False):
+    if (config.get(constants.MANAGED_INSTANCE_GROUP_CONFIG, None) is not None
+            and config.get('guestAccelerators', None) is not None):
+        # DWS in MIG only works for machine with GPUs.
         return GCPNodeType.MIG
 
     return GCPNodeType.COMPUTE

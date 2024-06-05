@@ -151,7 +151,8 @@ def bootstrap_instances(
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     # Check if we have any TPUs defined, and if so,
     # insert that information into the provider config
-    if instance_utils.get_node_type(config) == instance_utils.GCPNodeType.TPU:
+    if (instance_utils.get_node_type(
+            config.node_config) == instance_utils.GCPNodeType.TPU):
         config.provider_config[constants.HAS_TPU_PROVIDER_FIELD] = True
 
     crm, iam, compute, _ = construct_clients_from_provider_config(
@@ -374,7 +375,8 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
         'scopes': ['https://www.googleapis.com/auth/cloud-platform'],
     }
     iam_role: Dict[str, Any]
-    if instance_utils.get_node_type(config) == instance_utils.GCPNodeType.TPU:
+    if (instance_utils.get_node_type(
+            config.node_config) == instance_utils.GCPNodeType.TPU):
         # SKY: The API for TPU VM is slightly different from normal compute
         # instances.
         # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node # pylint: disable=line-too-long

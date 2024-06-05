@@ -119,7 +119,7 @@ def _wait_for_operations(
             logger.debug(
                 f'wait_for_compute_{op_type}_operation: '
                 f'Waiting for operation {operation["name"]} to finish...')
-            handler.wait_for_operation(operation, project_id, zone)
+            handler.wait_for_operation(operation, project_id, zone=zone)
 
 
 def _get_head_instance_id(instances: List) -> Optional[str]:
@@ -143,7 +143,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
 
-    node_type = instance_utils.get_node_type(config)
+    node_type = instance_utils.get_node_type(config.node_config)
     project_id = config.provider_config['project_id']
     availability_zone = config.provider_config['availability_zone']
 
@@ -513,8 +513,8 @@ def terminate_instances(
     tpu_node = provider_config.get('tpu_node')
     if tpu_node is not None:
         instance_utils.delete_tpu_node(project_id, zone, tpu_node)
-    use_mig = provider_config.get(constants.USE_MANAGED_INSTANCE_GROUP_CONFIG,
-                                  False)
+
+    use_mig = provider_config.get('use_managed_instance_group', False)
     if use_mig:
         # Deleting the MIG will also delete the instances.
         instance_utils.GCPManagedInstanceGroup.delete_mig(
