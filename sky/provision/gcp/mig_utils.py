@@ -37,8 +37,8 @@ def create_regional_instance_template_properties(
         cluster_name_on_cloud, node_config) -> 'compute_v1.InstanceProperties':
 
     return compute_v1.InstanceProperties(
-        description=(f'A temp instance template for {cluster_name_on_cloud} to '
-                     'support DWS requests.'),
+        description=('SkyPilot instance template for '
+                    f'{cluster_name_on_cloud!r} to support DWS requests.'),
         machine_type=node_config['machineType'],
         # We have to ignore reservations for DWS.
         # TODO: Add a warning log for this behvaiour.
@@ -222,6 +222,27 @@ def create_managed_instance_group(project_id, zone, group_name,
         # TODO: Error handling
         logger.debug(
             f'Managed instance group {group_name!r} created successfully.')
+
+
+def start_managed_instance_group(project_id, zone, group_name) -> None:
+    with compute_v1.InstanceGroupManagersClient() as compute_client:
+        # Create the managed instance group request
+        request = compute_v1.ApplyUpdatesToInstancesInstanceGroupManagerRequest(
+            instance_group_manager=group_name,
+            project=project_id,
+            zone=zone,
+            instance_group_managers_apply_updates_request_resource=compute_v1.
+            InstanceGroupManagersApplyUpdatesRequest(
+                all_instances=True,
+                minimal_action='NONE',
+                most_disruptive_allowed_action='RESTART',
+            ),
+        )
+
+        response = compute_client.apply_updates_to_instances(request)
+        wait_for_extended_operation(response, 'restart managed instance group',
+                                    600)
+        logger.debug('Managed instance group restarted successfully.')
 
 
 def check_managed_instance_group_exists(project_id, zone, group_name) -> bool:

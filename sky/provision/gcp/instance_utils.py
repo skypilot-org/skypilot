@@ -249,6 +249,20 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
+    def start_instances(cls, cluster_name: str, project_id: str, zone: str,
+                        instances: List[str], labels: Dict[str,
+                                                           str]) -> List[str]:
+        """Start multiple instances.
+        
+        Returns:
+            List of instance names that are started.
+        """
+        for instance_id in instances:
+            cls.start_instance(instance_id, project_id, zone)
+            cls.set_labels(project_id, zone, instance_id, labels)
+        return instances
+
+    @classmethod
     def start_instance(cls, node_id: str, project_id: str, zone: str) -> None:
         """Start a stopped instance."""
         raise NotImplementedError
@@ -985,16 +999,16 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         label_filters = {
             constants.TAG_RAY_CLUSTER_NAME: cluster_name,
         }
-        potential_head_instances = {}
+        potential_head_instances = []
         if mig_exists:
-            potential_head_instances = cls.filter(
-                project_id,
-                zone,
-                label_filters={
-                    constants.TAG_RAY_NODE_KIND: 'head',
-                    **label_filters,
-                },
-                status_filters=cls.NEED_TO_TERMINATE_STATES)
+            instances = cls.filter(project_id,
+                                   zone,
+                                   label_filters={
+                                       constants.TAG_RAY_NODE_KIND: 'head',
+                                       **label_filters,
+                                   },
+                                   status_filters=cls.NEED_TO_TERMINATE_STATES)
+            potential_head_instances = list(instances.keys())
 
         config['labels'] = {
             k: str(v).lower() for k, v in config['labels'].items()
@@ -1049,33 +1063,17 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         mig_utils.wait_for_managed_group_to_be_stable(
             project_id, zone, managed_instance_group_name)
 
-        head_instance_name: Optional[str] = None
-        running_instances = cls.filter(project_id,
-                                       zone,
-                                       label_filters,
-                                       status_filters=[cls.RUNNING_STATE])
-        for running_instance_name in running_instances.keys():
-            if running_instance_name in potential_head_instances:
-                head_instance_name = running_instance_name
-                break
-        else:
-            head_instance_name = list(running_instances.keys())[0]
-
-        if mig_exists:
-            # We need to update the node's label if mig already exists, as the
-            # config is not updated during the resize operation.
-            for instance_name in running_instances.keys():
-                cls.set_labels(project_id=project_id,
-                               availability_zone=zone,
-                               node_id=instance_name,
-                               labels=config['labels'])
+        running_instance_names = cls._add_labels_and_find_head(
+            cluster_name, project_id, zone, labels, potential_head_instances)
+        assert len(running_instance_names) == total_count, (
+            running_instance_names, total_count)
         cls.create_node_tag(
             project_id,
             zone,
-            head_instance_name,
+            running_instance_names[0],
             is_head=True,
         )
-        return None, list(running_instances.keys())
+        return None, running_instance_names
 
     @classmethod
     def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> None:
@@ -1093,6 +1091,56 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         mig_utils.delete_regional_instance_template(
             project_id, zone,
             mig_utils.get_instance_template_name(cluster_name))
+
+    # TODO(zhwu): We want to restart the instances with MIG instead of the
+    # normal instance start API to take advantage of DWS.
+    # @classmethod
+    # def start_instances(cls, cluster_name: str, project_id: str, zone: str,
+    #                     instances: List[str], labels: Dict[str,
+    #                                                        str]) -> List[str]:
+    #     del instances  # unused
+    #     potential_head_instances = cls.filter(
+    #         project_id,
+    #         zone,
+    #         label_filters={
+    #             constants.TAG_RAY_NODE_KIND: 'head',
+    #             constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+    #         },
+    #         status_filters=cls.NEED_TO_TERMINATE_STATES)
+    #     mig_name = mig_utils.get_managed_instance_group_name(cluster_name)
+    #     mig_utils.start_managed_instance_group(project_id, zone, mig_name)
+    #     mig_utils.wait_for_managed_group_to_be_stable(project_id, zone,
+    #                                                   mig_name)
+    #     return cls._add_labels_and_find_head(cluster_name, project_id, zone,
+    #                                          labels, potential_head_instances)
+
+    @classmethod
+    def _add_labels_and_find_head(
+            cls, cluster_name: str, project_id: str, zone: str,
+            labels: Dict[str, str],
+            potential_head_instances: List[str]) -> List[str]:
+        running_instances = cls.filter(
+            project_id,
+            zone, {constants.TAG_RAY_CLUSTER_NAME: cluster_name},
+            status_filters=[cls.RUNNING_STATE])
+        for running_instance_name in running_instances.keys():
+            if running_instance_name in potential_head_instances:
+                head_instance_name = running_instance_name
+                break
+        else:
+            head_instance_name = list(running_instances.keys())[0]
+        # We need to update the node's label if mig already exists, as the
+        # config is not updated during the resize operation.
+        for instance_name in running_instances.keys():
+            cls.set_labels(project_id=project_id,
+                           availability_zone=zone,
+                           node_id=instance_name,
+                           labels=labels)
+
+        running_instance_names = list(running_instances.keys())
+        running_instance_names.remove(head_instance_name)
+        # Label for head node type will be set by caller
+        return [head_instance_name] + running_instance_names
 
 
 class GCPTPUVMInstance(GCPInstance):

@@ -261,12 +261,16 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     if config.resume_stopped_nodes and to_start_count > 0 and stopped_instances:
         resumed_instance_ids = [n['name'] for n in stopped_instances]
         if resumed_instance_ids:
-            for instance_id in resumed_instance_ids:
-                resource.start_instance(instance_id, project_id,
-                                        availability_zone)
-                resource.set_labels(project_id, availability_zone, instance_id,
-                                    labels)
-        to_start_count -= len(resumed_instance_ids)
+            resumed_instance_ids = resource.start_instances(
+                cluster_name_on_cloud, project_id, availability_zone,
+                resumed_instance_ids, labels)
+        # In MIG case, the resumed_instance_ids will include the previously
+        # PENDING and RUNNING instances. To avoid double counting, we need to
+        # remove them from the resumed_instance_ids.
+        ready_instances = set(resumed_instance_ids)
+        ready_instances |= set([n['name'] for n in running_instances])
+        ready_instances |= set([n['name'] for n in pending_instances])
+        to_start_count = config.count - len(ready_instances)
 
         if head_instance_id is None:
             head_instance_id = resource.create_node_tag(
