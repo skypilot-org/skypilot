@@ -132,7 +132,7 @@ def instance_to_handler(instance: str):
     elif instance_type == 'tpu':
         return GCPTPUVMInstance
     elif instance.startswith('mig-'):
-        return GCPMIGComputeInstance
+        return GCPManagedInstanceGroup
     else:
         raise ValueError(f'Unknown instance type: {instance_type}')
 
@@ -939,7 +939,9 @@ class GCPComputeInstance(GCPInstance):
 
         cls.wait_for_operation(operation, project_id, availability_zone)
 
-class GCPMIGComputeInstance(GCPComputeInstance):
+
+class GCPManagedInstanceGroup(GCPComputeInstance):
+
     @classmethod
     def create_instances(
         cls,
@@ -949,7 +951,7 @@ class GCPMIGComputeInstance(GCPComputeInstance):
         node_config: dict,
         labels: dict,
         count: int,
-        total_count: int,   
+        total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
         logger.debug(f'Creating cluster with MIG: mig-{cluster_name!r}')
@@ -958,7 +960,8 @@ class GCPMIGComputeInstance(GCPComputeInstance):
 
         config.update({
             'labels': dict(
-                labels, **{
+                labels,
+                **{
                     constants.TAG_RAY_CLUSTER_NAME: cluster_name,
                     # Assume all nodes are workers, we can update the head node once the instances are created
                     constants.TAG_RAY_NODE_KIND: 'worker',
@@ -966,26 +969,31 @@ class GCPMIGComputeInstance(GCPComputeInstance):
                 }),
         })
         # Convert label values to string and lowercase per MIG API requirement.
-        config['labels'] = {k: str(v).lower() for k, v in config['labels'].items()}
+        config['labels'] = {
+            k: str(v).lower() for k, v in config['labels'].items()
+        }
 
         label_filters = {
             constants.TAG_RAY_CLUSTER_NAME: cluster_name,
         }
-        potential_head_instances = cls.filter(project_id, zone, label_filters={
-            constants.TAG_RAY_NODE_KIND: 'head',
-            **label_filters,
-        }, status_filters=cls.NEED_TO_TERMINATE_STATES)
+        potential_head_instances = cls.filter(
+            project_id,
+            zone,
+            label_filters={
+                constants.TAG_RAY_NODE_KIND: 'head',
+                **label_filters,
+            },
+            status_filters=cls.NEED_TO_TERMINATE_STATES)
 
         # TODO: add instance template name to the task definition if the user
         # wants to use it.
         region = zone.rpartition('-')[0]
         instance_template_name = 'it-' + cluster_name
         if not mig_utils.check_instance_template_exits(project_id, region,
-                                                    instance_template_name):
+                                                       instance_template_name):
             mig_utils.create_regional_instance_template(project_id, region,
                                                         instance_template_name,
-                                                        config,
-                                                        cluster_name)
+                                                        config, cluster_name)
         else:
             logger.debug(f'Instance template {instance_template_name} already '
                          'exists...')
@@ -995,14 +1003,14 @@ class GCPMIGComputeInstance(GCPComputeInstance):
                                  f'instanceTemplates/{instance_template_name}')
         managed_instance_group_name = 'mig-' + cluster_name
         mig_exist = mig_utils.check_managed_instance_group_exists(
-                project_id, zone, managed_instance_group_name)
+            project_id, zone, managed_instance_group_name)
         if mig_exist:
             # TODO: if we already have one, we should resize it.
             logger.debug(
                 f'Managed instance group {managed_instance_group_name!r} '
-                'already exists. Resizing it...'
-            )
-            mig_utils.resize_managed_instance_group(project_id, zone, managed_instance_group_name, total_count)
+                'already exists. Resizing it...')
+            mig_utils.resize_managed_instance_group(
+                project_id, zone, managed_instance_group_name, total_count)
         else:
             assert count == total_count, (
                 f'The count {count} should be the same as the total_count '
@@ -1015,11 +1023,14 @@ class GCPMIGComputeInstance(GCPComputeInstance):
 
         # TODO: This will block the provisioning until the nodes are ready,
         # which makes the failover not effective.
-        mig_utils.wait_for_managed_group_to_be_stable(project_id, zone,
-                                                  managed_instance_group_name)
-        
+        mig_utils.wait_for_managed_group_to_be_stable(
+            project_id, zone, managed_instance_group_name)
+
         head_instance_name = None
-        running_instances = cls.filter(project_id, zone, label_filters, status_filters=[cls.RUNNING_STATE])
+        running_instances = cls.filter(project_id,
+                                       zone,
+                                       label_filters,
+                                       status_filters=[cls.RUNNING_STATE])
         for running_instance_name in running_instances.keys():
             if running_instance_name in potential_head_instances:
                 head_instance_name = running_instance_name
@@ -1032,9 +1043,9 @@ class GCPMIGComputeInstance(GCPComputeInstance):
             # config is not updated during the resize operation.
             for instance_name in running_instances.keys():
                 cls.set_labels(project_id=project_id,
-                                availability_zone=zone,
-                                node_id=instance_name,
-                                labels=config['labels'])
+                               availability_zone=zone,
+                               node_id=instance_name,
+                               labels=config['labels'])
         cls.create_node_tag(
             project_id,
             zone,
@@ -1042,12 +1053,18 @@ class GCPMIGComputeInstance(GCPComputeInstance):
             is_head=True,
         )
         return None, list(running_instances.keys())
-        
+
     @classmethod
-    def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> dict:
-        mig_utils.delete_managed_instance_group(project_id, zone, )
-        mig_utils.delete_regional_instance_template(project_id, zone, )
-        return {}
+    def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> None:
+        mig_utils.delete_managed_instance_group(
+            project_id, zone,
+            mig_utils.get_managed_instance_group_name(cluster_name))
+        response = mig_utils.delete_regional_instance_template(
+            project_id, zone,
+            mig_utils.get_instance_template_name(cluster_name))
+        mig_utils.wait_for_extended_operation(
+            response, verbose_name='Deletion of Instance Template')
+
 
 class GCPTPUVMInstance(GCPInstance):
     """Instance handler for GCP TPU VM."""
@@ -1547,7 +1564,7 @@ def get_node_type(config: common.ProvisionConfig) -> GCPNodeType:
 
     if provider_config.get(constants.USE_MANAGED_INSTANCE_GROUP_CONFIG, False):
         return GCPNodeType.MIG
-    
+
     return GCPNodeType.COMPUTE
 
 

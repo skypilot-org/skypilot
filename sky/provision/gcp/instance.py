@@ -157,7 +157,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     if node_type == instance_utils.GCPNodeType.COMPUTE:
         resource = instance_utils.GCPComputeInstance
     elif node_type == instance_utils.GCPNodeType.MIG:
-        resource = instance_utils.GCPMIGComputeInstance
+        resource = instance_utils.GCPManagedInstanceGroup
     elif node_type == instance_utils.GCPNodeType.TPU:
         resource = instance_utils.GCPTPUVMInstance
     else:
@@ -281,8 +281,13 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
     if to_start_count > 0:
         errors, created_instance_ids = resource.create_instances(
-            cluster_name_on_cloud, project_id, availability_zone,
-            config.node_config, labels, to_start_count, total_count=config.count,
+            cluster_name_on_cloud,
+            project_id,
+            availability_zone,
+            config.node_config,
+            labels,
+            to_start_count,
+            total_count=config.count,
             include_head_node=head_instance_id is None)
         if errors:
             error = common.ProvisionerError('Failed to launch instances.')
@@ -507,13 +512,13 @@ def terminate_instances(
     tpu_node = provider_config.get('tpu_node')
     if tpu_node is not None:
         instance_utils.delete_tpu_node(project_id, zone, tpu_node)
-    use_mig = provider_config.get(constants.USE_MANAGED_INSTANCE_GROUP_CONFIG, False)
+    use_mig = provider_config.get(constants.USE_MANAGED_INSTANCE_GROUP_CONFIG,
+                                  False)
     if use_mig:
         # Deleting the MIG will also delete the instances.
-        instance_utils.GCPMIGComputeInstance.delete_mig(
+        instance_utils.GCPManagedInstanceGroup.delete_mig(
             project_id, zone, cluster_name_on_cloud)
         return
-
 
     label_filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     if worker_only:
