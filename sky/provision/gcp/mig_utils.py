@@ -9,7 +9,6 @@ import zlib
 from google.api_core.extended_operation import ExtendedOperation
 
 from sky import sky_logging
-from sky.provision import common
 from sky.provision.gcp import constants
 
 if typing.TYPE_CHECKING:
@@ -20,15 +19,11 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 
-def create_node_config_hash(cluster_name_on_cloud: str, node_config: Dict[str, Any]) -> int:
-    """Create a hash value for the node config.
+def get_instance_template_name(cluster_name: str) -> str:
+    return f'it-{cluster_name}'
 
-    This is to be used as a unique identifier for the instance template and mig
-    names.
-    """
-    properties = create_regional_instance_template_properties(
-        cluster_name_on_cloud, node_config)
-    return zlib.adler32(repr(properties).encode())
+def get_managed_instance_group_name(cluster_name: str) -> str:
+    return f'mig-{cluster_name}'
 
 
 def create_regional_instance_template_properties(
@@ -161,9 +156,6 @@ def delete_regional_instance_template(project_id, region,
 
 def create_managed_instance_group(project_id, zone, group_name,
                                   instance_template_url, size) -> None:
-    # credentials, project = google.auth.default()
-    # compute_client = compute_v1.InstanceGroupManagersClient(credentials=credentials)
-
     with compute_v1.InstanceGroupManagersClient() as compute_client:
         # Create the managed instance group request
         request = compute_v1.InsertInstanceGroupManagerRequest(
@@ -193,6 +185,21 @@ def create_managed_instance_group(project_id, zone, group_name,
         logger.debug(
             f'Managed instance group {group_name!r} created successfully.')
 
+def delete_managed_instance_group(project_id, zone, group_name) -> None:
+    with compute_v1.InstanceGroupManagersClient() as compute_client:
+        # Create the managed instance group request
+        request = compute_v1.DeleteInstanceGroupManagerRequest(
+            project=project_id,
+            zone=zone,
+            instance_group_manager=group_name,
+        )
+
+        # Send the request to delete the managed instance group
+        response = compute_client.delete(request=request)
+        # Wait for the operation to complete
+        logger.debug(response)
+        wait_for_extended_operation(response,
+                                    'delete managed instance group', 600)
 
 def check_managed_instance_group_exists(project_id, zone, group_name) -> bool:
     with compute_v1.InstanceGroupManagersClient() as compute_client:

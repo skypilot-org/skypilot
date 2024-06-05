@@ -131,11 +131,9 @@ def instance_to_handler(instance: str):
         return GCPComputeInstance
     elif instance_type == 'tpu':
         return GCPTPUVMInstance
+    elif instance.startswith('mig-'):
+        return GCPMIGComputeInstance
     else:
-        # Managed Instance Groups breaks this assumption. The suffix is a random value.
-        if "-mig-" in instance:
-            # TODO: Implement MIG Instance
-            return GCPComputeInstance
         raise ValueError(f'Unknown instance type: {instance_type}')
 
 
@@ -1045,7 +1043,11 @@ class GCPMIGComputeInstance(GCPComputeInstance):
         )
         return None, list(running_instances.keys())
         
-
+    @classmethod
+    def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> dict:
+        mig_utils.delete_managed_instance_group(project_id, zone, )
+        mig_utils.delete_regional_instance_template(project_id, zone, )
+        return {}
 
 class GCPTPUVMInstance(GCPInstance):
     """Instance handler for GCP TPU VM."""
