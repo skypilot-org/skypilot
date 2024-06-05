@@ -263,6 +263,9 @@ def make_task_bash_script(codegen: str,
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
+    # DEACTIVATE_SKY_REMOTE_PYTHON_ENV: Deactivate the SkyPilot runtime env, as
+    # the ray cluster is started within the runtime env, which may cause the
+    # user program running in that env as well.
     # PYTHONUNBUFFERED is used to disable python output buffering.
     script = [
         textwrap.dedent(f"""\
@@ -271,6 +274,7 @@ def make_task_bash_script(codegen: str,
             set -a
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
+            {constants.DEACTIVATE_SKY_REMOTE_PYTHON_ENV}
             export PYTHONUNBUFFERED=1
             cd {constants.SKY_REMOTE_WORKDIR}"""),
     ]

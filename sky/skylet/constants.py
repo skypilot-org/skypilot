@@ -49,6 +49,11 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_REMOTE_PYTHON_ENV = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
+# Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
+# environment. `deactivate` command does not work when conda is used.
+DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
+    'export PATH='
+    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||")')
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
