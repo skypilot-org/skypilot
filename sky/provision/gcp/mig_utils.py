@@ -36,7 +36,7 @@ def get_managed_instance_group_name(cluster_name: str) -> str:
 def create_regional_instance_template_properties(
         cluster_name_on_cloud, node_config) -> 'compute_v1.InstanceProperties':
 
-    return compute_v1.InstanceProperties(
+    return compute_v1.InstanceProperties(  # pylint: disable=used-before-assignment
         description=('SkyPilot instance template for '
                      f'{cluster_name_on_cloud!r} to support DWS requests.'),
         machine_type=node_config['machineType'],
@@ -130,7 +130,8 @@ def create_regional_instance_template(project_id, region, template_name,
         # TODO: Error handling
         # operation = compute_client.wait(response.operation)
         # if operation.error:
-        # raise Exception(f'Failed to create regional instance template: {operation.error}')
+        # raise Exception(f'Failed to create regional instance template: '
+        #                 f'{operation.error}')
 
         list_request = compute_v1.ListRegionInstanceTemplatesRequest(
             filter=f'name eq {template_name}',
@@ -272,7 +273,8 @@ def resize_managed_instance_group(project_id: str, zone: str, group_name: str,
     # resize_request_name = f'resize-request-{str(int(time.time()))}'
 
     # cmd = (
-    #     f'gcloud beta compute instance-groups managed resize-requests create {group_name} '
+    #     f'gcloud beta compute instance-groups managed resize-requests '
+    #     f'create {group_name} '
     #     f'--resize-request={resize_request_name} '
     #     f'--resize-by={size} '
     #     f'--requested-run-duration={run_duration} '
