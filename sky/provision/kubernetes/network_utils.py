@@ -8,11 +8,14 @@ import yaml
 
 import sky
 from sky import exceptions
+from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
 
 _INGRESS_TEMPLATE_NAME = 'kubernetes-ingress.yml.j2'
 _LOADBALANCER_TEMPLATE_NAME = 'kubernetes-loadbalancer.yml.j2'
@@ -228,20 +231,19 @@ def get_loadbalancer_ip(namespace: str,
                         timeout: int = 0) -> Optional[str]:
     """Returns the IP address of the load balancer."""
     core_api = kubernetes.core_api()
-    service = core_api.read_namespaced_service(
-        service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
 
-    if service.status.load_balancer.ingress is None:
-        return None
+    ip = None
 
-    ip = service.status.load_balancer.ingress[
-        0].ip or service.status.load_balancer.ingress[0].hostname
     start_time = time.time()
     while ip is None and time.time() - start_time < timeout:
         service = core_api.read_namespaced_service(
             service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
-        ip = (service.status.load_balancer.ingress[0].ip or
-              service.status.load_balancer.ingress[0].hostname)
+        if service.status.load_balancer.ingress is not None:
+            ip = (service.status.load_balancer.ingress[0].ip or
+                  service.status.load_balancer.ingress[0].hostname)
+        if ip is None:
+            logger.debug('Waiting for load balancer IP to be assigned.')
+            time.sleep(1)
     return ip if ip is not None else None
 
 
