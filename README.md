@@ -154,9 +154,9 @@ To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest
 <!-- Keep this section in sync with index.rst in SkyPilot Docs -->
 Runnable examples:
 - LLMs on SkyPilot
-  - [GPT-2](./llm/gpt-2/)
+  - [GPT-2 via `llm.c`](./llm/gpt-2/)
   - [Llama 3](./llm/llama-3/)
-  - [Qwen](./llm/qwen/) 
+  - [Qwen](./llm/qwen/)
   - [Databricks DBRX](./llm/dbrx/)
   - [Gemma](./llm/gemma/)
   - [Mixtral 8x7B](./llm/mixtral/); [Mistral 7B](https://docs.mistral.ai/self-deployment/skypilot/) (from official Mistral team)
