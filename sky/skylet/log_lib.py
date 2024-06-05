@@ -265,7 +265,7 @@ def make_task_bash_script(codegen: str,
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
     # DEACTIVATE_SKY_REMOTE_PYTHON_ENV: Deactivate the SkyPilot runtime env, as
     # the ray cluster is started within the runtime env, which may cause the
-    # user program running in that env as well.
+    # user program to run in that env as well.
     # PYTHONUNBUFFERED is used to disable python output buffering.
     script = [
         textwrap.dedent(f"""\
