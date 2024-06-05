@@ -69,7 +69,7 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
-  * `GPT-2 <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`_
+  * `GPT-2 via llm.c <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`_
   * `Llama 3 <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3>`_
   * `Qwen <https://github.com/skypilot-org/skypilot/tree/master/llm/qwen>`_
   * `Databricks DBRX <https://github.com/skypilot-org/skypilot/tree/master/llm/dbrx>`_
