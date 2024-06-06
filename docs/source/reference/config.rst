@@ -233,7 +233,8 @@ Available fields and semantics:
       # Seconds to wait for MIG/DWS to create the requested resources. If the
       # resources are not be able to create within the specified duration,
       # SkyPilot will start failover to other clouds/regions/zones.
-      creation_timeout_seconds: 300
+      # TODO: aligh with k8s provision_timeout
+      creation_timeout_seconds: 900
       
 
     # Identity to use for all GCP instances (optional).

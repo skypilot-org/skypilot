@@ -423,7 +423,8 @@ class GCPComputeInstance(GCPInstance):
                            operation: dict,
                            project_id: str,
                            region: Optional[str] = None,
-                           zone: Optional[str] = None) -> None:
+                           zone: Optional[str] = None,
+                           timeout: int = GCP_TIMEOUT) -> None:
         if zone is not None:
             kwargs = {'zone': zone}
             operation_caller = cls.load_resource().zoneOperations()
@@ -448,13 +449,13 @@ class GCPComputeInstance(GCPInstance):
             return request.execute(num_retries=GCP_MAX_RETRIES)
 
         wait_start = time.time()
-        while time.time() - wait_start < GCP_TIMEOUT:
+        while time.time() - wait_start < timeout:
             # Retry the wait() call until it succeeds or times out.
             # This is because the wait() call is only best effort, and does not
             # guarantee that the operation is done when it returns.
             # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # pylint: disable=line-too-long
-            timeout = max(GCP_TIMEOUT - (time.time() - wait_start), 1)
-            result = call_operation(operation_caller.wait, timeout)
+            remaining_timeout = max(timeout - (time.time() - wait_start), 1)
+            result = call_operation(operation_caller.wait, remaining_timeout)
             if result['status'] == 'DONE':
                 # NOTE: Error example:
                 # {
@@ -476,9 +477,9 @@ class GCPComputeInstance(GCPInstance):
         else:
             logger.warning('wait_for_operation: Timeout waiting for creation '
                            'operation, cancelling the operation ...')
-            timeout = max(GCP_TIMEOUT - (time.time() - wait_start), 1)
+            remaining_timeout = max(timeout - (time.time() - wait_start), 1)
             try:
-                result = call_operation(operation_caller.delete, timeout)
+                result = call_operation(operation_caller.delete, remaining_timeout)
             except gcp.http_error_exception() as e:
                 logger.debug('wait_for_operation: failed to cancel operation '
                              f'due to error: {e}')
@@ -1092,17 +1093,18 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             managed_instance_group_name,
             timeout=managed_instance_group_config['creation_timeout_seconds'])
 
-        running_instance_names = cls._add_labels_and_find_head(
+
+        pending_running_instance_names = cls._add_labels_and_find_head(
             cluster_name, project_id, zone, labels, potential_head_instances)
-        assert len(running_instance_names) == total_count, (
-            running_instance_names, total_count)
+        assert len(pending_running_instance_names) == total_count, (
+            pending_running_instance_names, total_count)
         cls.create_node_tag(
             project_id,
             zone,
-            running_instance_names[0],
+            pending_running_instance_names[0],
             is_head=True,
         )
-        return None, running_instance_names
+        return None, pending_running_instance_names
 
     @classmethod
     def _delete_instance_template(cls, project_id: str, zone: str,
@@ -1125,6 +1127,8 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
     @classmethod
     def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> None:
         mig_name = mig_utils.get_managed_instance_group_name(cluster_name)
+        # Get all resize request of the MIG and cancel them.
+        mig_utils.cancel_all_resize_requests(project_id, zone, mig_name)
         try:
             operation = cls.load_resource().instanceGroupManagers().delete(
                 project=project_id, zone=zone,
@@ -1174,28 +1178,29 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             cls, cluster_name: str, project_id: str, zone: str,
             labels: Dict[str, str],
             potential_head_instances: List[str]) -> List[str]:
-        running_instances = cls.filter(
+        pending_running_instances = cls.filter(
             project_id,
             zone, {constants.TAG_RAY_CLUSTER_NAME: cluster_name},
-            status_filters=[cls.RUNNING_STATE])
-        for running_instance_name in running_instances.keys():
+            # Find all provisioning and running instances.
+            status_filters=cls.NEED_TO_STOP_STATES)
+        for running_instance_name in pending_running_instances.keys():
             if running_instance_name in potential_head_instances:
                 head_instance_name = running_instance_name
                 break
         else:
-            head_instance_name = list(running_instances.keys())[0]
+            head_instance_name = list(pending_running_instances.keys())[0]
         # We need to update the node's label if mig already exists, as the
         # config is not updated during the resize operation.
-        for instance_name in running_instances.keys():
+        for instance_name in pending_running_instances.keys():
             cls.set_labels(project_id=project_id,
                            availability_zone=zone,
                            node_id=instance_name,
                            labels=labels)
 
-        running_instance_names = list(running_instances.keys())
-        running_instance_names.remove(head_instance_name)
+        pending_running_instance_names = list(pending_running_instances.keys())
+        pending_running_instance_names.remove(head_instance_name)
         # Label for head node type will be set by caller
-        return [head_instance_name] + running_instance_names
+        return [head_instance_name] + pending_running_instance_names
 
 
 class GCPTPUVMInstance(GCPInstance):
