@@ -9,11 +9,9 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
-from sky.clouds.gcp import gcp_utils
 from sky.provision import common
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
-from sky.provision.gcp import mig_utils
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -121,7 +119,7 @@ def _wait_for_operations(
             logger.debug(
                 f'wait_for_compute_{op_type}_operation: '
                 f'Waiting for operation {operation["name"]} to finish...')
-            handler.wait_for_operation(operation, project_id, zone)
+            handler.wait_for_operation(operation, project_id, zone=zone)
 
 
 def _get_head_instance_id(instances: List) -> Optional[str]:
@@ -133,90 +131,6 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
             head_instance_id = inst['name']
             break
     return head_instance_id
-
-
-def _run_instances_in_managed_instance_group(
-        region: str, cluster_name_on_cloud: str,
-        config: common.ProvisionConfig) -> common.ProvisionRecord:
-    print("Managed instance group is enabled.")
-
-    resumed_instance_ids: List[str] = []
-    created_instance_ids: List[str] = []
-
-    node_type = instance_utils.get_node_type(config.node_config)
-    project_id = config.provider_config['project_id']
-    availability_zone = config.provider_config['availability_zone']
-    head_instance_id = ""
-
-    # check instance templates
-
-    # TODO add instance template name to the task definition if the user wants to use it.
-    # Calculate template instance name based on the config node values. Hash them to get a unique name.
-    node_config_hash = mig_utils.create_node_config_hash(
-        cluster_name_on_cloud, config.node_config)
-    instance_template_name = f"{cluster_name_on_cloud}-it-{node_config_hash}"
-    if not mig_utils.check_instance_template_exits(project_id, region,
-                                                   instance_template_name):
-        mig_utils.create_regional_instance_template(project_id, region,
-                                                    instance_template_name,
-                                                    config.node_config,
-                                                    cluster_name_on_cloud)
-    else:
-        print(f"Instance template {instance_template_name} already exists...")
-
-    # create managed instance group
-    instance_template_url = f"projects/{project_id}/regions/{region}/instanceTemplates/{instance_template_name}"
-    managed_instance_group_name = f"{cluster_name_on_cloud}-mig-{node_config_hash}"
-    if not mig_utils.check_managed_instance_group_exists(
-            project_id, availability_zone, managed_instance_group_name):
-        mig_utils.create_managed_instance_group(project_id,
-                                                availability_zone,
-                                                managed_instance_group_name,
-                                                instance_template_url,
-                                                size=config.count)
-    else:
-        # TODO: if we already have one, we should resize it.
-        print(
-            f"Managed instance group {managed_instance_group_name} already exists..."
-        )
-        # mig_utils.resize_managed_instance_group(project_id, zone, group_name, size, run_duration)
-
-    mig_utils.wait_for_managed_group_to_be_stable(project_id, availability_zone,
-                                                  managed_instance_group_name)
-
-    resource: Type[instance_utils.GCPInstance]
-    if node_type == instance_utils.GCPNodeType.COMPUTE:
-        resource = instance_utils.GCPComputeInstance
-    elif node_type == instance_utils.GCPNodeType.TPU:
-        resource = instance_utils.GCPTPUVMInstance
-    else:
-        raise ValueError(f'Unknown node type {node_type}')
-
-    # filter_labels = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
-    # running_instances = resource.filter(
-    #     project_id=project_id,
-    #     zone=availability_zone,
-    #     label_filters=filter_labels,
-    #     status_filters=resource.RUNNING_STATE,
-    # ).values()
-
-    # # TODO: Can not tag individual nodes as they are part of the mig
-    # head_instance_id = resource.create_node_tag(
-    #             project_id,
-    #             availability_zone,
-    #             running_instances[0]['name'],
-    #             is_head=True,
-    #         )
-
-    # created_instance_ids = [n['name'] for n in running_instances]
-
-    return common.ProvisionRecord(provider_name='gcp',
-                                  region=region,
-                                  zone=availability_zone,
-                                  cluster_name=cluster_name_on_cloud,
-                                  head_instance_id=head_instance_id,
-                                  resumed_instance_ids=resumed_instance_ids,
-                                  created_instance_ids=created_instance_ids)
 
 
 def _run_instances(region: str, cluster_name_on_cloud: str,
@@ -239,6 +153,8 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     resource: Type[instance_utils.GCPInstance]
     if node_type == instance_utils.GCPNodeType.COMPUTE:
         resource = instance_utils.GCPComputeInstance
+    elif node_type == instance_utils.GCPNodeType.MIG:
+        resource = instance_utils.GCPManagedInstanceGroup
     elif node_type == instance_utils.GCPNodeType.TPU:
         resource = instance_utils.GCPTPUVMInstance
     else:
@@ -345,12 +261,16 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     if config.resume_stopped_nodes and to_start_count > 0 and stopped_instances:
         resumed_instance_ids = [n['name'] for n in stopped_instances]
         if resumed_instance_ids:
-            for instance_id in resumed_instance_ids:
-                resource.start_instance(instance_id, project_id,
-                                        availability_zone)
-                resource.set_labels(project_id, availability_zone, instance_id,
-                                    labels)
-        to_start_count -= len(resumed_instance_ids)
+            resumed_instance_ids = resource.start_instances(
+                cluster_name_on_cloud, project_id, availability_zone,
+                resumed_instance_ids, labels)
+        # In MIG case, the resumed_instance_ids will include the previously
+        # PENDING and RUNNING instances. To avoid double counting, we need to
+        # remove them from the resumed_instance_ids.
+        ready_instances = set(resumed_instance_ids)
+        ready_instances |= set([n['name'] for n in running_instances])
+        ready_instances |= set([n['name'] for n in pending_instances])
+        to_start_count = config.count - len(ready_instances)
 
         if head_instance_id is None:
             head_instance_id = resource.create_node_tag(
@@ -362,9 +282,14 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
     if to_start_count > 0:
         errors, created_instance_ids = resource.create_instances(
-            cluster_name_on_cloud, project_id, availability_zone,
-            config.node_config, labels, to_start_count,
-            head_instance_id is None)
+            cluster_name_on_cloud,
+            project_id,
+            availability_zone,
+            config.node_config,
+            labels,
+            to_start_count,
+            total_count=config.count,
+            include_head_node=head_instance_id is None)
         if errors:
             error = common.ProvisionerError('Failed to launch instances.')
             error.errors = errors
@@ -427,11 +352,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     try:
-        if gcp_utils.is_use_managed_instance_group():
-            return _run_instances_in_managed_instance_group(
-                region, cluster_name_on_cloud, config)
-        else:
-            return _run_instances(region, cluster_name_on_cloud, config)
+        return _run_instances(region, cluster_name_on_cloud, config)
     except gcp.http_error_exception() as e:
         error_details = getattr(e, 'error_details')
         errors = []
@@ -592,6 +513,13 @@ def terminate_instances(
     tpu_node = provider_config.get('tpu_node')
     if tpu_node is not None:
         instance_utils.delete_tpu_node(project_id, zone, tpu_node)
+
+    use_mig = provider_config.get('use_managed_instance_group', False)
+    if use_mig:
+        # Deleting the MIG will also delete the instances.
+        instance_utils.GCPManagedInstanceGroup.delete_mig(
+            project_id, zone, cluster_name_on_cloud)
+        return
 
     label_filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     if worker_only:

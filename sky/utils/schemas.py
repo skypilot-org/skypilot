@@ -588,8 +588,20 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
-                'use_managed_instance_group': {
-                    'type': 'boolean',
+                'managed_instance_group': {
+                    'type': 'object',
+                    'required': [
+                        'run_duration_seconds', 'creation_timeout_seconds'
+                    ],
+                    'additionalProperties': False,
+                    'properties': {
+                        'run_duration_seconds': {
+                            'type': 'integer',
+                        },
+                        'creation_timeout_seconds': {
+                            'type': 'integer',
+                        }
+                    }
                 },
                 **_INSTANCE_TAGS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
