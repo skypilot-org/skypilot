@@ -68,6 +68,7 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import dag_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -362,8 +363,9 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
     bashrc_diff = ('\n# For SkyPilot shell completion'
                    '\n. ~/.sky/.sky-complete.bash')
 
+    unset_debug = f'unset {env_options.Options.SHOW_DEBUG_INFO.value}; '
     if value == 'bash':
-        install_cmd = f'_SKY_COMPLETE=bash_source sky > \
+        install_cmd = f'{unset_debug}_SKY_COMPLETE=bash_source sky > \
                 ~/.sky/.sky-complete.bash && \
                 echo "{bashrc_diff}" >> ~/.bashrc'
 
@@ -372,13 +374,13 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         reload_cmd = _RELOAD_BASH_CMD
 
     elif value == 'fish':
-        cmd = '_SKY_COMPLETE=fish_source sky > \
-                ~/.config/fish/completions/sky.fish'
+        cmd = (f'{unset_debug}_SKY_COMPLETE=fish_source sky > '
+                '~/.config/fish/completions/sky.fish')
 
         reload_cmd = _RELOAD_FISH_CMD
 
     elif value == 'zsh':
-        install_cmd = f'_SKY_COMPLETE=zsh_source sky > \
+        install_cmd = f'{unset_debug}_SKY_COMPLETE=zsh_source sky > \
                 ~/.sky/.sky-complete.zsh && \
                 echo "{zshrc_diff}" >> ~/.zshrc'
 
