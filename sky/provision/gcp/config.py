@@ -151,8 +151,8 @@ def bootstrap_instances(
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     # Check if we have any TPUs defined, and if so,
     # insert that information into the provider config
-    if (instance_utils.get_node_type(
-            config.node_config) == instance_utils.GCPNodeType.TPU):
+    if instance_utils.get_node_type(
+            config.node_config) == instance_utils.GCPNodeType.TPU:
         config.provider_config[constants.HAS_TPU_PROVIDER_FIELD] = True
 
     crm, iam, compute, _ = construct_clients_from_provider_config(

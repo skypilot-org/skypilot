@@ -149,7 +149,7 @@ class GCP(clouds.Cloud):
     _DEPENDENCY_HINT = (
         'GCP tools are not installed. Run the following commands:\n'
         # Install the Google Cloud SDK:
-        f'{_INDENT_PREFIX}  $ pip install google-api-python-client google-cloud-compute\n'
+        f'{_INDENT_PREFIX}  $ pip install google-api-python-client\n'
         f'{_INDENT_PREFIX}  $ conda install -c conda-forge '
         'google-cloud-sdk -y')
 
