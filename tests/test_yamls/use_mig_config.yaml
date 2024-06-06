@@ -1,0 +1,4 @@
+gcp:
+  managed_instance_group:
+    run_duration_seconds: 36000
+    creation_timeout_seconds: 900

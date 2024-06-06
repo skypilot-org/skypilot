@@ -109,6 +109,8 @@ class Test(NamedTuple):
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
     timeout: int = DEFAULT_CMD_TIMEOUT
+    # Environment variables to set for each command.
+    env: Dict[str, str] = None
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -155,6 +157,9 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
                                            suffix='.log',
                                            delete=False)
     test.echo(f'Test started. Log: less {log_file.name}')
+    env_dict = os.environ.copy()
+    if test.env:
+        env_dict.update(test.env)
     for command in test.commands:
         log_file.write(f'+ {command}\n')
         log_file.flush()
@@ -164,6 +169,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             stderr=subprocess.STDOUT,
             shell=True,
             executable='/bin/bash',
+            env=env_dict,
         )
         try:
             proc.wait(timeout=test.timeout)
@@ -698,6 +704,34 @@ def test_clone_disk_gcp():
         ],
         f'sky down -y {name} {name}-clone {name}-clone-2',
     )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_gcp_mig():
+    name = _get_cluster_name()
+    test = Test(
+        'gcp_mig',
+        [
+            f'sky launch -y -c {name} --gpus t4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            # Check MIG exists.
+            f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"',
+            f'sky autostop -i 0 --down -y {name}',
+            'sleep 120',
+            f'sky status -r {name}; sky status {name} | grep "{name} not found"',
+            f'gcloud compute instance-templates list --regions | grep "sky-it-{name}"',
+            # Launch again.
+            f'sky launch -y -c {name} --gpus L4 --num-nodes 2 nvidia-smi',
+            f'sky logs {name} 1 | grep "L4"',
+            f'sky down -y {name}',
+            f'gcloud compute instance-templates list --regions | grep "sky-it-{name}" && exit 1 || true',
+        ],
+        f'sky down -y {name}',
+        env={'SKYPILOT_CONFIG': 'tests/test_yamls/use_mig_config.yaml'})
     run_one_test(test)
 
 
