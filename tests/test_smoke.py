@@ -710,10 +710,11 @@ def test_clone_disk_gcp():
 @pytest.mark.gcp
 def test_gcp_mig():
     name = _get_cluster_name()
+    region = 'us-central1'
     test = Test(
         'gcp_mig',
         [
-            f'sky launch -y -c {name} --gpus t4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} --gpus t4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp --region {region} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
@@ -724,8 +725,9 @@ def test_gcp_mig():
             'sleep 120',
             f'sky status -r {name}; sky status {name} | grep "{name} not found"',
             f'gcloud compute instance-templates list | grep "sky-it-{name}"',
-            # Launch again.
-            f'sky launch -y -c {name} --gpus L4 --num-nodes 2 nvidia-smi',
+            # Launch again with the same region. The original instance template
+            # should be removed.
+            f'sky launch -y -c {name} --gpus L4 --num-nodes 2 --region {region} nvidia-smi',
             f'sky logs {name} 1 | grep "L4"',
             f'sky down -y {name}',
             f'gcloud compute instance-templates list | grep "sky-it-{name}" && exit 1 || true',

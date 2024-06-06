@@ -462,7 +462,6 @@ class GCPComputeInstance(GCPInstance):
                 #   'code': 'VM_MIN_COUNT_NOT_REACHED',
                 #   'message': 'Requested minimum count of 4 VMs could not be created.'
                 # }
-                logger.debug(str(result))
                 errors = result.get('error', {}).get('errors')
                 if errors is not None:
                     logger.debug(
