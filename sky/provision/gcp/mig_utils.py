@@ -26,7 +26,8 @@ def get_managed_instance_group_name(cluster_name: str) -> str:
     return f'{constants.MIG_NAME_PREFIX}{cluster_name}'
 
 
-def check_instance_template_exits(project_id, region, template_name) -> bool:
+def check_instance_template_exits(project_id: str, region: str,
+                                  template_name: str) -> bool:
     compute = gcp.build('compute',
                         'v1',
                         credentials=None,
@@ -36,7 +37,8 @@ def check_instance_template_exits(project_id, region, template_name) -> bool:
             project=project_id, region=region,
             instanceTemplate=template_name).execute()
     except gcp.http_error_exception() as e:
-        if IT_RESOURCE_NOT_FOUND_PATTERN.search(str(e)) is not None:
+        if IT_RESOURCE_NOT_FOUND_PATTERN.search(str(e)) is None:
+            # Instance template does not exist.
             return False
         raise
     return True
@@ -44,7 +46,7 @@ def check_instance_template_exits(project_id, region, template_name) -> bool:
 
 def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
                                     region: str, template_name: str,
-                                    node_config: Dict[str, Any]):
+                                    node_config: Dict[str, Any]) -> dict:
     """Create a regional instance template."""
     compute = gcp.build('compute',
                         'v1',
@@ -84,7 +86,8 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
 
 
 def create_managed_instance_group(project_id: str, zone: str, group_name: str,
-                                  instance_template_url: str, size: int):
+                                  instance_template_url: str,
+                                  size: int) -> dict:
     compute = gcp.build('compute',
                         'v1',
                         credentials=None,
@@ -107,7 +110,8 @@ def create_managed_instance_group(project_id: str, zone: str, group_name: str,
 
 
 def resize_managed_instance_group(project_id: str, zone: str, group_name: str,
-                                  resize_by: int, run_duration_seconds: int):
+                                  resize_by: int,
+                                  run_duration_seconds: int) -> dict:
     compute = gcp.build('compute',
                         'beta',
                         credentials=None,
@@ -127,7 +131,7 @@ def resize_managed_instance_group(project_id: str, zone: str, group_name: str,
 
 
 def cancel_all_resize_request_for_mig(project_id: str, zone: str,
-                                      group_name: str):
+                                      group_name: str) -> None:
     logger.debug(f'Cancelling all resize requests for MIG {group_name!r}.')
     try:
         compute = gcp.build('compute',
