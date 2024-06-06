@@ -55,7 +55,7 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
 
     # We have to ignore user defined scheduling for DWS.
     # TODO: Add a warning log for this behvaiour.
-    scheduling = config.pop('scheduling', {})
+    scheduling = config.get('scheduling', {})
     assert scheduling.get('provisioningModel') != 'SPOT', (
         'DWS does not support spot VMs.')
 
