@@ -1,9 +1,11 @@
-# Serving Qwen1.5 on Your Own Cloud
+# Serving Qwen2 on Your Own Cloud
 
-[Qwen1.5](https://github.com/QwenLM/Qwen1.5) is one of the top open LLMs.
-As of Feb 2024, Qwen1.5-72B-Chat is ranked higher than Mixtral-8x7b-Instruct-v0.1 on the LMSYS Chatbot Arena Leaderboard.
+[Qwen2](https://github.com/QwenLM/Qwen2) is one of the top open LLMs.
+As of Jun 2024, Qwen1.5-110B-Chat is ranked higher than GPT-4-0613 on the [LMSYS Chatbot Arena Leaderboard](https://chat.lmsys.org/?leaderboard).
 
 📰 **Update (26 April 2024) -** SkyPilot now also supports the [**Qwen1.5-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) model! It performs competitively with Llama-3-70B across a [series of evaluations](https://qwenlm.github.io/blog/qwen1.5-110b/#model-quality). Use [serve-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/serve-110b.yaml) to serve the 110B model.
+
+📰 **Update (6 Jun 2024) -** SkyPilot now also supports the [**Qwen2**](https://qwenlm.github.io/blog/qwen2/) model! It further improves the competitive model, Qwen1.5.
 
 <p align="center">
     <img src="https://i.imgur.com/d7tEhAl.gif" alt="qwen" width="600"/>
@@ -99,7 +101,7 @@ ENDPOINT=$(sky serve status --endpoint qwen)
 curl http://$ENDPOINT/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "Qwen/Qwen1.5-72B-Chat",
+      "model": "Qwen/Qwen2-72B-Instruct",
       "messages": [
         {
           "role": "system",
@@ -121,7 +123,7 @@ It is also possible to access the Qwen service with a GUI using [vLLM](https://g
 
 1. Start the chat web UI (change the `--env` flag to the model you are running):
 ```bash
-sky launch -c qwen-gui ./gui.yaml --env MODEL_NAME='Qwen/Qwen1.5-72B-Chat' --env ENDPOINT=$(sky serve status --endpoint qwen)
+sky launch -c qwen-gui ./gui.yaml --env MODEL_NAME='Qwen/Qwen2-72B-Instruct' --env ENDPOINT=$(sky serve status --endpoint qwen)
 ```
 
 2. Then, we can access the GUI at the returned gradio link:
