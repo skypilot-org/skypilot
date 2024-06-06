@@ -742,7 +742,8 @@ class GCP(clouds.Cloud):
         credentials, project = google.auth.default()
         crm = googleapiclient.discovery.build('cloudresourcemanager',
                                               'v1',
-                                              credentials=credentials)
+                                              credentials=credentials,
+                                              cache_discovery=False)
         gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
         permissions = {'permissions': gcp_minimal_permissions}
         request = crm.projects().testIamPermissions(resource=project,
