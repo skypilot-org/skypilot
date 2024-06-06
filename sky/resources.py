@@ -436,7 +436,10 @@ class Resources:
 
     @property
     def labels(self) -> Optional[Dict[str, str]]:
-        return self._labels
+        labels = {constants.TAG_SKYPILOT_COMPONENT: 'cluster'}
+        if self._labels is not None:
+           labels.update(self._labels)
+        return labels
 
     @property
     def is_image_managed(self) -> Optional[bool]:

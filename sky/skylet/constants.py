@@ -225,3 +225,6 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
 CONTROLLER_PROCESS_CPU_DEMAND = 0.25
+
+# Tag key for what a cluster serves for in SkyPilot.
+TAG_SKYPILOT_COMPONENT = 'skypilot-component'

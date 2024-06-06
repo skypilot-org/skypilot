@@ -423,6 +423,12 @@ def get_controller_resources(
                     f'{controller_resources}').capitalize())
     controller_resources_to_use: resources.Resources = list(
         controller_resources)[0]
+    
+    labels = controller_resources_to_use.labels
+    labels.update(
+        {constants.TAG_SKYPILOT_COMPONENT: f'{controller.value.controller_type}-controller'}
+    )
+    controller_resources_to_use = controller_resources_to_use.copy(labels=labels)
 
     controller_record = global_user_state.get_cluster_from_name(
         controller.value.cluster_name)
