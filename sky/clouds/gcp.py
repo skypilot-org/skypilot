@@ -184,7 +184,8 @@ class GCP(clouds.Cloud):
         if gcp_utils.is_tpu_vm_pod(resources):
             unsupported = {
                 clouds.CloudImplementationFeatures.STOP: (
-                    'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
+                    'TPU VM pods cannot be stopped. Please refer to: '
+                    'https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
                 )
             }
         if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
@@ -195,10 +196,14 @@ class GCP(clouds.Cloud):
         # TODO(zhwu): We probably need to store the MIG requirement in resources
         # because `skypilot_config` may change for an existing cluster.
         # Clusters created with MIG (only GPU clusters) cannot be stopped.
-        if (skypilot_config.get_nested(('gcp', 'managed_instance_group'), None)
-                is not None and resources.accelerators):
+        if (skypilot_config.get_nested(
+            ('gcp', 'managed_instance_group'), None) is not None and
+                resources.accelerators):
             unsupported[clouds.CloudImplementationFeatures.STOP] = (
                 'Managed Instance Group (MIG) does not support stopping yet.')
+            unsupported[clouds.CloudImplementationFeatures.SPOT_INSTANCE] = (
+                'Managed Instance Group with DWS does not support '
+                'spot instances.')
         return unsupported
 
     @classmethod

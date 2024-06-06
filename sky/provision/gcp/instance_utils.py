@@ -479,7 +479,8 @@ class GCPComputeInstance(GCPInstance):
                            'operation, cancelling the operation ...')
             remaining_timeout = max(timeout - (time.time() - wait_start), 1)
             try:
-                result = call_operation(operation_caller.delete, remaining_timeout)
+                result = call_operation(operation_caller.delete,
+                                        remaining_timeout)
             except gcp.http_error_exception() as e:
                 logger.debug('wait_for_operation: failed to cancel operation '
                              f'due to error: {e}')
@@ -1093,7 +1094,6 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             managed_instance_group_name,
             timeout=managed_instance_group_config['creation_timeout_seconds'])
 
-
         pending_running_instance_names = cls._add_labels_and_find_head(
             cluster_name, project_id, zone, labels, potential_head_instances)
         assert len(pending_running_instance_names) == total_count, (
@@ -1128,7 +1128,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
     def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> None:
         mig_name = mig_utils.get_managed_instance_group_name(cluster_name)
         # Get all resize request of the MIG and cancel them.
-        mig_utils.cancel_all_resize_requests(project_id, zone, mig_name)
+        mig_utils.cancel_all_resize_request_for_mig(project_id, zone, mig_name)
         try:
             operation = cls.load_resource().instanceGroupManagers().delete(
                 project=project_id, zone=zone,
@@ -1180,7 +1180,8 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             potential_head_instances: List[str]) -> List[str]:
         pending_running_instances = cls.filter(
             project_id,
-            zone, {constants.TAG_RAY_CLUSTER_NAME: cluster_name},
+            zone,
+            {constants.TAG_RAY_CLUSTER_NAME: cluster_name},
             # Find all provisioning and running instances.
             status_filters=cls.NEED_TO_STOP_STATES)
         for running_instance_name in pending_running_instances.keys():

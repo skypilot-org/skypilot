@@ -27,7 +27,10 @@ def get_managed_instance_group_name(cluster_name: str) -> str:
 
 
 def check_instance_template_exits(project_id, region, template_name) -> bool:
-    compute = gcp.build('compute', 'v1', credentials=None, cache_discovery=False)
+    compute = gcp.build('compute',
+                        'v1',
+                        credentials=None,
+                        cache_discovery=False)
     try:
         compute.regionInstanceTemplates().get(
             project=project_id, region=region,
@@ -43,16 +46,24 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
                                     region: str, template_name: str,
                                     node_config: Dict[str, Any]):
     """Create a regional instance template."""
-    compute = gcp.build('compute', 'v1', credentials=None, cache_discovery=False)
+    compute = gcp.build('compute',
+                        'v1',
+                        credentials=None,
+                        cache_discovery=False)
     config = node_config.copy()
     config.pop(constants.MANAGED_INSTANCE_GROUP_CONFIG, None)
 
     # We have to ignore user defined scheduling for DWS.
     # TODO: Add a warning log for this behvaiour.
-    config.pop('scheduling', None)
-    # We have to ignore reservations for DWS.
-    # TODO: Add a warning log for this behvaiour.
-    config.pop('reservation_affinity', None)
+    scheduling = config.pop('scheduling', {})
+    assert scheduling.get('provisioningModel') != 'SPOT', (
+        'DWS does not support spot VMs.')
+
+    reservations_affinity = config.pop('reservation_affinity', None)
+    if reservations_affinity is not None:
+        logger.warning(
+            f'Ignoring reservations_affinity {reservations_affinity} '
+            'for DWS.')
 
     # Create the regional instance template request
     operation = compute.regionInstanceTemplates().insert(
@@ -66,7 +77,6 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
                     f'{cluster_name_on_cloud!r} to support DWS requests.'),
                 reservationAffinity=dict(
                     consumeReservationType='NO_RESERVATION'),
-                scheduling=dict(onHostMaintenance='TERMINATE'),
                 **config,
             )
         }).execute()
@@ -75,7 +85,10 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
 
 def create_managed_instance_group(project_id: str, zone: str, group_name: str,
                                   instance_template_url: str, size: int):
-    compute = gcp.build('compute', 'v1', credentials=None, cache_discovery=False)
+    compute = gcp.build('compute',
+                        'v1',
+                        credentials=None,
+                        cache_discovery=False)
     operation = compute.instanceGroupManagers().insert(
         project=project_id,
         zone=zone,
@@ -95,7 +108,10 @@ def create_managed_instance_group(project_id: str, zone: str, group_name: str,
 
 def resize_managed_instance_group(project_id: str, zone: str, group_name: str,
                                   resize_by: int, run_duration_seconds: int):
-    compute = gcp.build('compute', 'beta', credentials=None, cache_discovery=False)
+    compute = gcp.build('compute',
+                        'beta',
+                        credentials=None,
+                        cache_discovery=False)
     operation = compute.instanceGroupManagerResizeRequests().insert(
         project=project_id,
         zone=zone,
@@ -109,33 +125,44 @@ def resize_managed_instance_group(project_id: str, zone: str, group_name: str,
         }).execute()
     return operation
 
-def cancel_all_resize_request_for_mig(project_id: str, zone: str, group_name: str):
+
+def cancel_all_resize_request_for_mig(project_id: str, zone: str,
+                                      group_name: str):
+    logger.debug(f'Cancelling all resize requests for MIG {group_name!r}.')
     try:
-        compute = gcp.build('compute', 'beta', credentials=None, cache_discovery=False)
+        compute = gcp.build('compute',
+                            'beta',
+                            credentials=None,
+                            cache_discovery=False)
         operation = compute.instanceGroupManagerResizeRequests().list(
-            project=project_id, zone=zone,
+            project=project_id,
+            zone=zone,
             instanceGroupManager=group_name,
             filter='state eq ACCEPTED').execute()
         for request in operation.get('items', []):
             try:
                 compute.instanceGroupManagerResizeRequests().cancel(
-                    project=project_id, zone=zone,
+                    project=project_id,
+                    zone=zone,
                     instanceGroupManager=group_name,
                     requestId=request['id']).execute()
             except gcp.http_error_exception() as e:
                 logger.warning('Failed to cancel resize request '
-                                f'{request["id"]!r}: {e}')
+                               f'{request["id"]!r}: {e}')
     except gcp.http_error_exception() as e:
-        if re.search(MIG_RESOURCE_NOT_FOUND_PATTERN,
-                        str(e)) is None:
+        if re.search(MIG_RESOURCE_NOT_FOUND_PATTERN, str(e)) is None:
             raise
         logger.warning(f'MIG {group_name!r} does not exist. Skip '
-                        'resize request cancellation.')
+                       'resize request cancellation.')
         logger.debug(f'Error: {e}')
+
 
 def check_managed_instance_group_exists(project_id: str, zone: str,
                                         group_name: str) -> bool:
-    compute = gcp.build('compute', 'v1', credentials=None, cache_discovery=False)
+    compute = gcp.build('compute',
+                        'v1',
+                        credentials=None,
+                        cache_discovery=False)
     try:
         compute.instanceGroupManagers().get(
             project=project_id, zone=zone,
