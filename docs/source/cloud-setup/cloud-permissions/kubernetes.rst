@@ -66,7 +66,7 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-      name: sky-sa-role
+      name: sky-sa-role  # Can be changed if needed
       namespace: default  # Change to your namespace if using a different one.
     rules:
       - apiGroups: ["*"]
@@ -77,7 +77,7 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
     kind: ClusterRole
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-      name: sky-sa-cluster-role
+      name: sky-sa-cluster-role  # Can be changed if needed
       namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
@@ -98,7 +98,7 @@ These roles must apply to both the user account configured in the kubeconfig fil
 
 If your tasks use object store mounting or require access to ingress resources, you will need to grant additional permissions as described below.
 
-Permissions for object store mounting
+Permissions for Object Store Mounting
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If your tasks use object store mounting (e.g., S3, GCS, etc.), SkyPilot will need to run a DaemonSet to expose the FUSE device as a Kubernetes resource to SkyPilot pods.
@@ -113,7 +113,7 @@ To allow this, you will need to also create a ``skypilot-system`` namespace whic
     apiVersion: v1
     kind: Namespace
     metadata:
-      name: skypilot-system
+      name: skypilot-system  # Do not change this
       labels:
         parent: skypilot
     ---
@@ -123,7 +123,7 @@ To allow this, you will need to also create a ``skypilot-system`` namespace whic
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-      name: skypilot-system-service-account-role
+      name: skypilot-system-service-account-role  # Can be changed if needed
       namespace: skypilot-system  # Do not change this namespace
       labels:
         parent: skypilot
@@ -133,7 +133,7 @@ To allow this, you will need to also create a ``skypilot-system`` namespace whic
         verbs: ["*"]
 
 
-Permissions for using ingress
+Permissions for using Ingress
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If your tasks use :ref:`Ingress <kubernetes-ingress>` for exposing ports, you will need to grant the necessary permissions to the service account in the ``ingress-nginx`` namespace.
@@ -145,8 +145,8 @@ If your tasks use :ref:`Ingress <kubernetes-ingress>` for exposing ports, you wi
     apiVersion: rbac.authorization.k8s.io/v1
     kind: Role
     metadata:
-      namespace: ingress-nginx
-      name: sky-sa-role-ingress-nginx
+      namespace: ingress-nginx  # Do not change this
+      name: sky-sa-role-ingress-nginx  # Can be changed if needed
     rules:
       - apiGroups: [""]
         resources: ["services"]
@@ -167,6 +167,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
 
 
 .. code-block:: yaml
+   :linenos:
 
     # create-sky-sa.yaml
     kind: ServiceAccount
@@ -181,7 +182,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-      name: sky-sa-role
+      name: sky-sa-role  # Can be changed if needed
       namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
@@ -194,7 +195,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
     kind: RoleBinding
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-      name: sky-sa-rb
+      name: sky-sa-rb  # Can be changed if needed
       namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
@@ -203,14 +204,14 @@ To create a service account that has all necessary permissions for SkyPilot (inc
         name: sky-sa  # Change to your service account name
     roleRef:
       kind: Role
-      name: sky-sa-role
+      name: sky-sa-role  # Use the same name as the role at line 14
       apiGroup: rbac.authorization.k8s.io
     ---
     # ClusterRole for the service account
     kind: ClusterRole
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-      name: sky-sa-cluster-role
+      name: sky-sa-cluster-role  # Can be changed if needed
       namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
@@ -229,7 +230,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRoleBinding
     metadata:
-      name: sky-sa-cluster-role-binding
+      name: sky-sa-cluster-role-binding  # Can be changed if needed
       namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
@@ -239,14 +240,14 @@ To create a service account that has all necessary permissions for SkyPilot (inc
         namespace: default  # Change to your namespace if using a different one.
     roleRef:
       kind: ClusterRole
-      name: sky-sa-cluster-role
+      name: sky-sa-cluster-role  # Use the same name as the cluster role at line 43
       apiGroup: rbac.authorization.k8s.io
     ---
     # Optional: If using object store mounting, create the skypilot-system namespace
     apiVersion: v1
     kind: Namespace
     metadata:
-      name: skypilot-system
+      name: skypilot-system  # Do not change this
       labels:
         parent: skypilot
     ---
@@ -255,7 +256,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-      name: skypilot-system-service-account-role
+      name: skypilot-system-service-account-role  # Can be changed if needed
       namespace: skypilot-system  # Do not change this namespace
       labels:
         parent: skypilot
@@ -279,15 +280,17 @@ To create a service account that has all necessary permissions for SkyPilot (inc
         namespace: default  # Change this to the namespace where the service account is created
     roleRef:
       kind: Role
-      name: skypilot-system-service-account-role
+      name: skypilot-system-service-account-role  # Use the same name as the role at line 88
       apiGroup: rbac.authorization.k8s.io
     ---
     # Optional: Role for accessing ingress resources
     apiVersion: rbac.authorization.k8s.io/v1
     kind: Role
     metadata:
-      name: sky-sa-role-ingress-nginx
+      name: sky-sa-role-ingress-nginx  # Can be changed if needed
       namespace: ingress-nginx  # Do not change this namespace
+      labels:
+        parent: skypilot
     rules:
       - apiGroups: [""]
         resources: ["services"]
@@ -300,15 +303,17 @@ To create a service account that has all necessary permissions for SkyPilot (inc
     apiVersion: rbac.authorization.k8s.io/v1
     kind: RoleBinding
     metadata:
-      name: sky-sa-rolebinding-ingress-nginx
+      name: sky-sa-rolebinding-ingress-nginx  # Can be changed if needed
       namespace: ingress-nginx  # Do not change this namespace
+      labels:
+        parent: skypilot
     subjects:
       - kind: ServiceAccount
         name: sky-sa  # Change to your service account name
         namespace: default  # Change this to the namespace where the service account is created
     roleRef:
       kind: Role
-      name: sky-sa-role-ingress-nginx
+      name: sky-sa-role-ingress-nginx  # Use the same name as the role at line 119
       apiGroup: rbac.authorization.k8s.io
 
 Create the service account using the following command:
