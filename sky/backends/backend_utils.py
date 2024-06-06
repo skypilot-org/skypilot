@@ -867,6 +867,13 @@ def write_cluster_config(
     if to_provision.labels:
         labels.update(to_provision.labels)
 
+    # Prepare labels to be dumped into the yaml file - add quotes to the values
+    # to enforce str type for label values. Unquoted strings may get parsed as
+    # bool by yaml.safe_load (E.g., 'True' without quotes gets parsed as bool),
+    # which may cause issues with downstream code (e.g., Kubernetes python API
+    # does not accept bool values for labels).
+    labels = {k: f'\'{v}\'' for k, v in labels.items()}
+
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
         f'{constants.SKY_PYTHON_CMD} -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
