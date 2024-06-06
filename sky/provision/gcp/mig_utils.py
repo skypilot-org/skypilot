@@ -37,7 +37,7 @@ def check_instance_template_exits(project_id: str, region: str,
             project=project_id, region=region,
             instanceTemplate=template_name).execute()
     except gcp.http_error_exception() as e:
-        if IT_RESOURCE_NOT_FOUND_PATTERN.search(str(e)) is None:
+        if IT_RESOURCE_NOT_FOUND_PATTERN.search(str(e)) is not None:
             # Instance template does not exist.
             return False
         raise
