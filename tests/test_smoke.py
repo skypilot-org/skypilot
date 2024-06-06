@@ -723,12 +723,12 @@ def test_gcp_mig():
             f'sky autostop -i 0 --down -y {name}',
             'sleep 120',
             f'sky status -r {name}; sky status {name} | grep "{name} not found"',
-            f'gcloud compute instance-templates list --regions | grep "sky-it-{name}"',
+            f'gcloud compute instance-templates list | grep "sky-it-{name}"',
             # Launch again.
             f'sky launch -y -c {name} --gpus L4 --num-nodes 2 nvidia-smi',
             f'sky logs {name} 1 | grep "L4"',
             f'sky down -y {name}',
-            f'gcloud compute instance-templates list --regions | grep "sky-it-{name}" && exit 1 || true',
+            f'gcloud compute instance-templates list | grep "sky-it-{name}" && exit 1 || true',
         ],
         f'sky down -y {name}',
         env={'SKYPILOT_CONFIG': 'tests/test_yamls/use_mig_config.yaml'})
