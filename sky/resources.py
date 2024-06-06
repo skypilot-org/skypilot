@@ -438,7 +438,7 @@ class Resources:
     def labels(self) -> Optional[Dict[str, str]]:
         labels = {constants.TAG_SKYPILOT_COMPONENT: 'cluster'}
         if self._labels is not None:
-           labels.update(self._labels)
+            labels.update(self._labels)
         return labels
 
     @property
