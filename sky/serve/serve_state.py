@@ -363,7 +363,7 @@ def get_services() -> List[Dict[str, Any]]:
     """Get all existing service records."""
     user_id = _get_user_id()
     with engine.connect() as cursor:
-        rows = cursor.execute('SELECT v.max_version, s.id, s.name, s.controller_job_id, s.controller_port, s.load_balancer_port, s.status, s.uptime, s.min_replicas, s.max_replicas, s.resources, s.active_versions FROM services s '
+        rows = cursor.execute('SELECT v.max_version, s.id, s.name, s.controller_job_id, s.controller_port, s.load_balancer_port, s.status, s.uptime, s.replica_policy_min_replicas, s.replica_policy_max_replicas, s.resources, s.active_versions FROM services s '
                               'JOIN ('
                               'SELECT service_id, MAX(version) as max_version'
                               ' FROM version_specs GROUP BY service_id) v '
@@ -379,7 +379,7 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     service_id, service_name = _parse_name_values(service_name)
     with engine.connect() as cursor:
         rows = cursor.execute(
-            'SELECT v.max_version, s.id, s.name, s.controller_job_id, s.controller_port, s.load_balancer_port, s.status, s.uptime, s.min_replicas, s.max_replicas, s.resources, s.active_versions FROM services s '
+            'SELECT v.max_version, s.id, s.name, s.controller_job_id, s.controller_port, s.load_balancer_port, s.status, s.uptime, s.replica_policy_min_replicas, s.replica_policy_max_replicas, s.resources, s.active_versions FROM services s '
             'JOIN ('
             'SELECT service_id, MAX(version) as max_version '
             f'FROM version_specs WHERE service_id=\'{service_id}\' GROUP BY service_id) v '
