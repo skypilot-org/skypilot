@@ -83,8 +83,8 @@ available_node_types:
         managed-instance-group: {{ gcp_use_managed_instance_group }}
       {%- if gcp_use_managed_instance_group %}
       managed-instance-group:
-        run_duration_seconds: {{ run_duration_seconds }}
-        creation_timeout_seconds: {{ creation_timeout_seconds }}
+        run_duration: {{ run_duration }}
+        provision_timeout: {{ provision_timeout }}
       {%- endif %}
       {%- if specific_reservations %}
       reservationAffinity:

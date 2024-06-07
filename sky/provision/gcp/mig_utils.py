@@ -48,6 +48,7 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
                                     region: str, template_name: str,
                                     node_config: Dict[str, Any]) -> dict:
     """Create a regional instance template."""
+    logger.debug(f'Creating regional instance template {template_name!r}.')
     compute = gcp.build('compute',
                         'v1',
                         credentials=None,
@@ -88,6 +89,7 @@ def create_region_instance_template(cluster_name_on_cloud: str, project_id: str,
 def create_managed_instance_group(project_id: str, zone: str, group_name: str,
                                   instance_template_url: str,
                                   size: int) -> dict:
+    logger.debug(f'Creating managed instance group {group_name!r}.')
     compute = gcp.build('compute',
                         'v1',
                         credentials=None,
@@ -110,8 +112,9 @@ def create_managed_instance_group(project_id: str, zone: str, group_name: str,
 
 
 def resize_managed_instance_group(project_id: str, zone: str, group_name: str,
-                                  resize_by: int,
-                                  run_duration_seconds: int) -> dict:
+                                  resize_by: int, run_duration: int) -> dict:
+    logger.debug(f'Resizing managed instance group {group_name!r} by '
+                 f'{resize_by} with run duration {run_duration}.')
     compute = gcp.build('compute',
                         'beta',
                         credentials=None,
@@ -124,7 +127,7 @@ def resize_managed_instance_group(project_id: str, zone: str, group_name: str,
             'name': group_name,
             'resizeBy': resize_by,
             'requestedRunDuration': {
-                'seconds': run_duration_seconds,
+                'seconds': run_duration,
             }
         }).execute()
     return operation
@@ -149,8 +152,7 @@ def cancel_all_resize_request_for_mig(project_id: str, zone: str,
                     project=project_id,
                     zone=zone,
                     instanceGroupManager=group_name,
-                    resizeRequest=request['name'],
-                    requestId=request['id']).execute()
+                    resizeRequest=request['name']).execute()
             except gcp.http_error_exception() as e:
                 logger.warning('Failed to cancel resize request '
                                f'{request["id"]!r}: {e}')
@@ -179,11 +181,11 @@ def check_managed_instance_group_exists(project_id: str, zone: str,
     return True
 
 
-def wait_for_managed_group_to_be_stable(project_id: str,
-                                        zone: str,
-                                        group_name: str,
-                                        timeout: int = 1200) -> None:
+def wait_for_managed_group_to_be_stable(project_id: str, zone: str,
+                                        group_name: str, timeout: int) -> None:
     """Wait until the managed instance group is stable."""
+    logger.debug(f'Waiting for MIG {group_name} to be stable with timeout '
+                 f'{timeout}.')
     try:
         cmd = ('gcloud compute instance-groups managed wait-until '
                f'{group_name} '

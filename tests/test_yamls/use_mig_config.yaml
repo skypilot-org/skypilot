@@ -1,4 +1,4 @@
 gcp:
   managed_instance_group:
-    run_duration_seconds: 36000
-    creation_timeout_seconds: 900
+    run_duration: 36000
+    provision_timeout: 900

@@ -590,15 +590,13 @@ def get_config_schema():
                 },
                 'managed_instance_group': {
                     'type': 'object',
-                    'required': [
-                        'run_duration_seconds', 'creation_timeout_seconds'
-                    ],
+                    'required': ['run_duration'],
                     'additionalProperties': False,
                     'properties': {
-                        'run_duration_seconds': {
+                        'run_duration': {
                             'type': 'integer',
                         },
-                        'creation_timeout_seconds': {
+                        'provision_timeout': {
                             'type': 'integer',
                         }
                     }

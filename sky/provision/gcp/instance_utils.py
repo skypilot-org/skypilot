@@ -1074,15 +1074,12 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             constants.MANAGED_INSTANCE_GROUP_CONFIG]
         if count > 0:
             # Use resize to trigger DWS for creating VMs.
-            logger.debug(f'Resizing Managed instance group '
-                         f'{managed_instance_group_name!r} by {count}...')
             operation = mig_utils.resize_managed_instance_group(
                 project_id,
                 zone,
                 managed_instance_group_name,
                 count,
-                run_duration_seconds=managed_instance_group_config[
-                    'run_duration_seconds'])
+                run_duration=managed_instance_group_config['run_duration'])
             cls.wait_for_operation(operation, project_id, zone=zone)
 
         # This will block the provisioning until the nodes are ready, which
@@ -1092,7 +1089,9 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             project_id,
             zone,
             managed_instance_group_name,
-            timeout=managed_instance_group_config['creation_timeout_seconds'])
+            timeout=managed_instance_group_config.get(
+                'provision_timeout',
+                constants.DEFAULT_MANAGED_INSTANCE_GROUP_PROVISION_TIMEOUT))
 
         pending_running_instance_names = cls._add_labels_and_find_head(
             cluster_name, project_id, zone, labels, potential_head_instances)
@@ -1109,6 +1108,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
     @classmethod
     def _delete_instance_template(cls, project_id: str, zone: str,
                                   instance_template_name: str) -> None:
+        logger.debug(f'Deleting instance template {instance_template_name}...')
         region = zone.rpartition('-')[0]
         try:
             operation = cls.load_resource().regionInstanceTemplates().delete(
@@ -1129,6 +1129,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         mig_name = mig_utils.get_managed_instance_group_name(cluster_name)
         # Get all resize request of the MIG and cancel them.
         mig_utils.cancel_all_resize_request_for_mig(project_id, zone, mig_name)
+        logger.debug(f'Deleting MIG {mig_name!r} ...')
         try:
             operation = cls.load_resource().instanceGroupManagers().delete(
                 project=project_id, zone=zone,
@@ -1150,28 +1151,6 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         cls._delete_instance_template(
             project_id, zone,
             mig_utils.get_instance_template_name(cluster_name))
-
-    # TODO(zhwu): We want to restart the instances with MIG instead of the
-    # normal instance start API to take advantage of DWS.
-    # @classmethod
-    # def start_instances(cls, cluster_name: str, project_id: str, zone: str,
-    #                     instances: List[str], labels: Dict[str,
-    #                                                        str]) -> List[str]:
-    #     del instances  # unused
-    #     potential_head_instances = cls.filter(
-    #         project_id,
-    #         zone,
-    #         label_filters={
-    #             constants.TAG_RAY_NODE_KIND: 'head',
-    #             constants.TAG_RAY_CLUSTER_NAME: cluster_name,
-    #         },
-    #         status_filters=cls.NEED_TO_TERMINATE_STATES)
-    #     mig_name = mig_utils.get_managed_instance_group_name(cluster_name)
-    #     mig_utils.start_managed_instance_group(project_id, zone, mig_name)
-    #     mig_utils.wait_for_managed_group_to_be_stable(project_id, zone,
-    #                                                   mig_name)
-    #     return cls._add_labels_and_find_head(cluster_name, project_id, zone,
-    #                                          labels, potential_head_instances)
 
     @classmethod
     def _add_labels_and_find_head(
