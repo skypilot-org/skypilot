@@ -266,8 +266,8 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
 # it will be used to determine the priority of the label formats when
 # auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
-    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter,
-    KarpenterLabelFormatter, GFDLabelFormatter
+    SkyPilotLabelFormatter, GKELabelFormatter, KarpenterLabelFormatter,
+    GFDLabelFormatter, CoreWeaveLabelFormatter
 ]
 
 # Mapping of autoscaler type to label formatter
