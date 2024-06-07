@@ -3820,6 +3820,7 @@ def test_skyserve_failures(generic_cloud: str):
             f's=$(sky serve status {name}); echo "$s"; done',
             # Wait for the PENDING replica to appear.
             'sleep 10',
+            # Wait until the replica is out of PENDING.
             f's=$(sky serve status {name}); '
             f'until ! echo "$s" | grep "PENDING" && ! echo "$s" | grep "Please wait for the controller to be ready."; do '
             'echo "Waiting for replica to be out of pending..."; sleep 5; '
