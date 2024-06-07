@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 
+import sky
 from sky.serve import constants
 from sky.utils import db_utils
 
@@ -433,23 +434,44 @@ def add_or_update_replica(service_name: str, replica_id: int,
         d = replica_info.to_info_dict(with_handle=True)
         handle = d.pop('handle')
 
+        cloud = None
         region = None
         zone = None
+        instance_type = None
+        accelerators = None
+        ports = None
+        disk_size = None
+        spot = None
         if handle:
-            region = handle.launched_resources.region
-            zone = handle.launched_resources.zone
+            launched_resources: sky.Resources = handle.launched_resources
+            cloud = launched_resources.cloud._REPR.lower() if launched_resources.cloud else None
+            region = launched_resources.region
+            zone = launched_resources.zone
+            instance_type = launched_resources.instance_type
+            accelerators = ','.join([f'{acc}:{count}' for acc, count in launched_resources.accelerators.items()]) if launched_resources.accelerators else None
+            ports = ','.join(launched_resources.ports)
+            disk_size = launched_resources.disk_size
+            spot = launched_resources.use_spot
 
         d.update({'status_property': d['status_property'].to_dict()})
         ri = json.dumps(d)
         query = """\
         INSERT INTO replicas
-        (service_id, replica_id, replica_info, region, zone)
+        (service_id, replica_id, replica_info, skypilot_cluster_id, cloud, region, zone, instance_type, accelerators, ports, disk_size, spot)
         VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (service_id, replica_id)
         DO UPDATE SET replica_info=EXCLUDED.replica_info,
+                      skypilot_cluster_id=EXCLUDED.skypilot_cluster_id,
+                      cloud=EXCLUDED.cloud,
                       region=EXCLUDED.region,
-                      zone=EXCLUDED.zone"""
-        cursor.execute(query, (service_id, replica_id, ri, region, zone))
+                      zone=EXCLUDED.zone,
+                      instance_type=EXCLUDED.instance_type,
+                      accelerators=EXCLUDED.accelerators,
+                      ports=EXCLUDED.ports,
+                      disk_size=EXCLUDED.disk_size,
+                      spot=EXCLUDED.spot,
+                      """
+        cursor.execute(query, (service_id, replica_id, ri, replica_info.cluster_name, cloud, region, zone, instance_type, accelerators, ports, disk_size, spot))
 
 
 def remove_replica(service_name: str, replica_id: int) -> None:
