@@ -458,7 +458,7 @@ def add_or_update_replica(service_name: str, replica_id: int,
         query = """\
         INSERT INTO replicas
         (service_id, replica_id, replica_info, skypilot_cluster_id, cloud, region, zone, instance_type, accelerators, ports, disk_size, spot)
-        VALUES (%s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s)
         ON CONFLICT (service_id, replica_id)
         DO UPDATE SET replica_info=EXCLUDED.replica_info,
                       skypilot_cluster_id=EXCLUDED.skypilot_cluster_id,
@@ -469,7 +469,7 @@ def add_or_update_replica(service_name: str, replica_id: int,
                       accelerators=EXCLUDED.accelerators,
                       ports=EXCLUDED.ports,
                       disk_size=EXCLUDED.disk_size,
-                      spot=EXCLUDED.spot,
+                      spot=EXCLUDED.spot
                       """
         cursor.execute(query, (service_id, replica_id, ri, replica_info.cluster_name, cloud, region, zone, instance_type, accelerators, ports, disk_size, spot))
 
