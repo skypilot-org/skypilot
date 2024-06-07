@@ -444,7 +444,9 @@ def add_or_update_replica(service_name: str, replica_id: int,
         spot = None
         if handle:
             launched_resources: sky.Resources = handle.launched_resources
-            cloud = launched_resources.cloud._REPR.lower() if launched_resources.cloud else None
+            cloud = launched_resources.cloud._REPR.upper() if launched_resources.cloud else None
+            if cloud == 'LAMBDA':
+                cloud = 'LAMBDA_LABS'
             region = launched_resources.region
             zone = launched_resources.zone
             instance_type = launched_resources.instance_type
