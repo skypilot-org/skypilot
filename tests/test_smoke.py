@@ -3817,7 +3817,12 @@ def test_skyserve_failures(generic_cloud: str):
             f's=$(sky serve status {name}); '
             f'until echo "$s" | grep "FAILED_PROBING"; do '
             'echo "Waiting for replica to be failed..."; sleep 5; '
-            f's=$(sky serve status {name}); echo "$s"; done;' +
+            f's=$(sky serve status {name}); echo "$s"; done',
+            'sleep 10',
+            f's=$(sky serve status {name}); '
+            f'until ! echo "$s" | grep "PENDING"; do '
+            'echo "Waiting for replica to be out of pending..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done; ' + 
             _check_replica_in_status(
                 name, [(1, False, 'FAILED_PROBING'),
                        (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
