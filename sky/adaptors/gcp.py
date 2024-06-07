@@ -2,6 +2,7 @@
 
 # pylint: disable=import-outside-toplevel
 import json
+import functools
 
 from sky.adaptors import common
 
@@ -12,7 +13,7 @@ googleapiclient = common.LazyImport('googleapiclient',
 google = common.LazyImport('google', import_error_message=_IMPORT_ERROR_MESSAGE)
 _LAZY_MODULES = (google, googleapiclient)
 
-
+@functools.lru_cache()
 @common.load_lazy_modules(_LAZY_MODULES)
 def build(service_name: str, version: str, *args, **kwargs):
     """Build a GCP service.

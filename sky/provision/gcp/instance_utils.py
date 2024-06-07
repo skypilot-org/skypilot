@@ -100,9 +100,9 @@ def _generate_node_name(cluster_name: str, node_suffix: str,
     return node_name
 
 
-def _format_message_from_errors(errors: List[Dict[str, str]], e: Any,
-                                zone: Optional[str]) -> str:
-    """Format errors into a string."""
+def _format_and_log_message_from_errors(errors: List[Dict[str, str]], e: Any,
+                                        zone: Optional[str]) -> str:
+    """Format errors into a string and log it to the console."""
     if errors:
         plural = 's' if len(errors) > 1 else ''
         codes = ', '.join(repr(e.get('code', 'N/A')) for e in errors)
@@ -442,7 +442,8 @@ class GCPComputeInstance(GCPInstance):
                     logger.debug(
                         'wait_operations: Failed to create instances. Reason: '
                         f'{errors}')
-                    msg = _format_message_from_errors(errors, result, zone)
+                    msg = _format_and_log_message_from_errors(
+                        errors, result, zone)
                     error = common.ProvisionerError('Operation failed')
                     setattr(error, 'detailed_reason', msg)
                     error.errors = errors
@@ -464,8 +465,9 @@ class GCPComputeInstance(GCPInstance):
                 'message': f'Timeout waiting for operation {operation["name"]}',
                 'domain': 'wait_for_operation'
             }]
-            msg = _format_message_from_errors(errors, None, zone)
+            msg = _format_and_log_message_from_errors(errors, None, zone)
             error = common.ProvisionerError('Operation timed out')
+            # Used for usage collection only, to include in the usage message.
             setattr(error, 'detailed_reason', msg)
             error.errors = errors
             raise error
@@ -822,7 +824,7 @@ class GCPComputeInstance(GCPInstance):
                 })
             logger.debug(
                 f'create_instances: googleapiclient.errors.HttpError: {e}')
-            _format_message_from_errors(errors, e, zone)
+            _format_and_log_message_from_errors(errors, e, zone)
             return errors
 
         # Allow Google Compute Engine instance templates.
@@ -852,7 +854,7 @@ class GCPComputeInstance(GCPInstance):
             if errors:
                 logger.debug('create_instances: Failed to create instances. '
                              f'Reason: {errors}')
-                _format_message_from_errors(errors, operations, zone)
+                _format_and_log_message_from_errors(errors, operations, zone)
                 return errors
 
         logger.debug('Waiting GCP instances to be ready ...')
@@ -1260,7 +1262,7 @@ class GCPTPUVMInstance(GCPInstance):
                         'domain': 'create_instances',
                         'message': error_details,
                     })
-                    _format_message_from_errors(errors, e, zone)
+                    _format_and_log_message_from_errors(errors, e, zone)
                     return errors, names
                 for detail in error_details:
                     # To be consistent with error messages returned by operation
@@ -1279,7 +1281,7 @@ class GCPTPUVMInstance(GCPInstance):
                                 'domain': violation.get('subject'),
                                 'message': violation.get('description'),
                             })
-                _format_message_from_errors(errors, e, zone)
+                _format_and_log_message_from_errors(errors, e, zone)
                 return errors, names
         errors = []
         for operation in operations:
@@ -1297,7 +1299,7 @@ class GCPTPUVMInstance(GCPInstance):
         if errors:
             logger.debug('create_instances: Failed to create instances. '
                          f'Reason: {errors}')
-            _format_message_from_errors(errors, operations, zone)
+            _format_and_log_message_from_errors(errors, operations, zone)
             return errors, names
 
         logger.debug('Waiting GCP instances to be ready ...')
@@ -1339,7 +1341,7 @@ class GCPTPUVMInstance(GCPInstance):
                 'message': 'Timeout waiting for creation operation',
                 'domain': 'create_instances'
             }]
-            _format_message_from_errors(errors, None, zone)
+            _format_and_log_message_from_errors(errors, None, zone)
             return errors, names
 
         # NOTE: Error example:
@@ -1356,7 +1358,7 @@ class GCPTPUVMInstance(GCPInstance):
             logger.debug(
                 'create_instances: Failed to create instances. Reason: '
                 f'{errors}')
-            _format_message_from_errors(errors, results, zone)
+            _format_and_log_message_from_errors(errors, results, zone)
             return errors, names
         assert all(success), (
             'Failed to create instances, but there is no error. '
@@ -1478,7 +1480,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
                            'https://console.cloud.google.com/iam-admin/quotas '
                            'for more information.'
             }]
-            _format_message_from_errors(provisioner_err.errors, e, zone)
+            _format_and_log_message_from_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         if 'PERMISSION_DENIED' in stderr:
@@ -1487,7 +1489,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
                 'domain': 'tpu',
                 'message': 'TPUs are not available in this zone.'
             }]
-            _format_message_from_errors(provisioner_err.errors, e, zone)
+            _format_and_log_message_from_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         if 'no more capacity in the zone' in stderr:
@@ -1496,7 +1498,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
                 'domain': 'tpu',
                 'message': 'No more capacity in this zone.'
             }]
-            _format_message_from_errors(provisioner_err.errors, e, zone)
+            _format_and_log_message_from_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         if 'CloudTpu received an invalid AcceleratorType' in stderr:
@@ -1509,7 +1511,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
                 'message': (f'TPU type {tpu_type} is not available in this '
                             f'zone {zone}.')
             }]
-            _format_message_from_errors(provisioner_err.errors, e, zone)
+            _format_and_log_message_from_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         # TODO(zhwu): Add more error code handling, if needed.
@@ -1518,7 +1520,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
             'domain': 'tpu',
             'message': stderr
         }]
-        _format_message_from_errors(provisioner_err.errors, e, zone)
+        _format_and_log_message_from_errors(provisioner_err.errors, e, zone)
         raise provisioner_err from e
 
 
