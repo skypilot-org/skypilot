@@ -2298,7 +2298,7 @@ class AzureBlobStore(AbstractStore):
                 storage_account_name=self.storage_account_name,
                 container_name=self.name)
             container_client = data_utils.create_az_client(
-                'container', container_url=container_url)
+                client_type='container', container_url=container_url)
             if container_client.exists():
                 is_private = (True if container_client.get_container_properties(
                 )['public_access'] is None else False)

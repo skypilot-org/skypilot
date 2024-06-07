@@ -180,7 +180,7 @@ def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
     container_url = AZURE_CONTAINER_URL.format(
         storage_account_name=storage_account_name,
         container_name=container_name)
-    container_client = create_az_client('container',
+    container_client = create_az_client(client_type='container',
                                         container_url=container_url)
     return container_client.exists()
 
