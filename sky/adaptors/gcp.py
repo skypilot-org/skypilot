@@ -1,8 +1,8 @@
 """GCP cloud adaptors"""
 
 # pylint: disable=import-outside-toplevel
-import json
 import functools
+import json
 
 from sky.adaptors import common
 
@@ -12,6 +12,7 @@ googleapiclient = common.LazyImport('googleapiclient',
                                     import_error_message=_IMPORT_ERROR_MESSAGE)
 google = common.LazyImport('google', import_error_message=_IMPORT_ERROR_MESSAGE)
 _LAZY_MODULES = (google, googleapiclient)
+
 
 @functools.lru_cache()
 @common.load_lazy_modules(_LAZY_MODULES)
