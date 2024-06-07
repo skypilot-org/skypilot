@@ -19,8 +19,8 @@ To connect and use a Kubernetes cluster, SkyPilot needs:
 
 In a typical workflow:
 
-1. A cluster administrator sets up a Kubernetes cluster. Detailed admin guides for
-   different deployment environments (Amazon EKS, Google GKE, On-Prem and local debugging) are included in the :ref:`Kubernetes cluster setup guide <kubernetes-setup>`.
+1. A cluster administrator sets up a Kubernetes cluster. Refer to admin guides for
+   :ref:`Kubernetes cluster setup <kubernetes-setup>` for different deployment environments (Amazon EKS, Google GKE, On-Prem and local debugging) and :ref:`required permissions <cloud-permissions-kubernetes>`.
 
 2. Users who want to run SkyPilot tasks on this cluster are issued Kubeconfig
    files containing their credentials (`kube-context <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#define-clusters-users-and-contexts>`_).
