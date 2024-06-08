@@ -12,13 +12,13 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
 
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import aws as aws_cloud
 from sky.provision import common
 from sky.provision.aws import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)

@@ -12,14 +12,20 @@ from sky import data
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky import task
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import controller_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
+
+try:
+    import fastapi
+    app_router = fastapi.APIRouter()
+except ImportError:
+    app_router = None
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -31,6 +37,13 @@ logger = sky_logging.init_logger(__name__)
 # ======================
 
 # pylint: disable=redefined-builtin
+
+
+def router(name, *args, **kwargs):
+    """Decorator for adding a function to the API router."""
+    if app_router is None:
+        return lambda func: func
+    return getattr(app_router, name)(*args, **kwargs)
 
 
 @usage_lib.entrypoint

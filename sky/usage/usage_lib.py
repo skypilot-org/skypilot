@@ -23,8 +23,8 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-    from sky import status_lib
     from sky import task as task_lib
+    from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -393,6 +393,19 @@ def _send_local_messages():
                              f'exception caught: {type(e)}({e})')
 
 
+def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
+    with ux_utils.enable_traceback():
+        if hasattr(e, 'stacktrace') and e.stacktrace is not None:
+            messages.usage.stacktrace = e.stacktrace
+        else:
+            trace = traceback.format_exc()
+            messages.usage.stacktrace = trace
+        if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
+            messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+        messages.usage.exception = common_utils.remove_color(
+            common_utils.format_exception(e))
+
+
 @contextlib.contextmanager
 def entrypoint_context(name: str, fallback: bool = False):
     """Context manager for entrypoint.
@@ -428,13 +441,7 @@ def entrypoint_context(name: str, fallback: bool = False):
     try:
         yield
     except (Exception, SystemExit, KeyboardInterrupt) as e:
-        with ux_utils.enable_traceback():
-            trace = traceback.format_exc()
-            messages.usage.stacktrace = trace
-            if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
-                messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
-            messages.usage.exception = common_utils.remove_color(
-                common_utils.format_exception(e))
+        store_exception(e)
         raise
     finally:
         if fallback:
@@ -442,7 +449,27 @@ def entrypoint_context(name: str, fallback: bool = False):
         _send_local_messages()
 
 
-def entrypoint(name_or_fn: Union[str, Callable], fallback: bool = False):
+T = typing.TypeVar('T')
+
+
+@typing.overload
+def entrypoint(
+        name_or_fn: str,
+        fallback: bool = False
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    ...
+
+
+@typing.overload
+def entrypoint(name_or_fn: Callable[..., T],
+               fallback: bool = False) -> Callable[..., T]:
+    ...
+
+
+def entrypoint(
+    name_or_fn: Union[str, Callable[..., T]],
+    fallback: bool = False
+) -> Union[Callable[..., T], Callable[[Callable[..., T]], Callable[..., T]]]:
     return common_utils.make_decorator(entrypoint_context,
                                        name_or_fn,
                                        fallback=fallback)

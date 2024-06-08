@@ -5,10 +5,10 @@ providers supported by SkyPilot need to follow.
 """
 import functools
 import inspect
+import typing
 from typing import Any, Dict, List, Optional, Type
 
 from sky import sky_logging
-from sky import status_lib
 # These provision.<cloud> modules should never fail even if underlying cloud SDK
 # dependencies are not installed. This is ensured by using sky.adaptors inside
 # these modules, for lazy loading of cloud SDKs.
@@ -22,6 +22,9 @@ from sky.provision import kubernetes
 from sky.provision import runpod
 from sky.provision import vsphere
 from sky.utils import command_runner
+
+if typing.TYPE_CHECKING:
+    from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -61,7 +64,7 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Optional['status_lib.ClusterStatus']]:
     """Query instances.
 
     Returns a dictionary of instance IDs and status.
@@ -163,7 +166,7 @@ def query_ports(
 
 @_route_to_cloud_impl
 def wait_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
-                   state: Optional[status_lib.ClusterStatus]) -> None:
+                   state: Optional['status_lib.ClusterStatus']) -> None:
     """Wait instances until they ends up in the given state."""
     raise NotImplementedError
 

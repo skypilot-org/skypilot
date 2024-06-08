@@ -5,11 +5,11 @@ from typing import Any, Dict, List, Optional
 from sky import authentication as auth
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.provision import common
 from sky.provision.fluidstack import fluidstack_utils as utils
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

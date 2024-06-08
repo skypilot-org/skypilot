@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -28,7 +29,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Cudo(clouds.Cloud):
     """Cudo Compute"""
     _REPR = 'Cudo'

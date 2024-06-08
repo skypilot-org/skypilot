@@ -162,6 +162,7 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
+    'fastapi'
 ]
 
 local_ray = [
@@ -279,7 +280,7 @@ setuptools.setup(
     install_requires=install_requires,
     extras_require=extras_require,
     entry_points={
-        'console_scripts': ['sky = sky.cli:cli'],
+        'console_scripts': ['sky = sky.api.cli:cli'],
     },
     include_package_data=True,
     classifiers=[

@@ -223,7 +223,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         # Kill load balancer process first since it will raise errors if failed
         # to connect to the controller. Then the controller process.
         subprocess_utils.kill_children_processes(
-            [process.pid for process in process_to_kill], force=True)
+            parent_pids=[process.pid for process in process_to_kill],
+            force=True)
         for process in process_to_kill:
             process.join()
         failed = _cleanup(service_name)
