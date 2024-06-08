@@ -247,7 +247,6 @@ def get_az_storage_account_key(
         storage_client = create_az_client('storage')
     attempt = 0
     backoff = common_utils.Backoff()
-    logger.info('get_az_storage_account_key')
     while True:
         try:
             resources = resource_client.resources.list_by_resource_group(
@@ -264,14 +263,16 @@ def get_az_storage_account_key(
                     ]
             storage_account_key = storage_account_keys[0]
             return storage_account_key
+        # If storage account was created right before call to this method,
+        # it is possible to fail to retrieve the key as the creation did not 
+        # propagate to Azure yet. We retry several times.
         except UnboundLocalError as e:
             attempt += 1
-            logger.info('failed to retrieve storage account name....')
             if attempt > _STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT:
                 raise RuntimeError('Failed to obtain key value of storage '
                                    f'account {storage_account_name}.\n'
                                    f'Detailed error: {e}')
-            time.sleep(backoff.current_backoff()) 
+            time.sleep(backoff.current_backoff())
 
 
 def create_r2_client(region: str = 'auto') -> Client:
