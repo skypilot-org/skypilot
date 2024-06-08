@@ -22,7 +22,8 @@ def build(service_name: str, version: str, *args, **kwargs):
         version: Service version (e.g., 'v1').
     """
 
-    return google.discovery.build(service_name, version, *args, **kwargs)
+    return googleapiclient.discovery.build(service_name, version, *args,
+                                           **kwargs)
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
