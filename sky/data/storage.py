@@ -1449,10 +1449,10 @@ class S3Store(AbstractStore):
                         bucket_name=bucket_name))
                 return False
             else:
-                logger.error(e.output)
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete S3 bucket {bucket_name}.')
+                        f'Failed to delete S3 bucket {bucket_name}.'
+                        f'Detailed error: {e.output}')
 
         # Wait until bucket deletion propagates on AWS servers
         while data_utils.verify_s3_bucket(bucket_name):
@@ -1899,10 +1899,10 @@ class GcsStore(AbstractStore):
                                         executable='/bin/bash')
                 return True
             except subprocess.CalledProcessError as e:
-                logger.error(e.output)
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete GCS bucket {bucket_name}.')
+                        f'Failed to delete GCS bucket {bucket_name}.'
+                        f'Detailed error: {e.output}')
 
 
 class AzureBlobStore(AbstractStore):
@@ -2443,10 +2443,10 @@ class AzureBlobStore(AbstractStore):
                         bucket_name=container_name))
                 return False
             else:
-                logger.error(e.output)
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete Azure container {container_name}.')
+                        f'Failed to delete Azure container {container_name}. '
+                        f'Detailed error: {e.output}')
         return True
 
 
@@ -2823,10 +2823,10 @@ class R2Store(AbstractStore):
                         bucket_name=bucket_name))
                 return False
             else:
-                logger.error(e.output)
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete R2 bucket {bucket_name}.')
+                        f'Failed to delete R2 bucket {bucket_name}.'
+                        f'Detailed error: {e.output}')
 
         # Wait until bucket deletion propagates on AWS servers
         while data_utils.verify_r2_bucket(bucket_name):
