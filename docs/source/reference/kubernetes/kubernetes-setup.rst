@@ -124,7 +124,7 @@ Any one of these labels is sufficient for SkyPilot to detect GPUs on the cluster
           echo "$output"
         fi
 
-Manually labelling nodes
+Manually Labelling Nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 If none of the above labels are present on your cluster, you must create a label of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
@@ -143,7 +143,7 @@ Use the following command to label a node:
     GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerator`` label.
 
 
-Automatically labelling nodes
+Automatically Labelling Nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To make labelling easier, we provide a convenience script that automatically detects GPU types and labels each node. You can run it with:
@@ -165,8 +165,8 @@ To make labelling easier, we provide a convenience script that automatically det
 
 .. _kubernetes-setup-ports:
 
-[Optional] Step 3 - Set up for exposing services
--------------------------------------------------
+[Optional] Step 3 - Set up for Exposing Services
+------------------------------------------------
 
 .. tip::
 
@@ -197,16 +197,16 @@ The minimal permissions required for the service account can be found on the :re
 
 To simplify the setup, we provide a `script <https://github.com/skypilot-org/skypilot/blob/master/sky/utils/kubernetes/generate_kubeconfig.sh>`_ that creates a namespace and service account with the necessary permissions for a given service account name and namespace.
 
-.. code-block:: console
+.. code-block:: bash
 
     # Download the script
-    $ wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/utils/kubernetes/generate_kubeconfig.sh
-    $ chmod +x generate_kubeconfig.sh
+    wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/utils/kubernetes/generate_kubeconfig.sh
+    chmod +x generate_kubeconfig.sh
 
     # Execute the script to generate a kubeconfig file with the service account and namespace
     # Replace my-sa and my-namespace with your desired service account name and namespace
     # The script will create the namespace if it does not exist and create a service account with the necessary permissions.
-    $ SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
+    SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
 
 You may distribute the generated kubeconfig file to users who can then use it to submit tasks to the cluster.
 
@@ -215,9 +215,9 @@ Verifying Setup
 
 Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/config``, verify your setup by running :code:`sky check`:
 
-.. code-block:: console
+.. code-block:: bash
 
-    $ sky check kubernetes
+    sky check kubernetes
 
 This should show ``Kubernetes: Enabled`` without any warnings.
 
