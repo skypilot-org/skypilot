@@ -270,7 +270,7 @@ def get_az_storage_account_key(
             attempt += 1
             if attempt > _STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT:
                 raise RuntimeError('Failed to obtain key value of storage '
-                                   f'account {storage_account_name}.\n'
+                                   f'account {storage_account_name!r}.\n'
                                    f'Detailed error: {e}')
             time.sleep(backoff.current_backoff())
 
