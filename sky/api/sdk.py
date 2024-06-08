@@ -61,6 +61,7 @@ def _start_uvicorn_in_background():
     # Wait for the server to start.
     while True:
         try:
+            # TODO: Should check the process is running as well.
             requests.get(f'{_get_server_url()}/health', timeout=1)
             break
         except requests.exceptions.ConnectionError:
