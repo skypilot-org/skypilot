@@ -13,13 +13,7 @@ google = common.LazyImport('google', import_error_message=_IMPORT_ERROR_MESSAGE)
 _LAZY_MODULES = (google, googleapiclient)
 
 
-# The google-api-python-client library is built on top of the httplib2 library,
-# which is not thread-safe.
-# Reference: https://googleapis.github.io/google-api-python-client/docs/thread_safety.html # pylint: disable=line-too-long
-# We use a thread-local LRU cache to ensure that each thread has its own
-# httplib2.Http object.
 @common.load_lazy_modules(_LAZY_MODULES)
-@common.thread_local_lru_cache()
 def build(service_name: str, version: str, *args, **kwargs):
     """Build a GCP service.
 
@@ -34,6 +28,9 @@ def build(service_name: str, version: str, *args, **kwargs):
     if credentials is None:
         credentials, _ = google.auth.default()
 
+    # The google-api-python-client library is built on top of the httplib2
+    # library, which is not thread-safe.
+    # Reference: https://googleapis.github.io/google-api-python-client/docs/thread_safety.html # pylint: disable=line-too-long
     # Create a new Http() object for every request, to ensure that each thread
     # has its own httplib2.Http object for thread safety.
     def build_request(http, *args, **kwargs):

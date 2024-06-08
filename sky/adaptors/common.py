@@ -1,7 +1,6 @@
 """Lazy import for modules to avoid import error when not used."""
 import functools
 import importlib
-import threading
 from typing import Any, Optional, Tuple
 
 
@@ -60,29 +59,6 @@ def load_lazy_modules(modules: Tuple[LazyImport, ...]):
             for m in modules:
                 m.load_module()
             return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
-class _ThreadLocalLRUCache(threading.local):
-
-    def __init__(self, maxsize=32):
-        super().__init__()
-        self.cache = functools.lru_cache(maxsize=maxsize)
-
-
-def thread_local_lru_cache(maxsize=32):
-    # Create thread-local storage for the LRU cache
-    local_cache = _ThreadLocalLRUCache(maxsize)
-
-    def decorator(func):
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            # Use the thread-local LRU cache
-            return local_cache.cache(func)(*args, **kwargs)
 
         return wrapper
 

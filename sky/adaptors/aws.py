@@ -28,6 +28,7 @@ This is informed by the following boto3 docs:
 
 # pylint: disable=import-outside-toplevel
 
+import functools
 import logging
 import threading
 import time
@@ -52,6 +53,29 @@ version = 1
 # mentioned in
 # https://github.com/skypilot-org/skypilot/pull/1988
 _MAX_ATTEMPT_FOR_CREATION = 5
+
+
+class _ThreadLocalLRUCache(threading.local):
+
+    def __init__(self, maxsize=32):
+        super().__init__()
+        self.cache = functools.lru_cache(maxsize=maxsize)
+
+
+def _thread_local_lru_cache(maxsize=32):
+    # Create thread-local storage for the LRU cache
+    local_cache = _ThreadLocalLRUCache(maxsize)
+
+    def decorator(func):
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Use the thread-local LRU cache
+            return local_cache.cache(func)(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def _assert_kwargs_builtin_type(kwargs):
@@ -95,7 +119,7 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
 
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
-@common.thread_local_lru_cache()
+@_thread_local_lru_cache()
 def session():
     """Create an AWS session."""
     return _create_aws_object(boto3.session.Session, 'session')
