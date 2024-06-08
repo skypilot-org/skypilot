@@ -2134,6 +2134,9 @@ class AzureBlobStore(AbstractStore):
                             )
                         except azure.exceptions().ResourceExistsError as error:
                             if 'StorageAccountAlreadyTaken' in error.message:
+                                # The error occurs when the storage account
+                                # name attempted to be created already exists
+                                # globally being used by other user.
                                 with ux_utils.print_exception_no_traceback():
                                     raise exceptions.StorageBucketCreateError(
                                         'The storage account name '
