@@ -28,7 +28,6 @@ This is informed by the following boto3 docs:
 
 # pylint: disable=import-outside-toplevel
 
-import functools
 import logging
 import threading
 import time
