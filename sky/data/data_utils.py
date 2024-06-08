@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import textwrap
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 
@@ -19,6 +20,7 @@ from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 Client = Any
@@ -28,6 +30,9 @@ logger = sky_logging.init_logger(__name__)
 AZURE_CONTAINER_URL = (
     'https://{storage_account_name}.blob.core.windows.net/{container_name}')
 
+# Retry 5 times by default for delayed propagation to Azure system
+# when creating Storage Account.
+_STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT = 5
 
 def split_s3_path(s3_path: str) -> Tuple[str, str]:
     """Splits S3 Path into Bucket name and Relative Path to Bucket
@@ -240,20 +245,33 @@ def get_az_storage_account_key(
         resource_client = create_az_client('resource')
     if storage_client is None:
         storage_client = create_az_client('storage')
-    resources = resource_client.resources.list_by_resource_group(
-        resource_group_name)
-    # resource group is either created or read when Storage initializes.
-    assert resources is not None
-    for resource in resources:
-        if (resource.type == 'Microsoft.Storage/storageAccounts' and
-                resource.name == storage_account_name):
-            storage_account_keys = storage_client.storage_accounts.list_keys(
-                resource_group_name, storage_account_name)
-            storage_account_keys = [
-                key.value for key in storage_account_keys.keys
-            ]
-    storage_account_key = storage_account_keys[0]
-    return storage_account_key
+    attempt = 0
+    backoff = common_utils.Backoff()
+    logger.info('get_az_storage_account_key')
+    while True:
+        try:
+            resources = resource_client.resources.list_by_resource_group(
+                resource_group_name)
+            # resource group is either created or read when Storage initializes.
+            assert resources is not None
+            for resource in resources:
+                if (resource.type == 'Microsoft.Storage/storageAccounts' and
+                        resource.name == storage_account_name):
+                    storage_account_keys = storage_client.storage_accounts.list_keys(
+                        resource_group_name, storage_account_name)
+                    storage_account_keys = [
+                        key.value for key in storage_account_keys.keys
+                    ]
+            storage_account_key = storage_account_keys[0]
+            return storage_account_key
+        except UnboundLocalError as e:
+            attempt += 1
+            logger.info('failed to retrieve storage account name....')
+            if attempt > _STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT:
+                raise RuntimeError('Failed to obtain key value of storage '
+                                   f'account {storage_account_name}.\n'
+                                   f'Detailed error: {e}')
+            time.sleep(backoff.current_backoff()) 
 
 
 def create_r2_client(region: str = 'auto') -> Client:
