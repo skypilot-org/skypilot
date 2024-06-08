@@ -21,32 +21,8 @@ def build(service_name: str, version: str, *args, **kwargs):
         service_name: GCP service name (e.g., 'compute', 'storagetransfer').
         version: Service version (e.g., 'v1').
     """
-    import google_auth_httplib2
-    import httplib2
 
-    credentials = kwargs.pop('credentials', None)
-    if credentials is None:
-        credentials, _ = google.auth.default()
-
-    # The google-api-python-client library is built on top of the httplib2
-    # library, which is not thread-safe.
-    # Reference: https://googleapis.github.io/google-api-python-client/docs/thread_safety.html # pylint: disable=line-too-long
-    # Create a new Http() object for every request, to ensure that each thread
-    # has its own httplib2.Http object for thread safety.
-    def build_request(http, *args, **kwargs):
-        del http  # Unused.
-        new_http = google_auth_httplib2.AuthorizedHttp(credentials,
-                                                       http=httplib2.Http())
-        return googleapiclient.http.HttpRequest(new_http, *args, **kwargs)
-
-    authorized_http = google_auth_httplib2.AuthorizedHttp(credentials,
-                                                          http=httplib2.Http())
-    return googleapiclient.discovery.build(service_name,
-                                           version,
-                                           *args,
-                                           requestBuilder=build_request,
-                                           http=authorized_http,
-                                           **kwargs)
+    return google.discovery.build(service_name, version, *args, **kwargs)
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
