@@ -2049,11 +2049,10 @@ class AzureBlobStore(AbstractStore):
             # config, then use default names and create them.
             self.storage_account_name = skypilot_config.get_nested(
                 ('azure', 'storage_account'),
-                f'sky{self.region}{common_utils.get_user_hash()}dem1')
+                f'sky{self.region}{common_utils.get_user_hash()}')
             self.resource_group_name = skypilot_config.get_nested(
                 ('azure', 'resource_group'),
-                f'sky{common_utils.get_user_hash()}dem1')
-
+                f'sky{common_utils.get_user_hash()}')
             try:
                 self.resource_client.resource_groups.get(
                     self.resource_group_name)
@@ -2141,7 +2140,7 @@ class AzureBlobStore(AbstractStore):
                                         f'{self.storage_account_name!r} is already taken. '
                                         'Please try with another name.')
                         # wait until new resource creation propagates to Azure server.
-                        time.sleep(5)
+                        time.sleep(1)
 
         # resource_group_name is set to None when using non-sky-managed
         # public container or private container without authorization.
