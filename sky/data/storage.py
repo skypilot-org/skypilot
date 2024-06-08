@@ -2049,32 +2049,32 @@ class AzureBlobStore(AbstractStore):
             # config, then use default names and create them.
             self.storage_account_name = skypilot_config.get_nested(
                 ('azure', 'storage_account'),
-                f'sky{self.region}{common_utils.get_user_hash()}d1')
+                f'sky{self.region}{common_utils.get_user_hash()}dem1')
             self.resource_group_name = skypilot_config.get_nested(
                 ('azure', 'resource_group'),
-                f'sky{common_utils.get_user_hash()}d1')
-            status_message = (
-                f'[bold cyan]Setting up:\n'
-                f'- Resource group: {self.resource_group_name}\n'
-                f'- Storage account: {self.storage_account_name}'
-            )
-            with rich_utils.safe_status(f'{status_message}'):
-                # check if the resource group with given name already exists.
-                try:
-                    self.resource_client.resource_groups.get(
-                        self.resource_group_name)
-                except azure.exceptions().ResourceNotFoundError as e:
-                    if 'Code: ResourceGroupNotFound' in e.message:
+                f'sky{common_utils.get_user_hash()}dem1')
+
+            try:
+                self.resource_client.resource_groups.get(
+                    self.resource_group_name)
+            except azure.exceptions().ResourceNotFoundError as e:
+                if 'Code: ResourceGroupNotFound' in e.message:
+                    with rich_utils.safe_status(
+                        f'[bold cyan]Setting up:\n'
+                        f'- Resource group: {self.resource_group_name}'):
                         self.resource_client.resource_groups.create_or_update(
                             self.resource_group_name, {'location': self.region})
 
-                # check if the storage account name already exists under the
-                # given resource group name.
-                try:
-                    self.storage_client.storage_accounts.get_properties(
-                        self.resource_group_name, self.storage_account_name)
-                except azure.exceptions().ResourceNotFoundError as e:
-                    if 'Code: ResourceNotFound' in e.message:
+            # check if the storage account name already exists under the
+            # given resource group name.
+            try:
+                self.storage_client.storage_accounts.get_properties(
+                    self.resource_group_name, self.storage_account_name)
+            except azure.exceptions().ResourceNotFoundError as e:
+                if 'Code: ResourceNotFound' in e.message:
+                    with rich_utils.safe_status(
+                        f'[bold cyan]Setting up:\n'
+                        f'- Storage account: {self.storage_account_name}'):
                         try:
                             creation_response = (
                                 self.storage_client.storage_accounts.begin_create(
@@ -2141,7 +2141,7 @@ class AzureBlobStore(AbstractStore):
                                         f'{self.storage_account_name!r} is already taken. '
                                         'Please try with another name.')
                         # wait until new resource creation propagates to Azure server.
-                        time.sleep(1)
+                        time.sleep(5)
 
         # resource_group_name is set to None when using non-sky-managed
         # public container or private container without authorization.
