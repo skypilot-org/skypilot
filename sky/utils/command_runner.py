@@ -5,7 +5,7 @@ import os
 import pathlib
 import shlex
 import time
-from typing import Any, Iterable, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, Union
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -19,6 +19,10 @@ logger = sky_logging.init_logger(__name__)
 # The git exclude file to support.
 GIT_EXCLUDE = '.git/info/exclude'
 # Rsync options
+# TODO(zhwu): This will print a per-file progress bar (with -P),
+# shooting a lot of messages to the output. --info=progress2 is used
+# to get a total progress bar, but it requires rsync>=3.1.0 and Mac
+# OS has a default rsync==2.6.9 (16 years old).
 RSYNC_DISPLAY_OPTION = '-Pavz'
 # Legend
 #   dir-merge: ignore file can appear in any subdir, applies to that
@@ -30,6 +34,7 @@ RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
 
 _HASH_MAX_LENGTH = 10
+_DEFAULT_CONNECT_TIMEOUT = 30
 
 
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
@@ -60,7 +65,7 @@ def ssh_options_list(
 ) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     if connect_timeout is None:
-        connect_timeout = 30
+        connect_timeout = _DEFAULT_CONNECT_TIMEOUT
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
     arg_dict = {
@@ -75,7 +80,7 @@ def ssh_options_list(
         # that case.
         'UserKnownHostsFile': os.devnull,
         # Suppresses the warning messages, such as:
-        #   Warning: Permanently added '34.69.216.203' (ED25519) to the list of
+        #   Warning: Permanently added 'xx.xx.xx.xx' (EDxxx) to the list of
         #   known hosts.
         'LogLevel': 'ERROR',
         # Try fewer extraneous key pairs.
@@ -170,7 +175,7 @@ class CommandRunner:
 
         # We need this to correctly run the cmd, and get the output.
         command = [
-            'bash',
+            '/bin/bash',
             '--login',
             '-c',
         ]
@@ -206,6 +211,92 @@ class CommandRunner:
 
         command_str = ' '.join(command)
         return command_str
+
+    def _rsync(
+            self,
+            source: str,
+            target: str,
+            node_destination: str,
+            up: bool,
+            rsh_option: str,
+            # Advanced options.
+            log_path: str = os.devnull,
+            stream_logs: bool = True,
+            max_retry: int = 1,
+            prefix_command: Optional[str] = None,
+            get_remote_home_dir: Callable[[], str] = lambda: '~') -> None:
+        """Builds the rsync command."""
+        # Build command.
+        rsync_command = []
+        if prefix_command is not None:
+            rsync_command.append(prefix_command)
+        rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
+
+        # --filter
+        rsync_command.append(RSYNC_FILTER_OPTION)
+
+        if up:
+            # Build --exclude-from argument.
+            # The source is a local path, so we need to resolve it.
+            resolved_source = pathlib.Path(source).expanduser().resolve()
+            if (resolved_source / GIT_EXCLUDE).exists():
+                # Ensure file exists; otherwise, rsync will error out.
+                #
+                # We shlex.quote() because the path may contain spaces:
+                #   'my dir/.git/info/exclude'
+                # Without quoting rsync fails.
+                rsync_command.append(
+                    RSYNC_EXCLUDE_OPTION.format(
+                        shlex.quote(str(resolved_source / GIT_EXCLUDE))))
+
+        rsync_command.append(f'-e {shlex.quote(rsh_option)}')
+
+        if up:
+            resolved_target = target
+            if target.startswith('~'):
+                remote_home_dir = get_remote_home_dir()
+                resolved_target = target.replace('~', remote_home_dir)
+            full_source_str = str(resolved_source)
+            if resolved_source.is_dir():
+                full_source_str = os.path.join(full_source_str, '')
+            rsync_command.extend([
+                f'{full_source_str!r}',
+                f'{node_destination}:{resolved_target!r}',
+            ])
+        else:
+            resolved_source = source
+            if source.startswith('~'):
+                remote_home_dir = get_remote_home_dir()
+                resolved_source = source.replace('~', remote_home_dir)
+            rsync_command.extend([
+                f'{node_destination}:{resolved_source!r}',
+                f'{os.path.expanduser(target)!r}',
+            ])
+        command = ' '.join(rsync_command)
+        logger.debug(f'Running rsync command: {command}')
+
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        assert max_retry > 0, f'max_retry {max_retry} must be positive.'
+        while max_retry >= 0:
+            returncode, stdout, stderr = log_lib.run_with_log(
+                command,
+                log_path=log_path,
+                stream_logs=stream_logs,
+                shell=True,
+                require_outputs=True)
+            if returncode == 0:
+                break
+            max_retry -= 1
+            time.sleep(backoff.current_backoff())
+
+        direction = 'up' if up else 'down'
+        error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
+                     'Ensure that the network is stable, then retry.')
+        subprocess_utils.handle_returncode(returncode,
+                                           command,
+                                           error_msg,
+                                           stderr=stdout + stderr,
+                                           stream_logs=stream_logs)
 
     @timeline.event
     def run(
@@ -448,13 +539,11 @@ class SSHCommandRunner(CommandRunner):
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
 
-        command_str = self._get_command_to_run(
-            cmd,
-            process_stream,
-            separate_stderr,
-            # +1 to skip first new line.
-            skip_lines=skip_lines + 1,
-            source_bashrc=source_bashrc)
+        command_str = self._get_command_to_run(cmd,
+                                               process_stream,
+                                               separate_stderr,
+                                               skip_lines=skip_lines,
+                                               source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -508,30 +597,6 @@ class SSHCommandRunner(CommandRunner):
         Raises:
             exceptions.CommandError: rsync command failed.
         """
-        # Build command.
-        # TODO(zhwu): This will print a per-file progress bar (with -P),
-        # shooting a lot of messages to the output. --info=progress2 is used
-        # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
-        # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', RSYNC_DISPLAY_OPTION]
-
-        # --filter
-        rsync_command.append(RSYNC_FILTER_OPTION)
-
-        if up:
-            # The source is a local path, so we need to resolve it.
-            # --exclude-from
-            resolved_source = pathlib.Path(source).expanduser().resolve()
-            if (resolved_source / GIT_EXCLUDE).exists():
-                # Ensure file exists; otherwise, rsync will error out.
-                #
-                # We shlex.quote() because the path may contain spaces:
-                #   'my dir/.git/info/exclude'
-                # Without quoting rsync fails.
-                rsync_command.append(
-                    RSYNC_EXCLUDE_OPTION.format(
-                        shlex.quote(str(resolved_source / GIT_EXCLUDE))))
-
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(['ssh'])
         else:
@@ -544,43 +609,199 @@ class SSHCommandRunner(CommandRunner):
                 docker_ssh_proxy_command=docker_ssh_proxy_command,
                 port=self.port,
                 disable_control_master=self.disable_control_master))
-        rsync_command.append(f'-e "ssh {ssh_options}"')
-        # To support spaces in the path, we need to quote source and target.
-        # rsync doesn't support '~' in a quoted local path, but it is ok to
-        # have '~' in a quoted remote path.
-        if up:
-            full_source_str = str(resolved_source)
-            if resolved_source.is_dir():
-                full_source_str = os.path.join(full_source_str, '')
-            rsync_command.extend([
-                f'{full_source_str!r}',
-                f'{self.ssh_user}@{self.ip}:{target!r}',
-            ])
-        else:
-            rsync_command.extend([
-                f'{self.ssh_user}@{self.ip}:{source!r}',
-                f'{os.path.expanduser(target)!r}',
-            ])
-        command = ' '.join(rsync_command)
+        rsh_option = f'ssh {ssh_options}'
+        self._rsync(source,
+                    target,
+                    node_destination=f'{self.ssh_user}@{self.ip}',
+                    up=up,
+                    rsh_option=rsh_option,
+                    log_path=log_path,
+                    stream_logs=stream_logs,
+                    max_retry=max_retry)
 
-        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
-        while max_retry >= 0:
-            returncode, stdout, stderr = log_lib.run_with_log(
-                command,
-                log_path=log_path,
-                stream_logs=stream_logs,
-                shell=True,
-                require_outputs=True)
-            if returncode == 0:
-                break
-            max_retry -= 1
-            time.sleep(backoff.current_backoff())
 
-        direction = 'up' if up else 'down'
-        error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
-                     'Ensure that the network is stable, then retry.')
-        subprocess_utils.handle_returncode(returncode,
-                                           command,
-                                           error_msg,
-                                           stderr=stdout + stderr,
-                                           stream_logs=stream_logs)
+class KubernetesCommandRunner(CommandRunner):
+    """Runner for Kubernetes commands."""
+
+    def __init__(
+        self,
+        node: Tuple[str, str],
+        **kwargs,
+    ):
+        """Initialize KubernetesCommandRunner.
+
+        Example Usage:
+            runner = KubernetesCommandRunner((namespace, pod_name))
+            runner.run('ls -l')
+            runner.rsync(source, target, up=True)
+
+        Args:
+            node: The namespace and pod_name of the remote machine.
+        """
+        del kwargs
+        super().__init__(node)
+        self.namespace, self.pod_name = node
+
+    @timeline.event
+    def run(
+            self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = None,
+            require_outputs: bool = False,
+            # Advanced options.
+            log_path: str = os.devnull,
+            # If False, do not redirect stdout/stderr to optimize performance.
+            process_stream: bool = True,
+            stream_logs: bool = True,
+            ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+            separate_stderr: bool = False,
+            connect_timeout: Optional[int] = None,
+            source_bashrc: bool = False,
+            skip_lines: int = 0,
+            **kwargs) -> Union[int, Tuple[int, str, str]]:
+        """Uses 'kubectl exec' to run 'cmd' on a pod by its name and namespace.
+
+        Args:
+            cmd: The command to run.
+            port_forward: This should be None for k8s.
+
+            Advanced options:
+
+            require_outputs: Whether to return the stdout/stderr of the command.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+            check: Check the success of the command.
+            ssh_mode: The mode to use for ssh.
+                See SSHMode for more details.
+            separate_stderr: Whether to separate stderr from stdout.
+            connect_timeout: timeout in seconds for the pod connection.
+            source_bashrc: Whether to source the bashrc before running the
+                command.
+            skip_lines: The number of lines to skip at the beginning of the
+                output. This is used when the output is not processed by
+                SkyPilot but we still want to get rid of some warning messages,
+                such as SSH warnings.
+
+        Returns:
+            returncode
+            or
+            A tuple of (returncode, stdout, stderr).
+        """
+        # TODO(zhwu): implement port_forward for k8s.
+        assert port_forward is None, ('port_forward is not supported for k8s '
+                                      f'for now, but got: {port_forward}')
+        if connect_timeout is None:
+            connect_timeout = _DEFAULT_CONNECT_TIMEOUT
+        kubectl_args = [
+            '--pod-running-timeout', f'{connect_timeout}s', '-n',
+            self.namespace, self.pod_name
+        ]
+        if ssh_mode == SshMode.LOGIN:
+            assert isinstance(cmd, list), 'cmd must be a list for login mode.'
+            base_cmd = ['kubectl', 'exec', '-it', *kubectl_args, '--']
+            command = base_cmd + cmd
+            proc = subprocess_utils.run(command, shell=False, check=False)
+            return proc.returncode, '', ''
+
+        kubectl_base_command = ['kubectl', 'exec']
+
+        if ssh_mode == SshMode.INTERACTIVE:
+            kubectl_base_command.append('-i')
+        kubectl_base_command += [*kubectl_args, '--']
+
+        command_str = self._get_command_to_run(cmd,
+                                               process_stream,
+                                               separate_stderr,
+                                               skip_lines=skip_lines,
+                                               source_bashrc=source_bashrc)
+        command = kubectl_base_command + [
+            # It is important to use /bin/bash -c here to make sure we quote the
+            # command to be run properly. Otherwise, directly appending commands
+            # after '--' will not work for some commands, such as '&&', '>' etc.
+            '/bin/bash',
+            '-c',
+            shlex.quote(command_str)
+        ]
+
+        log_dir = os.path.expanduser(os.path.dirname(log_path))
+        os.makedirs(log_dir, exist_ok=True)
+
+        executable = None
+        if not process_stream:
+            if stream_logs:
+                command += [
+                    f'| tee {log_path}',
+                    # This also requires the executor to be '/bin/bash' instead
+                    # of the default '/bin/sh'.
+                    '; exit ${PIPESTATUS[0]}'
+                ]
+            else:
+                command += [f'> {log_path}']
+            executable = '/bin/bash'
+        return log_lib.run_with_log(' '.join(command),
+                                    log_path,
+                                    require_outputs=require_outputs,
+                                    stream_logs=stream_logs,
+                                    process_stream=process_stream,
+                                    shell=True,
+                                    executable=executable,
+                                    **kwargs)
+
+    @timeline.event
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        # Advanced options.
+        log_path: str = os.devnull,
+        stream_logs: bool = True,
+        max_retry: int = 1,
+    ) -> None:
+        """Uses 'rsync' to sync 'source' to 'target'.
+
+        Args:
+            source: The source path.
+            target: The target path.
+            up: The direction of the sync, True for local to cluster, False
+              for cluster to local.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+            max_retry: The maximum number of retries for the rsync command.
+              This value should be non-negative.
+
+        Raises:
+            exceptions.CommandError: rsync command failed.
+        """
+
+        def get_remote_home_dir() -> str:
+            # Use `echo ~` to get the remote home directory, instead of pwd or
+            # echo $HOME, because pwd can be `/` when the remote user is root
+            # and $HOME is not always set.
+            rc, remote_home_dir, _ = self.run('echo ~',
+                                              require_outputs=True,
+                                              stream_logs=False)
+            if rc != 0:
+                raise ValueError('Failed to get remote home directory.')
+            remote_home_dir = remote_home_dir.strip()
+            return remote_home_dir
+
+        # Build command.
+        helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
+                                   'kubernetes', 'rsync_helper.sh')
+        self._rsync(
+            source,
+            target,
+            node_destination=f'{self.pod_name}@{self.namespace}',
+            up=up,
+            rsh_option=helper_path,
+            log_path=log_path,
+            stream_logs=stream_logs,
+            max_retry=max_retry,
+            prefix_command=f'chmod +x {helper_path} && ',
+            # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
+            # /~/xx, so we need to replace ~ with the remote home directory. We
+            # only need to do this when ~ is at the beginning of the path.
+            get_remote_home_dir=get_remote_home_dir)

@@ -1,25 +1,37 @@
 #!/bin/bash
 # This script creates a new k8s Service Account and generates a kubeconfig with
-# its credentials. This Service Account has all the necessary permissions for
+# its credentials. This Service Account has the minimal permissions necessary for
 # SkyPilot. The kubeconfig is written in the current directory.
 #
-# You must configure your local kubectl to point to the right k8s cluster and
-# have admin-level access.
+# Before running this script, you must configure your local kubectl to point to
+# the right k8s cluster and have admin-level access.
 #
-# Note: all of the k8s resources are created in namespace "skypilot". If you
-# delete any of these objects, SkyPilot will stop working.
+# By default, this script will create a service account "sky-sa" in "default"
+# namespace. If you want to use a different namespace or service account name:
 #
-# You can override the default namespace "skypilot" using the
-# SKYPILOT_NAMESPACE environment variable.
-# You can override the default service account name "skypilot-sa" using the
-# SKYPILOT_SA_NAME environment variable.
+#   * Specify SKYPILOT_NAMESPACE env var to override the default namespace
+#   * Specify SKYPILOT_SA_NAME env var to override the default service account name
+#   * Specify SKIP_SA_CREATION=1 to skip creating the service account and use an existing one
+#
+# Usage:
+#   # Create "sky-sa" service account with minimal permissions in "default" namespace and generate kubeconfig
+#   $ ./generate_static_kubeconfig.sh
+#
+#   # Create "my-sa" account with minimal permissions in "my-namespace" namespace and generate kubeconfig
+#   $ SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_static_kubeconfig.sh
+#
+#   # Use an existing service account "my-sa" in "my-namespace" namespace and generate kubeconfig
+#   $ SKIP_SA_CREATION=1 SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_static_kubeconfig.sh
 
 set -eu -o pipefail
 
 # Allow passing in common name and username in environment. If not provided,
 # use default.
-SKYPILOT_SA=${SKYPILOT_SA_NAME:-skypilot-sa}
+SKYPILOT_SA=${SKYPILOT_SA_NAME:-sky-sa}
 NAMESPACE=${SKYPILOT_NAMESPACE:-default}
+
+echo "Service account: ${SKYPILOT_SA}"
+echo "Namespace: ${NAMESPACE}"
 
 # Set OS specific values.
 if [[ "$OSTYPE" == "linux-gnu" ]]; then
@@ -33,41 +45,165 @@ else
     exit 1
 fi
 
-echo "Creating the Kubernetes Service Account with minimal RBAC permissions."
-kubectl apply -f - <<EOF
+# If the user has set SKIP_SA_CREATION=1, skip creating the service account.
+if [ -z ${SKIP_SA_CREATION+x} ]; then
+  echo "Creating the Kubernetes Service Account with minimal RBAC permissions."
+  kubectl apply -f - <<EOF
+# Create/update namespace specified by the user
 apiVersion: v1
 kind: Namespace
 metadata:
   name: ${NAMESPACE}
+  labels:
+    parent: skypilot
 ---
-apiVersion: v1
 kind: ServiceAccount
+apiVersion: v1
 metadata:
   name: ${SKYPILOT_SA}
   namespace: ${NAMESPACE}
+  labels:
+    parent: skypilot
 ---
+# Role for the service account
+kind: Role
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
 metadata:
-  name: skypilot-role
+  name: ${SKYPILOT_SA}-role
+  namespace: ${NAMESPACE}
+  labels:
+    parent: skypilot
 rules:
-- apiGroups: ["*"]
-  resources: ["*"]
-  verbs: ["*"]
+  - apiGroups: ["*"]  # Required for creating pods, services, secrets and other necessary resources in the namespace.
+    resources: ["*"]
+    verbs: ["*"]
 ---
+# RoleBinding for the service account
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: ${SKYPILOT_SA}-rb
+  namespace: ${NAMESPACE}
+  labels:
+    parent: skypilot
+subjects:
+  - kind: ServiceAccount
+    name: ${SKYPILOT_SA}
+roleRef:
+  kind: Role
+  name: ${SKYPILOT_SA}-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ClusterRole for the service account
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: ${SKYPILOT_SA}-cluster-role
+  namespace: ${NAMESPACE}
+  labels:
+    parent: skypilot
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]  # Required for getting node resources.
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]   # Required for autodetecting the runtime class of the nodes.
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]   # Required for exposing services through ingresses
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
+---
+# ClusterRoleBinding for the service account
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: skypilot-crb
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: skypilot-role
-subjects:
-- kind: ServiceAccount
-  name: ${SKYPILOT_SA}
+  name: ${SKYPILOT_SA}-cluster-role-binding
   namespace: ${NAMESPACE}
+  labels:
+    parent: skypilot
+subjects:
+  - kind: ServiceAccount
+    name: ${SKYPILOT_SA}
+    namespace: ${NAMESPACE}
+roleRef:
+  kind: ClusterRole
+  name: ${SKYPILOT_SA}-cluster-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Optional: If using object store mounting, create the skypilot-system namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: skypilot-system
+  labels:
+    parent: skypilot
+---
+# Optional: If using object store mounting, create role in the skypilot-system
+# namespace to create FUSE device manager.
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: skypilot-system-service-account-role
+  namespace: skypilot-system
+  labels:
+    parent: skypilot
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+# Optional: If using object store mounting, create rolebinding in the skypilot-system
+# namespace to create FUSE device manager.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${SKYPILOT_SA}-skypilot-system-role-binding-${NAMESPACE}
+  namespace: skypilot-system  # Do not change this namespace
+  labels:
+    parent: skypilot
+subjects:
+  - kind: ServiceAccount
+    name: ${SKYPILOT_SA}
+    namespace: ${NAMESPACE}
+roleRef:
+  kind: Role
+  name: skypilot-system-service-account-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Optional: Role for accessing ingress resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${SKYPILOT_SA}-role-ingress-nginx
+  namespace: ingress-nginx  # Do not change this namespace
+  labels:
+    parent: skypilot
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["list", "get", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["list", "get", "watch"]
+---
+# Optional: RoleBinding for accessing ingress resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${SKYPILOT_SA}-rolebinding-ingress-nginx
+  namespace: ingress-nginx  # Do not change this namespace
+  labels:
+    parent: skypilot
+subjects:
+  - kind: ServiceAccount
+    name: ${SKYPILOT_SA}
+    namespace: ${NAMESPACE}
+roleRef:
+  kind: Role
+  name: ${SKYPILOT_SA}-role-ingress-nginx  # Use the same name as the role at line 119
+  apiGroup: rbac.authorization.k8s.io
 EOF
+fi
 
 # Checks if secret entry was defined for Service account. If defined it means that Kubernetes server has a
 # version bellow 1.24, otherwise one must manually create the secret and bind it to the Service account to have a non expiring token.
@@ -87,10 +223,15 @@ metadata:
   namespace: ${NAMESPACE}
   annotations:
     kubernetes.io/service-account.name: "${SKYPILOT_SA}"
+  labels:
+    parent: skypilot
 EOF
 
 SA_SECRET_NAME=${SKYPILOT_SA}
 fi
+
+# Sleep for 2 seconds to allow the secret to be created before fetching it.
+sleep 2
 
 # Note: service account token is stored base64-encoded in the secret but must
 # be plaintext in kubeconfig.
@@ -114,6 +255,7 @@ contexts:
 - context:
     cluster: ${CURRENT_CLUSTER}
     user: ${CURRENT_CLUSTER}-${SKYPILOT_SA}
+    namespace: ${NAMESPACE}
   name: ${CURRENT_CONTEXT}
 current-context: ${CURRENT_CONTEXT}
 kind: Config
@@ -127,11 +269,19 @@ EOF
 echo "---
 Done!
 
-Copy the generated kubeconfig file to your SkyPilot Proxy server, and set the
-kubeconfig_file parameter in your skypilot.yaml config file to point to this
-kubeconfig file.
+Copy the generated kubeconfig file to your ~/.kube/ directory to use it with
+kubectl and skypilot:
 
-If you need access to multiple kubernetes clusters, you can generate additional
-kubeconfig files using this script and then merge them using merge-kubeconfigs.sh.
+# Backup your existing kubeconfig file
+mv ~/.kube/config ~/.kube/config.bak
+cp kubeconfig ~/.kube/config
 
-Note: Kubernetes RBAC rules for SkyPilot were created, you won't need to create them manually."
+# Verify that you can access the cluster
+kubectl get pods
+
+Also add this to your ~/.sky/config.yaml to use the new service account:
+
+# ~/.sky/config.yaml
+kubernetes:
+  remote_identity: ${SKYPILOT_SA}
+"

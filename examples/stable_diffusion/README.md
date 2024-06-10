@@ -8,7 +8,7 @@
 
 4. Run `ssh -L 7860:localhost:7860 stable-diffusion`
 
-5. Open [`http://localhost:7860/`](http://localhost:7860/) in browser.
+5. Open [`http://localhost:7860/`](http://localhost:7860/) in browser. If the page doesn't load, try again in a few minutes to allow the container to start.
 
 6. Type in text prompt and click "Generate".
 

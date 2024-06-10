@@ -35,10 +35,10 @@ MEMORY_SIZE_UNITS = {
     'T': 2**40,
     'P': 2**50,
 }
-NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. \
-If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
-(e.g., skypilot.co/accelerator) are setup correctly. \
-To further debug, run: sky check.'
+NO_GPU_HELP_MESSAGE = ('If your cluster contains GPUs, make sure '
+                       'nvidia.com/gpu resource is available on the nodes and '
+                       'the node labels for identifying GPUs '
+                       '(e.g., skypilot.co/accelerator) are setup correctly. ')
 
 KUBERNETES_AUTOSCALER_NOTE = (
     'Note: Kubernetes cluster autoscaling is enabled. '
@@ -104,6 +104,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     Uses the format - nvidia-tesla-<accelerator>.
     A100-80GB, H100-80GB and L4 are an exception. They use nvidia-<accelerator>.
     """
+    if accelerator == 'H100':
+        # H100 is named as H100-80GB in GKE.
+        accelerator = 'H100-80GB'
     if accelerator in ('A100-80GB', 'L4', 'H100-80GB'):
         # A100-80GB, L4 and H100-80GB have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
@@ -187,10 +190,70 @@ class GKELabelFormatter(GPULabelFormatter):
         if value.startswith('nvidia-tesla-'):
             return value.replace('nvidia-tesla-', '').upper()
         elif value.startswith('nvidia-'):
-            return value.replace('nvidia-', '').upper()
+            acc = value.replace('nvidia-', '').upper()
+            if acc == 'H100-80GB':
+                # H100 is named as H100-80GB in GKE.
+                return 'H100'
+            return acc
         else:
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
+
+
+class GFDLabelFormatter(GPULabelFormatter):
+    """GPU Feature Discovery label formatter
+
+    NVIDIA GPUs nodes are labeled by GPU feature discovery
+    e.g. nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+    https://github.com/NVIDIA/gpu-feature-discovery
+
+    GPU feature discovery is included as part of the
+    NVIDIA GPU Operator:
+    https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html
+
+    This LabelFormatter can't be used in autoscaling clusters since accelerators
+    may map to multiple label, so we're not implementing `get_label_value`
+    """
+
+    LABEL_KEY = 'nvidia.com/gpu.product'
+
+    @classmethod
+    def get_label_key(cls) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        """An accelerator can map to many Nvidia GFD labels
+        (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
+        As a result, we do not support get_label_value for GFDLabelFormatter."""
+        raise NotImplementedError
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        """Searches against a canonical list of NVIDIA GPUs and pattern
+        matches the canonical GPU name against the GFD label.
+        """
+        canonical_gpu_names = [
+            'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4',
+            'V100', 'A10', 'P4000', 'P100', 'P40', 'P4', 'L4'
+        ]
+        for canonical_name in canonical_gpu_names:
+            # A100-80G accelerator is A100-SXM-80GB or A100-PCIE-80GB
+            if canonical_name == 'A100-80GB' and re.search(
+                    r'A100.*-80GB', value):
+                return canonical_name
+            elif canonical_name in value:
+                return canonical_name
+
+        # If we didn't find a canonical name:
+        # 1. remove 'NVIDIA-' (e.g., 'NVIDIA-RTX-A6000' -> 'RTX-A6000')
+        # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
+        # 3. remove 'RTX-' (e.g. 'RTX-6000' -> 'RTX6000')
+        # Same logic, but uppercased, as the Skypilot labeler job found in
+        # sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
+        return value.upper().replace('NVIDIA-',
+                                     '').replace('GEFORCE-',
+                                                 '').replace('RTX-', 'RTX')
 
 
 class KarpenterLabelFormatter(SkyPilotLabelFormatter):
@@ -208,7 +271,7 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
 # auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
     SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter,
-    KarpenterLabelFormatter
+    KarpenterLabelFormatter, GFDLabelFormatter
 ]
 
 # Mapping of autoscaler type to label formatter
@@ -282,6 +345,18 @@ def get_kubernetes_nodes() -> List[Any]:
             'Timed out when trying to get node info from Kubernetes cluster. '
             'Please check if the cluster is healthy and retry.') from None
     return nodes
+
+
+def get_kubernetes_pods() -> List[Any]:
+    try:
+        ns = get_current_kube_config_context_namespace()
+        pods = kubernetes.core_api().list_namespaced_pod(
+            ns, _request_timeout=kubernetes.API_TIMEOUT).items
+    except kubernetes.max_retry_error():
+        raise exceptions.ResourcesUnavailableError(
+            'Timed out when trying to get pod info from Kubernetes cluster. '
+            'Please check if the cluster is healthy and retry.') from None
+    return pods
 
 
 def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
@@ -439,7 +514,6 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 # conclude that the cluster is setup correctly and return.
                 return '', ''
             k8s_acc_label_key = label_formatter.get_label_key()
-            k8s_acc_label_value = label_formatter.get_label_value(acc_type)
             # Search in node_labels to see if any node has the requested
             # GPU type.
             # Note - this only checks if the label is available on a
@@ -449,10 +523,9 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
                     if (label == k8s_acc_label_key and
-                            value == k8s_acc_label_value):
-                        # If a node is found, we can break out of the loop
-                        # and proceed to deploy.
-                        return k8s_acc_label_key, k8s_acc_label_value
+                            label_formatter.get_accelerator_from_label_value(
+                                value) == acc_type):
+                        return label, value
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
                 suffix = ''
@@ -684,6 +757,12 @@ def get_current_kube_config_context_namespace() -> str:
             the default namespace.
     """
     k8s = kubernetes.kubernetes
+    # Get namespace if using in-cluster config
+    ns_path = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
+    if os.path.exists(ns_path):
+        with open(ns_path, encoding='utf-8') as f:
+            return f.read().strip()
+    # If not in-cluster, get the namespace from kubeconfig
     try:
         _, current_context = k8s.config.list_kube_config_contexts()
         if 'namespace' in current_context['context']:

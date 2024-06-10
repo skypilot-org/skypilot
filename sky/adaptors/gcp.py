@@ -21,8 +21,9 @@ def build(service_name: str, version: str, *args, **kwargs):
         service_name: GCP service name (e.g., 'compute', 'storagetransfer').
         version: Service version (e.g., 'v1').
     """
-    from googleapiclient import discovery
-    return discovery.build(service_name, version, *args, **kwargs)
+
+    return googleapiclient.discovery.build(service_name, version, *args,
+                                           **kwargs)
 
 
 @common.load_lazy_modules(_LAZY_MODULES)

@@ -1,5 +1,5 @@
 envs:
-  MODEL_NAME: Qwen/Qwen1.5-7B-Chat
+  MODEL_NAME: Qwen/Qwen2-7B-Instruct
 
 service:
   # Specifying the path to the endpoint to check the readiness of the replicas.
@@ -27,8 +27,8 @@ setup: |
     conda create -n qwen python=3.10 -y
     conda activate qwen
   fi
-  pip install -U vllm==0.3.2
-  pip install -U transformers==4.38.0
+  pip install vllm==0.4.2
+  pip install flash-attn==2.5.9.post1
 
 run: |
   conda activate qwen
