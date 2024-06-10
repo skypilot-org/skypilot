@@ -8,6 +8,10 @@ SkyPilot can run a container either as a task, or as the runtime environment of 
 * If the container image is invocable / has an entrypoint: run it :ref:`as a task <docker-containers-as-tasks>`.
 * If the container image is to be used as a runtime environment (e.g., ``ubuntu``, ``nvcr.io/nvidia/pytorch:23.10-py3``, etc.) and if you have extra commands to run inside the container: run it :ref:`as a runtime environment <docker-containers-as-runtime-environments>`.
 
+.. note::
+
+    Running docker containers is `not supported on RunPod <https://docs.runpod.io/references/faq#can-i-run-my-own-docker-daemon-on-runpod>`_. To use RunPod, use ``setup`` and ``run`` to configure your environment. See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/3096#issuecomment-2150559797>`_ for more.
+
 .. _docker-containers-as-tasks:
 
 Running Containers as Tasks
