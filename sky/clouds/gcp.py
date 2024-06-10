@@ -736,13 +736,13 @@ class GCP(clouds.Cloud):
 
         # pylint: disable=import-outside-toplevel,unused-import
         import google.auth
-        import googleapiclient.discovery
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
-        crm = googleapiclient.discovery.build('cloudresourcemanager',
-                                              'v1',
-                                              credentials=credentials)
+        crm = gcp.build('cloudresourcemanager',
+                        'v1',
+                        credentials=credentials,
+                        cache_discovery=False)
         gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
         permissions = {'permissions': gcp_minimal_permissions}
         request = crm.projects().testIamPermissions(resource=project,

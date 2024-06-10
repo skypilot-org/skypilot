@@ -306,20 +306,15 @@ _VALIDATE_LAUNCH_OUTPUT = (
 # ---------- A minimal task ----------
 def test_minimal(generic_cloud: str):
     name = _get_cluster_name()
-    validate_output = _VALIDATE_LAUNCH_OUTPUT
-    # Kubernetes will output a SSH Warning for proxy jump, which will cause
-    # the output validation fail. We skip the check for kubernetes for now.
-    if generic_cloud.lower() == 'kubernetes':
-        validate_output = 'true'
     test = Test(
         'minimal',
         [
-            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {validate_output}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {validate_output}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -3676,7 +3671,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
-            'sleep 30',
+            'sleep 40',
             # 2 on-deamnd (ready) + 1 on-demand (provisioning).
             (
                 _check_replica_in_status(
@@ -3690,7 +3685,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             # Test rolling update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
             # sleep to wait for update to be registered.
-            'sleep 15',
+            'sleep 25',
             # 2 on-deamnd (ready) + 1 on-demand (shutting down).
             _check_replica_in_status(name, [(2, False, 'READY'),
                                             (1, False, 'SHUTTING_DOWN')]),
@@ -3822,7 +3817,14 @@ def test_skyserve_failures(generic_cloud: str):
             f's=$(sky serve status {name}); '
             f'until echo "$s" | grep "FAILED_PROBING"; do '
             'echo "Waiting for replica to be failed..."; sleep 5; '
-            f's=$(sky serve status {name}); echo "$s"; done;' +
+            f's=$(sky serve status {name}); echo "$s"; done',
+            # Wait for the PENDING replica to appear.
+            'sleep 10',
+            # Wait until the replica is out of PENDING.
+            f's=$(sky serve status {name}); '
+            f'until ! echo "$s" | grep "PENDING" && ! echo "$s" | grep "Please wait for the controller to be ready."; do '
+            'echo "Waiting for replica to be out of pending..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done; ' +
             _check_replica_in_status(
                 name, [(1, False, 'FAILED_PROBING'),
                        (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),

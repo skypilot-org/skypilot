@@ -3644,7 +3644,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             try:
                 os.makedirs(local_log_dir, exist_ok=True)
                 runner.rsync(
-                    source=f'{remote_log_dir}/*',
+                    # Require a `/` at the end to make sure the parent dir
+                    # are not created locally. We do not add additional '*' as
+                    # kubernetes's rsync does not work with an ending '*'.
+                    source=f'{remote_log_dir}/',
                     target=local_log_dir,
                     up=False,
                     stream_logs=False,
@@ -3653,7 +3656,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
                     # Raised by rsync_down. Remote log dir may not exist, since
                     # the job can be run on some part of the nodes.
-                    logger.debug(f'{runner.ip} does not have the tasks/*.')
+                    logger.debug(f'{runner.node_id} does not have the tasks/*.')
                 else:
                     raise
 

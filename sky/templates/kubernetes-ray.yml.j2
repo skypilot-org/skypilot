@@ -267,7 +267,7 @@ available_node_types:
             skypilot-user: {{ user }}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
-            {{ label_key }}: {{ label_value }}
+            {{ label_key }}: {{ label_value|tojson }}
             # support for kueue
             {% if label_key == "kueue.x-k8s.io/queue-name" %}
             kueue.x-k8s.io/pod-group-name: {{ cluster_name_on_cloud }}
