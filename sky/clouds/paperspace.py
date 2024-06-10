@@ -147,10 +147,6 @@ class Paperspace(clouds.Cloud):
     def __repr__(self):
         return self._REPR
 
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, Paperspace)
-
     @classmethod
     def get_default_instance_type(
         cls,

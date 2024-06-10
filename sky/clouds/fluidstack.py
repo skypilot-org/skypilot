@@ -50,6 +50,9 @@ class Fluidstack(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
             f' is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
+            'Host controllers'
+            f' are not supported in {_REPR}.',
     }
     # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -136,10 +139,6 @@ class Fluidstack(clouds.Cloud):
 
     def __repr__(self):
         return 'Fluidstack'
-
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, Fluidstack)
 
     @classmethod
     def get_default_instance_type(

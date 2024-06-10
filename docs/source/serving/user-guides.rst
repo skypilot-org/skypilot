@@ -5,3 +5,5 @@ Serving User Guides
 
    autoscaling
    update
+   auth
+   spot-policy

@@ -1,6 +1,6 @@
 """Tests the inner loop of repeatedly querying instance status.
 
-Used by spot controller. This test prevents #2668 from regressing.
+Used by jobs controller. This test prevents #2668 from regressing.
 """
 
 import math

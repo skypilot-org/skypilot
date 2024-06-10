@@ -6,7 +6,7 @@ resources:
 
 envs:
   MODEL_SIZE: 7
-  HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 setup: |
   conda activate chatbot
@@ -24,12 +24,13 @@ run: |
   conda activate chatbot
   
   echo 'Starting controller...'
-  python -u -m fastchat.serve.controller > ~/controller.log 2>&1 &
+  python -u -m fastchat.serve.controller --host 127.0.0.1 > ~/controller.log 2>&1 &
   sleep 10
   echo 'Starting model worker...'
   python -u -m fastchat.serve.model_worker \
             --model-path meta-llama/Llama-2-${MODEL_SIZE}b-chat-hf \
             --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE 2>&1 \
+            --host 127.0.0.1 \
             | tee model_worker.log &
 
   echo 'Waiting for model worker to start...'
