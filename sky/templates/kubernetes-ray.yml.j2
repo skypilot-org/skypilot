@@ -261,7 +261,7 @@ available_node_types:
             skypilot-user: {{ user }}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
-            {{ label_key }}: {{ label_value }}
+            {{ label_key }}: {{ label_value|tojson }}
             {%- endfor %}
         {% if k8s_fuse_device_required %}
         annotations:
