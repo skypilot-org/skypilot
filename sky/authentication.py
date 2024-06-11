@@ -462,9 +462,13 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         #   changes in the downstream code to return a mapping of node IPs to
         #   pod names (to be used as ssh_target) and updating the upstream
         #   SSHConfigHelper to use a different ProxyCommand for each pod.
+        #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
+        #   on GKE.
         ssh_target = config['cluster_name'] + '-head'
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_target, port_forward_mode, private_key_path=PRIVATE_SSH_KEY_PATH)
+            ssh_target,
+            port_forward_mode,
+            private_key_path=PRIVATE_SSH_KEY_PATH)
     else:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')

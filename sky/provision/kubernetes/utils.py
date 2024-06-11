@@ -916,11 +916,12 @@ class KubernetesInstanceType:
         return self.name
 
 
-def construct_ssh_jump_command(private_key_path: str,
-                               ssh_jump_ip: str,
-                               ssh_jump_port: Optional[int] = None,
-                               proxy_cmd_path: Optional[str] = None,
-                               proxy_cmd_target_pod: Optional[str] = None) -> str:
+def construct_ssh_jump_command(
+        private_key_path: str,
+        ssh_jump_ip: str,
+        ssh_jump_port: Optional[int] = None,
+        proxy_cmd_path: Optional[str] = None,
+        proxy_cmd_target_pod: Optional[str] = None) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
@@ -932,7 +933,8 @@ def construct_ssh_jump_command(private_key_path: str,
         proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
         # adding execution permission to the proxy command script
         os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)
-        ssh_jump_proxy_command += f' -o ProxyCommand=\'{proxy_cmd_path} {proxy_cmd_target_pod}\' '
+        ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
+                                   f'{proxy_cmd_target_pod}\' ')
     return ssh_jump_proxy_command
 
 
@@ -989,16 +991,17 @@ def get_ssh_proxy_command(
     """
     # Fetch IP to connect to for the jump svc
     ssh_jump_ip = get_external_ip(network_mode)
+    assert private_key_path is not None, 'Private key path must be provided'
     if network_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         assert namespace is not None, 'Namespace must be provided for NodePort'
-        assert private_key_path is not None, 'Private key path must be provided'
         ssh_jump_port = get_port(k8s_ssh_target, namespace)
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
     else:
         ssh_jump_proxy_command_path = create_proxy_command_script()
         ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_ip,
+            private_key_path,
+            ssh_jump_ip,
             proxy_cmd_path=ssh_jump_proxy_command_path,
             proxy_cmd_target_pod=k8s_ssh_target)
     return ssh_jump_proxy_command
@@ -1011,14 +1014,14 @@ def create_proxy_command_script() -> str:
     Returns:
         str: Path to the ProxyCommand script.
     """
-    port_fwd_proxy_cmd_path = os.path.expanduser(
-        PORT_FORWARD_PROXY_CMD_PATH)
+    port_fwd_proxy_cmd_path = os.path.expanduser(PORT_FORWARD_PROXY_CMD_PATH)
     os.makedirs(os.path.dirname(port_fwd_proxy_cmd_path),
                 exist_ok=True,
                 mode=0o700)
 
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    template_path = os.path.join(root_dir, 'templates', PORT_FORWARD_PROXY_CMD_TEMPLATE)
+    template_path = os.path.join(root_dir, 'templates',
+                                 PORT_FORWARD_PROXY_CMD_TEMPLATE)
     # Copy the template to the proxy command path. We create a copy to allow
     # different users sharing the same SkyPilot installation to have their own
     # proxy command scripts.
