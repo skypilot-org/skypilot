@@ -648,6 +648,19 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
+                'managed_instance_group': {
+                    'type': 'object',
+                    'required': ['run_duration'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'run_duration': {
+                            'type': 'integer',
+                        },
+                        'provision_timeout': {
+                            'type': 'integer',
+                        }
+                    }
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
