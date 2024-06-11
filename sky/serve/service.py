@@ -28,6 +28,7 @@ from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.constants import SKY_HOME
 
 # Use the explicit logger name so that the logger is under the
 # `sky.serve.service` namespace when executed directly, so as
@@ -234,7 +235,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         else:
             shutil.rmtree(service_dir)
             serve_state.remove_service(service_name)
-            shutil.rmtree(constants.SKYSERVE_METADATA_DIR)
+            shutil.rmtree(constants.SKY_HOME)
             logger.info(f'Service {service_name} terminated successfully.')
 
         termination_file = os.environ.get('SKYPILOT_SERVICE_TERMINATION_FINISH_SIGNAL_FILE', None)
