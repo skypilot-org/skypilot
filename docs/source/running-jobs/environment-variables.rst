@@ -164,7 +164,7 @@ Environment variables for ``run``
      - A string of IP addresses of the nodes reserved to execute the task, where each line contains one IP address. Read more :ref:`here <dist-jobs>`.
      - 1.2.3.4
    * - ``SKYPILOT_NUM_NODES``
-     - Number of nodes used for the execution of the current task, which should be the same as ``$(echo "$SKYPILOT_NODE_IPS" | wc -l)``. Read more :ref:`here <dist-jobs>`.
+     - Number of nodes assigned to execute the current task. Same value as ``$(echo "$SKYPILOT_NODE_IPS" | wc -l)``. Read more :ref:`here <dist-jobs>`.
      - 1
    * - ``SKYPILOT_NUM_GPUS_PER_NODE``
      - Number of GPUs reserved on each node to execute the task; the same as the
