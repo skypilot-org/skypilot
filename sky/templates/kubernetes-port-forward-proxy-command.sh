@@ -57,11 +57,6 @@ while ! nc -z 127.0.0.1 "${local_port}"; do
     sleep 0.1
 done
 
-# To avoid errors when many concurrent requests are sent (see https://github.com/skypilot-org/skypilot/issues/2628),
-# we add a random delay before establishing the socat connection.
-# Empirically, this needs to be at least 1 second. We set this to be random between 1 and 2 seconds.
-sleep $(shuf -i 10-20 -n 1 | awk '{printf "%f", $1/10}')
-
 # Establishes two directional byte streams to handle stdin/stdout between
 # terminal and the jump pod.
 # socat process terminates when port-forward terminates.
