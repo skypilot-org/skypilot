@@ -124,7 +124,7 @@ Environment variables for ``setup``
      - 1.2.3.4
        3.4.5.6
    * - ``SKYPILOT_NUM_NODES``
-     - Number of nodes in the cluster, which should be the same as ``$(echo "$SKYPILOT_NODE_IPS" | wc -l)``.
+     - Number of nodes in the cluster. Same value as ``$(echo "$SKYPILOT_NODE_IPS" | wc -l)``.
      - 2
    * - ``SKYPILOT_TASK_ID``
      - A unique ID assigned to each task.
