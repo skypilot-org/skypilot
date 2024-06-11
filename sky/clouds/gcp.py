@@ -509,6 +509,9 @@ class GCP(clouds.Cloud):
             ('gcp', 'managed_instance_group'), None)
         use_mig = managed_instance_group_config is not None
         resources_vars['gcp_use_managed_instance_group'] = use_mig
+        # Convert boolean to 0 or 1 in string, as GCP does not support boolean
+        # value in labels for TPU VM APIs.
+        resources_vars['gcp_use_managed_instance_group_value'] = str(int(use_mig))
         if use_mig:
             resources_vars.update(managed_instance_group_config)
         return resources_vars
