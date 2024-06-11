@@ -456,13 +456,12 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         # Using `kubectl port-forward` creates a direct tunnel to the pod and
         # does not require a ssh jump pod.
         kubernetes_utils.check_port_forward_mode_dependencies()
-        # TODO(romilb): Handling multi-node clusters here might be tricky.
-        #   We would need to either port-forward to the head node and use
-        #   it as a jump host, or port-forward to each node individually.
-        #   In the either case, we would need to have a proxycommand on a per
-        #   node basis. This is currently not supported in upstream code.
-        #   Similarly in the downstream provisioning code, we would need to
-        #   set the worked pod name deterministically instead of using uuid.
+        # TODO(romilb): This can be further optimized. Instead of using the
+        #   head node as a jump pod for worker nodes, we can also directly
+        #   set the ssh_target to the worker node. However, that requires
+        #   changes in the downstream code to return a mapping of node IPs to
+        #   pod names (to be used as ssh_target) and updating the upstream
+        #   SSHConfigHelper to use a different ProxyCommand for each pod.
         ssh_target = config['cluster_name'] + '-head'
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
             ssh_target, port_forward_mode, private_key_path=PRIVATE_SSH_KEY_PATH)
