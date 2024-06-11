@@ -3,6 +3,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
@@ -54,8 +55,8 @@ ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
 KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 
 # Port-forward proxy command constants
-PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh.j2'
-PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/generated/kubernetes/proxy_{}.sh'
+PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
+PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/kubernetes-port-forward-proxy-command.sh'
 
 logger = sky_logging.init_logger(__name__)
 
@@ -918,7 +919,8 @@ class KubernetesInstanceType:
 def construct_ssh_jump_command(private_key_path: str,
                                ssh_jump_ip: str,
                                ssh_jump_port: Optional[int] = None,
-                               proxy_cmd_path: Optional[str] = None) -> str:
+                               proxy_cmd_path: Optional[str] = None,
+                               proxy_cmd_target_pod: Optional[str] = None) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
@@ -930,7 +932,7 @@ def construct_ssh_jump_command(private_key_path: str,
         proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
         # adding execution permission to the proxy command script
         os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)
-        ssh_jump_proxy_command += f' -o ProxyCommand=\'{proxy_cmd_path}\' '
+        ssh_jump_proxy_command += f' -o ProxyCommand=\'{proxy_cmd_path} {proxy_cmd_target_pod}\' '
     return ssh_jump_proxy_command
 
 
@@ -993,36 +995,34 @@ def get_ssh_proxy_command(
         ssh_jump_port = get_port(k8s_ssh_target, namespace)
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
-    # Setting kubectl port-forward/socat to establish ssh session using
-    # ClusterIP service to disallow any ports opened
     else:
-        ssh_jump_proxy_command_path = create_proxy_command_script(k8s_ssh_target)
+        ssh_jump_proxy_command_path = create_proxy_command_script()
         ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_ip, proxy_cmd_path=ssh_jump_proxy_command_path)
+            private_key_path, ssh_jump_ip,
+            proxy_cmd_path=ssh_jump_proxy_command_path,
+            proxy_cmd_target_pod=k8s_ssh_target)
     return ssh_jump_proxy_command
 
 
-def create_proxy_command_script(k8s_ssh_target: str) -> str:
+def create_proxy_command_script() -> str:
     """Creates a ProxyCommand script that uses kubectl port-forward to setup
     a tunnel between a local port and the SSH server in the pod.
-
-    Args:
-        k8s_ssh_target: str; The pod name to use as the target for SSH.
 
     Returns:
         str: Path to the ProxyCommand script.
     """
-    vars_to_fill = {
-        'pod_name': k8s_ssh_target,
-    }
     port_fwd_proxy_cmd_path = os.path.expanduser(
-        PORT_FORWARD_PROXY_CMD_PATH.format(k8s_ssh_target))
+        PORT_FORWARD_PROXY_CMD_PATH)
     os.makedirs(os.path.dirname(port_fwd_proxy_cmd_path),
                 exist_ok=True,
                 mode=0o700)
-    common_utils.fill_template(PORT_FORWARD_PROXY_CMD_TEMPLATE,
-                               vars_to_fill,
-                               output_path=port_fwd_proxy_cmd_path)
+
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    template_path = os.path.join(root_dir, 'templates', PORT_FORWARD_PROXY_CMD_TEMPLATE)
+    # Copy the template to the proxy command path. We create a copy to allow
+    # different users sharing the same SkyPilot installation to have their own
+    # proxy command scripts.
+    shutil.copy(template_path, port_fwd_proxy_cmd_path)
     # Set the permissions to 700 to ensure only the owner can read, write,
     # and execute the file.
     os.chmod(port_fwd_proxy_cmd_path, 0o700)

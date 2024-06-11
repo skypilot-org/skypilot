@@ -47,7 +47,6 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -4129,12 +4128,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                      handle.head_ip,
                                                      auth_config,
                                                      handle.docker_user)
-
-        # If cloud was kubernetes, remove the ProxyCommand script used for
-        # port-forwarding.
-        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-            kubernetes_utils.remove_proxy_command_script(
-                handle.cluster_name_on_cloud + '-head')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)

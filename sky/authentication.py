@@ -439,8 +439,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             f'Key {secret_name} does not exist in the cluster, creating it...')
         kubernetes.core_api().create_namespaced_secret(namespace, secret)
 
-    ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
     if network_mode == nodeport_mode:
+        ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
         service_type = kubernetes_enums.KubernetesServiceType.NODEPORT
         # Setup service for SSH jump pod. We create the SSH jump service here
         # because we need to know the service IP address and port to set the

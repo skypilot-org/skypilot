@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# Check if pod name is passed as an argument
+if [ $# -eq 0 ]; then
+  echo "Usage: $0 <pod_name>" >&2
+  exit 1
+fi
+
+POD_NAME="$1"  # The first argument is the name of the pod
+
 # Checks if socat is installed
 if ! command -v socat > /dev/null; then
   echo "Using 'port-forward' mode to run ssh session on Kubernetes instances requires 'socat' to be installed. Please install 'socat'" >&2
@@ -18,7 +26,7 @@ fi
 # This is preferred because of socket re-use issues in kubectl port-forward,
 # see - https://github.com/kubernetes/kubernetes/issues/74551#issuecomment-769185879
 KUBECTL_OUTPUT=$(mktemp)
-kubectl port-forward pod/{{ pod_name }} :22 > "${KUBECTL_OUTPUT}" 2>&1 &
+kubectl port-forward pod/"${POD_NAME}" :22 > "${KUBECTL_OUTPUT}" 2>&1 &
 
 # Capture the PID for the backgrounded kubectl command
 K8S_PORT_FWD_PID=$!
