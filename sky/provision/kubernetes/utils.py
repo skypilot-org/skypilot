@@ -1029,20 +1029,6 @@ def create_proxy_command_script() -> str:
     return port_fwd_proxy_cmd_path
 
 
-def remove_proxy_command_script(k8s_ssh_target: str):
-    """Removes the ProxyCommand script used for port-forwarding.
-
-    Args:
-        k8s_ssh_target: str; The pod name to use as the target for SSH.
-    """
-    port_fwd_proxy_cmd_path = os.path.expanduser(
-        PORT_FORWARD_PROXY_CMD_PATH.format(k8s_ssh_target))
-    print('Removing proxy command script at path:', port_fwd_proxy_cmd_path)
-    if os.path.exists(port_fwd_proxy_cmd_path):
-        print('File exists, removing.')
-        os.remove(port_fwd_proxy_cmd_path)
-
-
 def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
                        service_type: kubernetes_enums.KubernetesServiceType):
     """Sets up Kubernetes service resource to access for SSH jump pod.
