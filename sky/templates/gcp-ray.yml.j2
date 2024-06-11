@@ -80,7 +80,7 @@ available_node_types:
       {%- for label_key, label_value in labels.items() %}
         {{ label_key }}: {{ label_value|tojson }}
       {%- endfor %}
-        managed-instance-group: {{ gcp_use_managed_instance_group_value|tojson }}
+        use-managed-instance-group: {{ gcp_use_managed_instance_group_value|tojson }}
       {%- if gcp_use_managed_instance_group %}
       managed-instance-group:
         run_duration: {{ run_duration }}
