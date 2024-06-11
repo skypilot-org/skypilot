@@ -54,8 +54,6 @@ def get_networking_mode(
         networking_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
             mode_str)
     except ValueError as e:
-        # Add message saying "Please check: ~/.sky/config.yaml" to the error
-        # message.
         with ux_utils.print_exception_no_traceback():
             raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
                 from None
