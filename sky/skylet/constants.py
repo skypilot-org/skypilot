@@ -143,7 +143,7 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
     # causing the error:
     #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
-    f'{SKY_PIP_CMD} install "setuptools<=69.5.1"'
+    f'{SKY_PIP_CMD} install "setuptools<70"; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
