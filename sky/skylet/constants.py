@@ -128,8 +128,6 @@ CONDA_INSTALLATION_COMMANDS = (
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE}; }};'
 )
 
-# python -m venv ~/skypilot-runtime --system-site-packages
-
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 # Install ray and skypilot on the remote cluster if they are not already
