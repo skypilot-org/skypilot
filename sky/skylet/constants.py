@@ -123,6 +123,8 @@ CONDA_INSTALLATION_COMMANDS = (
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
     f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Create a separate conda environment for SkyPilot dependencies.
+    # We use --system-site-packages to reuse the system site packages to avoid
+    # the overhead of installing the same packages in the new environment.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
     f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages && '
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE}; }};'
@@ -140,6 +142,10 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     'export PIP_DISABLE_PIP_VERSION_CHECK=1;'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
+    # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
+    # causing the error:
+    #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
+    f'{SKY_PIP_CMD} install "setuptools<70"; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
