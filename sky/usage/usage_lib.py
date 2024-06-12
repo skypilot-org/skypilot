@@ -16,11 +16,11 @@ import requests
 
 import sky
 from sky import sky_logging
+from sky import skypilot_config
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
-from sky import skypilot_config
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -141,6 +141,7 @@ class UsageMessageToReport(MessageToReport):
         #: Requested number of nodes
         self.task_num_nodes: Optional[int] = None  # update_actual_task
         # YAMLs converted to JSON.
+        # TODO: include the skypilot config used in task yaml.
         self.user_task_yaml: Optional[List[Dict[
             str, Any]]] = None  # update_user_task_yaml
         self.actual_task: Optional[List[Dict[str,
@@ -151,9 +152,6 @@ class UsageMessageToReport(MessageToReport):
         self.runtimes: Dict[str, float] = {}  # update_runtime
         self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
-
-        #: SkyPilot config.
-        self.skypilot_config: Dict[str, Any] = skypilot_config.to_dict()
 
     def __repr__(self) -> str:
         d = self.get_properties()
