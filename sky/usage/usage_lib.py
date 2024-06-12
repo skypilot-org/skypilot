@@ -16,7 +16,6 @@ import requests
 
 import sky
 from sky import sky_logging
-from sky import skypilot_config
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
