@@ -140,6 +140,7 @@ class UsageMessageToReport(MessageToReport):
         #: Requested number of nodes
         self.task_num_nodes: Optional[int] = None  # update_actual_task
         # YAMLs converted to JSON.
+        # TODO: include the skypilot config used in task yaml.
         self.user_task_yaml: Optional[List[Dict[
             str, Any]]] = None  # update_user_task_yaml
         self.actual_task: Optional[List[Dict[str,
