@@ -268,8 +268,9 @@ class RayCodeGen:
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
 
             kwargs = dict()
-            # Only set the `_temp_dir` to SkyPilot's ray cluster directory when the directory
-            # exists for backward compatibility for the VM launched before #1790.
+            # Only set the `_temp_dir` to SkyPilot's ray cluster directory when
+            # the directory exists for backward compatibility for the VM
+            # launched before #1790.
             if os.path.exists({constants.SKY_REMOTE_RAY_TEMPDIR!r}):
                 kwargs['_temp_dir'] = {constants.SKY_REMOTE_RAY_TEMPDIR!r}
             ray.init(
@@ -307,8 +308,9 @@ class RayCodeGen:
                     ready, unready = ray.wait(unready)
                     idx = futures.index(ready[0])
                     returncodes[idx] = ray.get(ready[0])
-                # Remove the placement group after all tasks are done, so that the
-                # next job can be scheduled on the released resources immediately.
+                # Remove the placement group after all tasks are done, so that
+                # the next job can be scheduled on the released resources
+                # immediately.
                 ray_util.remove_placement_group(pg)
                 sys.stdout.flush()
                 return returncodes
@@ -554,7 +556,8 @@ class RayCodeGen:
             textwrap.dedent(f"""\
             sky_env_vars_dict = {{}}
             sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = job_ip_list_str
-            # Environment starting with `SKY_` is deprecated.
+            # Backward compatibility: Environment starting with `SKY_` is
+            # deprecated. Remove it in v0.9.0.
             sky_env_vars_dict['SKY_NODE_IPS'] = job_ip_list_str
             sky_env_vars_dict['{constants.SKYPILOT_NUM_NODES}'] = len(job_ip_rank_list)
             """)
@@ -578,7 +581,8 @@ class RayCodeGen:
 
         if script is not None:
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
-            # Environment starting with `SKY_` is deprecated.
+            # Backward compatibility: Environment starting with `SKY_` is
+            # deprecated. Remove it in v0.9.0.
             sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
 
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
@@ -596,11 +600,13 @@ class RayCodeGen:
                 name_str = f'{{node_name}}, rank={{rank}},'
                 log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{rank}}-{{node_name}}.log'))
             sky_env_vars_dict['{constants.SKYPILOT_NODE_RANK}'] = rank
-            # Environment starting with `SKY_` is deprecated.
+            # Backward compatibility: Environment starting with `SKY_` is
+            # deprecated. Remove it in v0.9.0.
             sky_env_vars_dict['SKY_NODE_RANK'] = rank
 
             sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
-            # Environment starting with `SKY_` is deprecated.
+            # Backward compatibility: Environment starting with `SKY_` is
+            # deprecated. Remove it in v0.9.0.
             sky_env_vars_dict['SKY_INTERNAL_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
