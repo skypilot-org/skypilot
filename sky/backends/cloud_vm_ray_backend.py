@@ -347,9 +347,9 @@ class RayCodeGen:
         num_nodes: int,
         resources_dict: Dict[str, float],
         stable_cluster_internal_ips: List[str],
+        env_vars: Dict[str, str],
         setup_cmd: Optional[str] = None,
         setup_log_path: Optional[str] = None,
-        env_vars: Optional[Dict[str, str]] = None,
     ) -> None:
         """Create the gang scheduling placement group for a Task.
 
@@ -409,11 +409,8 @@ class RayCodeGen:
 
         job_id = self.job_id
         if setup_cmd is not None:
-            if env_vars is None:
-                setup_envs = None
-            else:
-                setup_envs = env_vars.copy()
-                setup_envs[constants.SKYPILOT_NUM_NODES] = str(num_nodes)
+            setup_envs = env_vars.copy()
+            setup_envs[constants.SKYPILOT_NUM_NODES] = str(num_nodes)
             self._code += [
                 textwrap.dedent(f"""\
                 setup_cmd = {setup_cmd!r}
@@ -4755,9 +4752,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             1,
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
+            env_vars=task_env_vars,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
-            env_vars=task_env_vars,
         )
 
         if callable(task.run):
@@ -4804,9 +4801,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             num_actual_nodes,
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
+            env_vars=task_env_vars,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
-            env_vars=task_env_vars)
+        )
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
