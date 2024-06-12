@@ -12,6 +12,37 @@ Kubernetes Cluster Setup
     and shared a kubeconfig file with you, :ref:`Submitting tasks to Kubernetes <kubernetes-instructions>`
     explains how to submit tasks to your cluster.
 
+.. grid:: 1 1 3 3
+    :gutter: 2
+
+    .. grid-item-card:: ⚙️ Setup Kubernetes Cluster
+        :link: kubernetes-setup-intro
+        :link-type: ref
+        :text-align: center
+
+        Configure your Kubernetes cluster to run SkyPilot.
+
+    .. grid-item-card::  ✅️ Verify Setup
+        :link: kubernetes-setup-verify
+        :link-type: ref
+        :text-align: center
+
+        Ensure your cluster is set up correctly for SkyPilot.
+
+
+    .. grid-item-card::  👀️ Observability
+        :link: kubernetes-observability
+        :link-type: ref
+        :text-align: center
+
+        Use your existing Kubernetes tooling to monitor SkyPilot resources.
+
+
+
+.. _kubernetes-setup-intro:
+
+Setting up Kubernetes cluster for SkyPilot
+------------------------------------------
 
 To prepare a Kubernetes cluster to run SkyPilot, the cluster administrator must:
 
@@ -25,7 +56,7 @@ After these steps, the administrator can share the kubeconfig file with users, w
 .. _kubernetes-setup-deploy:
 
 Step 1 - Deploy a Kubernetes Cluster
-------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
 
@@ -68,7 +99,7 @@ Below we link to minimal guides to set up a new Kubernetes cluster in different 
 .. _kubernetes-setup-gpusupport:
 
 Step 2 - Set up GPU support
----------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To utilize GPUs on Kubernetes, your cluster must:
 
@@ -77,7 +108,7 @@ To utilize GPUs on Kubernetes, your cluster must:
 
 
 .. tip::
-    You can check if Nvidia GPU operator is installed and the ``nvidia`` runtime is set as default by running:
+    To verify the `Nvidia GPU Operator <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_ is installed after step 1 and the ``nvidia`` runtime is set as default, run:
 
     .. code-block:: console
 
@@ -93,7 +124,7 @@ To utilize GPUs on Kubernetes, your cluster must:
 .. _kubernetes-gpu-labels:
 
 Setting up GPU labels
-^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~
 
 .. tip::
 
@@ -124,29 +155,10 @@ Any one of these labels is sufficient for SkyPilot to detect GPUs on the cluster
           echo "$output"
         fi
 
-Manually Labelling Nodes
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-If none of the above labels are present on your cluster, you must create a label of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
-
-For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerator: v100`.
-
-Use the following command to label a node:
-
-.. code-block:: bash
-
-    kubectl label nodes <node-name> skypilot.co/accelerator=<gpu_name>
-
-
-.. note::
-
-    GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerator`` label.
-
-
 Automatically Labelling Nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To make labelling easier, we provide a convenience script that automatically detects GPU types and labels each node. You can run it with:
+If none of the above labels are present on your cluster, we provide a convenience script that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with:
 
 .. code-block:: console
 
@@ -162,15 +174,33 @@ To make labelling easier, we provide a convenience script that automatically det
 
     If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
 
+Manually Labelling Nodes
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can also manually label nodes, if required. Labels must be of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
+
+For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerator: v100`.
+
+Use the following command to label a node:
+
+.. code-block:: bash
+
+    kubectl label nodes <node-name> skypilot.co/accelerator=<gpu_name>
+
+
+.. note::
+
+    GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerator`` label.
+
 
 .. _kubernetes-setup-ports:
 
 [Optional] Step 3 - Set up for Exposing Services
-------------------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
 
-    If you are using GKE or EKS or do not plan to run SkyServe on Kubernetes, no additional setup is required to expose ports. SkyPilot will create a LoadBalancer service automatically.
+    If you are using GKE or EKS or do not plan expose ports publicly on Kubernetes (such as ``sky launch --ports``, SkyServe), no additional setup is required to expose ports. SkyPilot will create a LoadBalancer service automatically.
 
 Running SkyServe or tasks exposing ports requires additional setup to expose ports running services.
 SkyPilot supports either of two modes to expose ports:
@@ -183,7 +213,7 @@ Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more deta
 .. _kubernetes-setup-serviceaccount:
 
 [Optional] Step 4 - Namespace and Service Account Setup
--------------------------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
 
@@ -209,6 +239,8 @@ To simplify the setup, we provide a `script <https://github.com/skypilot-org/sky
     SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
 
 You may distribute the generated kubeconfig file to users who can then use it to submit tasks to the cluster.
+
+.. _kubernetes-setup-verify:
 
 Verifying Setup
 ---------------
@@ -271,6 +303,7 @@ Note that this dashboard can only be accessed from the machine where the ``kubec
     The demo dashboard is not secure and should not be used in production. Please refer to the
     `Kubernetes documentation <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_
     for more information on how to set up access control for the dashboard.
+
 
 Troubleshooting Kubernetes Setup
 --------------------------------

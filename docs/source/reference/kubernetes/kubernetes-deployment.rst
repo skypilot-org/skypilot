@@ -57,7 +57,7 @@ It runs a Kubernetes cluster inside a container, so no setup is required.
      $ sky local up
 
 3. Run :code:`sky check` and verify that Kubernetes is enabled in SkyPilot. You can now run SkyPilot tasks on this locally hosted Kubernetes cluster using :code:`sky launch`.
-4. After you are done using the cluster, you can remove it with :code:`sky local down`. This will terminate the KinD container and switch your kubeconfig back to it's original context:
+4. After you are done using the cluster, you can remove it with :code:`sky local down`. This will destroy the local kubernetes cluster and switch your kubeconfig back to it's original context:
 
    .. code-block:: console
 
@@ -65,8 +65,8 @@ It runs a Kubernetes cluster inside a container, so no setup is required.
 
 .. note::
     We recommend allocating at least 4 or more CPUs to your docker runtime to
-    ensure kind has enough resources. See instructions
-    `here <https://docs.docker.com/desktop/settings/linux/>`_.
+    ensure kind has enough resources. See instructions to increase CPU allocation
+    `here <https://kind.sigs.k8s.io/docs/user/known-issues/#failure-to-build-node-image/>`_.
 
 .. note::
     kind does not support multiple nodes and GPUs.
@@ -80,6 +80,24 @@ Deploying on Google Cloud GKE
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. Create a GKE standard cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
+
+   .. raw:: HTML
+
+       <details>
+
+       <summary>Example: create a GKE cluster with 2 nodes, each having 16 CPUs.</summary>
+
+   .. code-block:: bash
+
+       PROJECT_ID=$(gcloud config get-value project)
+       CLUSTER_NAME=mycluster
+       gcloud beta container --project "${PROJECT_ID}" clusters create "${CLUSTER_NAME}" --zone "us-central1-c" --no-enable-basic-auth --cluster-version "1.27.13-gke.1201000" --release-channel "regular" --machine-type "e2-standard-16" --image-type "COS_CONTAINERD" --disk-type "pd-balanced" --disk-size "100" --metadata disable-legacy-endpoints=true --scopes "https://www.googleapis.com/auth/devstorage.read_only","https://www.googleapis.com/auth/logging.write","https://www.googleapis.com/auth/monitoring","https://www.googleapis.com/auth/servicecontrol","https://www.googleapis.com/auth/service.management.readonly","https://www.googleapis.com/auth/trace.append" --num-nodes "2" --logging=SYSTEM,WORKLOAD --monitoring=SYSTEM --enable-ip-alias --network "projects/${PROJECT_ID}/global/networks/default" --subnetwork "projects/${PROJECT_ID}/regions/us-central1/subnetworks/default" --no-enable-intra-node-visibility --default-max-pods-per-node "110" --security-posture=standard --workload-vulnerability-scanning=disabled --no-enable-master-authorized-networks --addons HorizontalPodAutoscaling,HttpLoadBalancing,GcePersistentDiskCsiDriver --enable-autoupgrade --enable-autorepair --max-surge-upgrade 1 --max-unavailable-upgrade 0 --enable-managed-prometheus --enable-shielded-nodes --node-locations "us-central1-c"
+
+   .. raw:: html
+
+       </details>
+
+
 2. Get the kubeconfig for your cluster. The following command will automatically update ``~/.kube/config`` with new kubecontext for the GKE cluster:
 
    .. code-block:: console
@@ -110,11 +128,21 @@ Deploying on Google Cloud GKE
 
    To verify if GPU drivers are set up, run ``kubectl describe nodes`` and verify that ``nvidia.com/gpu`` is listed under the ``Capacity`` section.
 
-4. Verify your kubeconfig (and GPU support, if available) is correctly set up by running :code:`sky check`:
+4. Verify your kubernetes cluster is correctly set up for SkyPilot by running :code:`sky check`:
 
    .. code-block:: console
 
      $ sky check
+
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud kubernetes`
+
+   .. code-block:: console
+
+       $ sky show-gpus --cloud kubernetes
+       GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+       L4    1, 2, 3, 4    8           6
+       A100  1, 2          4           2
+
 
 .. note::
     GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
@@ -149,12 +177,19 @@ Deploying on Amazon EKS
 
      kubectl get jobs -n kube-system
 
-4. Verify your kubeconfig (and GPU support, if available) is correctly set up by running :code:`sky check`:
+4. Verify your kubernetes cluster is correctly set up for SkyPilot by running :code:`sky check`:
 
    .. code-block:: console
 
      $ sky check
 
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud kubernetes`
+
+   .. code-block:: console
+
+       $ sky show-gpus --cloud kubernetes
+       GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+       A100  1, 2          4           2
 
 .. _kubernetes-setup-onprem:
 
