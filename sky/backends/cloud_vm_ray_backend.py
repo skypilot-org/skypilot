@@ -3162,7 +3162,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
-            if detach_setup or _is_command_length_exceeding_limit(encoded_script):
+            if detach_setup or _is_command_length_exceeding_limit(
+                    encoded_script):
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
