@@ -150,7 +150,7 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 _MAX_INLINE_SCRIPT_LENGTH = 120 * 1024
 
 
-def _is_command_length_exceeds_limit(command: str) -> bool:
+def _is_command_length_exceeding_limit(command: str) -> bool:
     """Check if the length of the command exceeds the limit.
 
     We calculate the length of the command after quoting the command twice as
@@ -3162,7 +3162,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
-            if detach_setup or _is_command_length_exceeds_limit(encoded_script):
+            if detach_setup or _is_command_length_exceeding_limit(encoded_script):
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
@@ -3273,7 +3273,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
-        if _is_command_length_exceeds_limit(job_submit_cmd):
+        if _is_command_length_exceeding_limit(job_submit_cmd):
             runners = handle.get_command_runners()
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
