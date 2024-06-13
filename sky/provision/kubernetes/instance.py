@@ -329,8 +329,11 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
         'prefix_cmd() '
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
         'export DEBIAN_FRONTEND=noninteractive;'
-        '$(prefix_cmd) apt-get update;'
-        '$(prefix_cmd) apt install openssh-server rsync -y; '
+        # Check and install openssh-server and rsync only if either is missing
+        'if ! $(prefix_cmd) dpkg -l | grep -qw openssh-server || ! $(prefix_cmd) dpkg -l | grep -qw rsync; then '  # pylint: disable=line-too-long
+        '  $(prefix_cmd) apt-get update;'
+        '  $(prefix_cmd) apt install openssh-server rsync -y; '
+        'fi; '
         '$(prefix_cmd) mkdir -p /var/run/sshd; '
         '$(prefix_cmd) '
         'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
