@@ -14,7 +14,6 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Set
 
 import google.auth
-from googleapiclient import discovery
 import numpy as np
 
 from sky.adaptors import common as adaptors_common
@@ -85,18 +84,17 @@ SERIES_TO_DISCRIPTION = {
     't2a': 'T2A Arm Instance',
     't2d': 'T2D AMD Instance',
 }
-creds, project_id = google.auth.default()
-gcp_client = discovery.build('compute', 'v1')
-tpu_client = discovery.build('tpu', 'v1')
 
 SINGLE_THREADED = False
 ZONES: Set[str] = set()
 EXCLUDED_REGIONS: Set[str] = set()
 
+_, project_id = google.auth.default()
+
 
 def get_skus(service_id: str) -> List[Dict[str, Any]]:
     # Get the SKUs from the GCP API.
-    cb = discovery.build('cloudbilling', 'v1')
+    cb = gcp.build('cloudbilling', 'v1', cache_discovery=False)
     service_name = f'services/{service_id}'
 
     skus = []
@@ -171,6 +169,7 @@ def filter_zones(func: Callable[[], List[str]]) -> Callable[[], List[str]]:
 @filter_zones
 @functools.lru_cache(maxsize=None)
 def _get_all_zones() -> List[str]:
+    gcp_client = gcp.build('compute', 'v1', cache_discovery=False)
     zones_request = gcp_client.zones().list(project=project_id)
     zones = []
     while zones_request is not None:
@@ -182,6 +181,7 @@ def _get_all_zones() -> List[str]:
 
 
 def _get_machine_type_for_zone(zone: str) -> 'pd.DataFrame':
+    gcp_client = gcp.build('compute', 'v1', cache_discovery=False)
     machine_types_request = gcp_client.machineTypes().list(project=project_id,
                                                            zone=zone)
     print(f'Fetching machine types for zone {zone!r}...')
@@ -288,6 +288,7 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
 
 
 def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
+    gcp_client = gcp.build('compute', 'v1', cache_discovery=False)
     gpus_request = gcp_client.acceleratorTypes().list(project=project_id,
                                                       zone=zone)
     print(f'Fetching GPUs for zone {zone!r}...')
@@ -415,6 +416,7 @@ def get_gpu_df(skus: List[Dict[str, Any]],
 
 
 def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
+    tpu_client = gcp.build('tpu', 'v1', cache_discovery=False)
     tpus = []
     parent = f'projects/{project_id}/locations/{zone}'
     tpus_request = tpu_client.projects().locations().acceleratorTypes().list(

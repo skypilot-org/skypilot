@@ -12,6 +12,7 @@ import random
 import re
 import socket
 import sys
+import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
@@ -678,3 +679,26 @@ def deprecated_function(
         return func(*args, **kwargs)
 
     return new_func
+
+
+class _ThreadLocalLRUCache(threading.local):
+
+    def __init__(self, maxsize=32):
+        super().__init__()
+        self.cache = functools.lru_cache(maxsize=maxsize)
+
+
+def thread_local_lru_cache(maxsize=32):
+    # Create thread-local storage for the LRU cache
+    local_cache = _ThreadLocalLRUCache(maxsize)
+
+    def decorator(func):
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Use the thread-local LRU cache
+            return local_cache.cache(func)(*args, **kwargs)
+
+        return wrapper
+
+    return decorator

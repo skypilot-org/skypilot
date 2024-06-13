@@ -4,16 +4,20 @@
 import json
 
 from sky.adaptors import common
+from sky.utils import common_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '
                          'Try pip install "skypilot[gcp]"')
 googleapiclient = common.LazyImport('googleapiclient',
                                     import_error_message=_IMPORT_ERROR_MESSAGE)
 google = common.LazyImport('google', import_error_message=_IMPORT_ERROR_MESSAGE)
-_LAZY_MODULES = (google, googleapiclient)
+google_auth_httplib2 = common.LazyImport(
+    'google_auth_httplib2', import_error_message=_IMPORT_ERROR_MESSAGE)
+_LAZY_MODULES = (google, googleapiclient, google_auth_httplib2)
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
+@common_utils.thread_local_lru_cache()
 def build(service_name: str, version: str, *args, **kwargs):
     """Build a GCP service.
 
@@ -22,8 +26,26 @@ def build(service_name: str, version: str, *args, **kwargs):
         version: Service version (e.g., 'v1').
     """
 
-    return googleapiclient.discovery.build(service_name, version, *args,
-                                           **kwargs)
+    import httplib2
+    credentials = kwargs.pop('credentials', None)
+    if credentials is None:
+        credentials, _ = google.auth.default()
+    # Create a new Http() object for every request
+    def build_request(http, *args, **kwargs):
+        del http  # Unused
+        new_http = google_auth_httplib2.AuthorizedHttp(credentials,
+                                                       http=httplib2.Http())
+        return googleapiclient.http.HttpRequest(new_http, *args, **kwargs)
+
+    authorized_http = google_auth_httplib2.AuthorizedHttp(credentials,
+                                                          http=httplib2.Http())
+    client = googleapiclient.discovery.build(service_name,
+                                             version,
+                                             *args,
+                                             **kwargs,
+                                             requestBuilder=build_request,
+                                             http=authorized_http)
+    return client
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
