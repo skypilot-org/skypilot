@@ -153,9 +153,9 @@ _MAX_INLINE_SCRIPT_LENGTH = 120 * 1024
 def _is_command_length_exceeds_limit(command: str) -> bool:
     """Check if the length of the command exceeds the limit.
 
-    We quote the command twice as when it is executed by the CommandRunner, the
-    command will be quoted twice, which will add significant length to the
-    command.
+    We calculate the length of the command after quoting the command twice as
+    when it is executed by the CommandRunner, the command will be quoted twice
+    to ensure the correctness, which will add significant length to the command.
     """
 
     quoted_length = len(shlex.quote(shlex.quote(command)))
