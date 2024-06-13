@@ -152,7 +152,7 @@ _MAX_INLINE_SCRIPT_LENGTH = 120 * 1024
 
 def _is_command_length_exceeds_limit(command: str) -> bool:
     """Check if the length of the command exceeds the limit.
-    
+
     We quote the command twice as when it is executed by the CommandRunner, the
     command will be quoted twice, which will add significant length to the
     command.
