@@ -970,7 +970,7 @@ class Task:
                     })
                 elif store_type is storage_lib.StoreType.AZURE:
                     if isinstance(storage.source,
-                                  str) and storage.source.startswith('az://'):
+                                  str) and data_utils.is_az_container_endpoint(storage.source):
                         blob_path = storage.source
                     else:
                         assert storage.name is not None, storage
@@ -978,8 +978,10 @@ class Task:
                             storage_lib.AzureBlobStore,
                             storage.stores[storage_lib.StoreType.AZURE])
                         storage_account_name = store_object.storage_account_name
-                        blob_path = (f'az://{storage_account_name}/'
-                                     f'{storage.name}')
+                        blob_path = data_utils.AZURE_CONTAINER_URL.format(
+                            storage_account_name=storage_account_name,
+                            container_name=storage.name
+                        )
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })

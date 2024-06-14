@@ -62,15 +62,17 @@ def split_az_path(az_path: str) -> Tuple[str, str, str]:
     """Splits Path into Storage account and Container names and Relative Path
 
     Args:
-        az_path: str; Container Path, e.g. az://azuremlexampledata/data/
+        az_path: str; Container Path, e.g. https://azuremlexampledata.blob.core.windows.net/data
 
     Returns:
         str; Name of the container
         str; paths of the file/directory defined within the container
         str; Name of the storage account
     """
-    path_parts = az_path.replace('az://', '').split('/')
-    storage_account_name = path_parts.pop(0)
+    path_parts = az_path.replace('https://', '').split('/')
+    service_endpoint = path_parts.pop(0)
+    service_endpoint_parts = service_endpoint.split('.')
+    storage_account_name = service_endpoint_parts[0]
     container_name = path_parts.pop(0)
     key = '/'.join(path_parts)
     return container_name, key, storage_account_name
@@ -273,6 +275,27 @@ def get_az_storage_account_key(
                                    f'account {storage_account_name!r}.\n'
                                    f'Detailed error: {e}')
             time.sleep(backoff.current_backoff())
+
+
+def is_az_container_endpoint(endpoint_url: str):
+    """checks if the provided url is valid container endpoint
+
+    Args:
+      endpoint_url: str; url of container endpoint. 
+        e.g. https://azuremlexampledata.blob.core.windows.net/data
+
+    Returns:
+      boolean; shows either or not the container endpoint is valid.
+    """
+    # storage account must be length of 3-24
+    # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # pylint: disable=line-too-long
+    pattern = re.compile(
+        r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)*$'
+    )
+    match = pattern.match(endpoint_url)
+    if match:
+        return True
+    return False
 
 
 def create_r2_client(region: str = 'auto') -> Client:

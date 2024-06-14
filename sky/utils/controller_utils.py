@@ -718,10 +718,19 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     if copy_mounts_with_file_in_src:
         # file_mount_remote_tmp_dir will only exist when there are files in
         # the src for copy mounts.
-        storage = task.storage_mounts[file_mount_remote_tmp_dir]
-        store_type = list(storage.stores.keys())[0]
-        store_prefix = store_type.store_prefix()
-        bucket_url = store_prefix + file_bucket_name
+        storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
+        store_type = list(storage_obj.stores.keys())[0]
+        if store_type is storage_lib.StoreType.AZURE:
+            store_object = cast(storage_lib.AzureBlobStore,
+                                storage_obj.stores[store_type])
+            storage_account_name = store_object.storage_account_name
+            bucket_url = data_utils.AZURE_CONTAINER_URL.format(
+                storage_account_name = storage_account_name,
+                container_name = storage_obj.name
+            ) 
+        else:
+            store_prefix = store_type.store_prefix()
+            bucket_url = store_prefix + file_bucket_name
         for dst, src in copy_mounts_with_file_in_src.items():
             file_id = src_to_file_id[src]
             new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
@@ -739,13 +748,15 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
             store_type = store_types[0]
-            store_prefix = store_type.store_prefix()
             if store_type is storage_lib.StoreType.AZURE:
                 store_object = cast(storage_lib.AzureBlobStore,
                                     storage_obj.stores[store_type])
                 storage_account_name = store_object.storage_account_name
-                storage_obj.source = (f'{store_prefix}{storage_account_name}/'
-                                      f'{storage_obj.name}')
+                storage_obj.source = data_utils.AZURE_CONTAINER_URL.format(
+                    storage_account_name = storage_account_name,
+                    container_name = storage_obj.name
+                )
             else:
+                store_prefix = store_type.store_prefix()
                 storage_obj.source = f'{store_prefix}{storage_obj.name}'
             storage_obj.force_delete = True

@@ -4097,7 +4097,6 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
             storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
-            url = f'az://{storage_account_name}/{bucket_name}'
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
@@ -4416,7 +4415,10 @@ class TestStorageWithCredentials:
             storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name, resource_group_name)
-        bucket_uri = f'az://{storage_account_name}/{tmp_bucket_name}'
+        bucket_uri = data_utils.AZURE_CONTAINER_URL.format(
+            storage_account_name=storage_account_name,
+            container_name=tmp_bucket_name
+        )
         subprocess.check_call([
             'az', 'storage', 'container', 'create', '--name',
             f'{tmp_bucket_name}', '--account-name', f'{storage_account_name}',
@@ -4606,7 +4608,7 @@ class TestStorageWithCredentials:
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
          ('s3://digitalcorpora', storage_lib.StoreType.S3),
          ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS),
-         pytest.param('az://azuremlexampledata/data/imagenet',
+         pytest.param('https://azuremlexampledata.blob.core.windows.net/data/imagenet',
                       storage_lib.StoreType.AZURE,
                       marks=pytest.mark.azure)],
         indirect=['tmp_public_storage_obj'])
@@ -4622,7 +4624,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('nonexist_bucket_url', [
         's3://{random_name}', 'gs://{random_name}',
-        pytest.param('az://{account_name}/{random_name}',
+        pytest.param('https://{account_name}.blob.core.windows.net/{random_name}', # pylint: disable=line-too-long
                      marks=pytest.mark.azure),
         pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
         pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
@@ -4639,7 +4641,8 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('gs'):
                 command = f'gsutil ls {nonexist_bucket_url.format(random_name=nonexist_bucket_name)}'
                 expected_output = 'BucketNotFoundException'
-            elif nonexist_bucket_url.startswith('az'):
+            elif nonexist_bucket_url.startswith('https'):
+                data_utils.is_az_container_endpoint(nonexist_bucket_url)
                 default_region = 'eastus'
                 storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
                 resource_group_name = data_utils.get_az_resource_group(
@@ -4689,7 +4692,7 @@ class TestStorageWithCredentials:
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
                 match='Attempted to use a non-existent bucket as a source'):
-            if nonexist_bucket_url.startswith('az'):
+            if nonexist_bucket_url.startswith('https'):
                 storage_obj = storage_lib.Storage(
                     source=nonexist_bucket_url.format(
                         account_name=storage_account_name,
@@ -4702,7 +4705,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('private_bucket', [
         f's3://imagenet', f'gs://imagenet',
-        pytest.param('az://smoketestprivate/test', marks=pytest.mark.azure),
+        pytest.param('https://smoketestprivate.blob.core.windows.net/test', marks=pytest.mark.azure), # pylint: disable=line-too-long
         pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
     ])
     def test_private_bucket(self, private_bucket):
@@ -4710,7 +4713,7 @@ class TestStorageWithCredentials:
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
         store_type = urllib.parse.urlsplit(private_bucket).scheme
-        if store_type == 'az' or store_type == 'cos':
+        if store_type == 'https' or store_type == 'cos':
             private_bucket_name = urllib.parse.urlsplit(
                 private_bucket).path.strip('/')
         else:

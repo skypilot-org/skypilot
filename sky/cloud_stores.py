@@ -191,18 +191,14 @@ class AzureBlobCloudStorage(CloudStorage):
         name is a prefix of other objects.
         """
         # split the url using split_az_path
-        container_name, path, storage_account_name = data_utils.split_az_path(
-            url)
+        _, path, _ = data_utils.split_az_path(url)
         # If there aren't more than just container name and storage account,
         # that's a directory.
         if len(path) == 0:
             return True
         # If there's more, we'd need to check if it's a directory or a file.
-        container_url = data_utils.AZURE_CONTAINER_URL.format(
-            storage_account_name=storage_account_name,
-            container_name=container_name)
         container_client = data_utils.create_az_client(
-            client_type='container', container_url=container_url)
+            client_type='container', container_url=url)
         num_objects = 0
         for blob in container_client.list_blobs(name_starts_with=path):
             if blob.name == path:
@@ -235,17 +231,12 @@ class AzureBlobCloudStorage(CloudStorage):
                                                         storage_account_key,
                                                         container_name,
                                                         blob_path)
-
-        container_url = data_utils.AZURE_CONTAINER_URL.format(
-            storage_account_name=storage_account_name,
-            container_name=container_name)
-
         if is_dir:
-            source = f'{container_url}/{sas_token}'
+            converted_source = f'{source}/{sas_token}'
         else:
-            source = f'{container_url}/{blob_path}{sas_token}'
+            converted_source = f'{source}/{blob_path}{sas_token}'
 
-        return shlex.quote(source)
+        return shlex.quote(converted_source)
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Fetches a directory using AZCOPY from storage to remote instance."""
@@ -334,16 +325,6 @@ class R2CloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
-def get_storage_from_path(url: str) -> CloudStorage:
-    """Returns a CloudStorage by identifying the scheme:// in a URL."""
-    result = urllib.parse.urlsplit(url)
-
-    if result.scheme not in _REGISTRY:
-        assert False, (f'Scheme {result.scheme} not found in'
-                       f' supported storage ({_REGISTRY.keys()}); path {url}')
-    return _REGISTRY[result.scheme]
-
-
 class IBMCosCloudStorage(CloudStorage):
     """IBM Cloud Storage."""
     # install rclone if package isn't already installed
@@ -410,11 +391,20 @@ class IBMCosCloudStorage(CloudStorage):
         return self.make_sync_dir_command(source, destination)
 
 
+def get_storage_from_path(url: str) -> CloudStorage:
+    """Returns a CloudStorage by identifying the scheme:// in a URL."""
+    result = urllib.parse.urlsplit(url)
+    if result.scheme not in _REGISTRY:
+        assert False, (f'Scheme {result.scheme} not found in'
+                       f' supported storage ({_REGISTRY.keys()}); path {url}')
+    return _REGISTRY[result.scheme]
+
+
 # Maps bucket's URIs prefix(scheme) to its corresponding storage class
 _REGISTRY = {
     'gs': GcsCloudStorage(),
     's3': S3CloudStorage(),
     'r2': R2CloudStorage(),
     'cos': IBMCosCloudStorage(),
-    'az': AzureBlobCloudStorage()
+    'https': AzureBlobCloudStorage()
 }

@@ -158,15 +158,12 @@ class StoreType(enum.Enum):
         elif self == StoreType.GCS:
             return 'gs://'
         elif self == StoreType.AZURE:
-            return 'az://'
+            return 'https://'
         # R2 storages use 's3://' as a prefix for various aws cli commands
         elif self == StoreType.R2:
             return 'r2://'
         elif self == StoreType.IBM:
             return 'cos://'
-        elif self == StoreType.AZURE:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Azure Blob Storage is not supported yet.')
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {self}')
@@ -348,8 +345,14 @@ class AbstractStore:
             # externally created buckets, users must provide the
             # bucket's URL as 'source'.
             if handle is None:
-                with ux_utils.print_exception_no_traceback():
+                if isinstance(self, AzureBlobStore):
+                    source_endpoint = data_utils.AZURE_CONTAINER_URL.format(
+                        storage_account_name=self.storage_account_name,
+                        container_name=self.name)
+                else:
                     store_prefix = StoreType.from_store(self).store_prefix()
+                    source_endpoint = f'{store_prefix}{self.name}'
+                with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSpecError(
                         'Attempted to mount a non-sky managed bucket '
                         f'{self.name!r} without specifying the storage source.'
@@ -360,7 +363,7 @@ class AbstractStore:
                         'specify the bucket URL in the source field '
                         'instead of its name. I.e., replace '
                         f'`name: {self.name}` with '
-                        f'`source: {store_prefix}{self.name}`.')
+                        f'`source: {source_endpoint}`.')
 
 
 class Storage(object):
@@ -538,7 +541,7 @@ class Storage(object):
                         self.add_store(StoreType.S3)
                     elif self.source.startswith('gs://'):
                         self.add_store(StoreType.GCS)
-                    elif self.source.startswith('az://'):
+                    elif data_utils.is_az_container_endpoint(self.source):
                         self.add_store(StoreType.AZURE)
                     elif self.source.startswith('r2://'):
                         self.add_store(StoreType.R2)
@@ -624,12 +627,12 @@ class Storage(object):
                             'using a bucket by writing <destination_path>: '
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
-            elif split_path.scheme in ['s3', 'gs', 'az', 'r2', 'cos']:
+            elif split_path.scheme in ['s3', 'gs', 'https', 'r2', 'cos']:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
                 # cloud store - ensure path points to only a directory
                 if mode == StorageMode.MOUNT:
-                    if (split_path.scheme != 'az' and
+                    if (split_path.scheme != 'https' and
                         ((split_path.scheme != 'cos' and
                           split_path.path.strip('/') != '') or
                          (split_path.scheme == 'cos' and
@@ -647,7 +650,7 @@ class Storage(object):
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
-                        f'Supported paths: local, s3://, gs://, '
+                        f'Supported paths: local, s3://, gs://, https://, '
                         f'r2://, cos://. Got: {source}')
         return source, is_local_source
 
@@ -663,7 +666,7 @@ class Storage(object):
             """
             prefix = name.split('://')[0]
             prefix = prefix.lower()
-            if prefix in ['s3', 'gs', 'r2', 'cos']:
+            if prefix in ['s3', 'gs', 'https', 'r2', 'cos']:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
                         'Prefix detected: `name` cannot start with '
@@ -714,7 +717,7 @@ class Storage(object):
                     if source.startswith('cos://'):
                         # cos url requires custom parsing
                         name = data_utils.split_cos_path(source)[0]
-                    elif source.startswith('az://'):
+                    elif data_utils.is_az_container_endpoint(source):
                         name = data_utils.split_az_path(source)[0]
                     else:
                         name = urllib.parse.urlsplit(source).netloc
@@ -1072,7 +1075,7 @@ class S3Store(AbstractStore):
                 assert data_utils.verify_gcs_bucket(self.name), (
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
-            elif self.source.startswith('az://'):
+            elif data_utils.is_az_container_endpoint(self.source):
                 container_name, _, storage_account_name = (
                     data_utils.split_az_path(self.source))
                 assert self.name == container_name, (
@@ -1491,7 +1494,7 @@ class GcsStore(AbstractStore):
                 assert self.name == data_utils.split_gcs_path(self.source)[0], (
                     'GCS Bucket is specified as path, the name should be '
                     'the same as GCS bucket.')
-            elif self.source.startswith('az://'):
+            elif data_utils.is_az_container_endpoint(self.source):
                 container_name, _, storage_account_name = (
                     data_utils.split_az_path(self.source))
                 assert self.name == container_name, (
@@ -1943,8 +1946,8 @@ class AzureBlobStore(AbstractStore):
                 assert data_utils.verify_gcs_bucket(self.name), (
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
-            elif self.source.startswith('az://'):
-                container_name, _, _ = (data_utils.split_az_path(self.source))
+            elif data_utils.is_az_container_endpoint(self.source):
+                container_name, _, _ = data_utils.split_az_path(self.source)
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '
                     'the same as AZ bucket.')
@@ -2036,7 +2039,8 @@ class AzureBlobStore(AbstractStore):
         self.storage_client = data_utils.create_az_client('storage')
         self.resource_client = data_utils.create_az_client('resource')
         # Using externally created storage
-        if isinstance(self.source, str) and self.source.startswith('az://'):
+        if isinstance(self.source, str
+                      ) and data_utils.is_az_container_endpoint(self.source):
             bucket_name, _, storage_account_name = data_utils.split_az_path(
                 self.source)
             assert self.name == bucket_name
@@ -2193,7 +2197,7 @@ class AzureBlobStore(AbstractStore):
                     'Moving data directly from {cloud} to Azure is currently '
                     'not supported. Please specify a local source for the '
                     'storage object.')
-                if self.source.startswith('az://'):
+                if data_utils.is_az_container_endpoint(self.source):
                     pass
                 elif self.source.startswith('s3://'):
                     raise NotImplementedError(error_message.format('S3'))
@@ -2282,11 +2286,14 @@ class AzureBlobStore(AbstractStore):
             source_message = f'{len(source_path_list)} paths'
         else:
             source_message = source_path_list[0]
-
+        container_endpoint = data_utils.AZURE_CONTAINER_URL.format(
+            storage_account_name=self.storage_account_name,
+            container_name=self.name
+        )
         with rich_utils.safe_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to '
-                f'[green]az://{self.storage_account_name}/{self.name}/[/]'):
+                f'[green]{container_endpoint}/[/]'):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -2302,7 +2309,7 @@ class AzureBlobStore(AbstractStore):
         Buckets for Azure Blob Storage are referred as Containers.
         If the container exists, this method will return the container.
         If the container does not exist, there are three cases:
-          1) Raise an error if the container source starts with az://
+          1) Raise an error if the container source starts with https://
           2) Return None if container has been externally deleted and
              sync_on_reconstruction is False
           3) Create and return a new container otherwise
@@ -2334,13 +2341,14 @@ class AzureBlobStore(AbstractStore):
                         raise exceptions.StorageBucketGetError(
                             _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
                                 name=self.name))
+                self._validate_existing_bucket()
                 return container_client.container_name, False
             # when the container name does not exist under the provided
             # storage account name and credentials, and user has the rights to
             # access the storage account.
             else:
                 if isinstance(self.source,
-                              str) and self.source.startswith('az://'):
+                              str) and self.source.startswith('https://'):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageBucketGetError(
                             'Attempted to use a non-existent bucket as a '
@@ -2503,7 +2511,7 @@ class R2Store(AbstractStore):
                 assert data_utils.verify_gcs_bucket(self.name), (
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
-            elif self.source.startswith('az://'):
+            elif data_utils.is_az_container_endpoint(self.source):
                 container_name, _, storage_account_name = (
                     data_utils.split_az_path(self.source))
                 assert self.name == container_name, (
@@ -2889,7 +2897,7 @@ class IBMCosStore(AbstractStore):
                 assert data_utils.verify_gcs_bucket(self.name), (
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
-            elif self.source.startswith('az://'):
+            elif data_utils.is_az_container_endpoint(self.source):
                 container_name, _, storage_account_name = (
                     data_utils.split_az_path(self.source))
                 assert self.name == container_name, (
