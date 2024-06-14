@@ -68,7 +68,7 @@ Launching a cluster 'code-llama'. Proceed? [Y/n]:
 ```bash
 IP=$(sky status --ip code-llama)
 
-curl -L http://$IP:8000/v1/completions \
+curl http://$IP:8000/v1/completions \
     -H "Content-Type: application/json" \
     -d '{
       "model": "codellama/CodeLlama-70b-Instruct-hf",
@@ -131,7 +131,7 @@ availability of the service while minimizing the cost.
 ```bash
 ENDPOINT=$(sky serve status --endpoint code-llama)
 
-curl -L http://$ENDPOINT/v1/completions \
+curl http://$ENDPOINT/v1/completions \
     -H "Content-Type: application/json" \
     -d '{
       "model": "codellama/CodeLlama-70b-Instruct-hf",
@@ -146,7 +146,7 @@ We can also access the Code Llama service with the openAI Chat API.
 ```bash
 ENDPOINT=$(sky serve status --endpoint code-llama)
 
-curl -L http://$ENDPOINT/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
       "model": "codellama/CodeLlama-70b-Instruct-hf",

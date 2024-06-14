@@ -3,20 +3,28 @@
 import dataclasses
 import shlex
 import time
-import typing
 from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import command_runner
 from sky.utils import subprocess_utils
-
-if typing.TYPE_CHECKING:
-    from sky.utils import command_runner
 
 logger = sky_logging.init_logger(__name__)
 
 DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
                                 'the Docker daemon socket')
+
+# Configure environment variables. A docker image can have environment variables
+# set in the Dockerfile with `ENV``. We need to export these variables to the
+# shell environment, so that our ssh session can access them.
+SETUP_ENV_VARS_CMD = (
+    'prefix_cmd() '
+    '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+    'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
+    '~/container_env_var.sh && '
+    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh'
+)
 
 
 @dataclasses.dataclass
@@ -117,7 +125,7 @@ class DockerInitializer:
     """Initializer for docker containers on a remote node."""
 
     def __init__(self, docker_config: Dict[str, Any],
-                 runner: 'command_runner.SSHCommandRunner', log_path: str):
+                 runner: 'command_runner.CommandRunner', log_path: str):
         self.docker_config = docker_config
         self.container_name = docker_config['container_name']
         self.runner = runner
@@ -166,8 +174,7 @@ class DockerInitializer:
             rc,
             cmd,
             error_msg='Failed to run docker setup commands',
-            stderr=stdout + stderr,
-            stream_logs=False)
+            stderr=stdout + stderr)
         return stdout.strip()
 
     def initialize(self) -> str:
@@ -231,6 +238,8 @@ class DockerInitializer:
             # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             self._run(
+                '[ -f /etc/docker/daemon.json ] || '
+                'echo "{}" | sudo tee /etc/docker/daemon.json;'
                 'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
                 '/etc/docker/daemon.json > /tmp/daemon.json;'
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
@@ -246,6 +255,8 @@ class DockerInitializer:
             self._run(start_command)
 
         # SkyPilot: Setup Commands.
+        # TODO(zhwu): the following setups should be aligned with the kubernetes
+        # pod setup, like provision.kubernetes.instance::_set_env_vars_in_pods
         # TODO(tian): These setup commands assumed that the container is
         # debian-based. We should make it more general.
         # Most of docker images are using root as default user, so we set an
@@ -254,7 +265,8 @@ class DockerInitializer:
         # Disable apt-get from asking user input during installation.
         # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # pylint: disable=line-too-long
         self._run(
-            'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
+            f'echo \'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}\' '
+            '>> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
             run_env='docker')
         # Install dependencies.
@@ -297,7 +309,8 @@ class DockerInitializer:
             'mkdir -p ~/.ssh;'
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
             'sudo service ssh start;'
-            'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;',
+            'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;'
+            f'{SETUP_ENV_VARS_CMD}',
             run_env='docker')
 
         # SkyPilot: End of Setup Commands.

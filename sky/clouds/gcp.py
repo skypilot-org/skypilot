@@ -14,6 +14,7 @@ import colorama
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
@@ -179,20 +180,31 @@ class GCP(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        unsupported = {}
         if gcp_utils.is_tpu_vm_pod(resources):
-            return {
+            unsupported = {
                 clouds.CloudImplementationFeatures.STOP: (
-                    'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
+                    'TPU VM pods cannot be stopped. Please refer to: '
+                    'https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
                 )
             }
         if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
             # TPU node does not support multi-node.
-            return {
-                clouds.CloudImplementationFeatures.MULTI_NODE:
-                    ('TPU node does not support multi-node. Please set '
-                     'num_nodes to 1.')
-            }
-        return {}
+            unsupported[clouds.CloudImplementationFeatures.MULTI_NODE] = (
+                'TPU node does not support multi-node. Please set '
+                'num_nodes to 1.')
+        # TODO(zhwu): We probably need to store the MIG requirement in resources
+        # because `skypilot_config` may change for an existing cluster.
+        # Clusters created with MIG (only GPU clusters) cannot be stopped.
+        if (skypilot_config.get_nested(
+            ('gcp', 'managed_instance_group'), None) is not None and
+                resources.accelerators):
+            unsupported[clouds.CloudImplementationFeatures.STOP] = (
+                'Managed Instance Group (MIG) does not support stopping yet.')
+            unsupported[clouds.CloudImplementationFeatures.SPOT_INSTANCE] = (
+                'Managed Instance Group with DWS does not support '
+                'spot instances.')
+        return unsupported
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -314,9 +326,6 @@ class GCP(clouds.Cloud):
             return 0.11 * num_gigabytes
         else:
             return 0.08 * num_gigabytes
-
-    def is_same_cloud(self, other):
-        return isinstance(other, GCP)
 
     @classmethod
     def _is_machine_image(cls, image_id: str) -> bool:
@@ -496,6 +505,16 @@ class GCP(clouds.Cloud):
 
         resources_vars['tpu_node_name'] = tpu_node_name
 
+        managed_instance_group_config = skypilot_config.get_nested(
+            ('gcp', 'managed_instance_group'), None)
+        use_mig = managed_instance_group_config is not None
+        resources_vars['gcp_use_managed_instance_group'] = use_mig
+        # Convert boolean to 0 or 1 in string, as GCP does not support boolean
+        # value in labels for TPU VM APIs.
+        resources_vars['gcp_use_managed_instance_group_value'] = str(
+            int(use_mig))
+        if use_mig:
+            resources_vars.update(managed_instance_group_config)
         return resources_vars
 
     def _get_feasible_launchable_resources(
@@ -739,13 +758,13 @@ class GCP(clouds.Cloud):
 
         # pylint: disable=import-outside-toplevel,unused-import
         import google.auth
-        import googleapiclient.discovery
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
-        crm = googleapiclient.discovery.build('cloudresourcemanager',
-                                              'v1',
-                                              credentials=credentials)
+        crm = gcp.build('cloudresourcemanager',
+                        'v1',
+                        credentials=credentials,
+                        cache_discovery=False)
         gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
         permissions = {'permissions': gcp_minimal_permissions}
         request = crm.projects().testIamPermissions(resource=project,
@@ -841,13 +860,14 @@ class GCP(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
-    def need_cleanup_after_preemption(self,
-                                      resources: 'resources.Resources') -> bool:
-        """Returns whether a spot resource needs cleanup after preeemption."""
+    def need_cleanup_after_preemption_or_failure(
+            self, resources: 'resources.Resources') -> bool:
+        """Whether a resource needs cleanup after preeemption or failure."""
         # Spot TPU VMs require manual cleanup after preemption.
         # "If your Cloud TPU is preempted,
         # you must delete it and create a new one ..."
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
+        # On-demand TPU VMs are likely to require manual cleanup as well.
 
         return gcp_utils.is_tpu_vm(resources)
 
@@ -1069,3 +1089,25 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to delete image {image_name!r}',
             stderr=stderr,
             stream_logs=True)
+
+    @classmethod
+    def is_label_valid(cls, label_key: str,
+                       label_value: str) -> Tuple[bool, Optional[str]]:
+        key_regex = re.compile(r'^[a-z]([a-z0-9_-]{0,62})?$')
+        value_regex = re.compile(r'^[a-z0-9_-]{0,63}$')
+        key_valid = bool(key_regex.match(label_key))
+        value_valid = bool(value_regex.match(label_value))
+        error_msg = None
+        condition_msg = ('can include lowercase alphanumeric characters, '
+                         'dashes, and underscores, with a total length of 63 '
+                         'characters or less.')
+        if not key_valid:
+            error_msg = (f'Invalid label key {label_key} for GCP. '
+                         f'Key must start with a lowercase letter '
+                         f'and {condition_msg}')
+        if not value_valid:
+            error_msg = (f'Invalid label value {label_value} for GCP. Value '
+                         f'{condition_msg}')
+        if not key_valid or not value_valid:
+            return False, error_msg
+        return True, None

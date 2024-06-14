@@ -271,9 +271,9 @@ class Task:
                                                     int]] = None
         self.file_mounts: Optional[Dict[str, str]] = None
 
-        # Only set when 'self' is a spot controller task: 'self.spot_dag' is
-        # the underlying managed spot dag (sky.Dag object).
-        self.spot_dag: Optional['sky.Dag'] = None
+        # Only set when 'self' is a jobs controller task: 'self.managed_job_dag'
+        # is the underlying managed job dag (sky.Dag object).
+        self.managed_job_dag: Optional['sky.Dag'] = None
 
         # Only set when 'self' is a sky serve controller task.
         self.service_name: Optional[str] = None
@@ -348,6 +348,20 @@ class Task:
         config: Dict[str, Any],
         env_overrides: Optional[List[Tuple[str, str]]] = None,
     ) -> 'Task':
+        # More robust handling for 'envs': explicitly convert keys and values to
+        # str, since users may pass '123' as keys/values which will get parsed
+        # as int causing validate_schema() to fail.
+        envs = config.get('envs')
+        if envs is not None and isinstance(envs, dict):
+            new_envs: Dict[str, Optional[str]] = {}
+            for k, v in envs.items():
+                if v is not None:
+                    new_envs[str(k)] = str(v)
+                else:
+                    new_envs[str(k)] = None
+            config['envs'] = new_envs
+        common_utils.validate_schema(config, schemas.get_task_schema(),
+                                     'Invalid task YAML: ')
         if env_overrides is not None:
             # We must override env vars before constructing the Task, because
             # the Storage object creation is eager and it (its name/source
@@ -359,15 +373,14 @@ class Task:
             new_envs.update(env_overrides)
             config['envs'] = new_envs
 
-        # More robust handling for 'envs': explicitly convert keys and values to
-        # str, since users may pass '123' as keys/values which will get parsed
-        # as int causing validate_schema() to fail.
-        envs = config.get('envs')
-        if envs is not None and isinstance(envs, dict):
-            config['envs'] = {str(k): str(v) for k, v in envs.items()}
-
-        common_utils.validate_schema(config, schemas.get_task_schema(),
-                                     'Invalid task YAML: ')
+        for k, v in config.get('envs', {}).items():
+            if v is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Environment variable {k!r} is None. Please set a '
+                        'value for it in task YAML or with --env flag. '
+                        f'To set it to be empty, use an empty string ({k}: "" '
+                        f'in task YAML or --env {k}="" in CLI).')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
@@ -548,10 +561,6 @@ class Task:
             self.resources = _with_docker_login_config(self.resources,
                                                        self._envs)
         return self
-
-    @property
-    def need_spot_recovery(self) -> bool:
-        return any(r.spot_recovery is not None for r in self.resources)
 
     @property
     def use_spot(self) -> bool:
@@ -901,17 +910,20 @@ class Task:
             resources = list(self.resources)[0]
             storage_cloud = resources.cloud
             storage_region = resources.region
+
         if storage_cloud is not None:
             if str(storage_cloud) not in enabled_storage_clouds:
                 storage_cloud = None
 
+        storage_cloud_str = None
         if storage_cloud is None:
-            storage_cloud = clouds.CLOUD_REGISTRY.from_str(
-                enabled_storage_clouds[0])
-            assert storage_cloud is not None, enabled_storage_clouds[0]
+            storage_cloud_str = enabled_storage_clouds[0]
+            assert storage_cloud_str is not None, enabled_storage_clouds[0]
             storage_region = None  # Use default region in the Store class
+        else:
+            storage_cloud_str = str(storage_cloud)
 
-        store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
+        store_type = storage_lib.StoreType.from_cloud(storage_cloud_str)
         return store_type, storage_region
 
     def sync_storage_mounts(self) -> None:
@@ -1005,8 +1017,8 @@ class Task:
         return d
 
     def is_controller_task(self) -> bool:
-        """Returns whether this task is a spot/serve controller process."""
-        return self.spot_dag is not None or self.service_name is not None
+        """Returns whether this task is a jobs/serve controller process."""
+        return self.managed_job_dag is not None or self.service_name is not None
 
     def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=cloud URL).

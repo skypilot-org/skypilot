@@ -61,17 +61,17 @@ _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 def _default_ec2_resource(region: str) -> Any:
     if not hasattr(aws, 'version'):
         # For backward compatibility, reload the module if the aws module was
-        # imported before and stale. Used for, e.g., a live spot controller
+        # imported before and stale. Used for, e.g., a live jobs controller
         # running an older version and a new version gets installed by
-        # `sky spot launch`.
+        # `sky jobs launch`.
         #
         # Detailed explanation follows. Assume we're in this situation: an old
-        # spot controller running a spot job and then the code gets updated on
-        # the controller due to a new `sky spot launch` or `sky start`.
+        # jobs controller running a managed job and then the code gets updated
+        # on the controller due to a new `sky jobs launch or `sky start`.
         #
-        # First, controller consists of an outer process (sky.spot.controller's
+        # First, controller consists of an outer process (sky.jobs.controller's
         # main) and an inner process running the controller logic (started as a
-        # multiprocessing.Process in sky.spot.controller). `sky.provision.aws`
+        # multiprocessing.Process in sky.jobs.controller). `sky.provision.aws`
         # is only imported in the inner process due to its load-on-use
         # semantics.
         #
@@ -79,8 +79,8 @@ def _default_ec2_resource(region: str) -> Any:
         # {old sky.provision.aws, old sky.adaptors.aws}, and outer process has
         # loaded {old sky.adaptors.aws}.
         #
-        # In controller.py's start(), the inner process may exit due to spot job
-        # exits or `sky spot cancel`, entering outer process'
+        # In controller.py's start(), the inner process may exit due to managed
+        # job exits or `sky jobs cancel`, entering outer process'
         # `finally: ... _cleanup()` path. Inside _cleanup(), we eventually call
         # into `sky.provision.aws` which loads this module for the first time
         # for the outer process. At this point, outer process has loaded
@@ -843,7 +843,6 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
-    del provider_config  # unused
     ec2 = _default_ec2_resource(region)
     filters = [
         {
@@ -875,14 +874,6 @@ def get_cluster_info(
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
+        provider_name='aws',
+        provider_config=provider_config,
     )
-
-
-def query_ports(
-    cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
-) -> Dict[int, List[common.Endpoint]]:
-    """See sky/provision/__init__.py"""
-    return common.query_ports_passthrough(cluster_name_on_cloud, ports,
-                                          provider_config)

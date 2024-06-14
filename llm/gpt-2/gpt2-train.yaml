@@ -1,0 +1,94 @@
+name: gpt2-train
+
+envs:
+  BUCKET_NAME: # TODO: Fill in your bucket name
+  BUCKET_STORE: s3 # Can be s3, gcs, or r2.
+
+resources:
+  accelerators: A100:8
+  # Use docker image for latest version g++ to enable the compilation of llm.c.
+  image_id: docker:nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+  any_of:
+    # Avoid using docker image for lambda due to the docker is not supported on
+    # Lambda yet, but the base image works.
+    - cloud: lambda
+      image_id: null
+    - cloud: aws
+    - cloud: gcp
+    - cloud: azure
+    - cloud: fluidstack
+    - cloud: kubernetes
+  
+file_mounts:
+  ~/.cache/huggingface:
+    name: $BUCKET_NAME
+    store: $BUCKET_STORE
+    mode: COPY
+
+setup: |
+  cd ~
+
+  # install cudnn so we can use FlashAttention and run fast (optional)
+  # https://developer.nvidia.com/cudnn-downloads
+  # for me, CUDA 12 (run `nvcc --version`) running on Linux x86_64 Ubuntu 22.04
+  if [ -f ./CUDNN_INSTALLED ]; then
+    echo "cudnn already installed"
+  else
+    system=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
+    # Get version and remove the dot
+    version=$(lsb_release -sr | tr -d .)
+    export system_version="${system}${version}"
+    wget https://developer.download.nvidia.com/compute/cudnn/9.1.1/local_installers/cudnn-local-repo-${system_version}-9.1.1_1.0-1_amd64.deb -O cudnn-installer.deb
+    sudo dpkg -i cudnn-installer.deb
+    sudo cp /var/cudnn-local-repo-${system_version}-9.1.1/cudnn-*-keyring.gpg /usr/share/keyrings/
+    # Remove problematic kubernetes.list source
+    sudo apt-get update --allow-releaseinfo-change || true
+
+    sudo apt-get -y install cudnn-cuda-12
+
+    touch ./CUDNN_INSTALLED
+  fi
+
+  # "install" cudnn-frontend to ~/
+  sudo apt -y install git
+  git clone https://github.com/NVIDIA/cudnn-frontend.git || true
+
+  # install MPI (optional, if you intend to use multiple GPUs)
+  # SkyPilot do not install MPI as that requires NCCL which needs to be manually
+  # installed.
+  sudo apt install -y openmpi-bin openmpi-doc libopenmpi-dev
+  # install nccl
+  pip install nvidia-nccl-cu12
+  export LIBRARY_PATH=$LIBRARY_PATH:/usr/local/nccl2/lib
+  export CPLUS_INCLUDE_PATH=$CPLUS_INCLUDE_PATH:/usr/local/nccl2/include
+
+  git clone https://github.com/karpathy/llm.c.git || true
+  cd llm.c
+  ln -s ~/.cache/huggingface/fineweb10B dev/data/
+  # compile llm.c (mixed precision, with cuDNN flash-attention)
+  # first compilation is ~1 minute, mostly due to cuDNN
+  make train_gpt2cu USE_CUDNN=1
+
+
+run: |
+  cd ~/llm.c
+  # train on multiple GPUs
+  mpirun -np $SKYPILOT_NUM_GPUS_PER_NODE --allow-run-as-root ./train_gpt2cu \
+      -i "dev/data/fineweb10B/fineweb_train_*.bin" \
+      -j "dev/data/fineweb10B/fineweb_val_*.bin" \
+      -o log124M \
+      -e "d12" \
+      -b 64 -t 1024 \
+      -d 524288 \
+      -r 1 \
+      -z 1 \
+      -c 0.1 \
+      -l 0.0006 \
+      -q 0.0 \
+      -u 700 \
+      -n 5000 \
+      -v 250 -s 20000 \
+      -h 1
+
+  # Upload the log and model to the bucket
+  rsync -Pavz log124M ~/.cache/huggingface

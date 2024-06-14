@@ -571,8 +571,6 @@ def get_cluster_info(
         cluster_name: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
-    if provider_config:
-        del provider_config  # unused
     logger.info('New provision of Vsphere: get_cluster_info().')
 
     # Init the vsphere client
@@ -610,4 +608,6 @@ def get_cluster_info(
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
+        provider_name='vsphere',
+        provider_config=provider_config,
     )

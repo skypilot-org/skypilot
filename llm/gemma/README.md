@@ -37,7 +37,7 @@ After the cluster is launched, we can access the model with the following comman
 ```bash
 IP=$(sky status --ip gemma)
 
-curl -L http://$IP:8000/v1/completions \
+curl http://$IP:8000/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "google/gemma-7b-it",
@@ -50,7 +50,7 @@ Chat API is also supported:
 ```bash
 IP=$(sky status --ip gemma)
 
-curl -L http://$IP:8000/v1/chat/completions \
+curl http://$IP:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "google/gemma-7b-it",
@@ -78,7 +78,7 @@ After the cluster is launched, we can access the model with the following comman
 ```bash
 ENDPOINT=$(sky serve status --endpoint gemma)
 
-curl -L http://$ENDPOINT/v1/completions \
+curl http://$ENDPOINT/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "google/gemma-7b-it",
@@ -89,7 +89,7 @@ curl -L http://$ENDPOINT/v1/completions \
 
 Chat API is also supported:
 ```bash
-curl -L http://$ENDPOINT/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "google/gemma-7b-it",

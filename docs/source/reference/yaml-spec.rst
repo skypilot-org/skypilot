@@ -92,10 +92,21 @@ Available fields:
       # If unspecified, defaults to False (on-demand instances).
       use_spot: False
 
-      # The recovery strategy for spot jobs (optional).
-      # `use_spot` must be True for this to have any effect. For now, only
-      # `FAILOVER` strategy is supported.
-      spot_recovery: none
+      # The recovery strategy for managed jobs (optional).
+      #
+      # In effect for managed jobs. Possible values are `FAILOVER` and `EAGER_NEXT_REGION`.
+      #
+      # If `FAILOVER` is specified, the job will be restarted in the same region
+      # if the node fails, and go to the next region if no available resources
+      # are found in the same region. 
+      #
+      # If `EAGER_NEXT_REGION` is specified, the job will go to the next region
+      # directly if the node fails. This is useful for spot instances, as in
+      # practice, preemptions in a region usually indicate a shortage of resources
+      # in that region.
+      #
+      # default: EAGER_NEXT_REGION
+      job_recovery: none
 
       # Disk size in GB to allocate for OS (mounted at /). Increase this if you
       # have a large working directory or tasks that write out large outputs.
@@ -207,6 +218,20 @@ Available fields:
       # https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure
       # To use a more limited but easier to manage tool:
       # https://github.com/IBM/vpc-img-inst
+
+      # Labels to apply to the instances (optional).
+      #
+      # If specified, these labels will be applied to the VMs or pods created
+      # by SkyPilot. These are useful for assigning metadata that may be
+      # used by external tools. Implementation depends on the chosen cloud -
+      # On AWS, labels map to instance tags. On GCP, labels map to instance
+      # labels. On Kubernetes, labels map to pod labels. On other clouds,
+      # labels are not supported and will be ignored.
+      #
+      # Note: Labels are applied only on the first launch of the cluster. They
+      # are not updated on subsequent launches.
+      labels:
+        my-label: my-value
 
       # Candidate resources (optional). If specified, SkyPilot will only use
       # these candidate resources to launch the cluster. The fields specified

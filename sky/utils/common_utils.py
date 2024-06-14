@@ -61,11 +61,18 @@ def get_usage_run_id() -> str:
     return _usage_run_id
 
 
-def get_user_hash() -> str:
+def get_user_hash(force_fresh_hash: bool = False) -> str:
     """Returns a unique user-machine specific hash as a user id.
 
     We cache the user hash in a file to avoid potential user_name or
     hostname changes causing a new user hash to be generated.
+
+    Args:
+        force_fresh_hash: Bypasses the cached hash in USER_HASH_FILE and the
+            hash in the USER_ID_ENV_VAR and forces a fresh user-machine hash
+            to be generated. Used by `kubernetes.ssh_key_secret_field_name` to
+            avoid controllers sharing the same ssh key field name as the
+            local client.
     """
 
     def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
@@ -77,12 +84,13 @@ def get_user_hash() -> str:
             return False
         return len(user_hash) == USER_HASH_LENGTH
 
-    user_hash = os.getenv(constants.USER_ID_ENV_VAR)
-    if _is_valid_user_hash(user_hash):
-        assert user_hash is not None
-        return user_hash
+    if not force_fresh_hash:
+        user_hash = os.getenv(constants.USER_ID_ENV_VAR)
+        if _is_valid_user_hash(user_hash):
+            assert user_hash is not None
+            return user_hash
 
-    if os.path.exists(_USER_HASH_FILE):
+    if not force_fresh_hash and os.path.exists(_USER_HASH_FILE):
         # Read from cached user hash file.
         with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
@@ -96,8 +104,13 @@ def get_user_hash() -> str:
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
-        f.write(user_hash)
+    if not force_fresh_hash:
+        # Do not cache to file if force_fresh_hash is True since the file may
+        # be intentionally using a different hash, e.g. we want to keep the
+        # user_hash for usage collection the same on the jobs/serve controller
+        # as users' local client.
+        with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
+            f.write(user_hash)
     return user_hash
 
 
@@ -439,9 +452,9 @@ def class_fullname(cls, skip_builtins: bool = True):
     """Get the full name of a class.
 
     Example:
-        >>> e = sky.exceptions.FetchIPError()
+        >>> e = sky.exceptions.FetchClusterInfoError()
         >>> class_fullname(e.__class__)
-        'sky.exceptions.FetchIPError'
+        'sky.exceptions.FetchClusterInfoError'
 
     Args:
         cls: The class to get the full name.
@@ -567,20 +580,24 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                            'The `envs` field contains invalid keys:\n' +
                            e.message)
             else:
-                err_msg = err_msg_prefix + 'The following fields are invalid:'
+                err_msg = err_msg_prefix
                 known_fields = set(e.schema.get('properties', {}).keys())
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(
                             field, known_fields, 1)
                         if most_similar_field:
-                            err_msg += (f'\nInstead of {field!r}, did you mean '
+                            err_msg += (f'Instead of {field!r}, did you mean '
                                         f'{most_similar_field[0]!r}?')
                         else:
-                            err_msg += f'\nFound unsupported field {field!r}.'
+                            err_msg += f'Found unsupported field {field!r}.'
         else:
+            message = e.message
+            # Object in jsonschema is represented as dict in Python. Replace
+            # 'object' with 'dict' for better readability.
+            message = message.replace('type \'object\'', 'type \'dict\'')
             # Example e.json_path value: '$.resources'
-            err_msg = (err_msg_prefix + e.message +
+            err_msg = (err_msg_prefix + message +
                        f'. Check problematic field(s): {e.json_path}')
 
     if err_msg:
@@ -589,15 +606,19 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
 
 
 def get_cleaned_username(username: str = '') -> str:
-    """Cleans the username. Dots and underscores are allowed, as we will
+    """Cleans the username. Underscores are allowed, as we will
      handle it when mapping to the cluster_name_on_cloud in
      common_utils.make_cluster_name_on_cloud.
 
     Clean up includes:
      1. Making all characters lowercase
-     2. Removing any non-alphanumeric characters (excluding hyphens)
+     2. Removing any non-alphanumeric characters (excluding hyphens and
+        underscores)
      3. Removing any numbers and/or hyphens at the start of the username.
      4. Removing any hyphens at the end of the username
+     5. Truncate the username to 63 characters, as requested by GCP labels
+
+    Dots are removed due to: https://cloud.google.com/compute/docs/labeling-resources#requirements # pylint: disable=line-too-long
 
     e.g. 1SkY-PiLot2- becomes sky-pilot2
 
@@ -606,9 +627,10 @@ def get_cleaned_username(username: str = '') -> str:
     """
     username = username or getpass.getuser()
     username = username.lower()
-    username = re.sub(r'[^a-z0-9-._]', '', username)
+    username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)
     username = re.sub(r'-$', '', username)
+    username = username[:63]
     return username
 
 
@@ -632,8 +654,12 @@ def fill_template(template_name: str, variables: Dict,
         fout.write(content)
 
 
-def deprecated_function(func: Callable, name: str, deprecated_name: str,
-                        removing_version: str) -> Callable:
+def deprecated_function(
+        func: Callable,
+        name: str,
+        deprecated_name: str,
+        removing_version: str,
+        override_argument: Optional[Dict[str, Any]] = None) -> Callable:
     """Decorator for creating deprecated functions, for backward compatibility.
 
     It will result in a warning being emitted when the function is used.
@@ -641,9 +667,14 @@ def deprecated_function(func: Callable, name: str, deprecated_name: str,
 
     @functools.wraps(func)
     def new_func(*args, **kwargs):
+        override_argument_str = ''
+        if override_argument:
+            override_argument_str = ', '.join(
+                f'{k}={v}' for k, v in override_argument.items())
         logger.warning(
             f'Call to deprecated function {deprecated_name}, which will be '
-            f'removed in {removing_version}. Please use {name}() instead.')
+            f'removed in {removing_version}. Please use '
+            f'{name}({override_argument_str}) instead.')
         return func(*args, **kwargs)
 
     return new_func

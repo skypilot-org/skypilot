@@ -5,3 +5,4 @@ setup: |
 
 run: |
   conda env list
+  echo "task run finish"
