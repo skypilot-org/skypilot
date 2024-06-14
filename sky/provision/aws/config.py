@@ -192,7 +192,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
                 role.attach_policy(PolicyArn=policy_arn)
 
             # SkyPilot: 'PassRole' is required by the controllers (jobs and
-            # services) created with `remote_identity: SERVICE_ACCOUNT` to
+            # services) created with `aws.remote_identity: SERVICE_ACCOUNT` to
             # create instances with the IAM role.
             skypilot_pass_role_policy_doc = {
                 'Statement': [
