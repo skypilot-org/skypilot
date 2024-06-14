@@ -203,7 +203,7 @@ Use the following command to label a node:
 
 .. tip::
 
-    If you are using GKE or EKS or do not plan expose ports publicly on Kubernetes (such as ``sky launch --ports``, SkyServe), no additional setup is required to expose ports. SkyPilot will create a LoadBalancer service automatically.
+    If you are using GKE or EKS or do not plan expose ports publicly on Kubernetes (such as ``sky launch --ports``, SkyServe), no additional setup is required. On GKE and EKS, SkyPilot will create a LoadBalancer service automatically.
 
 Running SkyServe or tasks exposing ports requires additional setup to expose ports running services.
 SkyPilot supports either of two modes to expose ports:
