@@ -515,11 +515,13 @@ class ReplicaInfo:
                 msg += 'POST'
                 response = requests.post(readiness_path,
                                          json=post_data,
-                    headers=headers,
+                                         headers=headers,
                                          timeout=timeout)
             else:
                 msg += 'GET'
-                response = requests.get(readiness_path, headers=headers, timeout=timeout)
+                response = requests.get(readiness_path,
+                                        headers=headers,
+                                        timeout=timeout)
             msg += (f' request to {replica_identity} returned status '
                     f'code {response.status_code}')
             if response.status_code == 200:
