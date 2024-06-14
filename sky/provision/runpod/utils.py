@@ -76,7 +76,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
         info['name'] = instance['name']
 
         if instance['desiredStatus'] == 'RUNNING' and instance.get('runtime'):
-            for port in instance['runtime']['ports']:
+            for port in instance['runtime'].get('ports', []):
                 if port['privatePort'] == 22 and port['isIpPublic']:
                     info['external_ip'] = port['ip']
                     info['ssh_port'] = port['publicPort']
@@ -114,8 +114,6 @@ def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
                f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
                f'{constants.SKY_REMOTE_RAY_PORT}/http'),
         support_public_ip=True,
-        # Allow docker in docker.
-        docker_args='-v /var/run/docker.sock:/var/run/docker.sock',
     )
 
     return new_instance['id']
