@@ -114,6 +114,8 @@ def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
                f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
                f'{constants.SKY_REMOTE_RAY_PORT}/http'),
         support_public_ip=True,
+        # Allow docker in docker.
+        docker_args='-v /var/run/docker.sock:/var/run/docker.sock',
     )
 
     return new_instance['id']
