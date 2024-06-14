@@ -49,7 +49,7 @@ To prepare a Kubernetes cluster to run SkyPilot, the cluster administrator must:
 1. :ref:`Deploy a cluster <kubernetes-setup-deploy>` running Kubernetes v1.20 or later.
 2. Set up :ref:`GPU support <kubernetes-setup-gpusupport>`.
 3. [Optional] :ref:`Set up ports <kubernetes-setup-ports>` for exposing services.
-4. [Optional] :ref:`Set up permissions <kubernetes-setup-serviceaccount>`: Create a namespace for your users and/or create a service account with minimal permissions for SkyPilot.
+4. [Optional] :ref:`Set up permissions <kubernetes-setup-serviceaccount>`: create a namespace for your users and/or create a service account with minimal permissions for SkyPilot.
 
 After these steps, the administrator can share the kubeconfig file with users, who can then submit tasks to the cluster using SkyPilot.
 
