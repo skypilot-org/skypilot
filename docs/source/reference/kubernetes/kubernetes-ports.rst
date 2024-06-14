@@ -35,9 +35,13 @@ To use this mode, you must have a Kubernetes cluster that supports LoadBalancer 
 When using this mode, SkyPilot will create a single LoadBalancer Service for all ports that you expose on a cluster.
 Each port can be accessed using the LoadBalancer's external IP address and the port number. Use :code:`sky status --endpoints <cluster>` to view the external endpoints for all ports.
 
+In cloud based Kubernetes clusters, this will automatically create an external Load Balancer.
+GKE creates a `Pass-through Load Balancer <https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer>`__
+and AWS creates a `Network Load Balancer <https://docs.aws.amazon.com/eks/latest/userguide/network-load-balancing.html>`__.
+These load balancers will be automatically terminated when the cluster is deleted.
+
 .. note::
-    In cloud based Kubernetes clusters, this will automatically create an external Load Balancer.     GKE creates a (`pass-through load balancer <https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer>`__)
-    and AWS creates a `Network Load Balancer <https://docs.aws.amazon.com/eks/latest/userguide/network-load-balancing.html>`__). These load balancers will be automatically terminated when the cluster is deleted.
+    LoadBalancer services are not supported on kind clusters created using :code:`sky local up`.
 
 .. note::
     The default LoadBalancer implementation in EKS selects a random port from the list of opened ports for the
@@ -47,9 +51,6 @@ Each port can be accessed using the LoadBalancer's external IP address and the p
     For example, if a SkyPilot task exposes 5 ports but only 2 of them have services running behind them, EKS may select a port that does not have a service running behind it and the LoadBalancer will not pass the healthcheck. As a result, the service will not be assigned an external IP address.
 
     To work around this issue, make sure all your ports have services running behind them.
-
-.. note::
-    LoadBalancer services are not supported on kind clusters created using :code:`sky local up`.
 
 
 .. _kubernetes-ingress:
@@ -72,22 +73,9 @@ To use this mode:
     # NAME                             TYPE                CLUSTER-IP    EXTERNAL-IP     PORT(S)
     # ingress-nginx-controller         LoadBalancer        10.24.4.254   35.202.58.117   80:31253/TCP,443:32699/TCP
 
-.. note::
-    If the ``EXTERNAL-IP`` field is ``<none>``, you may manually assign it an External IP.
-    This can be done by patching the service with an IP that can be accessed from outside the cluster.
-    If the service type is ``NodePort``, you can set the ``EXTERNAL-IP`` to any node's IP address:
-
-    .. code-block:: bash
-
-      # Patch the nginx ingress service with an external IP. Can be any node's IP if using NodePort service.
-      # Replace <IP> in the following command with the IP you select.
-      $ kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{"spec": {"externalIPs": ["<IP>"]}}'
-
-    If the ``EXTERNAL-IP`` field is left as ``<none>``, SkyPilot will use ``localhost`` as the external IP for the Ingress,
-    and the endpoint may not be accessible from outside the cluster.
 
 .. note::
-    If you cannot update the ``EXTERNAL-IP`` field of the service, you can also
+    If the ``EXTERNAL-IP`` field is ``<none>``, you can manually
     specify the Ingress IP or hostname through the ``skypilot.co/external-ip``
     annotation on the ``ingress-nginx-controller`` service. In this case,
     having a valid ``EXTERNAL-IP`` field is not required.
@@ -96,10 +84,14 @@ To use this mode:
 
     .. code-block:: bash
 
-      # Add skypilot.co/external-ip annotation to the  nginx ingress service.
+      # Add skypilot.co/external-ip annotation to the nginx ingress service.
       # Replace <IP> in the following command with the IP you select.
       # Can be any node's IP if using NodePort service type.
       $ kubectl annotate service ingress-nginx-controller skypilot.co/external-ip=<IP> -n ingress-nginx
+
+    If the ``EXTERNAL-IP`` field is ``<none>`` and the ``skypilot.co/external-ip`` annotation does not exist,
+    SkyPilot will use ``localhost`` as the external IP for the Ingress,
+    and the endpoint may not be accessible from outside the cluster.
 
 
 3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
@@ -125,9 +117,3 @@ Use :code:`sky status --endpoints <cluster>` to view the full endpoint URLs for 
 .. note::
 
     When exposing a port under a sub-path such as an ingress, services expecting root path access, (e.g., Jupyter notebooks) may face issues. To resolve this, configure the service to operate under a different base URL. For Jupyter, use `--NotebookApp.base_url <https://jupyter-notebook.readthedocs.io/en/5.7.4/config.html>`_ flag during launch. Alternatively, consider using :ref:`LoadBalancer <kubernetes-loadbalancer>` mode.
-
-
-.. note::
-
-    Currently, SkyPilot does not support opening ports on a Kubernetes cluster using the `Gateway API <https://kubernetes.io/docs/concepts/services-networking/gateway/>`_.
-    If you are interested in this feature, please `reach out <https//slack.skypilot.co>`_.

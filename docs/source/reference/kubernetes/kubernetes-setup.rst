@@ -103,7 +103,10 @@ Step 2 - Set up GPU support
 
 To utilize GPUs on Kubernetes, your cluster must:
 
-1. Have the ``nvidia.com/gpu`` **resource** available on all GPU nodes and have ``nvidia`` as the default runtime for your container engine. See `Nvidia GPU Operator Installation Guide <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_ for more details.
+1. Have the ``nvidia.com/gpu`` **resource** available on all GPU nodes and have ``nvidia`` as the default runtime for your container engine.
+
+   * If you are following :ref:`our deployment guides <kubernetes-deployment>` or using GKE or EKS, this would already be set up. Else, install the `Nvidia GPU Operator <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_.
+
 2. Have a **label on each node specifying the GPU type**. See :ref:`Setting up GPU labels <kubernetes-gpu-labels>` for more details.
 
 
@@ -315,4 +318,4 @@ If you encounter issues while setting up your Kubernetes cluster, please refer t
    :hidden:
 
    kubernetes-deployment
-   kubernetes-ports
+   Exposing Services <kubernetes-ports>
