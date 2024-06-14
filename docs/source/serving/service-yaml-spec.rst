@@ -31,7 +31,8 @@ Available fields:
         # Defaults to 15 seconds. If the readiness probe takes longer than this
         # time to respond, the probe will be considered as failed. This is
         # useful when your service is slow to respond to readiness probe
-        # requests.
+        # requests. Note, having a too high timeout will delay the detection
+        # of a real failure of your service replica.
         timeout_seconds: 15
 
       # Simplified version of readiness probe that only contains the readiness
