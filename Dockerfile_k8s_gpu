@@ -1,4 +1,6 @@
-FROM nvidia/cuda:12.1.0-runtime-ubuntu20.04
+FROM nvidia/cuda:12.1.1-runtime-ubuntu20.04
+
+ARG DEBIAN_FRONTEND=noninteractive
 
 # Install ssh and other local dependencies
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
@@ -6,6 +8,13 @@ RUN rm -rf /etc/apt/sources.list.d/cuda* && \
     apt update -y && \
     apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat curl -y && \
     rm -rf /var/lib/apt/lists/*
+
+# Setup SSH and generate hostkeys
+RUN sudo mkdir -p /var/run/sshd && \
+    sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sudo sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
+    cd /etc/ssh/ && \
+    sudo ssh-keygen -A
 
 # Setup new user named sky and add to sudoers. \
 # Also add /opt/conda/bin to sudo path and give sky user permission to run sudo without password
@@ -37,15 +46,6 @@ RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x8
     grpcio==1.51.3 python-dotenv==1.0.1 ray[default]==2.9.3 && \
     curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
     sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-
-
-# Setup SSH and generate hostkeys
-RUN sudo mkdir -p /var/run/sshd && \
-    sudo chmod 0755 /var/run/sshd && \
-    sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sudo sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
-    cd /etc/ssh/ && \
-    sudo ssh-keygen -A
 
 # Add /home/sky/.local/bin/ to PATH
 RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
