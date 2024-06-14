@@ -4,7 +4,7 @@ FROM nvidia/cuda:12.1.0-runtime-ubuntu20.04
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
 RUN rm -rf /etc/apt/sources.list.d/cuda* && \
     apt update -y && \
-    apt install gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat curl -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup new user named sky and add to sudoers. \
