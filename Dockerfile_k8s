@@ -32,7 +32,9 @@ RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install packaging 'protobuf<4.0.0' pulp && \
     pip install pycryptodome==3.12.0 && \
     pip install docker kubernetes==28.1.0 && \
-    pip install grpcio==1.51.3 python-dotenv==1.0.1
+    pip install grpcio==1.51.3 python-dotenv==1.0.1 && \
+    curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
+    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
 # Add /home/sky/.local/bin/ to PATH
 RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
