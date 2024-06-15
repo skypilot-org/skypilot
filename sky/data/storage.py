@@ -27,6 +27,7 @@ from sky.data import mounting_utils
 from sky.data import storage_utils
 from sky.data.data_utils import Rclone
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -325,6 +326,13 @@ class AbstractStore:
 
     def _validate_existing_bucket(self):
         """Validates the storage fields for existing buckets."""
+        if controller_utils.is_running_on_jobs_controller():
+            # If running on jobs controller, we skip the check because it is
+            # already done when the job is submitted from the client. In that
+            # case, checking again raises an error since the bucket is created
+            # by the client and not the jobs controller, and is thus seen
+            # (incorrectly) by the jobs controller as an external bucket.
+            return
         # Check if 'source' is None, this is only allowed when Storage is in
         # either MOUNT mode or COPY mode with sky-managed storage.
         # Note: In COPY mode, a 'source' being None with non-sky-managed

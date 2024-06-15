@@ -4,11 +4,13 @@ import dataclasses
 import enum
 import getpass
 import os
+import pathlib
 import tempfile
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 import colorama
+import yaml
 
 from sky import check as sky_check
 from sky import clouds
@@ -742,3 +744,24 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_prefix = store_type.store_prefix()
             storage_obj.source = f'{store_prefix}{storage_obj.name}'
             storage_obj.force_delete = True
+
+
+def is_running_on_jobs_controller() -> bool:
+    """Am I running on jobs controller?
+
+    Loads ~/.sky/sky_ray.yml and check cluster_name.
+    """
+    if pathlib.Path('~/.sky/sky_ray.yml').expanduser().exists():
+        config = yaml.safe_load(
+            pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text())
+        cluster_name = config.get('cluster_name', '')
+        candidate_controller_names = (
+            Controllers.JOBS_CONTROLLER.value.
+            candidate_cluster_names)
+        # We use startswith instead of exact match because the cluster name in
+        # the yaml file is cluster_name_on_cloud which may have additional
+        # suffices.
+        return any(
+            cluster_name.startswith(name)
+            for name in candidate_controller_names)
+    return False

@@ -7,10 +7,8 @@ rid of the SSH port-forwarding business (see cli.py's job_dashboard()
 comment).
 """
 import datetime
-import pathlib
 
 import flask
-import yaml
 
 from sky import jobs as managed_jobs
 from sky.utils import common_utils
@@ -19,30 +17,9 @@ from sky.utils import controller_utils
 app = flask.Flask(__name__)
 
 
-def _is_running_on_jobs_controller() -> bool:
-    """Am I running on jobs controller?
-
-    Loads ~/.sky/sky_ray.yml and check cluster_name.
-    """
-    if pathlib.Path('~/.sky/sky_ray.yml').expanduser().exists():
-        config = yaml.safe_load(
-            pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text())
-        cluster_name = config.get('cluster_name', '')
-        candidate_controller_names = (
-            controller_utils.Controllers.JOBS_CONTROLLER.value.
-            candidate_cluster_names)
-        # We use startswith instead of exact match because the cluster name in
-        # the yaml file is cluster_name_on_cloud which may have additional
-        # suffices.
-        return any(
-            cluster_name.startswith(name)
-            for name in candidate_controller_names)
-    return False
-
-
 @app.route('/')
 def home():
-    if not _is_running_on_jobs_controller():
+    if not controller_utils.is_running_on_jobs_controller():
         # Experimental: run on laptop (refresh is very slow).
         all_managed_jobs = managed_jobs.queue(refresh=True, skip_finished=False)
     else:
