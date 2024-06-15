@@ -2203,6 +2203,13 @@ class AzureBlobStore(AbstractStore):
                                     'already exists under your '
                                     'subsciption in another resource '
                                     'group. Please try another name.')
+                    except Exception as error:  # pylint: disable=broad-except
+                        with ux_utils.print_exception_no_traceback():
+                            raise exceptions.StorageBucketCreateError(
+                                'Failed to create storage account '
+                                f'{self.storage_account_name!r}.\n'
+                                f'Details: {common_utils.format_exception(
+                                    error, use_bracket=True)}')
                     # wait until new resource creation propagates to Azure.
                     time.sleep(1)
 
