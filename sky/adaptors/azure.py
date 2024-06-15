@@ -116,7 +116,6 @@ def get_client(name: str, subscription_id: str, **kwargs):
             raise ValueError(f'Client not supported: "{name}"')
 
 
-@functools.lru_cache()
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_az_container_sas_token(
     storage_account_name: str,
@@ -152,7 +151,6 @@ def get_az_container_sas_token(
     return f'?{sas_token}'
 
 
-@functools.lru_cache()
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_az_blob_sas_token(storage_account_name: str, storage_account_key: str,
                           container_name: str, blob_name: str) -> str:
