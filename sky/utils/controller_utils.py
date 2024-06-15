@@ -753,11 +753,11 @@ def is_running_on_jobs_controller() -> bool:
     """
     if pathlib.Path('~/.sky/sky_ray.yml').expanduser().exists():
         config = yaml.safe_load(
-            pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text())
+            pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text(
+                encoding='utf-8'))
         cluster_name = config.get('cluster_name', '')
         candidate_controller_names = (
-            Controllers.JOBS_CONTROLLER.value.
-            candidate_cluster_names)
+            Controllers.JOBS_CONTROLLER.value.candidate_cluster_names)
         # We use startswith instead of exact match because the cluster name in
         # the yaml file is cluster_name_on_cloud which may have additional
         # suffices.

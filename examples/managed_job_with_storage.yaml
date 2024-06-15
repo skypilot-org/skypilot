@@ -24,7 +24,6 @@ file_mounts:
   /output_path:
     # Change this to the your own globally unique bucket name.
     name: sky-output-bucket
-    persistent: false
     mode: MOUNT
 
   /imagenet-image:
