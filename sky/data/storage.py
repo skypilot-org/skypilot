@@ -1966,7 +1966,7 @@ class AzureBlobStore(AbstractStore):
                     f'Source specified as {self.source}, a COS bucket. ',
                     'COS Bucket should exist.')
         # Validate name
-        self.name = self.validate_container_name(self.name)
+        self.name = self.validate_name(self.name)
 
         # Check if the storage is enabled
         if not _is_storage_cloud_enabled(str(clouds.Azure())):
@@ -1979,7 +1979,7 @@ class AzureBlobStore(AbstractStore):
                     )
 
     @classmethod
-    def validate_container_name(cls, name) -> str:
+    def validate_name(cls, name) -> str:
         """Validates the name of the AZ Container.
 
         Source for rules: https://learn.microsoft.com/en-us/rest/api/storageservices/Naming-and-Referencing-Containers--Blobs--and-Metadata#container-names # pylint: disable=line-too-long
