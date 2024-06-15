@@ -20,6 +20,13 @@ file_mounts:
     source: ./examples
     persistent: false
     mode: COPY
+
+  /output_path:
+    # Change this to the your own globally unique bucket name.
+    name: sky-output-bucket
+    persistent: false
+    mode: MOUNT
+
   /imagenet-image:
     source: s3://sky-imagenet-data
   
@@ -55,3 +62,6 @@ run: |
 
   cat ~/tmpfile
   cat ~/a/b/c/tmpfile
+  
+  # Write to a file in the mounted bucket
+  echo "hello world!" > /output_path/output.txt

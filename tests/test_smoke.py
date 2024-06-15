@@ -2824,6 +2824,7 @@ def test_managed_jobs_storage(generic_cloud: str):
     yaml_str = pathlib.Path(
         'examples/managed_job_with_storage.yaml').read_text()
     storage_name = f'sky-test-{int(time.time())}'
+    output_storage_name = f'{storage_name}-out'
 
     # Also perform region testing for bucket creation to validate if buckets are
     # created in the correct region and correctly mounted in managed jobs.
@@ -2838,16 +2839,24 @@ def test_managed_jobs_storage(generic_cloud: str):
         region_cmd = TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.S3, storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
+        output_check_cmd = TestStorageWithCredentials.cli_count_name_in_bucket(storage_lib.StoreType.S3,
+                                                                               output_storage_name,
+                                                                               'output.txt')
     elif generic_cloud == 'gcp':
         region = 'us-west2'
         region_flag = f' --region {region}'
         region_cmd = TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.GCS, storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
+        output_check_cmd = TestStorageWithCredentials.cli_count_name_in_bucket(storage_lib.StoreType.GCS,
+                                                                               output_storage_name,
+                                                                               'output.txt')
     elif generic_cloud == 'kubernetes':
+        output_check_cmd = 'echo 1'
         use_spot = ' --no-use-spot'
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
+    yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(yaml_str)
         f.flush()
@@ -2860,7 +2869,9 @@ def test_managed_jobs_storage(generic_cloud: str):
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 'sleep 60',  # Wait the spot queue to be updated
                 f'{_JOB_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
-                f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
+                f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
+                # Check if file was written to the mounted output bucket
+                f'{output_check_cmd} | grep 1 '
             ],
             _JOB_CANCEL_WAIT.format(job_name=name),
             # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
