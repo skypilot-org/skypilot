@@ -2208,8 +2208,7 @@ class AzureBlobStore(AbstractStore):
                             raise exceptions.StorageBucketCreateError(
                                 'Failed to create storage account '
                                 f'{self.storage_account_name!r}.\n'
-                                f'Details: {common_utils.format_exception(
-                                    error, use_bracket=True)}')
+                                f'Details: {common_utils.format_exception(error, use_bracket=True)}')
                     # wait until new resource creation propagates to Azure.
                     time.sleep(1)
 
