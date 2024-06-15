@@ -2104,18 +2104,14 @@ class AzureBlobStore(AbstractStore):
             StorageBucketCreateError: If storage account attempted to be
                 created already exists
         """
-        try:
-            # obtains detailed information about resource group under the
-            # user's subscription. Used to check if the name already exists
-            self.resource_client.resource_groups.get(
-                self.resource_group_name)
-        except azure.exceptions().ResourceNotFoundError as e:
-            if 'Code: ResourceGroupNotFound' in e.message:
-                with rich_utils.safe_status(
-                    f'[bold cyan]Setting up:\n'
-                    f'- Resource group: {self.resource_group_name}'):
-                    self.resource_client.resource_groups.create_or_update(
-                        self.resource_group_name, {'location': self.region})
+        # create_or_update function checks if the passed resource group name
+        # already exists and creates one if not. It silently moves on if it
+        # exists.
+        with rich_utils.safe_status(
+            f'[bold cyan]Setting up:\n'
+            f'- Resource group: {self.resource_group_name}'):
+            self.resource_client.resource_groups.create_or_update(
+                self.resource_group_name, {'location': self.region})
         # check if the storage account name already exists under the
         # given resource group name.
         try:
