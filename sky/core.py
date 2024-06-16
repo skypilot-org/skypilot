@@ -828,7 +828,7 @@ def storage_delete(name: str) -> None:
     if handle is None:
         raise ValueError(f'Storage name {name!r} not found.')
     else:
-        store_object = data.Storage(name=handle.storage_name,
+        storage_object = data.Storage(name=handle.storage_name,
                                     source=handle.source,
                                     sync_on_reconstruction=False)
-        store_object.delete()
+        storage_object.delete()
