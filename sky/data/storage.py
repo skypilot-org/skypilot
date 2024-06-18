@@ -837,7 +837,12 @@ class Storage(object):
             store_type = StoreType(store_type)
 
         if store_type in self.stores:
-            logger.info(f'Storage type {store_type} already exists.')
+            if store_type == StoreType.AZURE:
+                storage_account_name = self.stores[store_type].storage_account_name
+                logger.info(f'Storage type {store_type} already exists under '
+                            f'storage account {storage_account_name!r}.')
+            else:
+                logger.info(f'Storage type {store_type} already exist.')
             return self.stores[store_type]
 
         store_cls: Type[AbstractStore]
@@ -1913,22 +1918,78 @@ class AzureBlobStore(AbstractStore):
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
 
+    class AzureBlobStoreMetadata(AbstractStore.StoreMetadata):
+        """A pickle-able representation of Azure Blob Store
+
+        Allows store objects to be written to and reconstructed from
+        global_user_state.
+        """
+
+        def __init__(self,
+                     *,
+                     name: str,
+                     storage_account_name: str,
+                     source: Optional[SourceType],
+                     region: Optional[str] = None,
+                     is_sky_managed: Optional[bool] = None):
+            self.name = name
+            self.storage_account_name = storage_account_name
+            self.source = source
+            self.region = region
+            self.is_sky_managed = is_sky_managed
+
+        def __repr__(self):
+            return (f'AzureBlobStoreMetadata('
+                    f'\n\tname={self.name},'
+                    f'\n\tstorage_account_name={self.storage_account_name},'
+                    f'\n\tsource={self.source},'
+                    f'\n\tregion={self.region},'
+                    f'\n\tis_sky_managed={self.is_sky_managed})')
+
     def __init__(self,
                  name: str,
                  source: str,
+                 storage_account_name: Optional[str] = None,
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
         self.storage_client: 'storage.Client'
         self.resource_client: 'storage.Client'
         self.bucket_name: str
-        self.storage_account_name: str
+        # storage_account_name is not None when initializing only
+        # when it is being reconstructed from the handle(metadata).
+        self.storage_account_name = storage_account_name
         self.storage_account_key: Optional[str] = None
         self.resource_group_name: Optional[str] = None
         if region is None:
             region = 'eastus'
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
+
+    @classmethod
+    def from_metadata(cls, metadata: AzureBlobStoreMetadata, **override_args):
+        """Create a Store from a AzureBlobStoreMetadata object.
+
+        Used when reconstructing Storage and Store objects from
+        global_user_state.
+        """
+        return cls(name=override_args.get('name', metadata.name),
+                   storage_account_name=override_args.get(
+                       'storage_account', metadata.storage_account_name),
+                   source=override_args.get('source', metadata.source),
+                   region=override_args.get('region', metadata.region),
+                   is_sky_managed=override_args.get('is_sky_managed',
+                                                    metadata.is_sky_managed),
+                   sync_on_reconstruction=override_args.get(
+                       'sync_on_reconstruction', True))
+
+    def get_metadata(self) -> AzureBlobStoreMetadata:
+        return self.AzureBlobStoreMetadata(
+            name=self.name,
+            storage_account_name=self.storage_account_name,
+            source=self.source,
+            region=self.region,
+            is_sky_managed=self.is_sky_managed)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -2073,8 +2134,14 @@ class AzureBlobStore(AbstractStore):
             ValueError: When user provided storage account that does not belong
                 to the user through config.yaml.
         """
+        # self.storage_account_name already has a value only when it is being
+        # reconstructed with metadata from local db. 
+        if self.storage_account_name is not None:
+            resource_group_name = data_utils.get_az_resource_group(
+                self.storage_account_name)
+            storage_account_name = self.storage_account_name
         # Using externally created container
-        if isinstance(self.source, str
+        elif isinstance(self.source, str
                       ) and data_utils.is_az_container_endpoint(self.source):
             bucket_name, _, storage_account_name = data_utils.split_az_path(
                 self.source)
@@ -2263,7 +2330,8 @@ class AzureBlobStore(AbstractStore):
         """Deletes the storage."""
         deleted_by_skypilot = self._delete_az_bucket(self.name)
         if deleted_by_skypilot:
-            msg_str = f'Deleted AZ Container {self.name}.'
+            msg_str = (f'Deleted AZ Container {self.name!r} under storage '
+                       f'account {self.storage_account_name!r}.')
         else:
             msg_str = (f'AZ Container {self.name} may have '
                        'been deleted externally. Removing from local state.')
@@ -2471,7 +2539,8 @@ class AzureBlobStore(AbstractStore):
                 self.resource_group_name, self.storage_account_name,
                 container_name, {})
             logger.info('Created AZ Container '
-                        f'{container_name} in {self.region}.')
+                        f'{container_name!r} in {self.region!r} under storage '
+                        f'account {self.storage_account_name!r}.')
         except azure.exceptions().ResourceExistsError as e:
             error_msg, error_code = e.error.message, e.error.code
             if error_code == 'ContainerOperationFailure':
