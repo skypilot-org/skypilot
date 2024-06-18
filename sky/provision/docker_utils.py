@@ -157,7 +157,6 @@ class DockerInitializer:
         while True:
             rc, stdout, stderr = self.runner.run(cmd,
                                                  require_outputs=True,
-                                                 separate_stderr=True,
                                                  stream_logs=False,
                                                  log_path=self.log_path)
             if (not wait_for_docker_daemon or
