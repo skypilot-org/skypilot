@@ -96,13 +96,6 @@ def get_az_mount_cmd(container_name: str,
     Returns:
         str: command used to mount AZ container with blobfuse2
     """
-    # Note: Using MOUNT mode with Azure Blob Storage by default gives full
-    # permissions(777) to files/directories unlike other object
-    # storages(s3, gcs). It is also impossible to change these
-    # permissions(chmod). Special type of storage account is required to
-    # support these features, and those are more costly.
-    # Reference: https://github.com/Azure/azure-storage-fuse/issues/776#issuecomment-1111022548 # pylint: disable=line-too-long
-    
     # storage_account_key is set to None when mounting public container, and
     # mounting public containers are not officially supported by blobfuse2 yet.
     # Setting an empty SAS token value is a suggested workaround.
@@ -115,6 +108,7 @@ def get_az_mount_cmd(container_name: str,
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
+                 '-o umask=022 -o default_permissions '
                  f'--tmp-path {_BLOBFUSE_CACHE_DIR} '
                  f'--container-name {container_name}')
     return mount_cmd
