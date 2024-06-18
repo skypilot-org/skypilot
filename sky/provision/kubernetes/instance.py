@@ -308,12 +308,13 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
         runner = command_runner.KubernetesCommandRunner(
             (namespace, new_node.metadata.name))
         rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
-                                   require_outputs=True,
-                                   separate_stderr=True,
-                                   stream_logs=False)
+                                        require_outputs=True,
+                                        separate_stderr=True,
+                                        stream_logs=False)
         _raise_command_running_error('check user privilege',
                                      check_k8s_user_sudo_cmd,
-                                     new_node.metadata.name, rc, stdout + stderr)
+                                     new_node.metadata.name, rc,
+                                     stdout + stderr)
         if stdout == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
@@ -692,9 +693,9 @@ def get_cluster_info(
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner((namespace, head_pod_name))
     rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
-                               require_outputs=True,
-                               separate_stderr=True,
-                               stream_logs=False)
+                                    require_outputs=True,
+                                    separate_stderr=True,
+                                    stream_logs=False)
     _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
                                  head_pod_name, rc, stdout + stderr)
     ssh_user = stdout.strip()

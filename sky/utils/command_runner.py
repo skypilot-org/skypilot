@@ -781,9 +781,9 @@ class KubernetesCommandRunner(CommandRunner):
             # echo $HOME, because pwd can be `/` when the remote user is root
             # and $HOME is not always set.
             rc, remote_home_dir, stderr = self.run('echo ~',
-                                              require_outputs=True,
-                                              separate_stderr=True,
-                                              stream_logs=False)
+                                                   require_outputs=True,
+                                                   separate_stderr=True,
+                                                   stream_logs=False)
             if rc != 0:
                 raise ValueError('Failed to get remote home directory: '
                                  f'{remote_home_dir + stderr}')

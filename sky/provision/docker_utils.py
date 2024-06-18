@@ -139,7 +139,8 @@ class DockerInitializer:
     def _run(self,
              cmd,
              run_env='host',
-             wait_for_docker_daemon: bool = False) -> str:
+             wait_for_docker_daemon: bool = False,
+             separate_stderr: bool = False) -> str:
 
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
@@ -155,10 +156,12 @@ class DockerInitializer:
         cnt = 0
         retry = 3
         while True:
-            rc, stdout, stderr = self.runner.run(cmd,
-                                                 require_outputs=True,
-                                                 stream_logs=False,
-                                                 log_path=self.log_path)
+            rc, stdout, stderr = self.runner.run(
+                cmd,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=separate_stderr,
+                log_path=self.log_path)
             if (not wait_for_docker_daemon or
                     DOCKER_PERMISSION_DENIED_STR not in stdout + stderr):
                 break
@@ -340,9 +343,12 @@ class DockerInitializer:
         user_pos = string.find('~')
         if user_pos > -1:
             if self.home_dir is None:
-                self.home_dir = (self._run(
+                self.home_dir = self._run(
                     f'{self.docker_cmd} exec {self.container_name} '
-                    'printenv HOME',))
+                    'printenv HOME',
+                    separate_stderr=True)
+                assert '\n' not in self.home_dir, (
+                    f'Unexpected newline in HOME env variable: {self.home_dir}')
 
             if any_char:
                 return string.replace('~/', self.home_dir + '/')
