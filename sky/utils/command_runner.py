@@ -780,11 +780,13 @@ class KubernetesCommandRunner(CommandRunner):
             # Use `echo ~` to get the remote home directory, instead of pwd or
             # echo $HOME, because pwd can be `/` when the remote user is root
             # and $HOME is not always set.
-            rc, remote_home_dir, _ = self.run('echo ~',
+            rc, remote_home_dir, stderr = self.run('echo ~',
                                               require_outputs=True,
+                                              separate_stderr=True,
                                               stream_logs=False)
             if rc != 0:
-                raise ValueError('Failed to get remote home directory.')
+                raise ValueError('Failed to get remote home directory: '
+                                 f'{remote_home_dir + stderr}')
             remote_home_dir = remote_home_dir.strip()
             return remote_home_dir
 
