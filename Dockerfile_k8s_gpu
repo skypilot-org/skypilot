@@ -1,3 +1,4 @@
+# We use the cuda runtime image instead of devel image to reduce size (1.3GB vs 3.6GB)
 FROM nvidia/cuda:12.1.1-runtime-ubuntu20.04
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -34,7 +35,7 @@ WORKDIR /home/sky
 SHELL ["/bin/bash", "-c"]
 
 # Install conda and other dependencies
-# Keep the Ray version below in sync with skylet.constants.SKY_REMOTE_RAY_VERSION
+# Keep the conda and Ray versions below in sync with the ones in skylet.constants
 RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
     bash Miniconda3-Linux-x86_64.sh -b && \
     eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
