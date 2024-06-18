@@ -77,7 +77,9 @@ def get_client(name: str, subscription_id: str, **kwargs):
             # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35770 # pylint: disable=line-too-long 
             from azure.storage.blob import ContainerClient
             container_url = kwargs.pop('container_url', None)
-            assert container_url is not None
+            assert container_url is not None, ('Must provide \'container_url\''
+                                               ' keyword arguments for '
+                                               'container client.')
             container_client = ContainerClient.from_container_url(container_url)
             try:
                 container_client.exists()
@@ -126,9 +128,9 @@ def get_az_container_sas_token(
 
     Args:
         storage_account_name: str; Name of the storage account
-        storage_account_key: str; access key for the given storage
+        storage_account_key: str; Access key for the given storage
             account
-        container_name: str; name of the mounting container
+        container_name: str; Name of the mounting container
 
     Returns:
         SAS token prepended with the delimiter character, "?"
