@@ -126,9 +126,9 @@ def get_az_container_sas_token(
 
     Args:
         storage_account_name: str; Name of the storage account
-        storage_account_key: str; access key for the given storage
+        storage_account_key: str; Access key for the given storage
             account
-        container_name: str; name of the mounting container
+        container_name: str; The name of the mounting container
 
     Returns:
         SAS token prepended with the delimiter character, "?"
