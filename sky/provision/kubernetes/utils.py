@@ -1,5 +1,6 @@
 """Kubernetes utilities for SkyPilot."""
 import json
+import logging
 import math
 import os
 import re
@@ -16,6 +17,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import network_utils
+from sky.provision.logging import set_logging_level
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
@@ -601,9 +603,12 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         bool: True if credentials are valid, False otherwise
         str: Error message if credentials are invalid, None otherwise
     """
+
     try:
         ns = get_current_kube_config_context_namespace()
-        kubernetes.core_api().list_namespaced_pod(ns, _request_timeout=timeout)
+        with set_logging_level('urllib3', logging.ERROR):
+            kubernetes.core_api().list_namespaced_pod(ns,
+                                                      _request_timeout=timeout)
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
