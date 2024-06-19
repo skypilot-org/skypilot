@@ -75,8 +75,10 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
         info['status'] = instance['desiredStatus']
         info['name'] = instance['name']
 
-        if instance['desiredStatus'] == 'RUNNING' and instance.get('runtime'):
-            for port in instance['runtime']['ports']:
+        runtime = instance.get('runtime', {})
+        if (instance['desiredStatus'] == 'RUNNING' and runtime and
+                runtime.get('ports')):
+            for port in runtime.get('ports', []):
                 if port['privatePort'] == 22 and port['isIpPublic']:
                     info['external_ip'] = port['ip']
                     info['ssh_port'] = port['publicPort']
