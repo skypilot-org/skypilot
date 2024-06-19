@@ -1528,6 +1528,44 @@ def get_autoscaler_type(
     return autoscaler_type
 
 
+# Mapping of known spot label keys and values for different cluster types
+# Add new cluster types here if they support spot instances along with the
+# corresponding spot label key and value.
+SPOT_LABEL_MAP = {
+    kubernetes_enums.KubernetesAutoscalerType.GKE.value:
+        ('cloud.google.com/gke-spot', 'true')
+}
+
+
+def get_spot_label() -> Tuple[Optional[str], Optional[str]]:
+    """Get the spot label key and value for using spot instances, if supported.
+
+    Checks if the underlying cluster supports spot instances by checking nodes
+    for known spot label keys and values. If found, returns the spot label key
+    and value. If not, checks if autoscaler is configured and returns
+    appropriate labels. If neither are found, returns None.
+
+    Returns:
+        Tuple[str, str]: Tuple containing the spot label key and value. Returns
+            None if spot instances are not supported.
+    """
+    # Check if the cluster supports spot instances by checking nodes for known
+    # spot label keys and values
+    for node in get_kubernetes_nodes():
+        for _, (key, value) in SPOT_LABEL_MAP.items():
+            if key in node.metadata.labels and node.metadata.labels[
+                    key] == value:
+                return key, value
+
+    # Check if autoscaler is configured. Allow spot instances if autoscaler type
+    # is known to support spot instances.
+    autoscaler_type = get_autoscaler_type()
+    if autoscaler_type == kubernetes_enums.KubernetesAutoscalerType.GKE:
+        return SPOT_LABEL_MAP[autoscaler_type.value]
+
+    return None, None
+
+
 def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     """Converts a dictionary to a Kubernetes object.
 
