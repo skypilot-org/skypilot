@@ -4417,8 +4417,7 @@ class TestStorageWithCredentials:
             storage_account_name, resource_group_name)
         bucket_uri = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=storage_account_name,
-            container_name=tmp_bucket_name
-        )
+            container_name=tmp_bucket_name)
         subprocess.check_call([
             'az', 'storage', 'container', 'create', '--name',
             f'{tmp_bucket_name}', '--account-name', f'{storage_account_name}',
@@ -4608,9 +4607,10 @@ class TestStorageWithCredentials:
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
          ('s3://digitalcorpora', storage_lib.StoreType.S3),
          ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS),
-         pytest.param('https://azuremlexampledata.blob.core.windows.net/data/imagenet',
-                      storage_lib.StoreType.AZURE,
-                      marks=pytest.mark.azure)],
+         pytest.param(
+             'https://azuremlexampledata.blob.core.windows.net/data/imagenet',
+             storage_lib.StoreType.AZURE,
+             marks=pytest.mark.azure)],
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not
@@ -4622,13 +4622,17 @@ class TestStorageWithCredentials:
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
     @pytest.mark.no_fluidstack
-    @pytest.mark.parametrize('nonexist_bucket_url', [
-        's3://{random_name}', 'gs://{random_name}',
-        pytest.param('https://{account_name}.blob.core.windows.net/{random_name}', # pylint: disable=line-too-long
-                     marks=pytest.mark.azure),
-        pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
-        pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
-    ])
+    @pytest.mark.parametrize(
+        'nonexist_bucket_url',
+        [
+            's3://{random_name}',
+            'gs://{random_name}',
+            pytest.param(
+                'https://{account_name}.blob.core.windows.net/{random_name}',  # pylint: disable=line-too-long
+                marks=pytest.mark.azure),
+            pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
+            pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
+        ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
         # Generate a random bucket name and verify it doesn't exist:
@@ -4703,11 +4707,15 @@ class TestStorageWithCredentials:
                         random_name=nonexist_bucket_name))
 
     @pytest.mark.no_fluidstack
-    @pytest.mark.parametrize('private_bucket', [
-        f's3://imagenet', f'gs://imagenet',
-        pytest.param('https://smoketestprivate.blob.core.windows.net/test', marks=pytest.mark.azure), # pylint: disable=line-too-long
-        pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
-    ])
+    @pytest.mark.parametrize(
+        'private_bucket',
+        [
+            f's3://imagenet',
+            f'gs://imagenet',
+            pytest.param('https://smoketestprivate.blob.core.windows.net/test',
+                         marks=pytest.mark.azure),  # pylint: disable=line-too-long
+            pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
+        ])
     def test_private_bucket(self, private_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if

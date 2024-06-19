@@ -15,7 +15,7 @@ azure = common.LazyImport(
     'azure',
     import_error_message=('Failed to import dependencies for Azure.'
                           'Try pip install "skypilot[azure]"'))
-_LAZY_MODULES = (azure)
+_LAZY_MODULES = (azure,)
 
 _session_creation_lock = threading.RLock()
 
@@ -75,7 +75,7 @@ def get_client(name: str, subscription_id: str, **kwargs):
             # try-except block by first assuming the url is a public container.
             # If it turns out to be a private container, an error will be
             # caught and treated as private container.
-            # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35770 # pylint: disable=line-too-long 
+            # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35770 # pylint: disable=line-too-long
             from azure.storage.blob import ContainerClient
             container_url = kwargs.pop('container_url', None)
             assert container_url is not None, ('Must provide \'container_url\''
@@ -84,41 +84,43 @@ def get_client(name: str, subscription_id: str, **kwargs):
             container_client = ContainerClient.from_container_url(container_url)
             try:
                 container_client.exists()
-            except exceptions().ClientAuthenticationError as e:
+            except exceptions().ClientAuthenticationError:
                 # Caught when credential is not provided to the private
                 # container url or wrong container name is provided as the
                 # public container url. We reattempt with credentials assuming
                 # user is using private container with access rights.
-                if 'ErrorCode:NoAuthenticationInformation' in e.message:
-                    container_client = ContainerClient.from_container_url(
-                        container_url, credential)
-                    try:
-                        # Suppress noisy logs from Azure SDK when attempting
-                        # to run exists() on public container with credentials.
-                        # Reference:
-                        # https://github.com/Azure/azure-sdk-for-python/issues/9422 # pylint: disable=line-too-long
-                        azure_logger = logging.getLogger('azure')
-                        original_level = azure_logger.getEffectiveLevel()
-                        azure_logger.setLevel(logging.CRITICAL)
-                        container_client.exists()
-                        azure_logger.setLevel(original_level)
-                    except exceptions().ClientAuthenticationError as error:
-                        # Caught when user attempted to use private container
-                        # without access rights.
-                        # Reference:
-                        # https://learn.microsoft.com/en-us/troubleshoot/azure/entra/entra-id/app-integration/error-code-aadsts50020-user-account-identity-provider-does-not-exist # pylint: disable=line-too-long
-                        if 'ERROR: AADSTS50020' in error.message:
-                            with ux_utils.print_exception_no_traceback():
-                                raise sky_exceptions.StorageBucketGetError(
-                                    'Attempted to fetch a non-existant public '
-                                    'container name: '
-                                    f'{container_client.container_name}. '
-                                    'Please check if the name is correct.')
-                        else:
-                            with ux_utils.print_exception_no_traceback():
-                                r 
-
-
+                container_client = ContainerClient.from_container_url(
+                    container_url, credential)
+                try:
+                    # Suppress noisy logs from Azure SDK when attempting
+                    # to run exists() on public container with credentials.
+                    # Reference:
+                    # https://github.com/Azure/azure-sdk-for-python/issues/9422 # pylint: disable=line-too-long
+                    azure_logger = logging.getLogger('azure')
+                    original_level = azure_logger.getEffectiveLevel()
+                    azure_logger.setLevel(logging.CRITICAL)
+                    container_client.exists()
+                    azure_logger.setLevel(original_level)
+                except exceptions().ClientAuthenticationError as error:
+                    # Caught when user attempted to use private container
+                    # without access rights.
+                    # Reference:
+                    # https://learn.microsoft.com/en-us/troubleshoot/azure/entra/entra-id/app-integration/error-code-aadsts50020-user-account-identity-provider-does-not-exist # pylint: disable=line-too-long
+                    if 'ERROR: AADSTS50020' in error.message:
+                        with ux_utils.print_exception_no_traceback():
+                            raise sky_exceptions.StorageBucketGetError(
+                                'Attempted to fetch a non-existant public '
+                                'container name: '
+                                f'{container_client.container_name}. '
+                                'Please check if the name is correct.')
+                    else:
+                        with ux_utils.print_exception_no_traceback():
+                            raise sky_exceptions.StorageBucketGetError(
+                                'Failed to retreive the container client '
+                                f'for the container: {container_client.container_name!r}. '
+                                f'Details: '
+                                f'{common_utils.format_exception(error, use_bracket=True)}'
+                            )
 
             return container_client
         else:

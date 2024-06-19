@@ -765,6 +765,8 @@ class Storage(object):
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction)
                 elif s_type == StoreType.AZURE:
+                    assert isinstance(s_metadata,
+                                      AzureBlobStore.AzureBlobStoreMetadata)
                     store = AzureBlobStore.from_metadata(
                         s_metadata,
                         source=self.source,
@@ -838,7 +840,9 @@ class Storage(object):
 
         if store_type in self.stores:
             if store_type == StoreType.AZURE:
-                storage_account_name = self.stores[store_type].storage_account_name
+                azure_store_obj = self.stores[store_type]
+                assert isinstance(azure_store_obj, AzureBlobStore)
+                storage_account_name = azure_store_obj.storage_account_name
                 logger.info(f'Storage type {store_type} already exists under '
                             f'storage account {storage_account_name!r}.')
             else:
@@ -1932,11 +1936,11 @@ class AzureBlobStore(AbstractStore):
                      source: Optional[SourceType],
                      region: Optional[str] = None,
                      is_sky_managed: Optional[bool] = None):
-            self.name = name
             self.storage_account_name = storage_account_name
-            self.source = source
-            self.region = region
-            self.is_sky_managed = is_sky_managed
+            super().__init__(name=name,
+                             source=source,
+                             region=region,
+                             is_sky_managed=is_sky_managed)
 
         def __repr__(self):
             return (f'AzureBlobStoreMetadata('
@@ -1949,7 +1953,7 @@ class AzureBlobStore(AbstractStore):
     def __init__(self,
                  name: str,
                  source: str,
-                 storage_account_name: Optional[str] = None,
+                 storage_account_name: str = '',
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
@@ -1967,12 +1971,14 @@ class AzureBlobStore(AbstractStore):
                          sync_on_reconstruction)
 
     @classmethod
-    def from_metadata(cls, metadata: AzureBlobStoreMetadata, **override_args):
+    def from_metadata(cls, metadata: AbstractStore.StoreMetadata,
+                      **override_args):
         """Create a Store from a AzureBlobStoreMetadata object.
 
         Used when reconstructing Storage and Store objects from
         global_user_state.
         """
+        assert isinstance(metadata, AzureBlobStore.AzureBlobStoreMetadata)
         return cls(name=override_args.get('name', metadata.name),
                    storage_account_name=override_args.get(
                        'storage_account', metadata.storage_account_name),
@@ -2120,8 +2126,8 @@ class AzureBlobStore(AbstractStore):
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
 
-
-    def _get_storage_account_and_resource_group(self) -> Tuple[str, str]:
+    def _get_storage_account_and_resource_group(
+            self) -> Tuple[str, Optional[str]]:
         """Get storage account and resource group to be used for AzureBlobStore
 
         Storage account name and resource group name of the container to be
@@ -2135,20 +2141,21 @@ class AzureBlobStore(AbstractStore):
                 to the user through config.yaml.
         """
         # self.storage_account_name already has a value only when it is being
-        # reconstructed with metadata from local db. 
+        # reconstructed with metadata from local db.
         if self.storage_account_name is not None:
             resource_group_name = data_utils.get_az_resource_group(
                 self.storage_account_name)
             storage_account_name = self.storage_account_name
         # Using externally created container
-        elif isinstance(self.source, str
-                      ) and data_utils.is_az_container_endpoint(self.source):
+        elif isinstance(self.source,
+                        str) and data_utils.is_az_container_endpoint(
+                            self.source):
             storage_account_name, container_name, _ = data_utils.split_az_path(
                 self.source)
             assert self.name == container_name
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
-        # Creates new resource group and storage account or use the 
+        # Creates new resource group and storage account or use the
         # storage_account provided by the user through config.yaml
         else:
             config_storage_account = skypilot_config.get_nested(
@@ -2169,22 +2176,22 @@ class AzureBlobStore(AbstractStore):
                             'subscription ID. Provide a storage account '
                             'through config.yaml only when creating a '
                             'container under an already existing storage '
-                            'account within your subscription ID.'
-                        )
+                            'account within your subscription ID.')
             else:
-                # If storage account name is not provided from config, then 
+                # If storage account name is not provided from config, then
                 # use default resource group and storage account names.
                 storage_account_name = f'sky{self.region}{common_utils.get_user_hash()}'
                 resource_group_name = f'sky{common_utils.get_user_hash()}'
                 try:
-                    # obtains detailed information about resource group under the
-                    # user's subscription. Used to check if the name already exists
+                    # obtains detailed information about resource group under
+                    # the user's subscription. Used to check if the name
+                    # already exists
                     self.resource_client.resource_groups.get(
                         resource_group_name)
-                except azure.exceptions().ResourceNotFoundError as e:
+                except azure.exceptions().ResourceNotFoundError:
                     with rich_utils.safe_status(
-                        f'[bold cyan]Setting up:\n'
-                        f'- Resource group: {resource_group_name}'):
+                            f'[bold cyan]Setting up:\n'
+                            f'- Resource group: {resource_group_name}'):
                         self.resource_client.resource_groups.create_or_update(
                             resource_group_name, {'location': self.region})
                 # check if the storage account name already exists under the
@@ -2192,15 +2199,15 @@ class AzureBlobStore(AbstractStore):
                 try:
                     self.storage_client.storage_accounts.get_properties(
                         resource_group_name, storage_account_name)
-                except azure.exceptions().ResourceNotFoundError as e:
+                except azure.exceptions().ResourceNotFoundError:
                     with rich_utils.safe_status(
-                        f'[bold cyan]Setting up:\n'
-                        f'- Storage account: {storage_account_name}'):
+                            f'[bold cyan]Setting up:\n'
+                            f'- Storage account: {storage_account_name}'):
                         try:
                             creation_response = (
-                                self.storage_client.storage_accounts.begin_create(
-                                    resource_group_name,
-                                    storage_account_name, {
+                                self.storage_client.storage_accounts.
+                                begin_create(
+                                    resource_group_name, storage_account_name, {
                                         'sku': {
                                             'name': 'Standard_GRS'
                                         },
@@ -2216,19 +2223,22 @@ class AzureBlobStore(AbstractStore):
                                             'key_source': 'Microsoft.Storage'
                                         },
                                     }).result())
-                            # Assigning Storage Blob Data Owner role of the storage
-                            # account. Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
+                            # Assigning Storage Blob Data Owner role of the
+                            # storage account.
+                            # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
                             authorization_client = data_utils.create_az_client(
                                 'authorization')
                             graph_client = data_utils.create_az_client('graph')
 
                             async def get_object_id():
                                 httpx_logger = logging.getLogger('httpx')
-                                original_level = httpx_logger.getEffectiveLevel()
+                                original_level = httpx_logger.getEffectiveLevel(
+                                )
                                 # silencing the INFO level response log from httpx request
                                 httpx_logger.setLevel(logging.WARNING)
                                 user = await graph_client.users.with_url(
-                                    'https://graph.microsoft.com/v1.0/me').get()
+                                    'https://graph.microsoft.com/v1.0/me'
+                                ).get()
                                 httpx_logger.setLevel(original_level)
                                 object_id = str(user.additional_data['id'])
                                 return object_id
@@ -2282,12 +2292,12 @@ class AzureBlobStore(AbstractStore):
                                 raise exceptions.StorageBucketCreateError(
                                     'Failed to create storage account '
                                     f'{storage_account_name!r}.\n'
-                                    f'Details: {common_utils.format_exception(error, use_bracket=True)}')
+                                    f'Details: {common_utils.format_exception(error, use_bracket=True)}'
+                                )
                         # wait until new resource creation propagates to Azure.
                         time.sleep(1)
-        
-        return storage_account_name, resource_group_name
 
+        return storage_account_name, resource_group_name
 
     def upload(self):
         """Uploads source to store bucket.
@@ -2398,12 +2408,10 @@ class AzureBlobStore(AbstractStore):
             source_message = source_path_list[0]
         container_endpoint = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=self.storage_account_name,
-            container_name=self.name
-        )
-        with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to '
-                f'[green]{container_endpoint}/[/]'):
+            container_name=self.name)
+        with rich_utils.safe_status(f'[bold cyan]Syncing '
+                                    f'[green]{source_message}[/] to '
+                                    f'[green]{container_endpoint}/[/]'):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,

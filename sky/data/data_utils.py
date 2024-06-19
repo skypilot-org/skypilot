@@ -34,6 +34,7 @@ AZURE_CONTAINER_URL = (
 # when creating Storage Account.
 _STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT = 5
 
+
 def split_s3_path(s3_path: str) -> Tuple[str, str]:
     """Splits S3 Path into Bucket name and Relative Path to Bucket
 
@@ -62,7 +63,8 @@ def split_az_path(az_path: str) -> Tuple[str, str, str]:
     """Splits Path into Storage account and Container names and Relative Path
 
     Args:
-        az_path: str; Container Path, e.g. https://azuremlexampledata.blob.core.windows.net/data
+        az_path: str; Container Path,
+          e.g. https://azuremlexampledata.blob.core.windows.net/data
 
     Returns:
         str; Name of the storage account
@@ -257,22 +259,20 @@ def get_az_storage_account_key(
             for resource in resources:
                 if (resource.type == 'Microsoft.Storage/storageAccounts' and
                         resource.name == storage_account_name):
-                    storage_account_keys = storage_client.storage_accounts.list_keys(
+                    keys = storage_client.storage_accounts.list_keys(
                         resource_group_name, storage_account_name)
-                    storage_account_keys = [
-                        key.value for key in storage_account_keys.keys
-                    ]
+                    storage_account_keys = [key.value for key in keys.keys]
             storage_account_key = storage_account_keys[0]
             return storage_account_key
         # If storage account was created right before call to this method,
-        # it is possible to fail to retrieve the key as the creation did not 
+        # it is possible to fail to retrieve the key as the creation did not
         # propagate to Azure yet. We retry several times.
         except UnboundLocalError as e:
             attempt += 1
             if attempt > _STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT:
                 raise RuntimeError('Failed to obtain key value of storage '
                                    f'account {storage_account_name!r}.\n'
-                                   f'Detailed error: {e}')
+                                   f'Detailed error: {e}') from e
             time.sleep(backoff.current_backoff())
 
 
@@ -280,7 +280,7 @@ def is_az_container_endpoint(endpoint_url: str) -> bool:
     """Checks if the provided url is valid container endpoint
 
     Args:
-      endpoint_url: str; Url of container endpoint. 
+      endpoint_url: str; Url of container endpoint.
         e.g. https://azuremlexampledata.blob.core.windows.net/data
 
     Returns:
@@ -289,8 +289,7 @@ def is_az_container_endpoint(endpoint_url: str) -> bool:
     # storage account must be length of 3-24
     # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # pylint: disable=line-too-long
     pattern = re.compile(
-        r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)*$'
-    )
+        r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)*$')
     match = pattern.match(endpoint_url)
     if match:
         return True

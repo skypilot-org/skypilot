@@ -6,7 +6,7 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, cast, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 import colorama
 
@@ -721,13 +721,12 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
         store_type = list(storage_obj.stores.keys())[0]
         if store_type is storage_lib.StoreType.AZURE:
-            store_object = cast(storage_lib.AzureBlobStore,
-                                storage_obj.stores[store_type])
+            store_object = storage_obj.stores[store_type]
+            assert isinstance(store_object, storage_lib.AzureBlobStore)
             storage_account_name = store_object.storage_account_name
             bucket_url = data_utils.AZURE_CONTAINER_URL.format(
-                storage_account_name = storage_account_name,
-                container_name = storage_obj.name
-            ) 
+                storage_account_name=storage_account_name,
+                container_name=storage_obj.name)
         else:
             store_prefix = store_type.store_prefix()
             bucket_url = store_prefix + file_bucket_name
@@ -749,13 +748,12 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'We only support one store type for now.', storage_obj.stores)
             store_type = store_types[0]
             if store_type is storage_lib.StoreType.AZURE:
-                store_object = cast(storage_lib.AzureBlobStore,
-                                    storage_obj.stores[store_type])
+                store_object = storage_obj.stores[store_type]
+                assert isinstance(store_object, storage_lib.AzureBlobStore)
                 storage_account_name = store_object.storage_account_name
                 storage_obj.source = data_utils.AZURE_CONTAINER_URL.format(
-                    storage_account_name = storage_account_name,
-                    container_name = storage_obj.name
-                )
+                    storage_account_name=storage_account_name,
+                    container_name=storage_obj.name)
             else:
                 store_prefix = store_type.store_prefix()
                 storage_obj.source = f'{store_prefix}{storage_obj.name}'

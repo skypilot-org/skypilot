@@ -4,8 +4,8 @@ import json
 import os
 import re
 import typing
-from typing import (Any, Callable, cast, Dict, Iterable, List, Optional, Set,
-                    Tuple, Union)
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+                    Union)
 
 import colorama
 import yaml
@@ -969,20 +969,20 @@ class Task:
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.AZURE:
-                    if (isinstance(storage.source,
-                                  str) and
-                        data_utils.is_az_container_endpoint(storage.source)):
+                    if (isinstance(storage.source, str) and
+                            data_utils.is_az_container_endpoint(
+                                storage.source)):
                         blob_path = storage.source
                     else:
                         assert storage.name is not None, storage
-                        store_object = cast(
-                            storage_lib.AzureBlobStore,
-                            storage.stores[storage_lib.StoreType.AZURE])
+                        store_object = storage.stores[
+                            storage_lib.StoreType.AZURE]
+                        assert isinstance(store_object,
+                                          storage_lib.AzureBlobStore)
                         storage_account_name = store_object.storage_account_name
                         blob_path = data_utils.AZURE_CONTAINER_URL.format(
                             storage_account_name=storage_account_name,
-                            container_name=storage.name
-                        )
+                            container_name=storage.name)
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
