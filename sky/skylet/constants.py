@@ -100,7 +100,7 @@ DOCKER_LOGIN_ENV_VARS = {
 
 # Commands for disable GPU ECC, which can improve the performance of the GPU
 # for some workloads by 30%. This will only be applied when a user specify
-# `nvidia_gpu.disable_ecc: true` in ~/.sky/config.yaml.
+# `nvidia_gpus.disable_ecc: true` in ~/.sky/config.yaml.
 # Running this command will reboot the machine, introducing overhead for
 # provisioning the machine.
 # https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW

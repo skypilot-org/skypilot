@@ -40,14 +40,14 @@ Available fields and semantics:
     - gcp
     - kubernetes
 
-  nvidia_gpu:
+  nvidia_gpus:
     # Disable ECC for NVIDIA GPUs (optional).
     #
     # Set to true to disable ECC for NVIDIA GPUs during provisioning. This is
     # useful to improve the GPU performance in some cases (up to 30%
     # improvement). This will only be applied if a cluster is requested with
     # NVIDIA GPUs.
-    # https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW.
+    # https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW
     #
     # Default: false.
     disable_ecc: false

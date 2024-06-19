@@ -782,7 +782,7 @@ def get_config_schema():
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
-            'nvidia_gpu': gpu_configs,
+            'nvidia_gpus': gpu_configs,
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.
