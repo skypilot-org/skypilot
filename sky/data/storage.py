@@ -718,7 +718,7 @@ class Storage(object):
                         # cos url requires custom parsing
                         name = data_utils.split_cos_path(source)[0]
                     elif data_utils.is_az_container_endpoint(source):
-                        name = data_utils.split_az_path(source)[0]
+                        name = data_utils.split_az_path(source)[1]
                     else:
                         name = urllib.parse.urlsplit(source).netloc
                     assert name is not None, source
@@ -1081,7 +1081,7 @@ class S3Store(AbstractStore):
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
             elif data_utils.is_az_container_endpoint(self.source):
-                container_name, _, storage_account_name = (
+                storage_account_name, container_name, _ = (
                     data_utils.split_az_path(self.source))
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '
@@ -1500,7 +1500,7 @@ class GcsStore(AbstractStore):
                     'GCS Bucket is specified as path, the name should be '
                     'the same as GCS bucket.')
             elif data_utils.is_az_container_endpoint(self.source):
-                container_name, _, storage_account_name = (
+                storage_account_name, container_name, _ = (
                     data_utils.split_az_path(self.source))
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '
@@ -2008,7 +2008,7 @@ class AzureBlobStore(AbstractStore):
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
             elif data_utils.is_az_container_endpoint(self.source):
-                container_name, _, _ = data_utils.split_az_path(self.source)
+                _, container_name, _ = data_utils.split_az_path(self.source)
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '
                     'the same as AZ bucket.')
@@ -2143,9 +2143,9 @@ class AzureBlobStore(AbstractStore):
         # Using externally created container
         elif isinstance(self.source, str
                       ) and data_utils.is_az_container_endpoint(self.source):
-            bucket_name, _, storage_account_name = data_utils.split_az_path(
+            storage_account_name, container_name, _ = data_utils.split_az_path(
                 self.source)
-            assert self.name == bucket_name
+            assert self.name == container_name
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
         # Creates new resource group and storage account or use the 
@@ -2182,111 +2182,109 @@ class AzureBlobStore(AbstractStore):
                     self.resource_client.resource_groups.get(
                         resource_group_name)
                 except azure.exceptions().ResourceNotFoundError as e:
-                    if 'Code: ResourceGroupNotFound' in e.message:
-                        with rich_utils.safe_status(
-                            f'[bold cyan]Setting up:\n'
-                            f'- Resource group: {resource_group_name}'):
-                            self.resource_client.resource_groups.create_or_update(
-                                resource_group_name, {'location': self.region})
+                    with rich_utils.safe_status(
+                        f'[bold cyan]Setting up:\n'
+                        f'- Resource group: {resource_group_name}'):
+                        self.resource_client.resource_groups.create_or_update(
+                            resource_group_name, {'location': self.region})
                 # check if the storage account name already exists under the
                 # given resource group name.
                 try:
                     self.storage_client.storage_accounts.get_properties(
                         resource_group_name, storage_account_name)
                 except azure.exceptions().ResourceNotFoundError as e:
-                    if 'Code: ResourceNotFound' in e.message:
-                        with rich_utils.safe_status(
-                            f'[bold cyan]Setting up:\n'
-                            f'- Storage account: {storage_account_name}'):
-                            try:
-                                creation_response = (
-                                    self.storage_client.storage_accounts.begin_create(
-                                        resource_group_name,
-                                        storage_account_name, {
-                                            'sku': {
-                                                'name': 'Standard_GRS'
+                    with rich_utils.safe_status(
+                        f'[bold cyan]Setting up:\n'
+                        f'- Storage account: {storage_account_name}'):
+                        try:
+                            creation_response = (
+                                self.storage_client.storage_accounts.begin_create(
+                                    resource_group_name,
+                                    storage_account_name, {
+                                        'sku': {
+                                            'name': 'Standard_GRS'
+                                        },
+                                        'kind': 'StorageV2',
+                                        'location': self.region,
+                                        'encryption': {
+                                            'services': {
+                                                'blob': {
+                                                    'key_type': 'Account',
+                                                    'enabled': True
+                                                }
                                             },
-                                            'kind': 'StorageV2',
-                                            'location': self.region,
-                                            'encryption': {
-                                                'services': {
-                                                    'blob': {
-                                                        'key_type': 'Account',
-                                                        'enabled': True
-                                                    }
-                                                },
-                                                'key_source': 'Microsoft.Storage'
-                                            },
-                                        }).result())
-                                # Assigning Storage Blob Data Owner role of the storage
-                                # account. Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
-                                authorization_client = data_utils.create_az_client(
-                                    'authorization')
-                                graph_client = data_utils.create_az_client('graph')
+                                            'key_source': 'Microsoft.Storage'
+                                        },
+                                    }).result())
+                            # Assigning Storage Blob Data Owner role of the storage
+                            # account. Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
+                            authorization_client = data_utils.create_az_client(
+                                'authorization')
+                            graph_client = data_utils.create_az_client('graph')
 
-                                async def get_object_id():
-                                    httpx_logger = logging.getLogger('httpx')
-                                    original_level = httpx_logger.getEffectiveLevel()
-                                    # silencing the INFO level response log from httpx request
-                                    httpx_logger.setLevel(logging.WARNING)
-                                    user = await graph_client.users.with_url(
-                                        'https://graph.microsoft.com/v1.0/me').get()
-                                    httpx_logger.setLevel(original_level)
-                                    object_id = str(user.additional_data['id'])
-                                    return object_id
+                            async def get_object_id():
+                                httpx_logger = logging.getLogger('httpx')
+                                original_level = httpx_logger.getEffectiveLevel()
+                                # silencing the INFO level response log from httpx request
+                                httpx_logger.setLevel(logging.WARNING)
+                                user = await graph_client.users.with_url(
+                                    'https://graph.microsoft.com/v1.0/me').get()
+                                httpx_logger.setLevel(original_level)
+                                object_id = str(user.additional_data['id'])
+                                return object_id
 
-                                object_id = asyncio.run(get_object_id())
-                                # Defintion ID of Storage Blob Data Owner role.
-                                # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # pylint: disable=line-too-long
-                                storage_blob_data_owner_role_id = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
-                                role_definition_id = (
-                                    '/subscriptions'
-                                    f'/{azure.get_subscription_id()}'
-                                    '/providers/Microsoft.Authorization'
-                                    '/roleDefinitions'
-                                    f'/{storage_blob_data_owner_role_id}')
-                                authorization_client.role_assignments.create(
-                                    scope=creation_response.id,
-                                    role_assignment_name=uuid.uuid4(),
-                                    parameters={
-                                        'properties': {
-                                            'principalId': f'{object_id}',
-                                            'principalType': 'User',
-                                            'roleDefinitionId': role_definition_id,
-                                        }
-                                    },
-                                )
-                            except azure.exceptions().ResourceExistsError as error:
-                                if 'StorageAccountAlreadyTaken' in error.message:
-                                    # The error occurs when the storage account
-                                    # name attempted to be created already exists
-                                    # globally being used by other user.
-                                    with ux_utils.print_exception_no_traceback():
-                                        raise exceptions.StorageBucketCreateError(
-                                            'The storage account name '
-                                            f'{storage_account_name!r} is '
-                                            'already taken under other user\'s '
-                                            'subscripion. '
-                                            'Please try with another name.')
-                                if 'StorageAccountAlreadyExists' in error.message:
-                                    # The error occurs when the storage account
-                                    # name attempted to be created already exists
-                                    # under the user's subscription.
-                                    with ux_utils.print_exception_no_traceback():
-                                        raise exceptions.StorageBucketCreateError(
-                                            'The storage account name '
-                                            f'{storage_account_name!r} '
-                                            'already exists under your '
-                                            'subsciption in another resource '
-                                            'group. Please try another name.')
-                            except Exception as error:  # pylint: disable=broad-except
+                            object_id = asyncio.run(get_object_id())
+                            # Defintion ID of Storage Blob Data Owner role.
+                            # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # pylint: disable=line-too-long
+                            storage_blob_data_owner_role_id = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
+                            role_definition_id = (
+                                '/subscriptions'
+                                f'/{azure.get_subscription_id()}'
+                                '/providers/Microsoft.Authorization'
+                                '/roleDefinitions'
+                                f'/{storage_blob_data_owner_role_id}')
+                            authorization_client.role_assignments.create(
+                                scope=creation_response.id,
+                                role_assignment_name=uuid.uuid4(),
+                                parameters={
+                                    'properties': {
+                                        'principalId': f'{object_id}',
+                                        'principalType': 'User',
+                                        'roleDefinitionId': role_definition_id,
+                                    }
+                                },
+                            )
+                        except azure.exceptions().ResourceExistsError as error:
+                            if 'StorageAccountAlreadyTaken' in error.message:
+                                # The error occurs when the storage account
+                                # name attempted to be created already exists
+                                # globally being used by other user.
                                 with ux_utils.print_exception_no_traceback():
                                     raise exceptions.StorageBucketCreateError(
-                                        'Failed to create storage account '
-                                        f'{storage_account_name!r}.\n'
-                                        f'Details: {common_utils.format_exception(error, use_bracket=True)}')
-                            # wait until new resource creation propagates to Azure.
-                            time.sleep(1)
+                                        'The storage account name '
+                                        f'{storage_account_name!r} is '
+                                        'already taken under other user\'s '
+                                        'subscripion. '
+                                        'Please try with another name.')
+                            if 'StorageAccountAlreadyExists' in error.message:
+                                # The error occurs when the storage account
+                                # name attempted to be created already exists
+                                # under the user's subscription.
+                                with ux_utils.print_exception_no_traceback():
+                                    raise exceptions.StorageBucketCreateError(
+                                        'The storage account name '
+                                        f'{storage_account_name!r} '
+                                        'already exists under your '
+                                        'subsciption in another resource '
+                                        'group. Please try another name.')
+                        except Exception as error:  # pylint: disable=broad-except
+                            with ux_utils.print_exception_no_traceback():
+                                raise exceptions.StorageBucketCreateError(
+                                    'Failed to create storage account '
+                                    f'{storage_account_name!r}.\n'
+                                    f'Details: {common_utils.format_exception(error, use_bracket=True)}')
+                        # wait until new resource creation propagates to Azure.
+                        time.sleep(1)
         
         return storage_account_name, resource_group_name
 
@@ -2625,7 +2623,7 @@ class R2Store(AbstractStore):
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
             elif data_utils.is_az_container_endpoint(self.source):
-                container_name, _, storage_account_name = (
+                storage_account_name, container_name, _ = (
                     data_utils.split_az_path(self.source))
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '
@@ -3011,7 +3009,7 @@ class IBMCosStore(AbstractStore):
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
             elif data_utils.is_az_container_endpoint(self.source):
-                container_name, _, storage_account_name = (
+                storage_account_name, container_name, _ = (
                     data_utils.split_az_path(self.source))
                 assert self.name == container_name, (
                     'AZ Bucket is specified as path, the name should be '

@@ -191,10 +191,10 @@ class AzureBlobCloudStorage(CloudStorage):
         name is a prefix of other objects.
         """
         # split the url using split_az_path
-        _, path, _ = data_utils.split_az_path(url)
+        _, _, path = data_utils.split_az_path(url)
         # If there aren't more than just container name and storage account,
         # that's a directory.
-        if len(path) == 0:
+        if not path:
             return True
         # If there's more, we'd need to check if it's a directory or a file.
         container_client = data_utils.create_az_client(
@@ -212,7 +212,7 @@ class AzureBlobCloudStorage(CloudStorage):
 
     def _get_azcopy_source(self, source: str, is_dir: bool) -> str:
         """Converts the source so it can be used as an argument for azcopy."""
-        container_name, blob_path, storage_account_name = (
+        storage_account_name, container_name, blob_path = (
             data_utils.split_az_path(source))
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
@@ -234,7 +234,9 @@ class AzureBlobCloudStorage(CloudStorage):
         if is_dir:
             converted_source = f'{source}/{sas_token}'
         else:
-            converted_source = f'{source}/{blob_path}{sas_token}'
+            # "?" is a delimiter character used when SAS token is attached to
+            # the blob endpoint.
+            converted_source = f'{source}/{blob_path}?{sas_token}'
 
         return shlex.quote(converted_source)
 
@@ -242,7 +244,7 @@ class AzureBlobCloudStorage(CloudStorage):
         """Fetches a directory using AZCOPY from storage to remote instance."""
         source = self._get_azcopy_source(source, is_dir=True)
         # destination is guaranteed to not have '/' at the end of the string
-        # by tasks.py/set_file_mounts(). It is necessary to add from this
+        # by tasks.py::set_file_mounts(). It is necessary to add from this
         # method due to syntax of azcopy.
         destination = f'{destination}/'
         download_command = (f'azcopy sync {source} {destination} '

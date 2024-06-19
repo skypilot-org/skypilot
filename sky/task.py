@@ -969,8 +969,9 @@ class Task:
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.AZURE:
-                    if isinstance(storage.source,
-                                  str) and data_utils.is_az_container_endpoint(storage.source):
+                    if (isinstance(storage.source,
+                                  str) and
+                        data_utils.is_az_container_endpoint(storage.source)):
                         blob_path = storage.source
                     else:
                         assert storage.name is not None, storage

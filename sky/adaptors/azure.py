@@ -8,13 +8,14 @@ import threading
 
 from sky import exceptions as sky_exceptions
 from sky.adaptors import common
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 azure = common.LazyImport(
     'azure',
     import_error_message=('Failed to import dependencies for Azure.'
                           'Try pip install "skypilot[azure]"'))
-_LAZY_MODULES = (azure,)
+_LAZY_MODULES = (azure)
 
 _session_creation_lock = threading.RLock()
 
@@ -113,6 +114,12 @@ def get_client(name: str, subscription_id: str, **kwargs):
                                     'container name: '
                                     f'{container_client.container_name}. '
                                     'Please check if the name is correct.')
+                        else:
+                            with ux_utils.print_exception_no_traceback():
+                                r 
+
+
+
             return container_client
         else:
             raise ValueError(f'Client not supported: "{name}"')
@@ -181,9 +188,7 @@ def get_az_blob_sas_token(storage_account_name: str, storage_account_key: str,
                                       create=True),
         expiry=datetime.datetime.now(datetime.timezone.utc) +
         datetime.timedelta(hours=1))
-    # "?" is a delimiter character used when SAS token is attached to the
-    # blob endpoint.
-    return f'?{sas_token}'
+    return f'{sas_token}'
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)

@@ -14,6 +14,7 @@ _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '2.2.0'
+# https://github.com/Azure/azure-storage-fuse/releases
 BLOBFUSE2_VERSION = '2.2.0'
 _BLOBFUSE_CACHE_DIR = '~/.sky/blobfuse2_cache'
 
@@ -60,11 +61,7 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
 
 
 def get_az_mount_install_cmd() -> str:
-    """Returns a command to install AZ Container mount utility blobfuse2.
-
-    Returns:
-        str: installation command of the mounting utility blobdfuse2
-    """
+    """Returns a command to install AZ Container mount utility blobfuse2."""
     install_cmd = ('sudo apt-get update; '
                    'sudo apt-get install -y '
                    '-o Dpkg::Options::="--force-confdef" '
@@ -86,17 +83,17 @@ def get_az_mount_cmd(container_name: str,
     """Returns a command to mount an AZ Container using blobfuse2.
 
     Args:
-        container_name: str; name of the mounting container
-        storage_account_name: str; name of the storage account the given
+        container_name: str; Name of the mounting container
+        storage_account_name: str; Name of the storage account the given
             container belongs to
-        mount_path: str; path where the container will be mounting
-        storage_account_key: Optional[str]; access key for the given storage
+        mount_path: str; Path where the container will be mounting
+        storage_account_key: Optional[str]; Access key for the given storage
             account
 
     Returns:
         str: command used to mount AZ container with blobfuse2
     """
-    # storage_account_key is set to None when mounting public container, and
+    # Storage_account_key is set to None when mounting public container, and
     # mounting public containers are not officially supported by blobfuse2 yet.
     # Setting an empty SAS token value is a suggested workaround.
     # https://github.com/Azure/azure-storage-fuse/issues/1338

@@ -65,17 +65,17 @@ def split_az_path(az_path: str) -> Tuple[str, str, str]:
         az_path: str; Container Path, e.g. https://azuremlexampledata.blob.core.windows.net/data
 
     Returns:
-        str; Name of the container
-        str; paths of the file/directory defined within the container
         str; Name of the storage account
+        str; Name of the container
+        str; Paths of the file/directory defined within the container
     """
     path_parts = az_path.replace('https://', '').split('/')
     service_endpoint = path_parts.pop(0)
     service_endpoint_parts = service_endpoint.split('.')
     storage_account_name = service_endpoint_parts[0]
     container_name = path_parts.pop(0)
-    key = '/'.join(path_parts)
-    return container_name, key, storage_account_name
+    path = '/'.join(path_parts)
+    return storage_account_name, container_name, path
 
 
 def split_r2_path(r2_path: str) -> Tuple[str, str]:
@@ -159,12 +159,10 @@ def create_az_client(client_type: str, **kwargs) -> Client:
     """Helper method that connects to AZ client for diverse Resources.
 
     Args:
-      type: str; resource name, e.g. storage, resource, container
-      storage_account_name: str; name of the storage account
-      container_name: str; name of the container.
+      client_type: str; specify client type, e.g. storage, resource, container
 
     Returns:
-      Client object facing AZ Resource of the 'type'.
+      Client object facing AZ Resource of the 'client_type'.
     """
     container_url = kwargs.pop('container_url', None)
     if client_type == 'container':
@@ -179,10 +177,11 @@ def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
     """Helper method that checks if the AZ Container exists
 
     Args:
-      name: str; Name of AZ Container.
+      storage_account_name: str; Name of the storage account
+      container_name: str; Name of the container
 
     Returns:
-      boolean; shows either or not the container exists.
+      boolean; Shows either or not the container exists.
     """
     container_url = AZURE_CONTAINER_URL.format(
         storage_account_name=storage_account_name,
@@ -198,8 +197,8 @@ def get_az_resource_group(
     """Returns the resource group name the given storage account belongs to.
 
     Args:
-        storage_account_name: str; name of the storage account
-        storage_client: Optional[Client]; client object facing storage
+        storage_account_name: str; Name of the storage account
+        storage_client: Optional[Client]; Client object facing storage
 
     Returns:
         Name of the resource group the given storage account belongs to.
@@ -231,10 +230,10 @@ def get_az_storage_account_key(
 
     Args:
         storage_account_name: str; Name of the storage account
-        resource_group_name: str; Name of the resource group the passed storage
-            account belongs to.
-        storage_clent: Optional[Client]; client object facing Storage
-        resource_client: Optional[Client]; client object facing Resource
+        resource_group_name: Optional[str]; Name of the resource group the
+            passed storage account belongs to.
+        storage_clent: Optional[Client]; Client object facing Storage
+        resource_client: Optional[Client]; Client object facing Resource
 
     Returns:
         One of the few access keys to the given storage account
@@ -277,15 +276,15 @@ def get_az_storage_account_key(
             time.sleep(backoff.current_backoff())
 
 
-def is_az_container_endpoint(endpoint_url: str):
-    """checks if the provided url is valid container endpoint
+def is_az_container_endpoint(endpoint_url: str) -> bool:
+    """Checks if the provided url is valid container endpoint
 
     Args:
-      endpoint_url: str; url of container endpoint. 
+      endpoint_url: str; Url of container endpoint. 
         e.g. https://azuremlexampledata.blob.core.windows.net/data
 
     Returns:
-      boolean; shows either or not the container endpoint is valid.
+      boolean; Shows either or not the container endpoint is valid.
     """
     # storage account must be length of 3-24
     # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # pylint: disable=line-too-long
