@@ -120,8 +120,12 @@ Environment variables for ``setup``
      - Rank (an integer ID from 0 to :code:`num_nodes-1`) of the node being set up.
      - 0
    * - ``SKYPILOT_SETUP_NODE_IPS``
-     - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
+     - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address. Note that this is not necessarily the same as the nodes in ``run`` stage, as the ``setup`` stage runs on all nodes of the cluster, while the ``run`` stage can run on a subset of nodes.
      - 1.2.3.4
+       3.4.5.6
+   * - ``SKYPILOT_NUM_NODES``
+     - Number of nodes in the cluster. Same value as ``$(echo "$SKYPILOT_NODE_IPS" | wc -l)``.
+     - 2
    * - ``SKYPILOT_TASK_ID``
      - A unique ID assigned to each task.
        
@@ -159,6 +163,9 @@ Environment variables for ``run``
    * - ``SKYPILOT_NODE_IPS``
      - A string of IP addresses of the nodes reserved to execute the task, where each line contains one IP address. Read more :ref:`here <dist-jobs>`.
      - 1.2.3.4
+   * - ``SKYPILOT_NUM_NODES``
+     - Number of nodes assigned to execute the current task. Same value as ``$(echo "$SKYPILOT_NODE_IPS" | wc -l)``. Read more :ref:`here <dist-jobs>`.
+     - 1
    * - ``SKYPILOT_NUM_GPUS_PER_NODE``
      - Number of GPUs reserved on each node to execute the task; the same as the
        count in ``accelerators: <name>:<count>`` (rounded up if a fraction). Read
