@@ -875,6 +875,9 @@ def write_cluster_config(
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
+    initial_setup_commands = []
+    if skypilot_config.get_nested(('nvidia_gpu', 'disable_ecc'), False):
+        initial_setup_commands.append(constants.DISABLE_GPU_ECC_COMMAND)
     tmp_yaml_path = yaml_path + '.tmp'
     common_utils.fill_template(
         cluster_config_template,
@@ -906,6 +909,8 @@ def write_cluster_config(
                 # currently only used by GCP.
                 'specific_reservations': specific_reservations,
 
+                # Initial setup commands.
+                'initial_setup_commands': initial_setup_commands,
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
