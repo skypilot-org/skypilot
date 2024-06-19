@@ -98,7 +98,6 @@ DOCKER_LOGIN_ENV_VARS = {
     DOCKER_SERVER_ENV_VAR,
 }
 
-
 # Commands for disable GPU ECC, which can improve the performance of the GPU
 # for some workloads by 30%. This will only be applied when a user specify
 # `nvidia_gpu.disable_ecc: true` in ~/.sky/config.yaml.
@@ -111,8 +110,7 @@ DISABLE_GPU_ECC_COMMAND = (
     # Disable the GPU ECC.
     'sudo nvidia-smi -e 0 && '
     # Reboot the machine to apply the changes.
-    'sudo reboot; '
-)
+    'sudo reboot; ')
 
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with
