@@ -170,19 +170,29 @@ class RunPod(clouds.Cloud):
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del zones, dryrun  # unused
+        del cluster_name_on_cloud, zones, dryrun  # unused
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
 
+        if resources.image_id is None:
+            image_id = 'runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04'
+        elif None in resources.image_id:
+            image_id = resources.image_id[None]
+        else:
+            image_id = resources.image_id[region.name]
+        if image_id.startswith('docker:'):
+            image_id = image_id[len('docker:'):]
+
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'image_id': resources.image_id,
         }
 
     def _get_feasible_launchable_resources(

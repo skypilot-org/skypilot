@@ -88,7 +88,8 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
     return instance_dict
 
 
-def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
+def launch(name: str, instance_type: str, region: str, disk_size: int,
+           image_id: str) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
@@ -102,7 +103,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
 
     new_instance = runpod.runpod.create_pod(
         name=name,
-        image_name='runpod/base:0.0.2',
+        image_name=image_id,
         gpu_type_id=gpu_type,
         cloud_type=cloud_type,
         container_disk_in_gb=disk_size,
