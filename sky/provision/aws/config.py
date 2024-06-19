@@ -191,10 +191,9 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
             for policy_arn in attach_policy_arns:
                 role.attach_policy(PolicyArn=policy_arn)
 
-            # SkyPilot: 'PassRole' is required by the head node to pass the role
-            # to the workers, so we can access S3 buckets on the workers.
-            # 'Resource' is to limit the role to only able to pass itself to the
-            # workers.
+            # SkyPilot: 'PassRole' is required by the controllers (jobs and
+            # services) created with `aws.remote_identity: SERVICE_ACCOUNT` to
+            # create instances with the IAM role.
             skypilot_pass_role_policy_doc = {
                 'Statement': [
                     {
