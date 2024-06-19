@@ -727,9 +727,6 @@ def open_ports(
         elif existing_rule['IpProtocol'] == '-1':
             # For AWS, IpProtocol = -1 means all traffic
             existing_ports.add(-1)
-            # TODO: AWS SGs are permissive, if a deny rule were
-            #       required by Skypilot, this would override the rule
-            #       by making all ports accessible
             break
 
     ports_to_open = []
