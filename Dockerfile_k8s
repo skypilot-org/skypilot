@@ -3,9 +3,11 @@ FROM continuumio/miniconda3:23.3.1-0
 # TODO(romilb): Investigate if this image can be consolidated with the skypilot
 #  client image (`Dockerfile`)
 
+ARG DEBIAN_FRONTEND=noninteractive
+
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
-    apt install gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat curl -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt remove -y python3 && \
     conda init
@@ -25,14 +27,20 @@ RUN useradd -m -s /bin/bash sky && \
 # Switch to sky user
 USER sky
 
+# Set HOME environment variable for sky user
+ENV HOME /home/sky
+
+# Set current working directory
+WORKDIR /home/sky
+
 # Install SkyPilot pip dependencies preemptively to speed up provisioning time
-RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
-    pip install networkx oauth2client pandas pendulum PrettyTable && \
-    pip install ray[default]==2.9.3 rich tabulate filelock && \
-    pip install packaging 'protobuf<4.0.0' pulp && \
-    pip install pycryptodome==3.12.0 && \
-    pip install docker kubernetes==28.1.0 && \
-    pip install grpcio==1.51.3 python-dotenv==1.0.1
+RUN conda init && \
+    pip install wheel Click colorama cryptography jinja2 jsonschema networkx  \
+    oauth2client pandas pendulum PrettyTable rich tabulate filelock packaging  \
+    'protobuf<4.0.0' pulp pycryptodome==3.12.0 docker kubernetes==28.1.0  \
+    grpcio==1.51.3 python-dotenv==1.0.1 ray[default]==2.9.3 && \
+    curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
+    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
 # Add /home/sky/.local/bin/ to PATH
 RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
@@ -43,7 +51,3 @@ COPY --chown=sky . /skypilot/sky/
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1
-
-# Set WORKDIR and initialize conda for sky user
-WORKDIR /home/sky
-RUN conda init
