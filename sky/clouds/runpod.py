@@ -180,7 +180,8 @@ class RunPod(clouds.Cloud):
             custom_resources = None
 
         if resources.image_id is None:
-            image_id = 'runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04'
+            image_id = (
+                'runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04')
         elif None in resources.image_id:
             image_id = resources.image_id[None]
         else:
