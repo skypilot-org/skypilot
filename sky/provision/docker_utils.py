@@ -9,6 +9,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -343,12 +344,15 @@ class DockerInitializer:
         user_pos = string.find('~')
         if user_pos > -1:
             if self.home_dir is None:
-                self.home_dir = self._run(
-                    f'{self.docker_cmd} exec {self.container_name} '
-                    'printenv HOME',
-                    separate_stderr=True)
+                cmd = (f'{self.docker_cmd} exec {self.container_name} '
+                       'printenv HOME')
+                self.home_dir = self._run(cmd, separate_stderr=True)
+                self.home_dir = self.home_dir.strip()
+                # Check for unexpected newline in home directory, which can be
+                # a common issue when the output is mixed with stderr.
                 assert '\n' not in self.home_dir, (
-                    f'Unexpected newline in HOME env variable: {self.home_dir}')
+                    'Unexpected newline in home directory '
+                    f'({{self.home_dir}}) retrieved with {cmd}')
 
             if any_char:
                 return string.replace('~/', self.home_dir + '/')
