@@ -346,7 +346,6 @@ class DockerInitializer:
                 cmd = (f'{self.docker_cmd} exec {self.container_name} '
                        'printenv HOME')
                 self.home_dir = self._run(cmd, separate_stderr=True)
-                self.home_dir = self.home_dir.strip()
                 # Check for unexpected newline in home directory, which can be
                 # a common issue when the output is mixed with stderr.
                 assert '\n' not in self.home_dir, (
