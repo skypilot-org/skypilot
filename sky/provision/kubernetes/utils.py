@@ -17,7 +17,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import network_utils
-from sky.provision.logging import set_logging_level
+from sky.provision import logging
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
