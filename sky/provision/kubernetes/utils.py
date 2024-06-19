@@ -1557,7 +1557,8 @@ def get_spot_label() -> Tuple[Optional[str], Optional[str]]:
                     key] == value:
                 return key, value
 
-    # Check if autoscaler is configured
+    # Check if autoscaler is configured. Allow spot instances if autoscaler type
+    # is known to support spot instances.
     autoscaler_type = get_autoscaler_type()
     if autoscaler_type == kubernetes_enums.KubernetesAutoscalerType.GKE:
         return SPOT_LABEL_MAP[autoscaler_type.value]
