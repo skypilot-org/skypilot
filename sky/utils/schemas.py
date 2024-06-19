@@ -659,7 +659,7 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'storage_account': {
-                    'type': 'string'
+                    'type': 'string',
                 },
             }
         },

@@ -1122,7 +1122,7 @@ class S3Store(AbstractStore):
                     )
 
     @classmethod
-    def validate_name(cls, name) -> str:
+    def validate_name(cls, name: str) -> str:
         """Validates the name of the S3 store.
 
         Source for rules: https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html # pylint: disable=line-too-long
@@ -1539,7 +1539,7 @@ class GcsStore(AbstractStore):
                     'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.')  # pylint: disable=line-too-long
 
     @classmethod
-    def validate_name(cls, name) -> str:
+    def validate_name(cls, name: str) -> str:
         """Validates the name of the GCS store.
 
         Source for rules: https://cloud.google.com/storage/docs/buckets#naming
@@ -1918,7 +1918,7 @@ class GcsStore(AbstractStore):
 
 
 class AzureBlobStore(AbstractStore):
-    """Represents the backend for Azure Blob Storage Container. """
+    """Represents the backend for Azure Blob Storage Container."""
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
 
@@ -2039,14 +2039,14 @@ class AzureBlobStore(AbstractStore):
         if not _is_storage_cloud_enabled(str(clouds.Azure())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: azure\' specified, but ' \
-                    'Azure access is disabled. To fix, enable '\
-                    'Azure by running `sky check`. More info: '\
+                    'Storage \'store: azure\' specified, but '
+                    'Azure access is disabled. To fix, enable '
+                    'Azure by running `sky check`. More info: '
                     'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
                     )
 
     @classmethod
-    def validate_name(cls, name) -> str:
+    def validate_name(cls, name: str) -> str:
         """Validates the name of the AZ Container.
 
         Source for rules: https://learn.microsoft.com/en-us/rest/api/storageservices/Naming-and-Referencing-Containers--Blobs--and-Metadata#container-names # pylint: disable=line-too-long
@@ -3041,7 +3041,7 @@ class IBMCosStore(AbstractStore):
         self.name = IBMCosStore.validate_name(self.name)
 
     @classmethod
-    def validate_name(cls, name) -> str:
+    def validate_name(cls, name: str) -> str:
         """Validates the name of a COS bucket.
 
         Rules source: https://ibm.github.io/ibm-cos-sdk-java/com/ibm/cloud/objectstorage/services/s3/model/Bucket.html  # pylint: disable=line-too-long
