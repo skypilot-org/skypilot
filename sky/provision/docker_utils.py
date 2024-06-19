@@ -9,7 +9,6 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
-from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
