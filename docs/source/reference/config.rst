@@ -47,7 +47,11 @@ Available fields and semantics:
     # useful to improve the GPU performance in some cases (up to 30%
     # improvement). This will only be applied if a cluster is requested with
     # NVIDIA GPUs.
-    # https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW
+    #
+    # Note: this setting will cause a reboot during the first provisioning of
+    # the cluster, which may take a few minutes.
+    #
+    # Reference: https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW
     #
     # Default: false.
     disable_ecc: false
