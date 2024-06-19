@@ -2541,15 +2541,19 @@ class AzureBlobStore(AbstractStore):
                         f'{container_name!r} in {self.region!r} under storage '
                         f'account {self.storage_account_name!r}.')
         except azure.exceptions().ResourceExistsError as e:
-            error_msg, error_code = e.error.message, e.error.code
-            if error_code == 'ContainerOperationFailure':
-                if 'container is being deleted' in error_msg:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketCreateError(
-                            f'The bucket {self.name!r} is currently being '
-                            'deleted. Please wait for the deletion to complete'
-                            'before attempting to create a bucket with the '
-                            'same name. This may take a few minutes. ')
+            if 'container is being deleted' in e.error.message:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketCreateError(
+                        f'The bucket {self.name!r} is currently being '
+                        'deleted. Please wait for the deletion to complete'
+                        'before attempting to create a bucket with the '
+                        'same name. This may take a few minutes. ')
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketCreateError(
+                        f'Failed to create the bucket {self.name!r}. '
+                        f'Details: {common_utils.format_exception(e, use_bracket=True)}'
+                    )
         return container
 
     def _delete_az_bucket(self, container_name: str) -> bool:
