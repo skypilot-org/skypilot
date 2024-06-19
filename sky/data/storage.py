@@ -2198,8 +2198,8 @@ class AzureBlobStore(AbstractStore):
                         resource_group_name)
                 except azure.exceptions().ResourceNotFoundError:
                     with rich_utils.safe_status(
-                            f'[bold cyan]Setting up:\n'
-                            f'- Resource group: {resource_group_name}'):
+                            '[bold cyan]Setting up resource group: '
+                            f'{resource_group_name}'):
                         self.resource_client.resource_groups.create_or_update(
                             resource_group_name, {'location': self.region})
                 # check if the storage account name already exists under the
@@ -2209,8 +2209,8 @@ class AzureBlobStore(AbstractStore):
                         resource_group_name, storage_account_name)
                 except azure.exceptions().ResourceNotFoundError:
                     with rich_utils.safe_status(
-                            f'[bold cyan]Setting up:\n'
-                            f'- Storage account: {storage_account_name}'):
+                            '[bold cyan]Setting up storage account: '
+                            f'{storage_account_name}'):
                         try:
                             creation_response = (
                                 self.storage_client.storage_accounts.
@@ -2465,11 +2465,17 @@ class AzureBlobStore(AbstractStore):
             if 'Name or service not known' in error_message:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        'Attempted to fetch a bucket from non-existant '
+                        'Attempted to fetch the container from non-existant '
                         'storage account '
                         f'name: {self.storage_account_name}. Please check '
                         'if the name is correct.')
-
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        'Failed to fetch the container from storage account '
+                        f'{self.storage_account_name!r}.'
+                        f'Details: {common_utils.format_exception(e, use_bracket=True)}'
+                    )
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if
         # Store object is being reconstructed for deletion or re-mount with
@@ -2559,6 +2565,7 @@ class AzureBlobStore(AbstractStore):
         try:
             with rich_utils.safe_status(
                     f'[bold cyan]Deleting Azure cotainer {container_name}[/]'):
+                # Check for the existance of the container before deletion.
                 self.storage_client.blob_containers.get(
                     self.resource_group_name,
                     self.storage_account_name,
