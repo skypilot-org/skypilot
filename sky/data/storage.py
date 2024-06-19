@@ -1921,6 +1921,8 @@ class AzureBlobStore(AbstractStore):
     """Represents the backend for Azure Blob Storage Container."""
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
+    _DEFAULT_STORAGE_ACCOUNT_NAME = 'sky{region}{user_hash}'
+    _DEFAULT_RESOURCE_GROUP_NAME = 'sky{user_hash}'
 
     class AzureBlobStoreMetadata(AbstractStore.StoreMetadata):
         """A pickle-able representation of Azure Blob Store
@@ -2180,8 +2182,13 @@ class AzureBlobStore(AbstractStore):
             else:
                 # If storage account name is not provided from config, then
                 # use default resource group and storage account names.
-                storage_account_name = f'sky{self.region}{common_utils.get_user_hash()}'
-                resource_group_name = f'sky{common_utils.get_user_hash()}'
+                storage_account_name = (
+                    self._DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                        region=self.region,
+                        user_hash=common_utils.get_user_hash()))
+                resource_group_name = (
+                    self._DEFAULT_RESOURCE_GROUP_NAME.format(
+                        region=self.region))
                 try:
                     # obtains detailed information about resource group under
                     # the user's subscription. Used to check if the name
