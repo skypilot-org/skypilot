@@ -16,8 +16,8 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
+from sky.provision import logging as provision_logging
 from sky.provision.kubernetes import network_utils
-from sky.provision import logging
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
@@ -606,7 +606,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
 
     try:
         ns = get_current_kube_config_context_namespace()
-        with set_logging_level('urllib3', logging.ERROR):
+        with provision_logging.set_logging_level('urllib3', logging.ERROR):
             kubernetes.core_api().list_namespaced_pod(ns,
                                                       _request_timeout=timeout)
     except ImportError:
