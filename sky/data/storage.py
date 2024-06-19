@@ -1961,7 +1961,7 @@ class AzureBlobStore(AbstractStore):
                  sync_on_reconstruction: bool = True):
         self.storage_client: 'storage.Client'
         self.resource_client: 'storage.Client'
-        self.bucket_name: str
+        self.container_name: str
         # storage_account_name is not None when initializing only
         # when it is being reconstructed from the handle(metadata).
         self.storage_account_name = storage_account_name
@@ -2095,7 +2095,7 @@ class AzureBlobStore(AbstractStore):
     def initialize(self):
         """Initializes the AZ Container object on the cloud.
 
-        Initialization involves fetching bucket if exists, or creating it if
+        Initialization involves fetching container if exists, or creating it if
         it does not. Also, it checks for the existance of the storage account
         and resource group if provided by the user. If not provided, those are
         created with a default naming convention.
@@ -2103,7 +2103,7 @@ class AzureBlobStore(AbstractStore):
         Raises:
             StorageBucketCreateError: If container creation fails or storage
                 account attempted to be created already exists.
-            StorageBucketGetError: If fetching existing bucket fails.
+            StorageBucketGetError: If fetching existing container fails.
             StorageInitError: If general initialization fails.
             ValueError: When user provided storage account that does not belong
                 to the user through config.yaml.
@@ -2120,7 +2120,7 @@ class AzureBlobStore(AbstractStore):
                 self.storage_account_name, self.resource_group_name,
                 self.storage_client, self.resource_client)
 
-        self.bucket_name, is_new_bucket = self._get_bucket()
+        self.container_name, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
             # object (i.e., did not exist in global_user_state) and we should
@@ -2365,7 +2365,7 @@ class AzureBlobStore(AbstractStore):
                             f'{includes} '
                             '--delete-destination false '
                             f'--source {base_dir_path} '
-                            f'--container {self.bucket_name}')
+                            f'--container {self.container_name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
@@ -2377,8 +2377,8 @@ class AzureBlobStore(AbstractStore):
                 [file_name.rstrip('*') for file_name in excluded_list])
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
-            container_path = (f'{self.bucket_name}/{dest_dir_name}'
-                              if dest_dir_name else self.bucket_name)
+            container_path = (f'{self.container_name}/{dest_dir_name}'
+                              if dest_dir_name else self.container_name)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
@@ -2456,7 +2456,7 @@ class AzureBlobStore(AbstractStore):
                               str) and self.source.startswith('https://'):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageBucketGetError(
-                            'Attempted to use a non-existent bucket as a '
+                            'Attempted to use a non-existent container as a '
                             f'source: {self.source}. Please check if the '
                             'container name is correct.')
         except azure.exceptions().ServiceRequestError as e:
@@ -2476,9 +2476,9 @@ class AzureBlobStore(AbstractStore):
                         f'{self.storage_account_name!r}.'
                         f'Details: {common_utils.format_exception(e, use_bracket=True)}'
                     )
-        # If bucket cannot be found in both private and public settings,
-        # the bucket is to be created by Sky. However, creation is skipped if
-        # Store object is being reconstructed for deletion or re-mount with
+        # If the container cannot be found in both private and public settings,
+        # the container is to be created by Sky. However, creation is skipped
+        # if Store object is being reconstructed for deletion or re-mount with
         # sky start, and error is raised instead.
         if self.sync_on_reconstruction:
             container = self._create_az_bucket(self.name)
@@ -2489,7 +2489,7 @@ class AzureBlobStore(AbstractStore):
         # is already removed externally.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.StorageExternalDeletionError(
-                f'Attempted to fetch a non-existent bucket: {self.name}')
+                f'Attempted to fetch a non-existent container: {self.name}')
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on AZ container.
@@ -2513,7 +2513,7 @@ class AzureBlobStore(AbstractStore):
             str: a heredoc used to setup the AZ Container mount
         """
         install_cmd = mounting_utils.get_az_mount_install_cmd()
-        mount_cmd = mounting_utils.get_az_mount_cmd(self.bucket_name,
+        mount_cmd = mounting_utils.get_az_mount_cmd(self.container_name,
                                                     self.storage_account_name,
                                                     mount_path,
                                                     self.storage_account_key)
@@ -2524,7 +2524,7 @@ class AzureBlobStore(AbstractStore):
         """Creates AZ Container.
 
         Args:
-            bucket_name: str; Name of bucket
+            container_name: str; Name of bucket(container)
             region: str; Region name, e.g. eastus, westus
 
         Returns:
@@ -2544,14 +2544,14 @@ class AzureBlobStore(AbstractStore):
             if 'container is being deleted' in e.error.message:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketCreateError(
-                        f'The bucket {self.name!r} is currently being '
+                        f'The container {self.name!r} is currently being '
                         'deleted. Please wait for the deletion to complete'
-                        'before attempting to create a bucket with the '
-                        'same name. This may take a few minutes. ')
+                        'before attempting to create a container with the '
+                        'same name. This may take a few minutes.')
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketCreateError(
-                        f'Failed to create the bucket {self.name!r}. '
+                        f'Failed to create the container {self.name!r}. '
                         f'Details: {common_utils.format_exception(e, use_bracket=True)}'
                     )
         return container
@@ -2560,7 +2560,7 @@ class AzureBlobStore(AbstractStore):
         """Deletes AZ Container, including all objects in Container.
 
         Args:
-            container_name: str; Name of container
+            container_name: str; Name of bucket(container)
 
         Returns:
             bool: True if container was deleted, False if it's
