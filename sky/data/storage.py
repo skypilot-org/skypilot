@@ -2133,8 +2133,9 @@ class AzureBlobStore(AbstractStore):
         """Get storage account and resource group to be used for AzureBlobStore
 
         Storage account name and resource group name of the container to be
-        for AzureBlobStore object is obtained from this function. These are
-        determined by either through the source, config.yaml, or default name.
+        used for AzureBlobStore object is obtained from this function. These
+        are determined by either through the source, config.yaml, or default
+        name.
 
         Raises:
             StorageBucketCreateError: If storage account attempted to be
@@ -2272,33 +2273,12 @@ class AzureBlobStore(AbstractStore):
                                 },
                             )
                         except azure.exceptions().ResourceExistsError as error:
-                            if 'StorageAccountAlreadyTaken' in error.message:
-                                # The error occurs when the storage account
-                                # name attempted to be created already exists
-                                # globally being used by other user.
-                                with ux_utils.print_exception_no_traceback():
-                                    raise exceptions.StorageBucketCreateError(
-                                        'The storage account name '
-                                        f'{storage_account_name!r} is '
-                                        'already taken under other user\'s '
-                                        'subscripion. '
-                                        'Please try with another name.')
-                            if 'StorageAccountAlreadyExists' in error.message:
-                                # The error occurs when the storage account
-                                # name attempted to be created already exists
-                                # under the user's subscription.
-                                with ux_utils.print_exception_no_traceback():
-                                    raise exceptions.StorageBucketCreateError(
-                                        'The storage account name '
-                                        f'{storage_account_name!r} '
-                                        'already exists under your '
-                                        'subsciption in another resource '
-                                        'group. Please try another name.')
-                        except Exception as error:  # pylint: disable=broad-except
                             with ux_utils.print_exception_no_traceback():
                                 raise exceptions.StorageBucketCreateError(
                                     'Failed to create storage account '
-                                    f'{storage_account_name!r}.\n'
+                                    f'{storage_account_name!r}. You may be '
+                                    'attempting to create a storage account '
+                                    'already being in use. '
                                     f'Details: {common_utils.format_exception(error, use_bracket=True)}'
                                 )
                         # wait until new resource creation propagates to Azure.
