@@ -251,7 +251,7 @@ def get_az_storage_account_key(
     attempt = 0
     backoff = common_utils.Backoff()
     while True:
-        keys = None
+        storage_account_keys = None
         resources = resource_client.resources.list_by_resource_group(
             resource_group_name)
         # resource group is either created or read when Storage initializes.
