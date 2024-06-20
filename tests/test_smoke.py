@@ -3638,12 +3638,14 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
         f'test-skyserve-readiness-timeout-fail',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/readiness_timeout/task.yaml',
-            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s";'
-            'echo "$s" | grep -q "0/1" || exit 1',
             # None of the readiness probe will pass, so the service will be
             # terminated after the initial delay.
-            _check_replica_in_status(name,
-                                     [(1, False, 'FAILED_INITIAL_DELAY')]),
+            f's=$(sky serve status {name}); '
+            f'until echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done;',
+            'sleep 60',
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 1;'
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
