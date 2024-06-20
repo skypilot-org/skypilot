@@ -251,29 +251,30 @@ def get_az_storage_account_key(
     attempt = 0
     backoff = common_utils.Backoff()
     while True:
-        try:
-            resources = resource_client.resources.list_by_resource_group(
-                resource_group_name)
-            # resource group is either created or read when Storage initializes.
-            assert resources is not None
-            for resource in resources:
-                if (resource.type == 'Microsoft.Storage/storageAccounts' and
-                        resource.name == storage_account_name):
-                    keys = storage_client.storage_accounts.list_keys(
-                        resource_group_name, storage_account_name)
-                    storage_account_keys = [key.value for key in keys.keys]
-            storage_account_key = storage_account_keys[0]
-            return storage_account_key
+        keys = None
+        resources = resource_client.resources.list_by_resource_group(
+            resource_group_name)
+        # resource group is either created or read when Storage initializes.
+        assert resources is not None
+        for resource in resources:
+            if (resource.type == 'Microsoft.Storage/storageAccounts' and
+                    resource.name == storage_account_name):
+                keys = storage_client.storage_accounts.list_keys(
+                    resource_group_name, storage_account_name)
+                storage_account_keys = [key.value for key in keys.keys]
         # If storage account was created right before call to this method,
         # it is possible to fail to retrieve the key as the creation did not
         # propagate to Azure yet. We retry several times.
-        except UnboundLocalError as e:
+        if storage_account_keys is None:
             attempt += 1
+            time.sleep(backoff.current_backoff())
             if attempt > _STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT:
                 raise RuntimeError('Failed to obtain key value of storage '
-                                   f'account {storage_account_name!r}.\n'
-                                   f'Detailed error: {e}') from e
-            time.sleep(backoff.current_backoff())
+                                   f'account {storage_account_name!r}. '
+                                   'Check if the storage account was created.')
+            continue
+        storage_account_key = storage_account_keys[0]
+        return storage_account_key
 
 
 def is_az_container_endpoint(endpoint_url: str) -> bool:
