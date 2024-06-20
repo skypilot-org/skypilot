@@ -247,6 +247,30 @@ Available fields and semantics:
       - projects/my-project/reservations/my-reservation2
 
 
+    # Managed instance group / DWS (optional).
+    #
+    # SkyPilot supports launching instances in a managed instance group (MIG)
+    # which schedules the GPU instance creation through DWS, offering a better
+    # availability. This feature is only applied when a resource request
+    # contains GPU instances.
+    managed_instance_group:
+      # Duration for a created instance to be kept alive (in seconds, required).
+      #
+      # This is required for the DWS to work properly. After the
+      # specified duration, the instance will be terminated.
+      run_duration: 3600
+      # Timeout for provisioning an instance by DWS (in seconds, optional).
+      #
+      # This timeout determines how long SkyPilot will wait for a managed
+      # instance group to create the requested resources before giving up,
+      # deleting the MIG and failing over to other locations. Larger timeouts
+      # may increase the chance for getting a resource, but will blcok failover
+      # to go to other zones/regions/clouds.
+      #
+      # Default: 900
+      provision_timeout: 900
+      
+
     # Identity to use for all GCP instances (optional).
     #
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to

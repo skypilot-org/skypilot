@@ -279,9 +279,22 @@ available_node_types:
         restartPolicy: Never
 
         # Add node selector if GPUs are requested:
-        {% if k8s_acc_label_key is not none and k8s_acc_label_value is not none %}
+        {% if (k8s_acc_label_key is not none and k8s_acc_label_value is not none) or (k8s_spot_label_key is not none) %}
         nodeSelector:
+            {% if k8s_acc_label_key is not none and k8s_acc_label_value is not none %}
             {{k8s_acc_label_key}}: {{k8s_acc_label_value}}
+            {% endif %}
+            {% if k8s_spot_label_key is not none %}
+            {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
+            {% endif %}
+        {% endif %}
+
+        {% if k8s_spot_label_key is not none %}
+        tolerations:
+          - key: {{k8s_spot_label_key}}
+            operator: Equal
+            value: {{k8s_spot_label_value|tojson}}
+            effect: NoSchedule
         {% endif %}
 
         # This volume allocates shared memory for Ray to use for its plasma

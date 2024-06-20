@@ -9,19 +9,19 @@
 # By default, this script will create a service account "sky-sa" in "default"
 # namespace. If you want to use a different namespace or service account name:
 #
-#   * Specify SKYPILOT_NAMESPACE env var to override the default namespace
-#   * Specify SKYPILOT_SA_NAME env var to override the default service account name
+#   * Specify SKYPILOT_NAMESPACE env var to override the default namespace where the service account is created.
+#   * Specify SKYPILOT_SA_NAME env var to override the default service account name.
 #   * Specify SKIP_SA_CREATION=1 to skip creating the service account and use an existing one
 #
 # Usage:
 #   # Create "sky-sa" service account with minimal permissions in "default" namespace and generate kubeconfig
-#   $ ./generate_static_kubeconfig.sh
+#   $ ./generate_kubeconfig.sh
 #
-#   # Create "my-sa" account with minimal permissions in "my-namespace" namespace and generate kubeconfig
-#   $ SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_static_kubeconfig.sh
+#   # Create "my-sa" service account with minimal permissions in "my-namespace" namespace and generate kubeconfig
+#   $ SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
 #
 #   # Use an existing service account "my-sa" in "my-namespace" namespace and generate kubeconfig
-#   $ SKIP_SA_CREATION=1 SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_static_kubeconfig.sh
+#   $ SKIP_SA_CREATION=1 SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
 
 set -eu -o pipefail
 
@@ -268,6 +268,8 @@ EOF
 
 echo "---
 Done!
+
+Kubeconfig using service acccount '${SKYPILOT_SA}' in namespace '${NAMESPACE}' written at $(pwd)/kubeconfig
 
 Copy the generated kubeconfig file to your ~/.kube/ directory to use it with
 kubectl and skypilot:
