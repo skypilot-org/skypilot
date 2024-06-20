@@ -46,7 +46,9 @@ Available fields and semantics:
     # Set to true to disable ECC for NVIDIA GPUs during provisioning. This is
     # useful to improve the GPU performance in some cases (up to 30%
     # improvement). This will only be applied if a cluster is requested with
-    # NVIDIA GPUs.
+    # NVIDIA GPUs. This is best-effort -- not guaranteed to work on all clouds
+    # e.g., RunPod and Kubernetes does not allow rebooting the node, though
+    # RunPod has ECC disabled by default.
     #
     # Note: this setting will cause a reboot during the first provisioning of
     # the cluster, which may take a few minutes.

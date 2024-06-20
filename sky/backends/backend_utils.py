@@ -876,7 +876,8 @@ def write_cluster_config(
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     initial_setup_commands = []
-    if skypilot_config.get_nested(('nvidia_gpus', 'disable_ecc'), False):
+    if (skypilot_config.get_nested(('nvidia_gpus', 'disable_ecc'), False) and
+            to_provision.accelerators is not None):
         initial_setup_commands.append(constants.DISABLE_GPU_ECC_COMMAND)
     tmp_yaml_path = yaml_path + '.tmp'
     common_utils.fill_template(
