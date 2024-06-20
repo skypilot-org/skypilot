@@ -259,6 +259,7 @@ def get_az_storage_account_key(
         for resource in resources:
             if (resource.type == 'Microsoft.Storage/storageAccounts' and
                     resource.name == storage_account_name):
+                assert storage_account_keys is None
                 keys = storage_client.storage_accounts.list_keys(
                     resource_group_name, storage_account_name)
                 storage_account_keys = [key.value for key in keys.keys]
