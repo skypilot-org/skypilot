@@ -2044,8 +2044,8 @@ class AzureBlobStore(AbstractStore):
                     'Storage \'store: azure\' specified, but '
                     'Azure access is disabled. To fix, enable '
                     'Azure by running `sky check`. More info: '
-                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
-                    )
+                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
+                )
 
     @classmethod
     def validate_name(cls, name: str) -> str:
@@ -2187,9 +2187,8 @@ class AzureBlobStore(AbstractStore):
                     self._DEFAULT_STORAGE_ACCOUNT_NAME.format(
                         region=self.region,
                         user_hash=common_utils.get_user_hash()))
-                resource_group_name = (
-                    self._DEFAULT_RESOURCE_GROUP_NAME.format(
-                        user_hash=common_utils.get_user_hash()))
+                resource_group_name = (self._DEFAULT_RESOURCE_GROUP_NAME.format(
+                    user_hash=common_utils.get_user_hash()))
                 try:
                     # obtains detailed information about resource group under
                     # the user's subscription. Used to check if the name
@@ -2474,8 +2473,8 @@ class AzureBlobStore(AbstractStore):
                     raise exceptions.StorageBucketGetError(
                         'Failed to fetch the container from storage account '
                         f'{self.storage_account_name!r}.'
-                        f'Details: {common_utils.format_exception(e, use_bracket=True)}'
-                    )
+                        'Details: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
         # If the container cannot be found in both private and public settings,
         # the container is to be created by Sky. However, creation is skipped
         # if Store object is being reconstructed for deletion or re-mount with
@@ -2552,8 +2551,8 @@ class AzureBlobStore(AbstractStore):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketCreateError(
                         f'Failed to create the container {self.name!r}. '
-                        f'Details: {common_utils.format_exception(e, use_bracket=True)}'
-                    )
+                        'Details: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
         return container
 
     def _delete_az_bucket(self, container_name: str) -> bool:
