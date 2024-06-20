@@ -2145,7 +2145,7 @@ class AzureBlobStore(AbstractStore):
         """
         # self.storage_account_name already has a value only when it is being
         # reconstructed with metadata from local db.
-        if self.storage_account_name is not None:
+        if self.storage_account_name:
             resource_group_name = data_utils.get_az_resource_group(
                 self.storage_account_name)
             storage_account_name = self.storage_account_name
@@ -2189,7 +2189,7 @@ class AzureBlobStore(AbstractStore):
                         user_hash=common_utils.get_user_hash()))
                 resource_group_name = (
                     self._DEFAULT_RESOURCE_GROUP_NAME.format(
-                        region=self.region))
+                        user_hash=common_utils.get_user_hash()))
                 try:
                     # obtains detailed information about resource group under
                     # the user's subscription. Used to check if the name
