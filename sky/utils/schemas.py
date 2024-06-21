@@ -299,6 +299,9 @@ def get_service_schema():
                         'initial_delay_seconds': {
                             'type': 'number',
                         },
+                        'timeout_seconds': {
+                            'type': 'number',
+                        },
                         'post_data': {
                             'anyOf': [{
                                 'type': 'string',
@@ -647,6 +650,19 @@ def get_config_schema():
                     'items': {
                         'type': 'string',
                     },
+                },
+                'managed_instance_group': {
+                    'type': 'object',
+                    'required': ['run_duration'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'run_duration': {
+                            'type': 'integer',
+                        },
+                        'provision_timeout': {
+                            'type': 'integer',
+                        }
+                    }
                 },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,

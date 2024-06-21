@@ -100,7 +100,7 @@ Table of Contents
 .. toctree::
    :hidden:
 
-   kubernetes-getting-started
+   Getting Started <kubernetes-getting-started>
    kubernetes-setup
    kubernetes-troubleshooting
 

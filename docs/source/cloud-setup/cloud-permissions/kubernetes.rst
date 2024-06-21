@@ -9,31 +9,15 @@ for authentication and creating resources on your Kubernetes cluster.
 When running inside your Kubernetes cluster (e.g., as a Spot controller or Serve controller),
 SkyPilot can operate using either of the following three authentication methods:
 
-1. **Using your local kubeconfig file**: In this case, SkyPilot will
-   copy your local ``~/.kube/config`` file to the controller pod and use it for
-   authentication. This is the default method when running inside the cluster,
-   and no additional configuration is required.
-
-   .. note::
-
-       If your cluster uses exec based authentication in your ``~/.kube/config`` file
-       (e.g., GKE uses exec auth by default), SkyPilot may not be able to authenticate using this method. In this case,
-       consider using the service account methods below.
-
-2. **Creating a service account**: SkyPilot can automatically create the service
+1. **Automatically create a service account**: SkyPilot can automatically create the service
    account and roles for itself to manage resources in the Kubernetes cluster.
-   To use this method, set ``remote_identity: SERVICE_ACCOUNT`` to your
-   Kubernetes configuration in the :ref:`~/.sky/config.yaml <config-yaml>` file:
-
-   .. code-block:: yaml
-
-       kubernetes:
-         remote_identity: SERVICE_ACCOUNT
+   This is the default method when running inside the cluster, and no
+   additional configuration is required.
 
    For details on the permissions that are granted to the service account,
    refer to the `Minimum Permissions Required for SkyPilot`_ section below.
 
-3. **Using a custom service account**: If you have a custom service account
+2. **Using a custom service account**: If you have a custom service account
    with the `necessary permissions <k8s-permissions_>`__, you can configure
    SkyPilot to use it by adding this to your :ref:`~/.sky/config.yaml <config-yaml>` file:
 
@@ -41,6 +25,22 @@ SkyPilot can operate using either of the following three authentication methods:
 
        kubernetes:
          remote_identity: your-service-account-name
+
+3. **Using your local kubeconfig file**: In this case, SkyPilot will
+   copy your local ``~/.kube/config`` file to the controller pod and use it for
+   authentication. To use this method, set ``remote_identity: LOCAL_CREDENTIALS`` to your
+   Kubernetes configuration in the :ref:`~/.sky/config.yaml <config-yaml>` file:
+
+   .. code-block:: yaml
+
+       kubernetes:
+         remote_identity: LOCAL_CREDENTIALS
+
+   .. note::
+
+       If your cluster uses exec based authentication in your ``~/.kube/config`` file
+       (e.g., GKE uses exec auth by default), SkyPilot may not be able to authenticate using this method. In this case,
+       consider using the service account methods below.
 
 .. note::
 

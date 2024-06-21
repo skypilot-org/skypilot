@@ -20,7 +20,7 @@ To connect and use a Kubernetes cluster, SkyPilot needs:
 In a typical workflow:
 
 1. A cluster administrator sets up a Kubernetes cluster. Refer to admin guides for
-   :ref:`Kubernetes cluster setup <kubernetes-setup>` for different deployment environments (Amazon EKS, Google GKE, On-Prem and local debugging) and :ref:`required permissions <cloud-permissions-kubernetes>`.
+   :ref:`Kubernetes cluster setup <kubernetes-setup>` for different deployment environments (Amazon EKS, Google GKE, On-Prem and local debugging).
 
 2. Users who want to run SkyPilot tasks on this cluster are issued Kubeconfig
    files containing their credentials (`kube-context <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#define-clusters-users-and-contexts>`_).
@@ -51,6 +51,16 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
      $ cp /path/to/kubeconfig ~/.kube/config
 
    You can verify your credentials are setup correctly by running :code:`kubectl get pods`.
+
+   .. note::
+
+     If your cluster administrator has also provided you with a specific service account to use, set it in your ``~/.sky/config.yaml`` file:
+
+     .. code-block:: yaml
+
+         kubernetes:
+           remote_identity: your-service-account-name
+
 
 2. Run :code:`sky check` and verify that Kubernetes is enabled in SkyPilot.
 
