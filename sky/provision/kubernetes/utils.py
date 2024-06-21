@@ -17,6 +17,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import network_utils
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
@@ -920,13 +921,14 @@ def construct_ssh_jump_command(
         private_key_path: str,
         ssh_jump_ip: str,
         ssh_jump_port: Optional[int] = None,
+        ssh_jump_user: str = 'sky',
         proxy_cmd_path: Optional[str] = None,
         proxy_cmd_target_pod: Optional[str] = None) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
                               f'-o IdentitiesOnly=yes '
-                              f'-W %h:%p sky@{ssh_jump_ip}')
+                              f'-W %h:%p {ssh_jump_user}@{ssh_jump_ip}')
     if ssh_jump_port is not None:
         ssh_jump_proxy_command += f' -p {ssh_jump_port} '
     if proxy_cmd_path is not None:
@@ -1002,6 +1004,7 @@ def get_ssh_proxy_command(
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path,
             ssh_jump_ip,
+            ssh_jump_user=constants.SKY_SSH_USER_PLACEHOLDER,
             proxy_cmd_path=ssh_jump_proxy_command_path,
             proxy_cmd_target_pod=k8s_ssh_target)
     return ssh_jump_proxy_command

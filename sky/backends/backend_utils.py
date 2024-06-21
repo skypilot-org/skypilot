@@ -1230,6 +1230,12 @@ def ssh_credential_from_yaml(
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
+
+    # Update the ssh_user placeholder in proxy command, if required
+    if (ssh_proxy_command is not None and
+            constants.SKY_SSH_USER_PLACEHOLDER in ssh_proxy_command):
+        ssh_proxy_command = ssh_proxy_command.replace(
+            constants.SKY_SSH_USER_PLACEHOLDER, ssh_user)
     credentials = {
         'ssh_user': ssh_user,
         'ssh_private_key': ssh_private_key,

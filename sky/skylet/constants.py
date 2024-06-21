@@ -237,3 +237,7 @@ SKYPILOT_NUM_NODES = 'SKYPILOT_NUM_NODES'
 SKYPILOT_NODE_IPS = 'SKYPILOT_NODE_IPS'
 SKYPILOT_NUM_GPUS_PER_NODE = 'SKYPILOT_NUM_GPUS_PER_NODE'
 SKYPILOT_NODE_RANK = 'SKYPILOT_NODE_RANK'
+
+# Placeholder for the SSH user in proxy command, replaced when the ssh_user is
+# known after provisioning.
+SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
