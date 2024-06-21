@@ -70,9 +70,6 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
-    {%- for initial_setup_command in initial_setup_commands %}
-    {{ initial_setup_command }}
-    {%- endfor %}
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
