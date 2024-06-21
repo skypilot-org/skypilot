@@ -2251,7 +2251,7 @@ def check_cluster_available(
 
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 def is_controller_accessible(
-    controller: 'controller_utils.Controllers',
+    controller: controller_utils.Controllers,
     stopped_message: str,
     non_existent_message: Optional[str] = None,
     exit_if_not_accessible: bool = False,

@@ -789,7 +789,7 @@ class Task:
 
     def set_storage_mounts(
         self,
-        storage_mounts: Optional[Dict[str, 'storage_lib.Storage']],
+        storage_mounts: Optional[Dict[str, storage_lib.Storage]],
     ) -> 'Task':
         """Sets the storage mounts for this task.
 
@@ -855,7 +855,7 @@ class Task:
         return self
 
     def update_storage_mounts(
-            self, storage_mounts: Dict[str, 'storage_lib.Storage']) -> 'Task':
+            self, storage_mounts: Dict[str, storage_lib.Storage]) -> 'Task':
         """Updates the storage mounts for this task.
 
         Different from set_storage_mounts(), this function updates into the
@@ -882,7 +882,7 @@ class Task:
         return self.set_storage_mounts(task_storage_mounts)
 
     def _get_preferred_store(
-            self) -> Tuple['storage_lib.StoreType', Optional[str]]:
+            self) -> Tuple[storage_lib.StoreType, Optional[str]]:
         """Returns the preferred store type and region for this task."""
         # TODO(zhwu, romilb): The optimizer should look at the source and
         #  destination to figure out the right stores to use. For now, we
