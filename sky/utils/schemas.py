@@ -757,6 +757,23 @@ def get_config_schema():
         }
     }
 
+    docker_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'run_options': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    }
+                }]
+            }
+        }
+    }
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
@@ -774,6 +791,7 @@ def get_config_schema():
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
+            'docker': docker_configs,
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.
