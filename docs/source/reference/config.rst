@@ -40,6 +40,24 @@ Available fields and semantics:
     - gcp
     - kubernetes
 
+  docker:
+    # Additional Docker run options (optional).
+    #
+    # When image_id: docker:<docker_image> is used in a task YAML, additional
+    # run options for starting the Docker container can be specified here.
+    # The default run options are:
+    #   --net=host
+    #   --cap-add=SYS_ADMIN
+    #   --device=/dev/fuse
+    #   --security-opt=apparmor:unconfined
+    #
+    # This field can be useful for mounting volumes and other advanced Docker
+    # configurations. The following is an example option for allowing running
+    # Docker inside Docker.
+    #   sky launch --cloud aws --image-id docker:continuumio/miniconda3 "apt update; apt install -y docker.io; docker run hello-world"
+    run_options:
+      - -v /var/run/docker.sock:/var/run/docker.sock
+
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.
   aws:
