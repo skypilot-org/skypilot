@@ -35,7 +35,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     for cloud in clouds:
         try:
             cloud_module = importlib.import_module(
-                f'sky.clouds.service_catalog.{cloud}_catalog')
+                f'sky.clouds.service_catalog.{cloud.lower()}_catalog')
         except ModuleNotFoundError:
             raise ValueError(
                 'Cannot find module "sky.clouds.service_catalog'

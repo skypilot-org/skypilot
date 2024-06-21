@@ -364,6 +364,9 @@ setup_commands:
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - sudo DEBIAN_FRONTEND=noninteractive apt install gcc patch pciutils rsync fuse curl -y;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     sudo touch ~/.sudo_as_admin_successful;
