@@ -749,9 +749,12 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # to specifying a source.
     updated_mount_storages = {}
     for storage_path, storage_obj in task.storage_mounts.items():
-        if storage_obj.mode == storage_lib.StorageMode.MOUNT and not storage_obj.source:
-            # Construct source URL with first store type and storage name.
-            source = list(storage_obj.stores.keys())[0].store_prefix() + storage_obj.name
+        if (storage_obj.mode == storage_lib.StorageMode.MOUNT and
+                not storage_obj.source):
+            # Construct source URL with first store type and storage name
+            # E.g., s3://my-storage-name
+            source = list(
+                storage_obj.stores.keys())[0].store_prefix() + storage_obj.name
             new_storage = storage_lib.Storage.from_yaml_config({
                 'source': source,
                 'persistent': storage_obj.persistent,
