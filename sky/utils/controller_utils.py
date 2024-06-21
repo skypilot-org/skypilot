@@ -745,6 +745,21 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             storage_obj.source = f'{store_prefix}{storage_obj.name}'
             storage_obj.force_delete = True
 
+    # Step 7: Convert all `MOUNT` mode storages which don't specify a source
+    # to specifying a source.
+    updated_mount_storages = {}
+    for storage_path, storage_obj in task.storage_mounts.items():
+        if storage_obj.mode == storage_lib.StorageMode.MOUNT and not storage_obj.source:
+            # Construct source URL with first store type and storage name.
+            source = list(storage_obj.stores.keys())[0].store_prefix() + storage_obj.name
+            new_storage = storage_lib.Storage.from_yaml_config({
+                'source': source,
+                'persistent': storage_obj.persistent,
+                'mode': storage_lib.StorageMode.MOUNT,
+            })
+            updated_mount_storages[storage_path] = new_storage
+    task.update_storage_mounts(updated_mount_storages)
+
 
 def is_running_on_jobs_controller() -> bool:
     """Am I running on jobs controller?
