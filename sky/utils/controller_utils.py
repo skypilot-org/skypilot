@@ -755,7 +755,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             new_storage = storage_lib.Storage.from_yaml_config({
                 'source': source,
                 'persistent': storage_obj.persistent,
-                'mode': storage_lib.StorageMode.MOUNT,
+                'mode': storage_lib.StorageMode.MOUNT.value,
             })
             updated_mount_storages[storage_path] = new_storage
     task.update_storage_mounts(updated_mount_storages)
