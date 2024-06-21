@@ -874,9 +874,15 @@ def write_cluster_config(
     )
 
     # Docker run options
-    docker_run_options = skypilot_config.get_nested(('docker', 'run_options'), [])
+    docker_run_options = skypilot_config.get_nested(('docker', 'run_options'),
+                                                    [])
     if isinstance(docker_run_options, str):
         docker_run_options = [docker_run_options]
+    if docker_run_options and isinstance(to_provision.cloud, clouds.Kubernetes):
+        logger.warning(f'{colorama.Style.DIM}Docker run options are specified, '
+                       'but ignored for Kubernetes: '
+                       f'{" ".join(docker_run_options)}'
+                       f'{colorama.Style.RESET_ALL}')
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
