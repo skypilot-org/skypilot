@@ -369,6 +369,7 @@ def get_service_schema():
         }
     }
 
+_TASK_CONFIG_OVERRIDE_ALLOWED_LIST = []
 
 def get_task_schema():
     return {
@@ -435,6 +436,14 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
+            # Experimental fields, can be removed in future versions.
+            'experimetal': {
+                'configs_override': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                }
+            }
         }
     }
 
