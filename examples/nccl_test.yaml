@@ -39,3 +39,4 @@ run: |
     --role `hostname -s`: \
     --tee 3 \
     all_reduce_bench.py
+    
