@@ -260,7 +260,9 @@ class SkyServiceSpec:
                 policy_strs.append('Static spot mixture with '
                                    f'{self.base_ondemand_fallback_replicas} '
                                    f'base on-demand replica{plural}')
-        return ' '.join(policy_strs) if policy_strs else 'No spot policy'
+        if not policy_strs:
+            return 'No spot fallback policy'
+        return ' '.join(policy_strs)
 
     def autoscaling_policy_str(self):
         # TODO(MaoZiming): Update policy_str
