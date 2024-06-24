@@ -344,14 +344,17 @@ class Cloud:
         self,
         resources: 'resources_lib.Resources',
         num_nodes: int = 1
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
-        """Returns ([feasible and launchable resources], [fuzzy candidates]).
+    ) -> Tuple[List['resources_lib.Resources'], List[str], Optional[str]]:
+        """Returns ([feasible & launchable resources], [fuzzy candidates], hint)
 
         Feasible resources refer to an offering respecting the resource
         requirements.  Currently, this function implements "filtering" the
         cloud's offerings only w.r.t. accelerators constraints.
 
         Launchable resources require a cloud and an instance type be assigned.
+
+        The cloud may optionally return a string hint to the user if no feasible
+        resources are found.
 
         Fuzzy candidates example: when the requested GPU is A100:1 but is not
         available in a cloud/region, the fuzzy candidates are results of a fuzzy
@@ -372,12 +375,12 @@ class Cloud:
             # TODO(zhwu): The resources are now silently filtered out. We
             # should have some logging telling the user why the resources
             # are not considered.
-            return ([], [])
+            return ([], [], None)
         return self._get_feasible_launchable_resources(resources)
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+    ) -> Tuple[List['resources_lib.Resources'], List[str], Optional[str]]:
         """See get_feasible_launchable_resources()."""
         raise NotImplementedError
 
