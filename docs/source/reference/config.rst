@@ -40,6 +40,24 @@ Available fields and semantics:
     - gcp
     - kubernetes
 
+  nvidia_gpus:
+    # Disable ECC for NVIDIA GPUs (optional).
+    #
+    # Set to true to disable ECC for NVIDIA GPUs during provisioning. This is
+    # useful to improve the GPU performance in some cases (up to 30%
+    # improvement). This will only be applied if a cluster is requested with
+    # NVIDIA GPUs. This is best-effort -- not guaranteed to work on all clouds
+    # e.g., RunPod and Kubernetes does not allow rebooting the node, though
+    # RunPod has ECC disabled by default.
+    #
+    # Note: this setting will cause a reboot during the first provisioning of
+    # the cluster, which may take a few minutes.
+    #
+    # Reference: https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW
+    #
+    # Default: false.
+    disable_ecc: false
+
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.
   aws:
@@ -462,4 +480,3 @@ Available fields and semantics:
 
     us-ashburn-1:
       vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
-

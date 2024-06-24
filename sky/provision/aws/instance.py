@@ -717,16 +717,23 @@ def open_ports(
 
     existing_ports: Set[int] = set()
     for existing_rule in sg.ip_permissions:
-        # Skip any non-tcp rules.
-        if existing_rule['IpProtocol'] != 'tcp':
+        # Skip any non-tcp rules or if all traffic (-1) is specified.
+        if existing_rule['IpProtocol'] not in ['tcp', '-1']:
             continue
         # Skip any rules that don't have a FromPort or ToPort.
-        if 'FromPort' not in existing_rule or 'ToPort' not in existing_rule:
-            continue
-        existing_ports.update(
-            range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
-    ports_to_open = resources_utils.port_set_to_ranges(
-        resources_utils.port_ranges_to_set(ports) - existing_ports)
+        if 'FromPort' in existing_rule and 'ToPort' in existing_rule:
+            existing_ports.update(
+                range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
+        elif existing_rule['IpProtocol'] == '-1':
+            # For AWS, IpProtocol = -1 means all traffic
+            existing_ports.add(-1)
+            break
+
+    ports_to_open = []
+    # Do not need to open any ports when all traffic is already allowed.
+    if -1 not in existing_ports:
+        ports_to_open = resources_utils.port_set_to_ranges(
+            resources_utils.port_ranges_to_set(ports) - existing_ports)
 
     ip_permissions = []
     for port in ports_to_open:
