@@ -173,6 +173,7 @@ def up(
             for r in controller_resources
         }
         controller_task.set_resources(controller_resources)
+        controller_task.update_envs(task.envs)
 
         # # Set service_name so the backend will know to modify default ray
         # task CPU usage to custom value instead of default 0.5 vCPU. We need
