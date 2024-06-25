@@ -50,6 +50,7 @@ Available fields and semantics:
     #   --cap-add=SYS_ADMIN
     #   --device=/dev/fuse
     #   --security-opt=apparmor:unconfined
+    #   --runtime=nvidia  # Applied if nvidia GPUs are detected on the host
     #
     # This field can be useful for mounting volumes and other advanced Docker
     # configurations. The following is an example option for allowing running
