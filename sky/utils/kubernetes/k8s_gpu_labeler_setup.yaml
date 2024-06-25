@@ -52,16 +52,30 @@ data:
     #!/usr/bin/env python3
     import os
     import subprocess
+    from collections import OrderedDict
     from typing import Optional
     
     from kubernetes import client
     from kubernetes import config
     
-    canonical_gpu_names = [
-        'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4', 'V100', 
-        'A10', 'P100', 'P40', 'P4', 'L4'
-    ]
-    
+    # A mapping of canonical GPU names to a list of possible names that may appear in the output of nvidia-smi.
+    # This must be an ordered dict to keep priority order of GPU names and provide fall back for non-canonical names.
+    # E.g., For A100s, we first try matching with A100-80GB, then A100-40GB, and if all fails we simply look for 'A100'.
+    canonical_gpu_names = OrderedDict([
+        ('A100-80GB', ['A100-SXM4-80GB', 'A100-SXM-80GB', 'A100-SXM4-80GB', 'A100-PCIE-80GB']),
+        ('A100', ['A100-SXM4-40GB', 'A100-SXM-40GB', 'A100-SXM4-40GB', 'A100-PCIE-40GB']),
+        ('A10G', ['A10']),
+        ('H100', ['H100-SXM4-40GB', 'H100-SXM-40GB', 'H100-SXM4-40GB', 'H100-PCIE-40GB']),
+        ('K80', ['K80']),
+        ('M60', ['M60']),
+        ('T4g', ['T4']),
+        ('T4', ['T4']),
+        ('V100', ['V100-SXM2-32GB', 'V100-SXM2-16GB', 'V100-PCIE-32GB', 'V100-PCIE-16GB', 'V100']),
+        ('P100', ['P100-SXM2-16GB', 'P100-PCIE-16GB', 'P100']),
+        ('P40', ['P40']),
+        ('P4', ['P4']),
+        ('L4', ['L4'])
+    ])
     
     def get_gpu_name() -> Optional[str]:
         try:
@@ -102,11 +116,12 @@ data:
         gpu_name = get_gpu_name()
         if gpu_name is not None:
             labelled = False
-            for canonical_name in canonical_gpu_names:
-                if canonical_name.lower() in gpu_name.lower():
-                    label_node(canonical_name.lower())
-                    labelled = True
-                    break
+            for canonical_name, possible_names in canonical_gpu_names.items():
+                for possible_name in possible_names:
+                    if possible_name.lower() in gpu_name:
+                        label_node(canonical_name.lower())
+                        labelled = True
+                        break
             if not labelled:
                 # If we didn't find a canonical name:
                 # 1. remove 'NVIDIA ' if present (e.g., 'NVIDIA RTX A6000' -> 'RTX A6000')
