@@ -58,15 +58,5 @@ def setup_provision_logging(log_dir: str):
         fh.close()
 
 
-@contextlib.contextmanager
-def set_logging_level(logger, level):
-    original_level = logger.level
-    logger.setLevel(level)
-    try:
-        yield
-    finally:
-        logger.setLevel(original_level)
-
-
 def get_log_path() -> pathlib.Path:
     return config.log_path

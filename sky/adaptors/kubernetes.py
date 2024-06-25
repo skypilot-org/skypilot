@@ -2,9 +2,11 @@
 
 # pylint: disable=import-outside-toplevel
 
+import logging
 import os
 
 from sky.adaptors import common
+from sky.sky_logging import set_logging_level
 from sky.utils import env_options
 from sky.utils import ux_utils
 
@@ -26,6 +28,29 @@ _api_client = None
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
+
+
+def _decorate_methods(obj, decorator):
+
+    for attr_name in dir(obj):
+        attr = getattr(obj, attr_name)
+        if callable(attr) and not attr_name.startswith('__'):
+            setattr(obj, attr_name, decorator(attr))
+    return obj
+
+
+def _api_logging_decorator(logger: str, level: int):
+
+    def decorated_api(api):
+
+        def wrapped(*args, **kwargs):
+            obj = api(*args, **kwargs)
+            _decorate_methods(obj, set_logging_level(logger, level))
+            return obj
+
+        return wrapped
+
+    return decorated_api
 
 
 def _load_config():
@@ -65,15 +90,16 @@ def _load_config():
     _configured = True
 
 
+@_api_logging_decorator('urllib3', logging.ERROR)
 def core_api():
     global _core_api
     if _core_api is None:
         _load_config()
         _core_api = kubernetes.client.CoreV1Api()
-
     return _core_api
 
 
+@_api_logging_decorator('urllib3', logging.ERROR)
 def auth_api():
     global _auth_api
     if _auth_api is None:
@@ -83,6 +109,7 @@ def auth_api():
     return _auth_api
 
 
+@_api_logging_decorator('urllib3', logging.ERROR)
 def networking_api():
     global _networking_api
     if _networking_api is None:
@@ -92,6 +119,7 @@ def networking_api():
     return _networking_api
 
 
+@_api_logging_decorator('urllib3', logging.ERROR)
 def custom_objects_api():
     global _custom_objects_api
     if _custom_objects_api is None:
@@ -101,6 +129,7 @@ def custom_objects_api():
     return _custom_objects_api
 
 
+@_api_logging_decorator('urllib3', logging.ERROR)
 def node_api():
     global _node_api
     if _node_api is None:
@@ -110,6 +139,7 @@ def node_api():
     return _node_api
 
 
+@_api_logging_decorator('urllib3', logging.ERROR)
 def apps_api():
     global _apps_api
     if _apps_api is None:
@@ -119,6 +149,7 @@ def apps_api():
     return _apps_api
 
 
+@_api_logging_decorator('urllib3', logging.ERROR)
 def api_client():
     global _api_client
     if _api_client is None:
