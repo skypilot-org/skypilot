@@ -10,6 +10,7 @@ import shlex
 import shutil
 import threading
 import time
+import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
                     Optional, TextIO, Type, TypeVar)
@@ -23,6 +24,7 @@ import requests
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.serve import constants
@@ -38,6 +40,8 @@ if typing.TYPE_CHECKING:
     import fastapi
 
     from sky.serve import replica_managers
+
+logger = sky_logging.init_logger(__name__)
 
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
@@ -271,9 +275,46 @@ def set_service_status_and_active_versions_from_replica(
         active_versions=active_versions)
 
 
-def update_service_status() -> None:
+# TODO(tian): Combine this with
+# sky/spot/recovery_strategy.py::terminate_cluster
+def terminate_cluster(cluster_name: str,
+                      replica_drain_delay_seconds: int = 0,
+                      max_retry: int = 3) -> None:
+    """Terminate the sky serve replica cluster."""
+    time.sleep(replica_drain_delay_seconds)
+    retry_cnt = 0
+    backoff = common_utils.Backoff()
+    while True:
+        retry_cnt += 1
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        try:
+            if handle is not None:
+                backend = backend_utils.get_backend_from_handle(handle)
+                backend.teardown(handle, terminate=True)
+                return
+        except ValueError:
+            # The cluster is already terminated.
+            logger.info(
+                f'Replica cluster {cluster_name} is already terminated.')
+            return
+        except Exception as e:  # pylint: disable=broad-except
+            if retry_cnt >= max_retry:
+                raise RuntimeError('Failed to terminate the sky serve replica '
+                                   f'cluster {cluster_name}.') from e
+            gap_seconds = backoff.current_backoff()
+            logger.error(
+                'Failed to terminate the sky serve replica cluster '
+                f'{cluster_name}. Retrying after {gap_seconds} seconds.'
+                f'Details: {common_utils.format_exception(e)}')
+            logger.error(f'  Traceback: {traceback.format_exc()}')
+            time.sleep(gap_seconds)
+
+
+def update_service_status(service_names: Optional[List[str]] = None) -> None:
     services = serve_state.get_services()
     for record in services:
+        if service_names is not None and record['name'] not in service_names:
+            continue
         if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
             # Skip services that is shutting down.
             continue
@@ -281,9 +322,22 @@ def update_service_status() -> None:
         assert controller_job_id is not None
         controller_status = job_lib.get_status(controller_job_id)
         if controller_status is None or controller_status.is_terminal():
+            service_name = record['name']
             # If controller job is not running, set it as controller failed.
             serve_state.set_service_status_and_active_versions(
-                record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
+                service_name, serve_state.ServiceStatus.CONTROLLER_FAILED)
+
+            # Find all service replicas and terminate them when the controller
+            # fails to avoid resource leak.
+            # TODO(zhwu): this may need to be think of for the fault tolerance
+            # case, since we may want to make sure the replicas are still
+            # accessible even if the controller fails. If this is too aggressive
+            # we can terminate the replica when the user call `sky serve down`
+            # for the service with CONTROLLER_FAILED.
+            replica_infos = serve_state.get_replica_infos(service_name)
+            for replica in replica_infos:
+                terminate_cluster(replica.cluster_name)
+                serve_state.remove_replica(service_name, replica.replica_id)
 
 
 def update_service_encoded(service_name: str, version: int, mode: str) -> str:
@@ -388,6 +442,7 @@ def _terminate_failed_services(
     # replicas, so we don't need to try again here.
     for replica_info in serve_state.get_replica_infos(service_name):
         # TODO(tian): Refresh latest status of the cluster.
+        terminate_cluster(replica_info.cluster_name)
         if global_user_state.get_cluster_from_name(
                 replica_info.cluster_name) is not None:
             remaining_replica_clusters.append(f'{replica_info.cluster_name!r}')
@@ -411,6 +466,9 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
     terminated_service_names = []
     messages = []
+    # We should update the service status before terminating services to avoid
+    # service status in a staled state, and being handled incorrectly.
+    update_service_status(service_names)
     for service_name in service_names:
         service_status = _get_service_status(service_name,
                                              with_replica_info=False)
