@@ -2,9 +2,13 @@
 
 # pylint: disable=import-outside-toplevel
 import functools
+import json
+import subprocess
 import threading
 
 from sky.adaptors import common
+from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 azure = common.LazyImport(
     'azure',
@@ -14,19 +18,40 @@ _LAZY_MODULES = (azure,)
 
 _session_creation_lock = threading.RLock()
 
+# There is no programmatic way to get current account details anymore.
+# https://github.com/Azure/azure-sdk-for-python/issues/21561
 
-@common.load_lazy_modules(modules=_LAZY_MODULES)
+
+def _get_account():
+    result = subprocess_utils.run('az account show -o json',
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
+
+    if result.returncode != 0:
+        error_message = result.stderr.decode()
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Failed to execute az account show -o json command. '
+                f'Error: {error_message}')
+
+    try:
+        return json.loads(result.stdout.decode())
+    except json.JSONDecodeError as e:
+        error_message = result.stderr.decode()
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Failed to parse the output of az account show -o json '
+                f'command. Error: {error_message}') from e
+
+
 def get_subscription_id() -> str:
     """Get the default subscription id."""
-    from azure.common import credentials
-    return credentials.get_cli_profile().get_subscription_id()
+    return _get_account()['id']
 
 
-@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_current_account_user() -> str:
     """Get the default account user."""
-    from azure.common import credentials
-    return credentials.get_cli_profile().get_current_account_user()
+    return _get_account()['user']['name']
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
