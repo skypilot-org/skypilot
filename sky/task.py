@@ -462,6 +462,8 @@ class Task:
         if experimnetal_configs is not None:
             skypilot_config_override = experimnetal_configs.pop(
                 'config_overrides', None)
+            logger.debug('Overriding skypilot config with task-level config: '
+                         f'{skypilot_config_override}')
         assert not experimnetal_configs, ('Invalid task args: '
                                           f'{experimnetal_configs.keys()}')
 

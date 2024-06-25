@@ -1253,6 +1253,8 @@ class Resources:
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
+            _skypilot_config_override=override.pop(
+                '_skypilot_config_override', self._skypilot_config_override),
         )
         assert len(override) == 0
         return resources

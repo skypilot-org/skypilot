@@ -105,7 +105,8 @@ def get_nested(keys: Iterable[str],
         if override_configs is not None:
             return _get_nested(override_configs, keys, default_value)
         return default_value
-    return _get_nested(_dict, keys, default_value)
+    config = _recursive_update(copy.deepcopy(_dict), override_configs or {})
+    return _get_nested(config, keys, default_value)
 
 
 def _recursive_update(base_config: Dict[str, Any],
