@@ -15,7 +15,7 @@ num_nodes: 1
 file_mounts:
   /artifacts:
     name: $ARTIFACT_BUCKET_NAME
-    mode: MOUNT
+    mode: CSYNC
 
 workdir: .
 
