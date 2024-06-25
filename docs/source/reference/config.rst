@@ -45,6 +45,9 @@ Available fields and semantics:
     #
     # When image_id: docker:<docker_image> is used in a task YAML, additional
     # run options for starting the Docker container can be specified here.
+    # These options will be passed directly as command line args to `docker run`,
+    # see: https://docs.docker.com/reference/cli/docker/container/run/
+    #
     # The default run options are:
     #   --net=host
     #   --cap-add=SYS_ADMIN
