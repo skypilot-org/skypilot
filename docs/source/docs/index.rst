@@ -126,7 +126,7 @@ Contents
    ../reference/job-queue
    ../examples/auto-failover
    ../reference/kubernetes/index
-   ../running-jobs/index
+   ../running-jobs/distributed-jobs
 
 .. toctree::
    :maxdepth: 1
@@ -157,6 +157,7 @@ Contents
 
    ../examples/docker-containers
    ../examples/ports
+   ../running-jobs/environment-variables
    ../reference/tpu
    ../reference/logging
    ../reference/faq

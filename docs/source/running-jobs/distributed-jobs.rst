@@ -1,10 +1,10 @@
 .. _dist-jobs:
 
-Distributed Jobs on Many VMs
+Distributed Jobs on Many Nodes
 ================================================
 
 SkyPilot supports multi-node cluster
-provisioning and distributed execution on many VMs.
+provisioning and distributed execution on many nodes.
 
 For example, here is a simple PyTorch Distributed training example:
 
@@ -141,7 +141,7 @@ This allows you directly to SSH into the worker nodes, if required.
 
 Executing a Distributed Ray Program
 ------------------------------------
-To execute a distributed Ray program on many VMs, you can download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `task yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
+To execute a distributed Ray program on many nodes, you can download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `task yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
 
 .. code-block:: console
 

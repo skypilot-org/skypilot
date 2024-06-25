@@ -1,7 +1,7 @@
 
 .. _env-vars:
 
-Using Environment Variables
+Secrets and Environment Variables
 ================================================
 
 User-specified environment variables
