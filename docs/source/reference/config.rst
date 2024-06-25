@@ -48,7 +48,7 @@ Available fields and semantics:
     # These options will be passed directly as command line args to `docker run`,
     # see: https://docs.docker.com/reference/cli/docker/container/run/
     #
-    # The default run options are:
+    # The following run options are applied by default and cannot be overridden:
     #   --net=host
     #   --cap-add=SYS_ADMIN
     #   --device=/dev/fuse
@@ -56,11 +56,14 @@ Available fields and semantics:
     #   --runtime=nvidia  # Applied if nvidia GPUs are detected on the host
     #
     # This field can be useful for mounting volumes and other advanced Docker
-    # configurations. The following is an example option for allowing running
-    # Docker inside Docker.
+    # configurations. You can specify a list of arguments or a string, where the
+    # former will be combined into a single string with spaces. The following is
+    # an example option for allowing running Docker inside Docker and increase
+    # the size of /dev/shm.:
     #   sky launch --cloud aws --image-id docker:continuumio/miniconda3 "apt update; apt install -y docker.io; docker run hello-world"
     run_options:
       - -v /var/run/docker.sock:/var/run/docker.sock
+      - --shm-size=2g
 
   nvidia_gpus:
     # Disable ECC for NVIDIA GPUs (optional).
