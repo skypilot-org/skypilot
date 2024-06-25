@@ -873,23 +873,8 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
-    # Docker run options
-    docker_run_options = skypilot_config.get_nested(('docker', 'run_options'),
-                                                    [])
-    if isinstance(docker_run_options, str):
-        docker_run_options = [docker_run_options]
-    if docker_run_options and isinstance(to_provision.cloud, clouds.Kubernetes):
-        logger.warning(f'{colorama.Style.DIM}Docker run options are specified, '
-                       'but ignored for Kubernetes: '
-                       f'{" ".join(docker_run_options)}'
-                       f'{colorama.Style.RESET_ALL}')
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
-    initial_setup_commands = []
-    if (skypilot_config.get_nested(('nvidia_gpus', 'disable_ecc'), False) and
-            to_provision.accelerators is not None):
-        initial_setup_commands.append(constants.DISABLE_GPU_ECC_COMMAND)
     tmp_yaml_path = yaml_path + '.tmp'
     common_utils.fill_template(
         cluster_config_template,
@@ -921,8 +906,6 @@ def write_cluster_config(
                 # currently only used by GCP.
                 'specific_reservations': specific_reservations,
 
-                # Initial setup commands.
-                'initial_setup_commands': initial_setup_commands,
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
@@ -933,9 +916,6 @@ def write_cluster_config(
                         '{sky_wheel_hash}',
                         wheel_hash).replace('{cloud}',
                                             str(cloud).lower())),
-
-                # Docker
-                'docker_run_options': docker_run_options,
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
@@ -983,7 +963,9 @@ def write_cluster_config(
 
     # Add kubernetes config fields from ~/.sky/config
     if isinstance(cloud, clouds.Kubernetes):
-        kubernetes_utils.combine_pod_config_fields(tmp_yaml_path)
+        kubernetes_utils.combine_pod_config_fields(
+            tmp_yaml_path,
+            skypilot_override_configs=to_provision.skypilot_config_override)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.

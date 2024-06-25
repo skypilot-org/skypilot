@@ -77,15 +77,11 @@ _dict = None
 _loaded_config_path = None
 
 
-def get_nested(keys: Iterable[str], default_value: Any) -> Any:
-    """Gets a nested key.
-
-    If any key is not found, or any intermediate key does not point to a dict
-    value, returns 'default_value'.
-    """
-    if _dict is None:
+def _get_nested(configs: Optional[Dict[str, Any]], keys: Iterable[str],
+                default_value: Any) -> Any:
+    if configs is None:
         return default_value
-    curr = _dict
+    curr = configs
     for key in keys:
         if isinstance(curr, dict) and key in curr:
             curr = curr[key]
@@ -95,6 +91,35 @@ def get_nested(keys: Iterable[str], default_value: Any) -> Any:
     return curr
 
 
+def get_nested(keys: Iterable[str],
+               default_value: Any,
+               override_configs: Optional[Dict[str, Any]] = None) -> Any:
+    """Gets a nested key.
+
+    If any key is not found, or any intermediate key does not point to a dict
+    value, returns 'default_value'.
+    """
+    # TODO (zhwu): Verify that the override_configs is provided when keys is
+    # within resources.OVERRIDEABLE_CONFIG_KEYS.
+    if _dict is None:
+        if override_configs is not None:
+            return _get_nested(override_configs, keys, default_value)
+        return default_value
+    return _get_nested(_dict, keys, default_value)
+
+
+def _recursive_update(base_config: Dict[str, Any],
+                      override_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively updates base configuration with override configuration"""
+    for key, value in override_config.items():
+        if (isinstance(value, dict) and key in base_config and
+                isinstance(base_config[key], dict)):
+            _recursive_update(base_config[key], value)
+        else:
+            base_config[key] = value
+    return base_config
+
+
 def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
     """Returns a deep-copied config with the nested key set to value.
 
@@ -102,20 +127,13 @@ def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
     """
     _check_loaded_or_die()
     assert _dict is not None
-    curr = copy.deepcopy(_dict)
-    to_return = curr
-    prev = None
-    for i, key in enumerate(keys):
-        if key not in curr:
-            curr[key] = {}
-        prev = curr
-        curr = curr[key]
-        if i == len(keys) - 1:
-            prev_value = prev[key]
-            prev[key] = value
-            logger.debug(f'Set the value of {keys} to {value} (previous: '
-                         f'{prev_value}). Returning conf: {to_return}')
-    return to_return
+    override = {}
+    for i, key in enumerate(reversed(keys)):
+        if i == 0:
+            override = {key: value}
+        else:
+            override = {key: override}
+    return _recursive_update(copy.deepcopy(_dict), override)
 
 
 def to_dict() -> Dict[str, Any]:

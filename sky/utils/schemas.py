@@ -4,6 +4,7 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 import enum
+from typing import List, Tuple
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -370,6 +371,41 @@ def get_service_schema():
     }
 
 
+def _filter_configs(configs: dict, filter_keys: List[Tuple[str, ...]]) -> dict:
+    new_config = {
+        k: v for k, v in configs.items() if k not in ['properties', '$schema']
+    }
+
+    def _get_value(config: dict, keys: Tuple[str, ...]) -> dict:
+        if len(keys) == 1:
+            return config[keys[0]]
+        return _get_value(config[keys[0]], keys[1:])
+
+    for keys in filter_keys:
+        value = _get_value(new_config, keys)
+        for key in keys:
+            if key not in new_config:
+                new_config[key] = {}
+            if key == keys[-1]:
+                new_config[key] = value
+    return new_config
+
+
+def _experimental_task_schema() -> dict:
+    from sky import resources  # pylint: disable=import-outside-toplevel
+    return {
+        'experimental': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'configs': _filter_configs(get_config_schema(),
+                                           resources.OVERRIDEABLE_CONFIG_KEYS),
+            }
+        }
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -435,6 +471,7 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
+            **_experimental_task_schema(),
         }
     }
 

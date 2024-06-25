@@ -456,8 +456,23 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
+        # Experimental configs.
+        experimnetal_configs = config.pop('experimental', None)
+        skypilot_config_override = None
+        if experimnetal_configs is not None:
+            skypilot_config_override = experimnetal_configs.pop(
+                'config_overrides', None)
+        assert not experimnetal_configs, ('Invalid task args: '
+                                          f'{experimnetal_configs.keys()}')
+
         # Parse resources field.
-        resources_config = config.pop('resources', None)
+        resources_config = config.pop('resources', {})
+        if skypilot_config_override is not None:
+            assert resources_config.get('_skypilot_config_override') is None, (
+                'Cannot set _skypilot_config_override in both resources and '
+                'experimental.config_overrides')
+            resources_config[
+                '_skypilot_config_override'] = skypilot_config_override
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)

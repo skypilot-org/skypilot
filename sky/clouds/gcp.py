@@ -197,8 +197,10 @@ class GCP(clouds.Cloud):
         # because `skypilot_config` may change for an existing cluster.
         # Clusters created with MIG (only GPU clusters) cannot be stopped.
         if (skypilot_config.get_nested(
-            ('gcp', 'managed_instance_group'), None) is not None and
-                resources.accelerators):
+            ('gcp', 'managed_instance_group'),
+                None,
+                override_configs=resources.skypilot_config_override) is not None
+                and resources.accelerators):
             unsupported[clouds.CloudImplementationFeatures.STOP] = (
                 'Managed Instance Group (MIG) does not support stopping yet.')
             unsupported[clouds.CloudImplementationFeatures.SPOT_INSTANCE] = (
@@ -506,7 +508,9 @@ class GCP(clouds.Cloud):
         resources_vars['tpu_node_name'] = tpu_node_name
 
         managed_instance_group_config = skypilot_config.get_nested(
-            ('gcp', 'managed_instance_group'), None)
+            ('gcp', 'managed_instance_group'),
+            None,
+            override_configs=resources.skypilot_config_override)
         use_mig = managed_instance_group_config is not None
         resources_vars['gcp_use_managed_instance_group'] = use_mig
         # Convert boolean to 0 or 1 in string, as GCP does not support boolean
