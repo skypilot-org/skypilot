@@ -24,6 +24,8 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
+        ssl_keyfile: Optional[str] = None,
+        ssl_certfile: Optional[str] = None,
         readiness_headers: Optional[Dict[str, str]] = None,
         dynamic_ondemand_fallback: Optional[bool] = None,
         base_ondemand_fallback_replicas: Optional[int] = None,
@@ -77,6 +79,13 @@ class SkyServiceSpec:
                     'Currently, SkyServe will cleanup failed replicas'
                     'and auto restart it to keep the service running.')
 
+        if ssl_keyfile is not None and ssl_certfile is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('SSL certfile is required if keyfile is set.')
+        if ssl_certfile is not None and ssl_keyfile is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('SSL keyfile is required if certfile is set.')
+
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
@@ -84,6 +93,8 @@ class SkyServiceSpec:
         self._max_replicas: Optional[int] = max_replicas
         self._target_qps_per_replica: Optional[float] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
+        self._ssl_keyfile: Optional[str] = ssl_keyfile
+        self._ssl_certfile: Optional[str] = ssl_certfile
         self._readiness_headers: Optional[Dict[str, str]] = readiness_headers
         self._dynamic_ondemand_fallback: Optional[
             bool] = dynamic_ondemand_fallback
@@ -178,6 +189,11 @@ class SkyServiceSpec:
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
 
+        ssl_section = config.get('ssl', None)
+        if ssl_section is not None:
+            service_config['ssl_keyfile'] = ssl_section.get('keyfile', None)
+            service_config['ssl_certfile'] = ssl_section.get('certfile', None)
+
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -233,6 +249,8 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
+        add_if_not_none('ssl', 'keyfile', self.ssl_keyfile)
+        add_if_not_none('ssl', 'certfile', self.ssl_certfile)
         return config
 
     def probe_str(self):
@@ -277,12 +295,18 @@ class SkyServiceSpec:
                 f'replica{max_plural} (target QPS per replica: '
                 f'{self.target_qps_per_replica})')
 
+    def ssl_str(self):
+        if self.ssl_keyfile is None and self.ssl_certfile is None:
+            return 'No SSL Enabled'
+        return f'Keyfile: {self.ssl_keyfile}, Certfile: {self.ssl_certfile}'
+
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Readiness probe timeout seconds:  {self.readiness_timeout_seconds}
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
+            SSL Certificates:                 {self.ssl_str()}
             Spot Policy:                      {self.spot_policy_str()}
         """)
 
@@ -314,6 +338,14 @@ class SkyServiceSpec:
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
+
+    @property
+    def ssl_keyfile(self) -> Optional[str]:
+        return self._ssl_keyfile
+
+    @property
+    def ssl_certfile(self) -> Optional[str]:
+        return self._ssl_certfile
 
     @property
     def readiness_headers(self) -> Optional[Dict[str, str]]:

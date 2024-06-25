@@ -146,10 +146,21 @@ def up(
         controller_resources = controller_utils.get_controller_resources(
             controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
             task_resources=task.resources)
+        remote_ssl_keyfile = (
+            serve_utils.generate_remote_ssl_keyfile_name(service_name))
+        remote_ssl_certfile = (
+            serve_utils.generate_remote_ssl_certfile_name(service_name))
 
+        service_spec = task.service
+        # Already validated in _validate_service_task
+        assert service_spec is not None, 'Service section not found.'
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
             'local_task_yaml_path': service_file.name,
+            'remote_ssl_keyfile': remote_ssl_keyfile,
+            'remote_ssl_certfile': remote_ssl_certfile,
+            'local_ssl_keyfile': service_spec.ssl_keyfile,
+            'local_ssl_certfile': service_spec.ssl_certfile,
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
