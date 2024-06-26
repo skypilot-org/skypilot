@@ -50,6 +50,7 @@ provider:
   firewall_rule: {{firewall_rule}}
 {% endif %}
   use_internal_ips: {{use_internal_ips}}
+  force_enable_external_ips: {{force_enable_external_ips}}
 {%- if tpu_vm %}
   _has_tpus: True
 {%- endif %}
