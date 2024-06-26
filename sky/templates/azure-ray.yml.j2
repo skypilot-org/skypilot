@@ -14,6 +14,9 @@ docker:
     {%- if custom_resources is not none %}
       --gpus all
     {%- endif %}
+    {%- for run_option in docker_run_options %}
+    - {{run_option}}
+    {%- endfor %}
 {%- endif %}
 
 provider:
