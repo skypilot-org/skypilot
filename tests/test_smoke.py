@@ -103,6 +103,7 @@ _JOB_CANCEL_WAIT = (
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
+
 class Test(NamedTuple):
     name: str
     # Each command is executed serially.  If any failed, the remaining commands
@@ -1081,8 +1082,7 @@ def test_azure_storage_mounts_with_stop():
     default_region = 'eastus'
     storage_account_name = (
         storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-            region=default_region,
-            user_hash=common_utils.get_user_hash()))
+            region=default_region, user_hash=common_utils.get_user_hash()))
     resource_group_name = data_utils.get_az_resource_group(storage_account_name)
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name, resource_group_name)
@@ -4515,8 +4515,7 @@ class TestStorageWithCredentials:
         default_region = 'eastus'
         storage_account_name = (
             storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                region=default_region,
-                user_hash=common_utils.get_user_hash()))
+                region=default_region, user_hash=common_utils.get_user_hash()))
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
@@ -4754,9 +4753,9 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('https'):
                 default_region = 'eastus'
                 storage_account_name = (
-                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                        region=default_region,
-                        user_hash=common_utils.get_user_hash()))
+                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
+                    format(region=default_region,
+                           user_hash=common_utils.get_user_hash()))
                 resource_group_name = data_utils.get_az_resource_group(
                     storage_account_name)
                 storage_account_key = data_utils.get_az_storage_account_key(
@@ -4801,9 +4800,8 @@ class TestStorageWithCredentials:
                                        'to use. This is higly unlikely - '
                                        'check if the tests are correct.')
 
-        with pytest.raises(
-                sky.exceptions.StorageBucketGetError,
-                match='Attempted to use a non-existent'):
+        with pytest.raises(sky.exceptions.StorageBucketGetError,
+                           match='Attempted to use a non-existent'):
             if nonexist_bucket_url.startswith('https'):
                 storage_obj = storage_lib.Storage(
                     source=nonexist_bucket_url.format(

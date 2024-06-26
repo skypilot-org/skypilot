@@ -167,18 +167,19 @@ class StoreType(enum.Enum):
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {self}')
-    
+
     @classmethod
     def get_endpoint_url(cls, store: 'AbstractStore', path: str) -> str:
         store_type = cls.from_store(store)
         if store_type == StoreType.AZURE:
+            assert isinstance(store, AzureBlobStore)
             storage_account_name = store.storage_account_name
             bucket_endpoint_url = data_utils.AZURE_CONTAINER_URL.format(
-                storage_account_name=storage_account_name,
-                container_name=path)
+                storage_account_name=storage_account_name, container_name=path)
         else:
             bucket_endpoint_url = f'{store_type.store_prefix()}{path}'
         return bucket_endpoint_url
+
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
@@ -2443,8 +2444,9 @@ class AzureBlobStore(AbstractStore):
             container_client = data_utils.create_az_client(
                 client_type='container', container_url=container_url)
             if container_client.exists():
-                is_private = (True if container_client.get_container_properties(
-                ).get('public_access', None) is None else False)
+                is_private = (True if
+                              container_client.get_container_properties().get(
+                                  'public_access', None) is None else False)
                 # when user attempts to use private container without
                 # access rights
                 if self.resource_group_name is None and is_private:
@@ -2458,8 +2460,8 @@ class AzureBlobStore(AbstractStore):
             # storage account name and credentials, and user has the rights to
             # access the storage account.
             else:
-                if (isinstance(self.source,
-                              str) and self.source.startswith('https://')):
+                if (isinstance(self.source, str) and
+                        self.source.startswith('https://')):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageBucketGetError(
                             'Attempted to use a non-existent container as a '
@@ -2531,8 +2533,10 @@ class AzureBlobStore(AbstractStore):
         """
         try:
             container = self.storage_client.blob_containers.create(
-                self.resource_group_name, self.storage_account_name,
-                container_name, blob_container={})
+                self.resource_group_name,
+                self.storage_account_name,
+                container_name,
+                blob_container={})
             logger.info('Created AZ Container '
                         f'{container_name!r} in {self.region!r} under storage '
                         f'account {self.storage_account_name!r}.')
