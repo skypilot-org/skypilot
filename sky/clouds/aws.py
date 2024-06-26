@@ -1,5 +1,6 @@
 """Amazon Web Services."""
 import enum
+import fnmatch
 import functools
 import json
 import os
@@ -399,15 +400,11 @@ class AWS(clouds.Cloud):
 
         user_security_group = skypilot_config.get_nested(
             ('aws', 'security_group_name'), None)
-        if user_security_group is not None and not isinstance(
-                user_security_group, str):
-            for sg_name in user_security_group:
-                if cluster_name_on_cloud.startswith(
-                        sg_name) and sg_name != 'default':
-                    user_security_group = user_security_group[sg_name]
+        if user_security_group is not None and not isinstance(user_security_group, str):
+            for profile in user_security_group:
+                if fnmatch.fnmatchcase(cluster_name_on_cloud, list(profile.keys())[0]):
+                    user_security_group = list(profile.values())[0]
                     break
-                elif sg_name == 'default':
-                    user_security_group = user_security_group[sg_name]
         security_group = user_security_group
         if user_security_group is None and resources.ports is not None:
             # Already checked in Resources._try_validate_ports
