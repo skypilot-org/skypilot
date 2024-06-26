@@ -402,7 +402,7 @@ class GCP(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
@@ -493,15 +493,15 @@ class GCP(clouds.Cloud):
 
         firewall_rule = None
         if resources.ports is not None:
-            firewall_rule = (
-                USER_PORTS_FIREWALL_RULE_NAME.format(cluster_name_on_cloud))
+            firewall_rule = (USER_PORTS_FIREWALL_RULE_NAME.format(
+                cluster_name.name_on_cloud))
         resources_vars['firewall_rule'] = firewall_rule
 
         # For TPU nodes. TPU VMs do not need TPU_NAME.
         tpu_node_name = resources_vars.get('tpu_node_name')
         if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
             if tpu_node_name is None:
-                tpu_node_name = cluster_name_on_cloud
+                tpu_node_name = cluster_name.name_on_cloud
 
         resources_vars['tpu_node_name'] = tpu_node_name
 
@@ -998,8 +998,8 @@ class GCP(clouds.Cloud):
         assert False, 'This code path should not be used.'
 
     @classmethod
-    def create_image_from_cluster(cls, cluster_name: str,
-                                  cluster_name_on_cloud: str,
+    def create_image_from_cluster(cls,
+                                  cluster_name: resources_utils.ClusterName,
                                   region: Optional[str],
                                   zone: Optional[str]) -> str:
         del region  # unused
@@ -1008,7 +1008,7 @@ class GCP(clouds.Cloud):
         # `ray-cluster-name` tag, which is guaranteed by the current `ray`
         # backend. Once the `provision.query_instances` is implemented for GCP,
         # we should be able to get rid of this assumption.
-        tag_filters = {'ray-cluster-name': cluster_name_on_cloud}
+        tag_filters = {'ray-cluster-name': cluster_name.name_on_cloud}
         label_filter_str = cls._label_filter_str(tag_filters)
         instance_name_cmd = ('gcloud compute instances list '
                              f'--filter="({label_filter_str})" '
@@ -1020,7 +1020,8 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             instance_name_cmd,
-            error_msg=f'Failed to get instance name for {cluster_name!r}',
+            error_msg=
+            f'Failed to get instance name for {cluster_name.display_name!r}',
             stderr=stderr,
             stream_logs=True)
         instance_names = json.loads(stdout)
@@ -1031,7 +1032,7 @@ class GCP(clouds.Cloud):
                     f'instance, but got: {instance_names}')
         instance_name = instance_names[0]['name']
 
-        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
+        image_name = f'skypilot-{cluster_name.display_name}-{int(time.time())}'
         create_image_cmd = (f'gcloud compute images create {image_name} '
                             f'--source-disk  {instance_name} '
                             f'--source-disk-zone {zone}')
@@ -1043,7 +1044,8 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             create_image_cmd,
-            error_msg=f'Failed to create image for {cluster_name!r}',
+            error_msg=
+            f'Failed to create image for {cluster_name.display_name!r}',
             stderr=stderr,
             stream_logs=True)
 
@@ -1057,7 +1059,8 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             image_uri_cmd,
-            error_msg=f'Failed to get image uri for {cluster_name!r}',
+            error_msg=
+            f'Failed to get image uri for {cluster_name.display_name!r}',
             stderr=stderr,
             stream_logs=True)
 

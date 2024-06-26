@@ -371,12 +371,13 @@ class AWS(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='aws')
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources_lib.Resources',
-                                        cluster_name_on_cloud: str,
-                                        region: 'clouds.Region',
-                                        zones: Optional[List['clouds.Zone']],
-                                        dryrun: bool = False) -> Dict[str, Any]:
+    def make_deploy_resources_variables(
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name: resources_utils.ClusterName,
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Any]:
         del dryrun  # unused
         assert zones is not None, (region, zones)
 
@@ -403,7 +404,7 @@ class AWS(clouds.Cloud):
         if user_security_group is not None and not isinstance(
                 user_security_group, str):
             for profile in user_security_group:
-                if fnmatch.fnmatchcase(cluster_name_on_cloud,
+                if fnmatch.fnmatchcase(cluster_name.name_on_cloud,
                                        list(profile.keys())[0]):
                     user_security_group = list(profile.values())[0]
                     break
@@ -411,7 +412,7 @@ class AWS(clouds.Cloud):
         if user_security_group is None and resources.ports is not None:
             # Already checked in Resources._try_validate_ports
             security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
-                cluster_name_on_cloud)
+                cluster_name.name_on_cloud)
         elif user_security_group is None:
             security_group = DEFAULT_SECURITY_GROUP_NAME
 
@@ -845,22 +846,24 @@ class AWS(clouds.Cloud):
         assert False, 'This code path should not be used.'
 
     @classmethod
-    def create_image_from_cluster(cls, cluster_name: str,
-                                  cluster_name_on_cloud: str,
+    def create_image_from_cluster(cls,
+                                  cluster_name: resources_utils.ClusterName,
                                   region: Optional[str],
                                   zone: Optional[str]) -> str:
-        assert region is not None, (cluster_name, cluster_name_on_cloud, region)
+        assert region is not None, (cluster_name.display_name,
+                                    cluster_name.name_on_cloud, region)
         del zone  # unused
 
-        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
+        image_name = f'skypilot-{cluster_name.display_name}-{int(time.time())}'
 
-        status = provision_lib.query_instances('AWS', cluster_name_on_cloud,
+        status = provision_lib.query_instances('AWS',
+                                               cluster_name.name_on_cloud,
                                                {'region': region})
         instance_ids = list(status.keys())
         if not instance_ids:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Failed to find the source cluster {cluster_name!r} on '
+                    f'Failed to find the source cluster {cluster_name.display_name!r} on '
                     'AWS.')
 
         if len(instance_ids) != 1:
@@ -887,7 +890,7 @@ class AWS(clouds.Cloud):
             stream_logs=True)
 
         rich_utils.force_update_status(
-            f'Waiting for the source image {cluster_name!r} from {region} to be available on AWS.'
+            f'Waiting for the source image {cluster_name.display_name!r} from {region} to be available on AWS.'
         )
         # Wait for the image to be available
         wait_image_cmd = (

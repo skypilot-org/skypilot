@@ -1,4 +1,5 @@
 """Utility functions for resources."""
+import dataclasses
 import enum
 import itertools
 import re
@@ -41,6 +42,18 @@ class DiskTier(enum.Enum):
     def __le__(self, other: 'DiskTier') -> bool:
         types = list(DiskTier)
         return types.index(self) <= types.index(other)
+
+
+@dataclasses.dataclass
+class ClusterName:
+    display_name: str
+    name_on_cloud: str
+
+    def __repr__(self) -> str:
+        return repr(self.display_name)
+
+    def __str__(self) -> str:
+        return self.display_name
 
 
 def check_port_str(port: str) -> None:
