@@ -1971,10 +1971,10 @@ def test_kueue_labels_kubernetes():
             # create a two node task
             f'sky launch -y -d -c {name} tests/kubernetes/sky-kueue-multinode.yaml',
             'sleep 10',
-            f'kubectl get workloads | wc -l | grep 2', # one job listed
+            f'kubectl get workloads | wc -l | grep 2',  # one job listed
             f'sky down -y {name}',
             'sleep 20'
-            f'kubectl get workloads | wc -l | grep 0', # no jobs listed
+            f'kubectl get workloads | wc -l | grep 0',  # no jobs listed
         ],
         f'sky down -y {name}; kubectl delete --ignore-not-found -f tests/kubernetes/kueue-single-clusterqueue.yaml; kubectl delete --ignore-not-found -f tests/kubernetes/kueue-manifest.yaml',
     )
