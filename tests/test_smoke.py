@@ -74,7 +74,7 @@ FLUIDSTACK_TYPE = '--cloud fluidstack --gpus RTXA4000'
 SCP_TYPE = '--cloud scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
-storage_setup_commands = [
+STORAGE_SETUP_COMMANDS = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
     'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
     'touch ~/tmp-workdir/foo',
@@ -102,7 +102,6 @@ _JOB_CANCEL_WAIT = (
 # step.
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
-
 
 class Test(NamedTuple):
     name: str
@@ -950,7 +949,7 @@ def test_file_mounts(generic_cloud: str):
         #  arm64 (e.g., Apple Silicon) since goofys does not work on arm64.
         extra_flags = '--num-nodes 1'
     test_commands = [
-        *storage_setup_commands,
+        *STORAGE_SETUP_COMMANDS,
         f'sky launch -y -c {name} --cloud {generic_cloud} {extra_flags} examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
@@ -967,7 +966,7 @@ def test_file_mounts(generic_cloud: str):
 def test_scp_file_mounts():
     name = _get_cluster_name()
     test_commands = [
-        *storage_setup_commands,
+        *STORAGE_SETUP_COMMANDS,
         f'sky launch -y -c {name} {SCP_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
@@ -985,7 +984,7 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = _get_cluster_name()
     storage_name = TestStorageWithCredentials.generate_bucket_name()
     test_commands = [
-        *storage_setup_commands,
+        *STORAGE_SETUP_COMMANDS,
         (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name}'),
@@ -1022,7 +1021,7 @@ def test_aws_storage_mounts_with_stop():
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
@@ -1055,7 +1054,7 @@ def test_gcp_storage_mounts_with_stop():
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'gsutil ls gs://{storage_name}/hello.txt',
@@ -1080,7 +1079,10 @@ def test_azure_storage_mounts_with_stop():
     cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
     default_region = 'eastus'
-    storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
+    storage_account_name = (
+        storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+            region=default_region,
+            user_hash=common_utils.get_user_hash()))
     resource_group_name = data_utils.get_az_resource_group(storage_account_name)
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name, resource_group_name)
@@ -1093,7 +1095,7 @@ def test_azure_storage_mounts_with_stop():
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'output=$(az storage blob list -c {storage_name} --account-name {storage_account_name} --account-key {storage_account_key} --prefix hello.txt)'
@@ -1130,7 +1132,7 @@ def test_kubernetes_storage_mounts():
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud kubernetes {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt || '
@@ -1170,7 +1172,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt || '
@@ -1199,7 +1201,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
@@ -1229,7 +1231,7 @@ def test_ibm_storage_mounts():
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud ibm {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'rclone ls {bucket_rclone_profile}:{storage_name}/hello.txt',
@@ -2933,7 +2935,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         test = Test(
             'managed_jobs_storage',
             [
-                *storage_setup_commands,
+                *STORAGE_SETUP_COMMANDS,
                 f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 'sleep 60',  # Wait the spot queue to be updated
@@ -4185,7 +4187,10 @@ class TestStorageWithCredentials:
             return f'{alias_gen}; {gsutil_alias} rm -r {url}'
         if store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
-            storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
+            storage_account_name = (
+                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                    region=default_region,
+                    user_hash=common_utils.get_user_hash()))
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
@@ -4219,7 +4224,10 @@ class TestStorageWithCredentials:
             return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
-            storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
+            storage_account_name = (
+                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                    region=default_region,
+                    user_hash=common_utils.get_user_hash()))
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
@@ -4269,7 +4277,10 @@ class TestStorageWithCredentials:
                 return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
-            storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
+            storage_account_name = (
+                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                    region=default_region,
+                    user_hash=common_utils.get_user_hash()))
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
@@ -4296,7 +4307,10 @@ class TestStorageWithCredentials:
             return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
-            storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
+            storage_account_name = (
+                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                    region=default_region,
+                    user_hash=common_utils.get_user_hash()))
             resource_group_name = data_utils.get_az_resource_group(
                 storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
@@ -4499,7 +4513,10 @@ class TestStorageWithCredentials:
     def tmp_az_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using gsutil
         default_region = 'eastus'
-        storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
+        storage_account_name = (
+            storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                region=default_region,
+                user_hash=common_utils.get_user_hash()))
         resource_group_name = data_utils.get_az_resource_group(
             storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
@@ -4736,7 +4753,10 @@ class TestStorageWithCredentials:
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('https'):
                 default_region = 'eastus'
-                storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
+                storage_account_name = (
+                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                        region=default_region,
+                        user_hash=common_utils.get_user_hash()))
                 resource_group_name = data_utils.get_az_resource_group(
                     storage_account_name)
                 storage_account_key = data_utils.get_az_storage_account_key(

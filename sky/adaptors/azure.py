@@ -78,7 +78,7 @@ def get_client(name: str, subscription_id: str, **kwargs):
             # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35770 # pylint: disable=line-too-long
             from azure.storage.blob import ContainerClient
             container_url = kwargs.pop('container_url', None)
-            assert container_url is not None, ('Must provide \'container_url\''
+            assert container_url is not None, ('Must provide "container_url"'
                                                ' keyword arguments for '
                                                'container client.')
             container_client = ContainerClient.from_container_url(container_url)
@@ -117,7 +117,8 @@ def get_client(name: str, subscription_id: str, **kwargs):
                         with ux_utils.print_exception_no_traceback():
                             raise sky_exceptions.StorageBucketGetError(
                                 'Failed to retreive the container client '
-                                f'for the container: {container_client.container_name!r}. '
+                                'for the container: '
+                                f'{container_client.container_name!r}. '
                                 f'Details: '
                                 f'{common_utils.format_exception(error, use_bracket=True)}'
                             )

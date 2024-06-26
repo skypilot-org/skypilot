@@ -274,6 +274,8 @@ def get_az_storage_account_key(
                                    f'account {storage_account_name!r}. '
                                    'Check if the storage account was created.')
             continue
+        # Azure provides two sets of working storage account keys and we use
+        # one of it.
         storage_account_key = storage_account_keys[0]
         return storage_account_key
 
