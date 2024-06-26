@@ -187,7 +187,7 @@ class GKELabelFormatter(GPULabelFormatter):
             return value.replace('nvidia-tesla-', '').upper()
         elif value.startswith('nvidia-'):
             acc = value.replace('nvidia-', '').upper()
-            if acc == 'H100-80GB':
+            if acc in ['H100-80GB', 'H100-MEGA-80GB']:
                 # H100 is named as H100-80GB in GKE.
                 return 'H100'
             return acc
