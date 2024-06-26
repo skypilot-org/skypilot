@@ -299,6 +299,9 @@ def get_service_schema():
                         'initial_delay_seconds': {
                             'type': 'number',
                         },
+                        'timeout_seconds': {
+                            'type': 'number',
+                        },
                         'post_data': {
                             'anyOf': [{
                                 'type': 'string',
@@ -754,6 +757,17 @@ def get_config_schema():
         }
     }
 
+    gpu_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'disable_ecc': {
+                'type': 'boolean',
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
@@ -771,6 +785,7 @@ def get_config_schema():
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
+            'nvidia_gpus': gpu_configs,
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.

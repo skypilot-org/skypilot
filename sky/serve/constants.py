@@ -39,8 +39,7 @@ ENDPOINT_PROBE_INTERVAL_SECONDS = 10
 # The default timeout in seconds for a readiness probe request. We set the
 # timeout to 15s since using actual generation in LLM services as readiness
 # probe is very time-consuming (33B, 70B, ...).
-# TODO(tian): Expose this option to users in yaml file.
-READINESS_PROBE_TIMEOUT_SECONDS = 15
+DEFAULT_READINESS_PROBE_TIMEOUT_SECONDS = 15
 
 # Autoscaler window size in seconds for query per second. We calculate qps by
 # divide the number of queries in last window size by this window size.
