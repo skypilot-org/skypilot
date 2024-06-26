@@ -167,7 +167,18 @@ class StoreType(enum.Enum):
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {self}')
-
+    
+    @classmethod
+    def get_endpoint_url(cls, store: 'AbstractStore', path: str) -> str:
+        store_type = cls.from_store(store)
+        if store_type == StoreType.AZURE:
+            storage_account_name = store.storage_account_name
+            bucket_endpoint_url = data_utils.AZURE_CONTAINER_URL.format(
+                storage_account_name=storage_account_name,
+                container_name=path)
+        else:
+            bucket_endpoint_url = f'{store_type.store_prefix()}{path}'
+        return bucket_endpoint_url
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
@@ -345,13 +356,8 @@ class AbstractStore:
             # externally created buckets, users must provide the
             # bucket's URL as 'source'.
             if handle is None:
-                if isinstance(self, AzureBlobStore):
-                    source_endpoint = data_utils.AZURE_CONTAINER_URL.format(
-                        storage_account_name=self.storage_account_name,
-                        container_name=self.name)
-                else:
-                    store_prefix = StoreType.from_store(self).store_prefix()
-                    source_endpoint = f'{store_prefix}{self.name}'
+                source_endpoint = StoreType.get_endpoint_url(store=self,
+                                                             path=self.name)
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSpecError(
                         'Attempted to mount a non-sky managed bucket '

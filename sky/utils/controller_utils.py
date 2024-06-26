@@ -720,16 +720,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # the src for copy mounts.
         storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
         store_type = list(storage_obj.stores.keys())[0]
-        if store_type is storage_lib.StoreType.AZURE:
-            store_object = storage_obj.stores[store_type]
-            assert isinstance(store_object, storage_lib.AzureBlobStore)
-            storage_account_name = store_object.storage_account_name
-            bucket_url = data_utils.AZURE_CONTAINER_URL.format(
-                storage_account_name=storage_account_name,
-                container_name=file_bucket_name)
-        else:
-            store_prefix = store_type.store_prefix()
-            bucket_url = store_prefix + file_bucket_name
+        store_object = storage_obj.stores[store_type]
+        bucket_url = storage_lib.StoreType.get_endpoint_url(store_object,
+                                                            file_bucket_name)
         for dst, src in copy_mounts_with_file_in_src.items():
             file_id = src_to_file_id[src]
             new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
@@ -747,14 +740,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
             store_type = store_types[0]
-            if store_type is storage_lib.StoreType.AZURE:
-                store_object = storage_obj.stores[store_type]
-                assert isinstance(store_object, storage_lib.AzureBlobStore)
-                storage_account_name = store_object.storage_account_name
-                storage_obj.source = data_utils.AZURE_CONTAINER_URL.format(
-                    storage_account_name=storage_account_name,
-                    container_name=storage_obj.name)
-            else:
-                store_prefix = store_type.store_prefix()
-                storage_obj.source = f'{store_prefix}{storage_obj.name}'
+            store_object = storage_obj.stores[store_type]
+            storage_obj.source = storage_lib.StoreType.get_endpoint_url(
+                store_object,
+                storage_obj.name)
             storage_obj.force_delete = True
