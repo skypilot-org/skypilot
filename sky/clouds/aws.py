@@ -409,12 +409,12 @@ class AWS(clouds.Cloud):
                     user_security_group = list(profile.values())[0]
                     break
         security_group = user_security_group
-        if user_security_group is None and resources.ports is not None:
-            # Already checked in Resources._try_validate_ports
-            security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
-                cluster_name.name_on_cloud)
-        elif user_security_group is None:
+        if security_group is None:
             security_group = DEFAULT_SECURITY_GROUP_NAME
+            if resources.ports is not None:
+                # Already checked in Resources._try_validate_ports
+                security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
+                    cluster_name.name_on_cloud)
         elif user_security_group is not None and resources.ports is not None:
             with ux_utils.print_exception_no_traceback():
                 logger.warning(
