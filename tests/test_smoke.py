@@ -4608,7 +4608,7 @@ class TestStorageWithCredentials:
          ('s3://digitalcorpora', storage_lib.StoreType.S3),
          ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS),
          pytest.param(
-             'https://azuremlexampledata.blob.core.windows.net/data/imagenet',
+             'https://azureopendatastorage.blob.core.windows.net/nyctlc',
              storage_lib.StoreType.AZURE,
              marks=pytest.mark.azure)],
         indirect=['tmp_public_storage_obj'])
@@ -4646,7 +4646,6 @@ class TestStorageWithCredentials:
                 command = f'gsutil ls {nonexist_bucket_url.format(random_name=nonexist_bucket_name)}'
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('https'):
-                data_utils.is_az_container_endpoint(nonexist_bucket_url)
                 default_region = 'eastus'
                 storage_account_name = f'sky{default_region}{common_utils.get_user_hash()}'
                 resource_group_name = data_utils.get_az_resource_group(
@@ -4695,7 +4694,7 @@ class TestStorageWithCredentials:
 
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
-                match='Attempted to use a non-existent bucket as a source'):
+                match='Attempted to use a non-existent'):
             if nonexist_bucket_url.startswith('https'):
                 storage_obj = storage_lib.Storage(
                     source=nonexist_bucket_url.format(

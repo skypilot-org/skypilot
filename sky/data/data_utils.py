@@ -64,7 +64,7 @@ def split_az_path(az_path: str) -> Tuple[str, str, str]:
 
     Args:
         az_path: str; Container Path,
-          e.g. https://azuremlexampledata.blob.core.windows.net/data
+          e.g. https://azureopendatastorage.blob.core.windows.net/nyctlc
 
     Returns:
         str; Name of the storage account
@@ -283,7 +283,7 @@ def is_az_container_endpoint(endpoint_url: str) -> bool:
 
     Args:
       endpoint_url: str; Url of container endpoint.
-        e.g. https://azuremlexampledata.blob.core.windows.net/data
+        e.g. https://azureopendatastorage.blob.core.windows.net/nyctlc
 
     Returns:
       boolean; Shows either or not the container endpoint is valid.
