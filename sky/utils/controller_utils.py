@@ -726,7 +726,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             storage_account_name = store_object.storage_account_name
             bucket_url = data_utils.AZURE_CONTAINER_URL.format(
                 storage_account_name=storage_account_name,
-                container_name=storage_obj.name)
+                container_name=file_bucket_name)
         else:
             store_prefix = store_type.store_prefix()
             bucket_url = store_prefix + file_bucket_name
