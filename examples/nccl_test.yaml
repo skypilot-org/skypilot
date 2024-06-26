@@ -1,0 +1,42 @@
+# This measures NCCL all reduce performance with Torch.
+
+# Usage:
+#   $ sky launch -c nccl --use-spot nccl_test.yaml 
+
+# Example output
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:1
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:2
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:3
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:4
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:5
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:The average bandwidth of all_reduce with a 4.0GB payload (5 trials, 16 ranks):
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]: algbw: 2.053 GBps (16.4 Gbps)
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]: busbw: 3.850 GBps (30.8 Gbps)
+# (head, rank=0, pid=17654) [nccl-ebd1-head-8x3wqw6d-compute:0]:
+
+name: torch-nccl-allreduce
+
+num_nodes: 2
+
+resources:
+  accelerators: A100:8
+  use_spot: True
+
+setup: |
+  pip install torch
+  git clone https://github.com/stas00/ml-engineering.git
+
+run: |
+  cd ml-engineering/network/benchmarks
+  NNODES=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  MASTER_ADDR=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  python -u -m torch.distributed.run \
+    --nproc_per_node $SKYPILOT_NUM_GPUS_PER_NODE \
+    --nnodes $NNODES \
+    --rdzv_endpoint $MASTER_ADDR:8888 \
+    --rdzv_backend c10d \
+    --max_restarts 0 \
+    --role `hostname -s`: \
+    --tee 3 \
+    all_reduce_bench.py
+    
