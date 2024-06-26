@@ -82,6 +82,8 @@ def test_kubernetes_labels_resources():
         **GLOBAL_INVALID_LABELS,
         'a' * 254 + '/' + 'k' * 64: 'v' *
                                     63,  # exceed 253 chars in domain, 63 in key
+        'kueue.x-k8s.io/queue-name': 'queue',  # should error if queue doesn't exist
+        'kueue.x-k8s.io/priority-class': 'low-priority'  # should error if priority doesn't exist
     }
     cloud = clouds.Kubernetes()
     _run_label_test(allowed_labels, invalid_labels, cloud)

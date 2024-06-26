@@ -1957,6 +1957,30 @@ def test_task_labels_kubernetes():
         run_one_test(test)
 
 
+# ---------- Labels from task on Kubernetes (labels) ----------
+@pytest.mark.kubernetes
+@pytest.mark.slow
+def test_kueue_labels_kubernetes():
+    name = 'kueue-labels'
+    test = Test(
+        'kueue_labels_kubernetes',
+        [
+            f'kubectl apply --server-side -f tests/kubernetes/kueue-manifest.yaml',
+            'sleep 120',
+            f'kubectl apply -f tests/kubernetes/kueue-single-clusterqueue.yaml',
+            # create a two node task
+            f'sky launch -y -d -c {name} tests/kubernetes/sky-kueue-multinode.yaml',
+            'sleep 10',
+            f'kubectl get workloads | wc -l | grep 2', # one job listed
+            f'sky down -y {name}',
+            'sleep 20'
+            f'kubectl get workloads | wc -l | grep 0', # no jobs listed
+        ],
+        f'sky down -y {name}; kubectl delete --ignore-not-found -f tests/kubernetes/kueue-single-clusterqueue.yaml; kubectl delete --ignore-not-found -f tests/kubernetes/kueue-manifest.yaml',
+    )
+    run_one_test(test)
+
+
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
