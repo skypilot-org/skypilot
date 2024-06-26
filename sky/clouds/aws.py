@@ -415,6 +415,17 @@ class AWS(clouds.Cloud):
                 cluster_name.name_on_cloud)
         elif user_security_group is None:
             security_group = DEFAULT_SECURITY_GROUP_NAME
+        elif user_security_group is not None and resources.ports is not None:
+            with ux_utils.print_exception_no_traceback():
+                logger.warning(
+                    f'Ports {resources.ports} and security group name are '
+                    f'specified: {user_security_group}. It is not '
+                    'guaranteed that the ports will be opened if the '
+                    'specified security group is not correctly set up. '
+                    'Please try to specify `ports` only and leave out '
+                    '`aws.security_group_name` in `~/.sky/config.yaml` to '
+                    'allow SkyPilot to automatically create and configure '
+                    'the security group.')
 
         return {
             'instance_type': r.instance_type,
