@@ -158,11 +158,27 @@ Available fields and semantics:
 
     # Security group (optional).
     #
-    # The name of the security group to use for all instances. If not specified,
+    # Security group name to use for AWS instances. If not specified,
     # SkyPilot will use the default name for the security group: sky-sg-<hash>
     # Note: please ensure the security group name specified exists in the
     # regions the instances are going to be launched or the AWS account has the
     # permission to create a security group.
+    #
+    # Some example use cases are shown below. All fields are optional.
+    # - <string>: apply the service account with the specified name to all instances.
+    #    Example:
+    #       security_group_name: my-security-group
+    # - <list of single-element dict>: A list of single-element dict mapping from the cluster name (pattern)
+    #   to the security group name to use. The matching of the cluster name is done in the same order
+    #   as the list.
+    #   NOTE: If none of the wildcard expressions in the dict match the cluster name, SkyPilot will use the default
+    #   security group name as mentioned above:  sky-sg-<hash>
+    #   To specify your default, use "*" as the wildcard expression.
+    #   Example:
+    #       security_group_name:
+    #         - my-cluster-name: my-security-group-1
+    #         - sky-serve-controller-*: my-security-group-2
+    #         - "*": my-default-security-group
     security_group_name: my-security-group
 
     # Identity to use for AWS instances (optional).
