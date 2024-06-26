@@ -215,6 +215,8 @@ def _get_cloud_dependencies_installation_commands(
                 'pip list | grep azure-cli > /dev/null 2>&1 || '
                 'pip install "azure-cli>=2.31.0" azure-core '
                 '"azure-identity>=1.13.0" azure-mgmt-network > /dev/null 2>&1')
+            commands.append('pip list | grep azure-storage-blob || '
+                            'pip install azure-storage-blob msgraph-sdk')
         elif isinstance(cloud, clouds.GCP):
             commands.append(
                 f'echo -en "\\r{prefix_str}GCP{empty_str}" && '
