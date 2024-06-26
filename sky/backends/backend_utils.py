@@ -146,6 +146,7 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # Clouds with new provisioner has docker_login_config in the
     # docker field, instead of the provider field.
     ('docker', 'docker_login_config'),
+    ('docker', 'run_options'),
     # Other clouds
     ('provider', 'docker_login_config'),
     ('provider', 'firewall_rule'),
