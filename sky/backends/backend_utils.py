@@ -875,6 +875,10 @@ def write_cluster_config(
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
+    initial_setup_commands = []
+    if (skypilot_config.get_nested(('nvidia_gpus', 'disable_ecc'), False) and
+            to_provision.accelerators is not None):
+        initial_setup_commands.append(constants.DISABLE_GPU_ECC_COMMAND)
     tmp_yaml_path = yaml_path + '.tmp'
     common_utils.fill_template(
         cluster_config_template,
@@ -906,6 +910,8 @@ def write_cluster_config(
                 # currently only used by GCP.
                 'specific_reservations': specific_reservations,
 
+                # Initial setup commands.
+                'initial_setup_commands': initial_setup_commands,
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
@@ -979,7 +985,11 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
-    config_dict['cluster_name_on_cloud'] = cluster_name_on_cloud
+    # Read the cluster name from the tmp yaml file, to take the backward
+    # compatbility restortion above into account.
+    # TODO: remove this after 2 minor releases, 0.8.0.
+    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
     # Optimization: copy the contents of source files in file_mounts to a
     # special dir, and upload that as the only file_mount instead. Delay
@@ -2648,27 +2658,6 @@ def stop_handler(signum, frame):
           f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     with ux_utils.print_exception_no_traceback():
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
-
-
-def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
-                                       command: str,
-                                       failure_message: str) -> str:
-    """Runs command remotely and returns output with proper error handling."""
-    rc, stdout, stderr = runner.run(command,
-                                    require_outputs=True,
-                                    stream_logs=False)
-    if rc == 255:
-        # SSH failed
-        raise RuntimeError(
-            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
-            f'to {runner.ip} failed. This is most likely due to incorrect '
-            'credentials or incorrect permissions for the key file. Check '
-            'your credentials and try again.')
-    subprocess_utils.handle_returncode(rc,
-                                       command,
-                                       failure_message,
-                                       stderr=stderr)
-    return stdout
 
 
 def check_rsync_installed() -> None:

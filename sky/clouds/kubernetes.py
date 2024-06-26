@@ -51,6 +51,13 @@ class Kubernetes(clouds.Cloud):
     timeout = skypilot_config.get_nested(['kubernetes', 'provision_timeout'],
                                          10)
 
+    # Limit the length of the cluster name to avoid exceeding the limit of 63
+    # characters for Kubernetes resources. We limit to 42 characters (63-21) to
+    # allow additional characters for creating ingress services to expose ports.
+    # These services are named as {cluster_name_on_cloud}--skypilot-svc--{port},
+    # where the suffix is 21 characters long.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 42
+
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _DEFAULT_NUM_VCPUS = 2
@@ -92,7 +99,8 @@ class Kubernetes(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
+        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+        # Features to be disabled for exec auth
         is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
         if is_exec_auth:
             assert isinstance(message, str), message
@@ -102,7 +110,16 @@ class Kubernetes(clouds.Cloud):
             # Pod does not have permissions to terminate itself with exec auth.
             unsupported_features[
                 clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
+        # Allow spot instances if supported by the cluster
+        spot_label_key, _ = kubernetes_utils.get_spot_label()
+        if spot_label_key is not None:
+            unsupported_features.pop(
+                clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
         return unsupported_features
+
+    @classmethod
+    def max_cluster_name_length(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
@@ -290,6 +307,11 @@ class Kubernetes(clouds.Cloud):
 
         fuse_device_required = bool(resources.requires_fuse)
 
+        # Configure spot labels, if requested and supported
+        spot_label_key, spot_label_value = None, None
+        if resources.use_spot:
+            spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -311,6 +333,8 @@ class Kubernetes(clouds.Cloud):
             'k8s_fuse_device_required': fuse_device_required,
             # Namespace to run the FUSE device manager in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
+            'k8s_spot_label_key': spot_label_key,
+            'k8s_spot_label_value': spot_label_value,
             'image_id': image_id,
         }
 

@@ -55,6 +55,7 @@ from sky.clouds import GCP
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.data.data_utils import Rclone
+from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -111,6 +112,8 @@ class Test(NamedTuple):
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
     timeout: int = DEFAULT_CMD_TIMEOUT
+    # Environment variables to set for each command.
+    env: Dict[str, str] = None
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -157,6 +160,9 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
                                            suffix='.log',
                                            delete=False)
     test.echo(f'Test started. Log: less {log_file.name}')
+    env_dict = os.environ.copy()
+    if test.env:
+        env_dict.update(test.env)
     for command in test.commands:
         log_file.write(f'+ {command}\n')
         log_file.flush()
@@ -166,6 +172,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             stderr=subprocess.STDOUT,
             shell=True,
             executable='/bin/bash',
+            env=env_dict,
         )
         try:
             proc.wait(timeout=test.timeout)
@@ -305,20 +312,15 @@ _VALIDATE_LAUNCH_OUTPUT = (
 # ---------- A minimal task ----------
 def test_minimal(generic_cloud: str):
     name = _get_cluster_name()
-    validate_output = _VALIDATE_LAUNCH_OUTPUT
-    # Kubernetes will output a SSH Warning for proxy jump, which will cause
-    # the output validation fail. We skip the check for kubernetes for now.
-    if generic_cloud.lower() == 'kubernetes':
-        validate_output = 'true'
     test = Test(
         'minimal',
         [
-            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {validate_output}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f's=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {validate_output}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -362,6 +364,9 @@ def test_aws_region():
             f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-east-2\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            # A user program should not access SkyPilot runtime env python by default.
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} || exit 1\'',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -382,6 +387,9 @@ def test_gcp_region_and_service_account():
             f'sky status --all | grep {name} | grep us-central1',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-central1\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+            # A user program should not access SkyPilot runtime env python by default.
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} || exit 1\'',
+            f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -419,6 +427,9 @@ def test_azure_region():
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .zone | grep null\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+            # A user program should not access SkyPilot runtime env python by default.
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} || exit 1\'',
+            f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -753,6 +764,36 @@ def test_clone_disk_gcp():
         ],
         f'sky down -y {name} {name}-clone {name}-clone-2',
     )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_gcp_mig():
+    name = _get_cluster_name()
+    region = 'us-central1'
+    test = Test(
+        'gcp_mig',
+        [
+            f'sky launch -y -c {name} --gpus t4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp --region {region} tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            # Check MIG exists.
+            f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"',
+            f'sky autostop -i 0 --down -y {name}',
+            'sleep 120',
+            f'sky status -r {name}; sky status {name} | grep "{name} not found"',
+            f'gcloud compute instance-templates list | grep "sky-it-{name}"',
+            # Launch again with the same region. The original instance template
+            # should be removed.
+            f'sky launch -y -c {name} --gpus L4 --num-nodes 2 --region {region} nvidia-smi',
+            f'sky logs {name} 1 | grep "L4"',
+            f'sky down -y {name}',
+            f'gcloud compute instance-templates list | grep "sky-it-{name}" && exit 1 || true',
+        ],
+        f'sky down -y {name}',
+        env={'SKYPILOT_CONFIG': 'tests/test_yamls/use_mig_config.yaml'})
     run_one_test(test)
 
 
@@ -2937,7 +2978,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
     test = Test(
         'test-managed-jobs-inline-env',
         [
-            f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
             'sleep 20',
             f'{_JOB_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
         ],
@@ -2955,10 +2996,10 @@ def test_inline_env(generic_cloud: str):
     test = Test(
         'test-inline-env',
         [
-            f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
             'sleep 20',
             f'sky logs {name} 1 --status',
-            f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
@@ -2974,9 +3015,9 @@ def test_inline_env_file(generic_cloud: str):
     test = Test(
         'test-inline-env-file',
         [
-            f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
             f'sky logs {name} 1 --status',
-            f'sky exec {name} --env-file examples/sample_dotenv "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky exec {name} --env-file examples/sample_dotenv "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
@@ -3632,6 +3673,47 @@ def test_skyserve_streaming(generic_cloud: str):
 
 
 @pytest.mark.serve
+def test_skyserve_readiness_timeout_fail(generic_cloud: str):
+    """Test skyserve with large readiness probe latency, expected to fail"""
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-readiness-timeout-fail',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/readiness_timeout/task.yaml',
+            # None of the readiness probe will pass, so the service will be
+            # terminated after the initial delay.
+            f's=$(sky serve status {name}); '
+            f'until echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
+            'echo "Waiting for replica to be failed..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done;',
+            'sleep 60',
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 1;'
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_large_readiness_timeout(generic_cloud: str):
+    """Test skyserve with customized large readiness timeout"""
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-large-readiness-timeout',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/readiness_timeout/task_large_timeout.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.serve
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
@@ -3708,7 +3790,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
-            'sleep 30',
+            'sleep 40',
             # 2 on-deamnd (ready) + 1 on-demand (provisioning).
             (
                 _check_replica_in_status(
@@ -3722,7 +3804,7 @@ def test_skyserve_fast_update(generic_cloud: str):
             # Test rolling update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
             # sleep to wait for update to be registered.
-            'sleep 15',
+            'sleep 25',
             # 2 on-deamnd (ready) + 1 on-demand (shutting down).
             _check_replica_in_status(name, [(2, False, 'READY'),
                                             (1, False, 'SHUTTING_DOWN')]),
@@ -3854,7 +3936,14 @@ def test_skyserve_failures(generic_cloud: str):
             f's=$(sky serve status {name}); '
             f'until echo "$s" | grep "FAILED_PROBING"; do '
             'echo "Waiting for replica to be failed..."; sleep 5; '
-            f's=$(sky serve status {name}); echo "$s"; done;' +
+            f's=$(sky serve status {name}); echo "$s"; done',
+            # Wait for the PENDING replica to appear.
+            'sleep 10',
+            # Wait until the replica is out of PENDING.
+            f's=$(sky serve status {name}); '
+            f'until ! echo "$s" | grep "PENDING" && ! echo "$s" | grep "Please wait for the controller to be ready."; do '
+            'echo "Waiting for replica to be out of pending..."; sleep 5; '
+            f's=$(sky serve status {name}); echo "$s"; done; ' +
             _check_replica_in_status(
                 name, [(1, False, 'FAILED_PROBING'),
                        (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),

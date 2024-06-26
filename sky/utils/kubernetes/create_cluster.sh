@@ -101,32 +101,6 @@ kind create cluster --config /tmp/skypilot-kind.yaml --name skypilot
 
 echo "Kind cluster created."
 
-# Function to wait for SkyPilot GPU labeling jobs to complete
-wait_for_gpu_labeling_jobs() {
-    echo "Starting wait for SkyPilot GPU labeling jobs to complete..."
-
-    SECONDS=0
-    TIMEOUT=600  # 10 minutes in seconds
-
-    while true; do
-        TOTAL_JOBS=$(kubectl get jobs -n kube-system -l job=sky-gpu-labeler --no-headers | wc -l)
-        COMPLETED_JOBS=$(kubectl get jobs -n kube-system -l job=sky-gpu-labeler --no-headers | grep "1/1" | wc -l)
-
-        if [[ $COMPLETED_JOBS -eq $TOTAL_JOBS ]]; then
-            echo "All SkyPilot GPU labeling jobs completed ($TOTAL_JOBS)."
-            break
-        elif [ $SECONDS -ge $TIMEOUT ]; then
-            echo "Timeout reached while waiting for GPU labeling jobs."
-            exit 1
-        else
-            echo "Waiting for GPU labeling jobs to complete... ($COMPLETED_JOBS/$TOTAL_JOBS completed)"
-            echo "To check status, see GPU labeling pods:"
-            echo "kubectl get jobs -n kube-system -l job=sky-gpu-labeler"
-            sleep 5
-        fi
-    done
-}
-
 # Function to wait for GPU operator to be correctly installed
 wait_for_gpu_operator_installation() {
     echo "Starting wait for GPU operator installation..."
@@ -148,22 +122,6 @@ wait_for_gpu_operator_installation() {
             sleep 5
         fi
     done
-}
-
-wait_for_skypilot_gpu_image_pull() {
-    echo "Pulling SkyPilot GPU image..."
-    docker pull ${IMAGE_GPU}
-    echo "Loading SkyPilot GPU image into kind cluster..."
-    kind load docker-image --name skypilot ${IMAGE_GPU}
-    echo "SkyPilot GPU image loaded into kind cluster."
-}
-
-wait_for_skypilot_cpu_image_pull() {
-    echo "Pulling SkyPilot CPU image..."
-    docker pull ${IMAGE}
-    echo "Loading SkyPilot CPU image into kind cluster..."
-    kind load docker-image --name skypilot ${IMAGE}
-    echo "SkyPilot CPU image loaded into kind cluster."
 }
 
 wait_for_nginx_ingress_controller_install() {
@@ -206,20 +164,7 @@ if $ENABLE_GPUS; then
          nvidia/gpu-operator --set driver.enabled=false
     # Wait for GPU operator installation to succeed
     wait_for_gpu_operator_installation
-
-    # Load the SkyPilot GPU image into the cluster for faster labelling
-    wait_for_skypilot_gpu_image_pull
-
-    # Label nodes with GPUs
-    echo "Labelling nodes with GPUs..."
-    python -m sky.utils.kubernetes.gpu_labeler
-
-    # Wait for all the GPU labeling jobs to complete
-    wait_for_gpu_labeling_jobs
 fi
-
-# Load local skypilot image on to the cluster for faster startup
-wait_for_skypilot_cpu_image_pull
 
 # Install the Nginx Ingress Controller
 wait_for_nginx_ingress_controller_install
