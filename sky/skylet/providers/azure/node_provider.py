@@ -83,6 +83,7 @@ class AzureNodeProvider(NodeProvider):
     def _get_filtered_nodes(self, tag_filters):
         # add cluster name filter to only get nodes from this cluster
         cluster_tag_filters = {**tag_filters, TAG_RAY_CLUSTER_NAME: self.cluster_name}
+
         def match_tags(vm):
             for k, v in cluster_tag_filters.items():
                 if vm.tags.get(k) != v:
@@ -90,9 +91,11 @@ class AzureNodeProvider(NodeProvider):
             return True
 
         try:
-            vms = list(self.compute_client.virtual_machines.list(
-                resource_group_name=self.provider_config["resource_group"]
-            ))
+            vms = list(
+                self.compute_client.virtual_machines.list(
+                    resource_group_name=self.provider_config["resource_group"]
+                )
+            )
         except azure.exceptions().ResourceNotFoundError as e:
             if "Code: ResourceGroupNotFound" in e.exc_msg:
                 logger.debug("Resource group not found. VMs should be terminated.")
