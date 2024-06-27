@@ -3884,9 +3884,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if post_teardown_cleanup:
                 self.post_teardown_cleanup(handle, terminate, purge)
             return
-    
+
         if (isinstance(cloud, clouds.IBM) and terminate and
-              prev_cluster_status == status_lib.ClusterStatus.STOPPED):
+                prev_cluster_status == status_lib.ClusterStatus.STOPPED):
             # pylint: disable= W0622 W0703 C0415
             from sky.adaptors import ibm
             from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
