@@ -206,11 +206,15 @@ def _filter_instances(compute_client, filters: Dict[str, str],
                 return False
         return True
 
-    list_virtual_machines = get_azure_sdk_function(
-        client=compute_client.virtual_machines, function_name='list')
-    vms = list_virtual_machines(resource_group_name=resource_group)
-
-    nodes = list(filter(match_tags, vms))
+    try:
+        list_virtual_machines = get_azure_sdk_function(
+            client=compute_client.virtual_machines, function_name='list')
+        vms = list_virtual_machines(resource_group_name=resource_group)
+        nodes = list(filter(match_tags, vms))
+    except azure.exceptions().ResourceNotFoundError as e:
+        if 'ResourceGroupNotFound' in str(e):
+            return []
+        raise
     return nodes
 
 
