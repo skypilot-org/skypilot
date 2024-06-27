@@ -143,7 +143,7 @@ def get_az_container_sas_token(
         container_name: str; The name of the mounting container
 
     Returns:
-        SAS token prepended with the delimiter character, "?"
+        A SAS token with a 1-hour lifespan to access the specified container.
     """
     from azure.storage.blob import ContainerSasPermissions
     from azure.storage.blob import generate_container_sas
@@ -157,10 +157,7 @@ def get_az_container_sas_token(
                                            create=True),
         expiry=datetime.datetime.now(datetime.timezone.utc) +
         datetime.timedelta(hours=1))
-    # "?" is a delimiter character used when SAS token is attached to the
-    # container endpoint.
-    # Reference: https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/how-to-guides/create-sas-tokens?tabs=Containers # pylint: disable=line-too-long
-    return f'?{sas_token}'
+    return sas_token
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
@@ -176,7 +173,7 @@ def get_az_blob_sas_token(storage_account_name: str, storage_account_key: str,
         blob_name: str; path to the blob(file)
 
     Returns:
-        SAS token prepended with the delimiter character, "?"
+        A SAS token with a 1-hour lifespan to access the specified blob.
     """
     from azure.storage.blob import BlobSasPermissions
     from azure.storage.blob import generate_blob_sas
@@ -191,7 +188,7 @@ def get_az_blob_sas_token(storage_account_name: str, storage_account_key: str,
                                       create=True),
         expiry=datetime.datetime.now(datetime.timezone.utc) +
         datetime.timedelta(hours=1))
-    return f'{sas_token}'
+    return sas_token
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)

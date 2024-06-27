@@ -191,14 +191,18 @@ class AzureBlobCloudStorage(CloudStorage):
         name is a prefix of other objects.
         """
         # split the url using split_az_path
-        _, _, path = data_utils.split_az_path(url)
+        storage_account_name, container_name, path = data_utils.split_az_path(url)
         # If there aren't more than just container name and storage account,
         # that's a directory.
         if not path:
             return True
+        container_url = data_utils.AZURE_CONTAINER_URL.format(
+            storage_account_name = storage_account_name,
+            container_name = container_name
+        )
         # If there's more, we'd need to check if it's a directory or a file.
         container_client = data_utils.create_az_client(client_type='container',
-                                                       container_url=url)
+                                                       container_url=container_url)
         num_objects = 0
         for blob in container_client.list_blobs(name_starts_with=path):
             if blob.name == path:
@@ -231,12 +235,10 @@ class AzureBlobCloudStorage(CloudStorage):
                                                         storage_account_key,
                                                         container_name,
                                                         blob_path)
-        if is_dir:
-            converted_source = f'{source}/{sas_token}'
-        else:
-            # "?" is a delimiter character used when SAS token is attached to
-            # the blob endpoint.
-            converted_source = f'{source}/{blob_path}?{sas_token}'
+        # "?" is a delimiter character used when SAS token is attached to the
+        # container endpoint.
+        # Reference: https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/how-to-guides/create-sas-tokens?tabs=Containers # pylint: disable=line-too-long
+        converted_source = f'{source}?{sas_token}' if sas_token else source
 
         return shlex.quote(converted_source)
 
