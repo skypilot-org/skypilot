@@ -694,8 +694,7 @@ def _configure_subnet(region: str, cluster_name: str,
 
 def _enable_exteral_ips(config: common.ProvisionConfig) -> bool:
     force_enable_external_ips = config.provider_config.get(
-        'force_enable_external_ips', False
-    )
+        'force_enable_external_ips', False)
     use_internal_ips = config.provider_config.get('use_internal_ips', False)
 
     return force_enable_external_ips or not use_internal_ips
