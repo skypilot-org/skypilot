@@ -2143,19 +2143,19 @@ class AzureBlobStore(AbstractStore):
         used for AzureBlobStore object is obtained from this function. These
         are determined by either through the metadata, source, config.yaml, or
         default name:
-        
+
         1) If self.storage_account_name already has a set value, this means we
         are reconstructing the storage object using metadata from the local
         state.db to reuse sky managed storage.
-        
+
         2) Users provide externally created non-sky managed storage endpoint
         as a source from task yaml. Then, storage account is read from it and
         the resource group is inferred from it.
-        
+
         3) Users provide the storage account, which they want to create the
         sky managed storage, through config.yaml. Then, resource group is
         inferred from it.
-        
+
         4) If none of the above are true, default naming conventions are used
         to create the resource group and storage account for the users.
 
@@ -2172,9 +2172,8 @@ class AzureBlobStore(AbstractStore):
                 self.storage_account_name)
             storage_account_name = self.storage_account_name
         # Using externally created container
-        elif (isinstance(self.source,
-                        str) and data_utils.is_az_container_endpoint(
-                            self.source)):
+        elif (isinstance(self.source, str) and
+              data_utils.is_az_container_endpoint(self.source)):
             storage_account_name, container_name, _ = data_utils.split_az_path(
                 self.source)
             assert self.name == container_name

@@ -191,18 +191,18 @@ class AzureBlobCloudStorage(CloudStorage):
         name is a prefix of other objects.
         """
         # split the url using split_az_path
-        storage_account_name, container_name, path = data_utils.split_az_path(url)
+        storage_account_name, container_name, path = data_utils.split_az_path(
+            url)
         # If there aren't more than just container name and storage account,
         # that's a directory.
         if not path:
             return True
         container_url = data_utils.AZURE_CONTAINER_URL.format(
-            storage_account_name = storage_account_name,
-            container_name = container_name
-        )
+            storage_account_name=storage_account_name,
+            container_name=container_name)
         # If there's more, we'd need to check if it's a directory or a file.
-        container_client = data_utils.create_az_client(client_type='container',
-                                                       container_url=container_url)
+        container_client = data_utils.create_az_client(
+            client_type='container', container_url=container_url)
         num_objects = 0
         for blob in container_client.list_blobs(name_starts_with=path):
             if blob.name == path:

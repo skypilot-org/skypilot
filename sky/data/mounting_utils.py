@@ -17,7 +17,8 @@ GCSFUSE_VERSION = '2.2.0'
 # https://github.com/Azure/azure-storage-fuse/releases
 BLOBFUSE2_VERSION = '2.2.0'
 _BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
-_BLOBFUSE_CACHE_DIR = '~/.sky/blobfuse2_cache/{storage_account_name}_{container_name}'
+_BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
+                       '{storage_account_name}_{container_name}')
 
 
 def get_s3_mount_install_cmd() -> str:
@@ -104,9 +105,8 @@ def get_az_mount_cmd(container_name: str,
         key_env_var = f'AZURE_STORAGE_ACCESS_KEY={storage_account_key}'
 
     cache_path = _BLOBFUSE_CACHE_DIR.format(
-        storage_account_name = storage_account_name,
-        container_name = container_name
-    )
+        storage_account_name=storage_account_name,
+        container_name=container_name)
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
