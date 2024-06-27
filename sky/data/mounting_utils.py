@@ -16,7 +16,8 @@ _RENAME_DIR_LIMIT = 10000
 GCSFUSE_VERSION = '2.2.0'
 # https://github.com/Azure/azure-storage-fuse/releases
 BLOBFUSE2_VERSION = '2.2.0'
-_BLOBFUSE_CACHE_DIR = '~/.sky/blobfuse2_cache'
+_BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
+_BLOBFUSE_CACHE_DIR = '~/.sky/blobfuse2_cache/{storage_account_name}_{container_name}'
 
 
 def get_s3_mount_install_cmd() -> str:
@@ -71,7 +72,7 @@ def get_az_mount_install_cmd() -> str:
                    f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
                    '-O /tmp/blobfuse2.deb && '
                    'sudo dpkg --install /tmp/blobfuse2.deb && '
-                   f'mkdir -p {_BLOBFUSE_CACHE_DIR};')
+                   f'mkdir -p {_BLOBFUSE_CACHE_ROOT_DIR};')
 
     return install_cmd
 
@@ -102,11 +103,15 @@ def get_az_mount_cmd(container_name: str,
     else:
         key_env_var = f'AZURE_STORAGE_ACCESS_KEY={storage_account_key}'
 
+    cache_path = _BLOBFUSE_CACHE_DIR.format(
+        storage_account_name = storage_account_name,
+        container_name = container_name
+    )
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
                  '-o umask=022 -o default_permissions '
-                 f'--tmp-path {_BLOBFUSE_CACHE_DIR} '
+                 f'--tmp-path {cache_path} '
                  f'--container-name {container_name}')
     return mount_cmd
 
