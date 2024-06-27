@@ -4,7 +4,6 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 import enum
-from typing import List, Tuple
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -170,7 +169,7 @@ def _get_single_resources_schema():
             '_requires_fuse': {
                 'type': 'boolean',
             },
-            '_skypilot_config_override': {
+            '_cluster_config_override': {
                 'type': 'object',
             },
         }
@@ -375,16 +374,16 @@ def get_service_schema():
     }
 
 
-def _filter_schema(schema, keys_to_keep):
+def _filter_schema(schema: dict, keys_to_keep: dict):
+    """Recursively filter a schema to include only certain keys.
+    
+    Args:
+        schema: The original schema dictionary.
+        keys_to_keep: List of tuples with the path of keys to retain.
+    
+    Returns:
+        The filtered schema.
     """
-    Recursively filter a schema to include only certain keys.
-    :param schema: The original schema dictionary.
-    :param keys_to_keep: List of tuples with the path of keys to retain.
-    :return: The filtered schema.
-    """
-    if not isinstance(schema, dict):
-        return schema  # Return as is if it's not a dictionary
-
     # Convert list of tuples to a dictionary for easier access
     paths_dict = {}
     for path in keys_to_keep:

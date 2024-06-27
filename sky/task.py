@@ -458,23 +458,23 @@ class Task:
 
         # Experimental configs.
         experimnetal_configs = config.pop('experimental', None)
-        skypilot_config_override = None
+        cluster_config_override = None
         if experimnetal_configs is not None:
-            skypilot_config_override = experimnetal_configs.pop(
+            cluster_config_override = experimnetal_configs.pop(
                 'config_overrides', None)
             logger.debug('Overriding skypilot config with task-level config: '
-                         f'{skypilot_config_override}')
+                         f'{cluster_config_override}')
         assert not experimnetal_configs, ('Invalid task args: '
                                           f'{experimnetal_configs.keys()}')
 
         # Parse resources field.
         resources_config = config.pop('resources', {})
-        if skypilot_config_override is not None:
-            assert resources_config.get('_skypilot_config_override') is None, (
-                'Cannot set _skypilot_config_override in both resources and '
+        if cluster_config_override is not None:
+            assert resources_config.get('_cluster_config_override') is None, (
+                'Cannot set _cluster_config_override in both resources and '
                 'experimental.config_overrides')
             resources_config[
-                '_skypilot_config_override'] = skypilot_config_override
+                '_cluster_config_override'] = cluster_config_override
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)

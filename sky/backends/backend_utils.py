@@ -965,7 +965,7 @@ def write_cluster_config(
     if isinstance(cloud, clouds.Kubernetes):
         kubernetes_utils.combine_pod_config_fields(
             tmp_yaml_path,
-            skypilot_override_configs=to_provision.skypilot_config_override)
+            skypilot_override_configs=to_provision.cluster_config_override)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.

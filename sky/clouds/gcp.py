@@ -199,7 +199,7 @@ class GCP(clouds.Cloud):
         if (skypilot_config.get_nested(
             ('gcp', 'managed_instance_group'),
                 None,
-                override_configs=resources.skypilot_config_override) is not None
+                override_configs=resources.cluster_config_override) is not None
                 and resources.accelerators):
             unsupported[clouds.CloudImplementationFeatures.STOP] = (
                 'Managed Instance Group (MIG) does not support stopping yet.')
@@ -510,7 +510,7 @@ class GCP(clouds.Cloud):
         managed_instance_group_config = skypilot_config.get_nested(
             ('gcp', 'managed_instance_group'),
             None,
-            override_configs=resources.skypilot_config_override)
+            override_configs=resources.cluster_config_override)
         use_mig = managed_instance_group_config is not None
         resources_vars['gcp_use_managed_instance_group'] = use_mig
         # Convert boolean to 0 or 1 in string, as GCP does not support boolean

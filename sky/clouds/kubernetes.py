@@ -313,7 +313,7 @@ class Kubernetes(clouds.Cloud):
         timeout = skypilot_config.get_nested(
             ['kubernetes', 'provision_timeout'],
             10,
-            override_configs=resources.skypilot_config_override)
+            override_configs=resources.cluster_config_override)
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
