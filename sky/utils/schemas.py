@@ -377,11 +377,11 @@ def get_service_schema():
 
 def _filter_schema(schema: dict, keys_to_keep: dict) -> dict:
     """Recursively filter a schema to include only certain keys.
-    
+
     Args:
         schema: The original schema dictionary.
         keys_to_keep: List of tuples with the path of keys to retain.
-    
+
     Returns:
         The filtered schema.
     """
