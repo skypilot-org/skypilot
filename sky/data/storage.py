@@ -2104,8 +2104,8 @@ class AzureBlobStore(AbstractStore):
 
         Initialization involves fetching container if exists, or creating it if
         it does not. Also, it checks for the existance of the storage account
-        and resource group if provided by the user. If not provided, those are
-        created with a default naming convention.
+        if provided by the user and the resource group is inferred from it.
+        If not provided, both are created with a default naming conventions.
 
         Raises:
             StorageBucketCreateError: If container creation fails or storage
@@ -2157,9 +2157,9 @@ class AzureBlobStore(AbstractStore):
                 self.storage_account_name)
             storage_account_name = self.storage_account_name
         # Using externally created container
-        elif isinstance(self.source,
+        elif (isinstance(self.source,
                         str) and data_utils.is_az_container_endpoint(
-                            self.source):
+                            self.source)):
             storage_account_name, container_name, _ = data_utils.split_az_path(
                 self.source)
             assert self.name == container_name
@@ -2460,6 +2460,8 @@ class AzureBlobStore(AbstractStore):
             # storage account name and credentials, and user has the rights to
             # access the storage account.
             else:
+                # when this if statement is not True, we let it to proceed
+                # farther and create the container.
                 if (isinstance(self.source, str) and
                         self.source.startswith('https://')):
                     with ux_utils.print_exception_no_traceback():
@@ -2568,7 +2570,7 @@ class AzureBlobStore(AbstractStore):
         """
         try:
             with rich_utils.safe_status(
-                    f'[bold cyan]Deleting Azure cotainer {container_name}[/]'):
+                    f'[bold cyan]Deleting Azure container {container_name}[/]'):
                 # Check for the existance of the container before deletion.
                 self.storage_client.blob_containers.get(
                     self.resource_group_name,
