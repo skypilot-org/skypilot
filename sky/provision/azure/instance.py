@@ -105,7 +105,9 @@ def cleanup_ports(
 #     worker_only: bool = False,
 # ) -> None:
 #     """See sky/provision/__init__.py"""
-#     # TODO(zhwu): check the following
+#     # TODO(zhwu): check the following. Also, seems we can directly force
+#     # delete a resource group.
+#
 #     assert provider_config is not None, cluster_name_on_cloud
 #     subscription_id = provider_config['subscription_id']
 #     resource_group = provider_config['resource_group']
