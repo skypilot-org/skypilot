@@ -14,10 +14,8 @@ import colorama
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import azure
 from sky.clouds import service_catalog
-from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
