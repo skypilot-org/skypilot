@@ -1,6 +1,7 @@
 """Azure instance provisioning."""
 import logging
 from multiprocessing import pool
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 from sky import exceptions
@@ -20,6 +21,8 @@ azure_logger.setLevel(logging.WARNING)
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
+
+_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
 
 
 def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
@@ -49,7 +52,8 @@ def open_ports(
     subscription_id = provider_config['subscription_id']
     resource_group = provider_config['resource_group']
     network_client = azure.get_client('network', subscription_id)
-    # The NSG should have been created by the cluster provisioning.
+
+    
     update_network_security_groups = get_azure_sdk_function(
         client=network_client.network_security_groups,
         function_name='create_or_update')
@@ -57,6 +61,24 @@ def open_ports(
         client=network_client.network_security_groups, function_name='list')
     for nsg in list_network_security_groups(resource_group):
         try:
+            # Wait the NSG creation to be finished before opening a port. The cluster
+            # provisioning triggers the NSG creation, but it may not be finished yet.
+            backoff = common_utils.Backoff(max_backoff_factor=1)
+            start_time = time.time()
+            while True:
+                if nsg.provisioning_state not in ['Creating', 'Updating']:
+                    break
+                if time.time() - start_time > _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS:
+                    logger.warning(
+                        f'Fails to wait for the creation of NSG {nsg.name} in '
+                        f'{resource_group} within '
+                        f'{_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS} seconds. '
+                        'Skip this NSG.')
+                backoff_time = backoff.current_backoff()
+                logger.info(f'NSG {nsg.name} is not created yet. Waiting for '
+                            f'{backoff_time} seconds before checking again.')
+                time.sleep(backoff_time)
+
             # Azure NSG rules have a priority field that determines the order
             # in which they are applied. The priority must be unique across
             # all inbound rules in one NSG.
