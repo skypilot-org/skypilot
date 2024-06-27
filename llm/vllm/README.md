@@ -33,7 +33,7 @@ sky launch -c vllm-llama2 serve-openai-api.yaml --env HF_TOKEN=YOUR_HUGGING_FACE
 ```bash
 sky launch -c vllm-llama2 serve-openai-api.yaml --gpus V100:1 --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
 ```
-**Tip**: You can also use the vLLM docker container for faster setup. Refer to [serve-openai-api-docker.yaml](./serve-openai-api-docker.yaml) for more.
+**Tip**: You can also use the vLLM docker container for faster setup. Refer to [serve-openai-api-docker.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm/serve-openai-api-docker.yaml) for more.
 
 2. Check the IP for the cluster with:
 ```
