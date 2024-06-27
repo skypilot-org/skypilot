@@ -146,6 +146,7 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # Clouds with new provisioner has docker_login_config in the
     # docker field, instead of the provider field.
     ('docker', 'docker_login_config'),
+    ('docker', 'run_options'),
     # Other clouds
     ('provider', 'docker_login_config'),
     ('provider', 'firewall_rule'),
@@ -873,6 +874,17 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
+    # Docker run options
+    docker_run_options = skypilot_config.get_nested(('docker', 'run_options'),
+                                                    [])
+    if isinstance(docker_run_options, str):
+        docker_run_options = [docker_run_options]
+    if docker_run_options and isinstance(to_provision.cloud, clouds.Kubernetes):
+        logger.warning(f'{colorama.Style.DIM}Docker run options are specified, '
+                       'but ignored for Kubernetes: '
+                       f'{" ".join(docker_run_options)}'
+                       f'{colorama.Style.RESET_ALL}')
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     initial_setup_commands = []
@@ -922,6 +934,9 @@ def write_cluster_config(
                         '{sky_wheel_hash}',
                         wheel_hash).replace('{cloud}',
                                             str(cloud).lower())),
+
+                # Docker
+                'docker_run_options': docker_run_options,
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
