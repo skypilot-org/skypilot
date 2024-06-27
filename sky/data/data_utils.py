@@ -240,14 +240,18 @@ def get_az_storage_account_key(
     Returns:
         One of the few access keys to the given storage account
     """
-    # resource_group_name is None when using a public container or
-    # a private containers not belonging to the user.
-    if resource_group_name is None:
-        return None
     if resource_client is None:
         resource_client = create_az_client('resource')
     if storage_client is None:
         storage_client = create_az_client('storage')
+    if resource_group_name is None:
+        resource_group_name = get_az_resource_group(storage_account_name,
+                                                    storage_client)
+    # resource_group_name is None when using a public container or
+    # a private containers not belonging to the user.
+    if resource_group_name is None:
+        return None
+
     attempt = 0
     backoff = common_utils.Backoff()
     while True:

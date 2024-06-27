@@ -218,10 +218,8 @@ class AzureBlobCloudStorage(CloudStorage):
         """Converts the source so it can be used as an argument for azcopy."""
         storage_account_name, container_name, blob_path = (
             data_utils.split_az_path(source))
-        resource_group_name = data_utils.get_az_resource_group(
-            storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
-            storage_account_name, resource_group_name)
+            storage_account_name)
 
         if storage_account_key is None:
             # public containers do not require SAS token for access

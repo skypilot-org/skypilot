@@ -1083,9 +1083,8 @@ def test_azure_storage_mounts_with_stop():
     storage_account_name = (
         storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
             region=default_region, user_hash=common_utils.get_user_hash()))
-    resource_group_name = data_utils.get_az_resource_group(storage_account_name)
     storage_account_key = data_utils.get_az_storage_account_key(
-        storage_account_name, resource_group_name)
+        storage_account_name)
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
@@ -4191,10 +4190,8 @@ class TestStorageWithCredentials:
                 storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                     region=default_region,
                     user_hash=common_utils.get_user_hash()))
-            resource_group_name = data_utils.get_az_resource_group(
-                storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
-                storage_account_name, resource_group_name)
+                storage_account_name)
             return ('az storage container delete '
                     f'--account-name {storage_account_name} '
                     f'--account-key {storage_account_key} '
@@ -4228,10 +4225,8 @@ class TestStorageWithCredentials:
                 storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                     region=default_region,
                     user_hash=common_utils.get_user_hash()))
-            resource_group_name = data_utils.get_az_resource_group(
-                storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
-                storage_account_name, resource_group_name)
+                storage_account_name)
             list_cmd = ('az storage blob list '
                         f'--container-name {bucket_name} '
                         f'--prefix {shlex.quote(suffix)} '
@@ -4281,10 +4276,8 @@ class TestStorageWithCredentials:
                 storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                     region=default_region,
                     user_hash=common_utils.get_user_hash()))
-            resource_group_name = data_utils.get_az_resource_group(
-                storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
-                storage_account_name, resource_group_name)
+                storage_account_name)
             return ('az storage blob list '
                     f'--container-name {bucket_name} '
                     f'--prefix {shlex.quote(suffix)} '
@@ -4311,10 +4304,8 @@ class TestStorageWithCredentials:
                 storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                     region=default_region,
                     user_hash=common_utils.get_user_hash()))
-            resource_group_name = data_utils.get_az_resource_group(
-                storage_account_name)
             storage_account_key = data_utils.get_az_storage_account_key(
-                storage_account_name, resource_group_name)
+                storage_account_name)
             return ('az storage blob list '
                     f'--container-name {bucket_name} '
                     f'--account-name {storage_account_name} '
@@ -4516,10 +4507,8 @@ class TestStorageWithCredentials:
         storage_account_name = (
             storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                 region=default_region, user_hash=common_utils.get_user_hash()))
-        resource_group_name = data_utils.get_az_resource_group(
-            storage_account_name)
         storage_account_key = data_utils.get_az_storage_account_key(
-            storage_account_name, resource_group_name)
+            storage_account_name)
         bucket_uri = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=storage_account_name,
             container_name=tmp_bucket_name)
@@ -4756,10 +4745,8 @@ class TestStorageWithCredentials:
                     storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
                     format(region=default_region,
                            user_hash=common_utils.get_user_hash()))
-                resource_group_name = data_utils.get_az_resource_group(
-                    storage_account_name)
                 storage_account_key = data_utils.get_az_storage_account_key(
-                    storage_account_name, resource_group_name)
+                    storage_account_name)
                 command = f'az storage container exists --account-name {storage_account_name} --account-key {storage_account_key} --name {nonexist_bucket_name}'
                 expected_output = '"exists": false'
             elif nonexist_bucket_url.startswith('r2'):
