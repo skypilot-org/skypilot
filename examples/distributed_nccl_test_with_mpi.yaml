@@ -1,5 +1,5 @@
 resources:
-  accelerators: T4
+  accelerators: T4:2
   cloud: gcp
 
 file_mounts:
