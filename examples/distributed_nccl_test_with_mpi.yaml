@@ -25,9 +25,6 @@ setup: |
   make MPI=1 NCCL_HOME=/usr/local/nccl2 MPI_HOME=/usr/lib/openmpi
 
 run: |
-  export PATH=/usr/lib/openmpi/bin:$PATH
-  export LD_LIBRARY_PATH=/usr/lib/openmpi/lib:$LD_LIBRARY_PATH
-
   cd ./nccl-tests
   NCCL_TEST_PATH=$(pwd)/build/all_reduce_perf
   HOST_IPS=$(echo "$SKYPILOT_NODE_IPS" | tr '\n' ",")
