@@ -96,6 +96,8 @@ class AzureNodeProvider(NodeProvider):
             )
         except azure.exceptions().HttpResponseError as e:
             if e.reason == "ResourceGroupNotFound":
+                logger.debug("Resource group not found. VMs should be "
+                            "terminated.")
                 vms = {}
             else:
                 raise
