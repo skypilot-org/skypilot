@@ -13,6 +13,7 @@ from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resource.resources.models import DeploymentMode
 
 from sky.utils import common_utils
+from sky.provision import common
 
 UNIQUE_ID_LEN = 4
 _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
@@ -46,6 +47,7 @@ def bootstrap_azure(config):
     return config
 
 
+@common.log_function_start_end
 def _configure_resource_group(config):
     # TODO: look at availability sets
     # https://docs.microsoft.com/en-us/azure/virtual-machines/windows/tutorial-availability-sets
