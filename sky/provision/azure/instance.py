@@ -99,35 +99,62 @@ def cleanup_ports(
     del cluster_name_on_cloud, ports, provider_config  # Unused.
 
 
-# def terminate_instances(
-#     cluster_name_on_cloud: str,
-#     provider_config: Optional[Dict[str, Any]] = None,
-#     worker_only: bool = False,
-# ) -> None:
-#     """See sky/provision/__init__.py"""
-#     # TODO(zhwu): check the following. Also, seems we can directly force
-#     # delete a resource group.
-#
-#     assert provider_config is not None, cluster_name_on_cloud
-#     subscription_id = provider_config['subscription_id']
-#     resource_group = provider_config['resource_group']
-#     compute_client = azure.get_client('compute', subscription_id)
-#     delete_virtual_machine = get_azure_sdk_function(
-#         client=compute_client.virtual_machines, function_name='delete')
-#     list_virtual_machines = get_azure_sdk_function(
-#         client=compute_client.virtual_machines, function_name='list')
-#     for vm in list_virtual_machines(resource_group):
-#         if azure.get_tag(vm.tags,
-#                          TAG_RAY_CLUSTER_NAME) == cluster_name_on_cloud:
-#             if worker_only:
-#                 if azure.get_tag(vm.tags, TAG_RAY_NODE_KIND) != 'worker':
-#                     continue
-#             poller = delete_virtual_machine(resource_group, vm.name)
-#             poller.wait()
-#             if poller.status() != 'Succeeded':
-#                 with ux_utils.print_exception_no_traceback():
-#                     raise ValueError(f'Failed to delete VM {vm.name}: '
-#                                      f'{poller.status()}')
+def stop_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+
+    subscription_id = provider_config['subscription_id']
+    resource_group = provider_config['resource_group']
+    compute_client = azure.get_client('compute', subscription_id)
+    tag_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    if worker_only:
+        tag_filters[TAG_RAY_NODE_KIND] = 'worker'
+
+    nodes = _filter_instances(compute_client, tag_filters, resource_group)
+    stop_virtual_machine = get_azure_sdk_function(
+        client=compute_client.virtual_machines, function_name='deallocate')
+    with pool.ThreadPool() as p:
+        p.starmap(stop_virtual_machine,
+                  [(resource_group, node.name) for node in nodes])
+
+
+def terminate_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    # TODO(zhwu): check the following. Also, seems we can directly force
+    # delete a resource group.
+    subscription_id = provider_config['subscription_id']
+    resource_group = provider_config['resource_group']
+    if worker_only:
+        compute_client = azure.get_client('compute', subscription_id)
+        delete_virtual_machine = get_azure_sdk_function(
+            client=compute_client.virtual_machines, function_name='delete')
+        filters = {
+            TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
+            TAG_RAY_NODE_KIND: 'worker'
+        }
+        nodes = _filter_instances(compute_client, filters, resource_group)
+        with pool.ThreadPool() as p:
+            p.starmap(delete_virtual_machine,
+                      [(resource_group, node.name) for node in nodes])
+        return
+
+    assert provider_config is not None, cluster_name_on_cloud
+
+    resource_group_client = azure.get_client('resource', subscription_id)
+    delete_resource_group = get_azure_sdk_function(
+        client=resource_group_client.resource_groups, function_name='delete')
+
+    delete_resource_group(resource_group, force_deletion_types=None)
+
 
 # def _get_vm_ips(network_client, vm, resource_group: str,
 #                 use_internal_ips: bool) -> Tuple[str, str]:
