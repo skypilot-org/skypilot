@@ -24,9 +24,8 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
     versions of the SDK by first trying the old name and falling back to
     the prefixed new name.
     """
-    func = getattr(
-        client, function_name, getattr(client, f'begin_{function_name}', None)
-    )
+    func = getattr(client, function_name,
+                   getattr(client, f'begin_{function_name}', None))
     if func is None:
         raise AttributeError(
             f'{client.__name__!r} object has no {function_name} or '
@@ -34,42 +33,36 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
     return func
 
 
-def bootstrap_azure(config):
-    config = _configure_resource_group(config)
-    return config
-
-
 @common.log_function_start_end
-def _configure_resource_group(config):
-    # TODO: look at availability sets
-    # https://docs.microsoft.com/en-us/azure/virtual-machines/windows/tutorial-availability-sets
-    subscription_id = config['provider'].get('subscription_id')
+def bootstrap_instances(region: str, cluster_name: str, config: common.ProvisionConfig) -> common.ProvisionConfig:
+    """See sky/provision/__init__.py"""
+    provider_config = config.provider_config
+    subscription_id = provider_config.get('subscription_id')
     if subscription_id is None:
         subscription_id = azure.get_subscription_id()
     # Increase the timeout to fix the Azure get-access-token (used by ray azure
     # node_provider) timeout issue.
     # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
     resource_client = azure.get_client('resource', subscription_id)
-    config['provider']['subscription_id'] = subscription_id
+    provider_config['subscription_id'] = subscription_id
     logger.info(f'Using subscription id: {subscription_id}')
 
-    assert (
-        'resource_group' in config['provider']
-    ), 'Provider config must include resource_group field'
-    resource_group = config['provider']['resource_group']
+    assert ('resource_group' in provider_config
+           ), 'Provider config must include resource_group field'
+    resource_group = provider_config['resource_group']
 
     assert (
-        'location' in config['provider']
-    ), 'Provider config must include location field'
-    params = {'location': config['provider']['location']}
+        'location'
+        in provider_config), 'Provider config must include location field'
+    params = {'location': provider_config['location']}
 
-    if 'tags' in config['provider']:
-        params['tags'] = config['provider']['tags']
+    if 'tags' in provider_config:
+        params['tags'] = provider_config['tags']
 
     logger.info(f'Creating/Updating resource group: {resource_group}')
     rg_create_or_update = get_azure_sdk_function(
-        client=resource_client.resource_groups, function_name='create_or_update'
-    )
+        client=resource_client.resource_groups,
+        function_name='create_or_update')
     rg_create_or_update(resource_group_name=resource_group, parameters=params)
 
     # load the template file
@@ -81,18 +74,18 @@ def _configure_resource_group(config):
     logger.info('Using cluster name: %s', config['cluster_name'])
 
     # set unique id for resources in this cluster
-    unique_id = config['provider'].get('unique_id')
+    unique_id = provider_config.get('unique_id')
     if unique_id is None:
         hasher = sha256()
-        hasher.update(config['provider']['resource_group'].encode('utf-8'))
+        hasher.update(provider_config['resource_group'].encode('utf-8'))
         unique_id = hasher.hexdigest()[:UNIQUE_ID_LEN]
     else:
         unique_id = str(unique_id)
-    config['provider']['unique_id'] = unique_id
+    provider_config['unique_id'] = unique_id
     logger.info('Using unique id: %s', unique_id)
     cluster_id = '{}-{}'.format(config['cluster_name'], unique_id)
 
-    subnet_mask = config['provider'].get('subnet_mask')
+    subnet_mask = provider_config.get('subnet_mask')
     if subnet_mask is None:
         # choose a random subnet, skipping most common value of 0
         random.seed(unique_id)
@@ -104,35 +97,33 @@ def _configure_resource_group(config):
             'mode': DeploymentMode.incremental,
             'template': template,
             'parameters': {
-                'subnet': {'value': subnet_mask},
-                'clusterId': {'value': cluster_id},
+                'subnet': {
+                    'value': subnet_mask
+                },
+                'clusterId': {
+                    'value': cluster_id
+                },
             },
         }
     }
 
     create_or_update = get_azure_sdk_function(
-        client=resource_client.deployments, function_name='create_or_update'
-    )
+        client=resource_client.deployments, function_name='create_or_update')
     # TODO (skypilot): this takes a long time (> 40 seconds) for stopping an
     # azure VM, and this can be called twice during ray down.
-    outputs = (
-        create_or_update(
-            resource_group_name=resource_group,
-            deployment_name='ray-config',
-            parameters=parameters,
-        )
-        .result()
-        .properties.outputs
-    )
+    outputs = (create_or_update(
+        resource_group_name=resource_group,
+        deployment_name='ray-config',
+        parameters=parameters,
+    ).result().properties.outputs)
 
     # We should wait for the NSG to be created before opening any ports
     # to avoid overriding the newly-added NSG rules.
     nsg_id = outputs['nsg']['value']
 
     # append output resource ids to be used with vm creation
-    config['provider']['msi'] = outputs['msi']['value']
-    config['provider']['nsg'] = nsg_id
-    config['provider']['subnet'] = outputs['subnet']['value']
+    provider_config['msi'] = outputs['msi']['value']
+    provider_config['nsg'] = nsg_id
+    provider_config['subnet'] = outputs['subnet']['value']
 
     return config
-

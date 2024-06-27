@@ -20,16 +20,12 @@ from sky.provision.aws import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
+from sky.provision import constants
 
 logger = sky_logging.init_logger(__name__)
 
 _T = TypeVar('_T')
 
-# Tag uniquely identifying all nodes of a cluster
-TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
-TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
-TAG_RAY_NODE_KIND = 'ray-node-type'  # legacy tag for backward compatibility
-TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
 # Max retries for general AWS API calls.
 BOTO_MAX_RETRIES = 12
 # Max retries for creating an instance.
@@ -103,7 +99,7 @@ def _default_ec2_resource(region: str) -> Any:
 
 def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
     return [{
-        'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+        'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
         'Values': [cluster_name_on_cloud],
     }]
 
@@ -181,8 +177,8 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
                       count: int, associate_public_ip_address: bool) -> List:
     tags = {
         'Name': cluster_name,
-        TAG_RAY_CLUSTER_NAME: cluster_name,
-        TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
+        constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+        constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
         **tags
     }
     conf = node_config.copy()
@@ -251,8 +247,8 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
 def _get_head_instance_id(instances: List) -> Optional[str]:
     head_instance_id = None
     head_node_markers = (
-        (TAG_SKYPILOT_HEAD_NODE, '1'),
-        (TAG_RAY_NODE_KIND, 'head'),  # backward compat with Ray
+        (constants.TAG_SKYPILOT_HEAD_NODE, '1'),
+        (constants.TAG_RAY_NODE_KIND, 'head'),  # backward compat with Ray
     )
     for inst in instances:
         for t in inst.tags:
@@ -288,7 +284,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         'Name': 'instance-state-name',
         'Values': ['pending', 'running', 'stopping', 'stopped'],
     }, {
-        'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+        'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
         'Values': [cluster_name_on_cloud],
     }]
     exist_instances = list(ec2.instances.filter(Filters=filters))
@@ -316,10 +312,10 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     def _create_node_tag(target_instance, is_head: bool = True) -> str:
         if is_head:
             node_tag = [{
-                'Key': TAG_SKYPILOT_HEAD_NODE,
+                'Key': constants.TAG_SKYPILOT_HEAD_NODE,
                 'Value': '1'
             }, {
-                'Key': TAG_RAY_NODE_KIND,
+                'Key': constants.TAG_RAY_NODE_KIND,
                 'Value': 'head'
             }, {
                 'Key': 'Name',
@@ -327,10 +323,10 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             }]
         else:
             node_tag = [{
-                'Key': TAG_SKYPILOT_HEAD_NODE,
+                'Key': constants.TAG_SKYPILOT_HEAD_NODE,
                 'Value': '0'
             }, {
-                'Key': TAG_RAY_NODE_KIND,
+                'Key': constants.TAG_RAY_NODE_KIND,
                 'Value': 'worker'
             }, {
                 'Key': 'Name',
@@ -563,7 +559,7 @@ def stop_instances(
     ]
     if worker_only:
         filters.append({
-            'Name': f'tag:{TAG_RAY_NODE_KIND}',
+            'Name': f'tag:{constants.TAG_RAY_NODE_KIND}',
             'Values': ['worker'],
         })
     instances = _filter_instances(ec2,
@@ -601,7 +597,7 @@ def terminate_instances(
     ]
     if worker_only:
         filters.append({
-            'Name': f'tag:{TAG_RAY_NODE_KIND}',
+            'Name': f'tag:{constants.TAG_RAY_NODE_KIND}',
             'Values': ['worker'],
         })
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
@@ -806,7 +802,7 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
 
     filters = [
         {
-            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+            'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
             'Values': [cluster_name_on_cloud],
         },
     ]
@@ -857,7 +853,7 @@ def get_cluster_info(
             'Values': ['running'],
         },
         {
-            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+            'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
             'Values': [cluster_name_on_cloud],
         },
     ]
