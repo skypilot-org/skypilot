@@ -4,6 +4,7 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 import enum
+from typing import Any, Dict
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -374,7 +375,7 @@ def get_service_schema():
     }
 
 
-def _filter_schema(schema: dict, keys_to_keep: dict):
+def _filter_schema(schema: dict, keys_to_keep: dict) -> dict:
     """Recursively filter a schema to include only certain keys.
     
     Args:
@@ -385,7 +386,7 @@ def _filter_schema(schema: dict, keys_to_keep: dict):
         The filtered schema.
     """
     # Convert list of tuples to a dictionary for easier access
-    paths_dict = {}
+    paths_dict: Dict[str, Any] = {}
     for path in keys_to_keep:
         current = paths_dict
         for step in path:
@@ -394,7 +395,7 @@ def _filter_schema(schema: dict, keys_to_keep: dict):
             current = current[step]
 
     def keep_keys(current_schema: dict, current_path_dict: dict,
-                  new_schema: dict):
+                  new_schema: dict) -> dict:
         # Base case: if we reach a leaf in the path_dict, we stop.
         if (not current_path_dict or not isinstance(current_schema, dict) or
                 not current_schema.get('properties')):
