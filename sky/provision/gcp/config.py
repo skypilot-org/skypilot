@@ -672,7 +672,7 @@ def _configure_subnet(region: str, cluster_name: str,
             'type': 'ONE_TO_ONE_NAT',
         }],
     }]
-    enable_external_ips = _enable_exteral_ips(config)
+    enable_external_ips = _enable_external_ips(config)
     if not enable_external_ips:
         # Removing this key means the VM will not be assigned an external IP.
         default_interfaces[0].pop('accessConfigs')
@@ -692,7 +692,7 @@ def _configure_subnet(region: str, cluster_name: str,
     return config
 
 
-def _enable_exteral_ips(config: common.ProvisionConfig) -> bool:
+def _enable_external_ips(config: common.ProvisionConfig) -> bool:
     force_enable_external_ips = config.provider_config.get(
         'force_enable_external_ips', False)
     use_internal_ips = config.provider_config.get('use_internal_ips', False)
