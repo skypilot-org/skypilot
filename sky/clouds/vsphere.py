@@ -171,13 +171,13 @@ class Vsphere(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name_on_cloud: str,
+        cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         # TODO get image id here.
-        del cluster_name_on_cloud, dryrun  # unused
+        del cluster_name, dryrun  # unused
         assert zones is not None, (region, zones)
         zone_names = [zone.name for zone in zones]
         r = resources

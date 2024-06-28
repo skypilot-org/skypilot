@@ -3868,7 +3868,7 @@ def _generate_task_with_service(
     env: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
-    ports: Tuple[str],
+    ports: Optional[Tuple[str]],
     cpus: Optional[str],
     memory: Optional[str],
     disk_size: Optional[int],

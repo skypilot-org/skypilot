@@ -156,11 +156,11 @@ class Lambda(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud, dryrun  # Unused.
+        del cluster_name, dryrun  # Unused.
         assert zones is None, 'Lambda does not support zones.'
 
         r = resources
