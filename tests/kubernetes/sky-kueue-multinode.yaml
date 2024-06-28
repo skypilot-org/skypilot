@@ -1,0 +1,13 @@
+resources:
+  cloud: kubernetes
+  labels:
+    kueue.x-k8s.io/queue-name: user-queue
+    kueue.x-k8s.io/priority-class: low-priority  
+
+num_nodes: 2
+
+run: |
+  for i in {1..10000}; do
+    echo "$i"
+    sleep 1
+  done

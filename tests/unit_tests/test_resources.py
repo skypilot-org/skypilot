@@ -73,7 +73,6 @@ def test_aws_labels_resources():
 def test_kubernetes_labels_resources():
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
-        'kueue.x-k8s.io/queue-name': 'queue',
         'a' * 253 + '/' + 'k' * 63: 'v' *
                                     63,  # upto 253 chars in domain, 63 in key
         'mylabel': '',  # empty label values are allowed by k8s
@@ -83,6 +82,8 @@ def test_kubernetes_labels_resources():
         **GLOBAL_INVALID_LABELS,
         'a' * 254 + '/' + 'k' * 64: 'v' *
                                     63,  # exceed 253 chars in domain, 63 in key
+        'kueue.x-k8s.io/queue-name': 'queue',  # should error if queue doesn't exist
+        'kueue.x-k8s.io/priority-class': 'low-priority'  # should error if priority doesn't exist
     }
     cloud = clouds.Kubernetes()
     _run_label_test(allowed_labels, invalid_labels, cloud)
