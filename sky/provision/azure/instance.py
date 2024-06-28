@@ -516,7 +516,14 @@ def terminate_instances(
     delete_resource_group = _get_azure_sdk_function(
         client=resource_group_client.resource_groups, function_name='delete')
 
-    delete_resource_group(resource_group, force_deletion_types=None)
+    try:
+        delete_resource_group(resource_group, force_deletion_types=None)
+    except azure.exceptions().ResourceNotFoundError as e:
+        if 'ResourceGroupNotFound' in str(e):
+            logger.warning(f'Resource group {resource_group} not found. Skip '
+                           'terminating it.')
+            return
+        raise
 
 
 def _get_instance_status(compute_client, vm,
