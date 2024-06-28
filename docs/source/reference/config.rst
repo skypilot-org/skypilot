@@ -245,6 +245,16 @@ Available fields and semantics:
     #
     # Default: false.
     use_internal_ips: true
+
+    # Should instances in a vpc where communicated with via internal IPs still
+    # have an external IP? (optional)
+    #
+    # Set to true to force VMs to be assigned an exteral IP even when vpc_name
+    # and use_internal_ips are set.
+    #
+    # Default: false
+    force_enable_external_ips: true
+
     # SSH proxy command (optional).
     #
     # Please refer to the aws.ssh_proxy_command section above for more details.
@@ -312,7 +322,7 @@ Available fields and semantics:
       #
       # Default: 900
       provision_timeout: 900
-      
+
 
     # Identity to use for all GCP instances (optional).
     #
