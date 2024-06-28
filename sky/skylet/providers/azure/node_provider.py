@@ -98,8 +98,9 @@ class AzureNodeProvider(NodeProvider):
             )
         except azure.exceptions().ResourceNotFoundError as e:
             if "Code: ResourceGroupNotFound" in e.exc_msg:
-                logger.debug("Resource group not found. VMs should have been "
-                             "terminated.")
+                logger.debug(
+                    "Resource group not found. VMs should have been terminated."
+                )
                 vms = []
             else:
                 raise
