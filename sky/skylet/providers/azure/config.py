@@ -140,8 +140,8 @@ def _configure_resource_group(config):
         deployment_exists = False
 
     if not deployment_exists:
-        # TODO (skypilot): this takes a long time (> 40 seconds) for stopping an
-        # azure VM, and this can be called twice during ray down.
+        # This takes a long time (> 40 seconds), we should be careful calling
+        # this function.
         outputs = (
             create_or_update(
                 resource_group_name=resource_group,
