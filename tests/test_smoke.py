@@ -1165,7 +1165,13 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    # ubuntu 18.04 does not support fuse3, and blobfuse2 depends on fuse3.
+    azure_mount_unsupported_ubuntu_version = '18.04'
+    if azure_mount_unsupported_ubuntu_version in image_id:
+        content = template.render(storage_name=storage_name,
+                                  include_azure_mount=False)
+    else:
+        content = template.render(storage_name=storage_name,)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
