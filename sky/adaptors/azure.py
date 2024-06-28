@@ -63,3 +63,10 @@ def get_client(name: str, subscription_id: str):
 def create_security_rule(**kwargs):
     from azure.mgmt.network.models import SecurityRule
     return SecurityRule(**kwargs)
+
+
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def deployment_mode():
+    """Azure deployment mode."""
+    from azure.mgmt.resource.resources.models import DeploymentMode
+    return DeploymentMode

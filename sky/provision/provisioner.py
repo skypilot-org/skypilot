@@ -6,6 +6,7 @@ import os
 import shlex
 import socket
 import subprocess
+import sys
 import time
 import traceback
 from typing import Dict, List, Optional, Tuple
@@ -174,6 +175,7 @@ def bulk_provision(
             return _bulk_provision(cloud, region, zones, cluster_name,
                                    bootstrap_config)
         except Exception:  # pylint: disable=broad-except
+            sys.exit(1)
             zone_str = 'all zones'
             if zones:
                 zone_str = ','.join(zone.name for zone in zones)

@@ -13,11 +13,11 @@ from sky import sky_logging
 from sky.adaptors import gcp
 from sky.clouds import gcp as gcp_cloud
 from sky.provision import common
+from sky.provision import constants as provision_constants
 from sky.provision.gcp import constants
 from sky.provision.gcp import mig_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
-from sky.provision import constants as provision_constants
 
 # Tag for the name of the node
 INSTANCE_NAME_MAX_LEN = 64
@@ -1024,13 +1024,14 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         }
         potential_head_instances = []
         if mig_exists:
-            instances = cls.filter(project_id,
-                                   zone,
-                                   label_filters={
-                                       provision_constants.TAG_RAY_NODE_KIND: 'head',
-                                       **label_filters,
-                                   },
-                                   status_filters=cls.NEED_TO_TERMINATE_STATES)
+            instances = cls.filter(
+                project_id,
+                zone,
+                label_filters={
+                    provision_constants.TAG_RAY_NODE_KIND: 'head',
+                    **label_filters,
+                },
+                status_filters=cls.NEED_TO_TERMINATE_STATES)
             potential_head_instances = list(instances.keys())
 
         config['labels'] = {
@@ -1478,11 +1479,15 @@ class GCPTPUVMInstance(GCPInstance):
         for i, name in enumerate(names):
             node_config = config.copy()
             if i == 0:
-                node_config['labels'][TAG_SKYPILOT_HEAD_NODE] = '1'
-                node_config['labels'][TAG_RAY_NODE_KIND] = 'head'
+                node_config['labels'][
+                    provision_constants.TAG_SKYPILOT_HEAD_NODE] = '1'
+                node_config['labels'][
+                    provision_constants.TAG_RAY_NODE_KIND] = 'head'
             else:
-                node_config['labels'][TAG_SKYPILOT_HEAD_NODE] = '0'
-                node_config['labels'][TAG_RAY_NODE_KIND] = 'worker'
+                node_config['labels'][
+                    provision_constants.TAG_SKYPILOT_HEAD_NODE] = '0'
+                node_config['labels'][
+                    provision_constants.TAG_RAY_NODE_KIND] = 'worker'
             try:
                 logger.debug('Launching GCP TPU VM ...')
                 request = (

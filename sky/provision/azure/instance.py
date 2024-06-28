@@ -1,19 +1,22 @@
 """Azure instance provisioning."""
 import copy
-import logging
 import enum
+import json
+import logging
 from multiprocessing import pool
+import pathlib
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from uuid import uuid4
 
 from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import azure
-from sky.utils import common_utils
-from sky.utils import ux_utils
 from sky.provision import common
 from sky.provision import constants
+from sky.utils import common_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -24,6 +27,8 @@ azure_logger.setLevel(logging.WARNING)
 
 _RESUME_INSTANCE_TIMEOUT = 480  # 8 minutes
 _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
+UNIQUE_ID_LEN = 4
+_TAG_SKYPILOT_VM_ID = 'skypilot-vm-id'
 
 
 class AzureInstanceStatus(enum.Enum):
@@ -33,59 +38,74 @@ class AzureInstanceStatus(enum.Enum):
     STOPPED = 'stopped'
     DELETING = 'deleting'
 
-    POWER_STATE_MAP = {
-        'starting': PENDING,
-        'running': RUNNING,
-        # 'stopped' in Azure means Stopped (Allocated), which still bills
-        # for the VM.
-        'stopping': STOPPING,
-        'stopped': STOPPED,
-        # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
-        # bill for the VM.
-        'deallocating': STOPPING,
-        'deallocated': STOPPED,
-    }
-    PROVISIONING_STATE_MAP = {
-        'Creating': PENDING,
-        'Updating': PENDING,
-        'Failed': PENDING,
-        'Migrating': PENDING,
-        'Deleting': DELETING,
-        # Succeeded in provisioning state means the VM is provisioned but not
-        # necessarily running.
-        # 'Succeeded': status_lib.ClusterStatus.UP,
-    }
-
-    CLUSTER_STATUS_MAP = {
-        PENDING: status_lib.ClusterStatus.INIT,
-        STOPPING: status_lib.ClusterStatus.INIT,
-        RUNNING: status_lib.ClusterStatus.UP,
-        STOPPED: status_lib.ClusterStatus.STOPPED,
-        DELETING: None,
-    }
+    @classmethod
+    def power_state_map(cls) -> Dict[str, 'AzureInstanceStatus']:
+        return {
+            'starting': cls.PENDING,
+            'running': cls.RUNNING,
+            # 'stopped' in Azure means Stopped (Allocated), which still bills
+            # for the VM.
+            'stopping': cls.STOPPING,
+            'stopped': cls.STOPPED,
+            # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
+            # bill for the VM.
+            'deallocating': cls.STOPPING,
+            'deallocated': cls.STOPPED,
+        }
 
     @classmethod
-    def from_raw_states(cls, provisioning_state: str, power_state: str) -> 'AzureInstanceStatus':
-        if provisioning_state in cls.PROVISIONING_STATE_MAP:
-            status = cls.PROVISIONING_STATE_MAP[provisioning_state]
+    def provisioning_state_map(cls) -> Dict[str, 'AzureInstanceStatus']:
+        return {
+            'Creating': cls.PENDING,
+            'Updating': cls.PENDING,
+            'Failed': cls.PENDING,
+            'Migrating': cls.PENDING,
+            'Deleting': cls.DELETING,
+            # Succeeded in provisioning state means the VM is provisioned but not
+            # necessarily running.
+            # 'Succeeded': status_lib.ClusterStatus.UP,
+        }
+
+    @classmethod
+    def cluster_status_map(
+            cls
+    ) -> Dict['AzureInstanceStatus', Optional[status_lib.ClusterStatus]]:
+        return {
+            cls.PENDING: status_lib.ClusterStatus.INIT,
+            cls.STOPPING: status_lib.ClusterStatus.INIT,
+            cls.RUNNING: status_lib.ClusterStatus.UP,
+            cls.STOPPED: status_lib.ClusterStatus.STOPPED,
+            cls.DELETING: None,
+        }
+
+    @classmethod
+    def from_raw_states(cls, provisioning_state: str,
+                        power_state: Optional[str]) -> 'AzureInstanceStatus':
+        provisioning_state_map = cls.provisioning_state_map()
+        power_state_map = cls.power_state_map()
+        if power_state is None:
+            if provisioning_state not in provisioning_state_map:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ClusterStatusFetchingError(
+                        f'Failed to parse status from Azure response: {provisioning_state}'
+                    )
+            status = provisioning_state_map[provisioning_state]
         else:
-            if power_state not in cls.POWER_STATE_MAP:
+            if power_state not in power_state_map:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ClusterStatusFetchingError(
                         f'Failed to parse status from Azure response: {status}')
-            status = cls.POWER_STATE_MAP[power_state]
+            status = power_state_map[power_state]
         return status
-        
 
     def to_cluster_status(self) -> Optional[status_lib.ClusterStatus]:
-        return self.CLUSTER_STATUS_MAP.get(self)
-
+        return self.cluster_status_map().get(self)
 
 
 _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
 
 
-def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
+def _get_azure_sdk_function(client: Any, function_name: str) -> Callable:
     """Retrieve a callable function from Azure SDK client object.
 
     Newer versions of the various client SDKs renamed function names to
@@ -101,7 +121,32 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
                 obj={client.__name__}, func=function_name))
     return func
 
-    
+
+def _get_instance_ips(network_client, vm, resource_group: str,
+                      use_internal_ips: bool) -> Tuple[str, Optional[str]]:
+    nic_id = vm.network_profile.network_interfaces[0].id
+    nic_name = nic_id.split("/")[-1]
+    nic = network_client.network_interfaces.get(
+        resource_group_name=resource_group,
+        network_interface_name=nic_name,
+    )
+    ip_config = nic.ip_configurations[0]
+
+    external_ip = None
+    if not use_internal_ips:
+        public_ip_id = ip_config.public_ip_address.id
+        public_ip_name = public_ip_id.split("/")[-1]
+        public_ip = network_client.public_ip_addresses.get(
+            resource_group_name=resource_group,
+            public_ip_address_name=public_ip_name,
+        )
+        external_ip = public_ip.ip_address
+
+    internal_ip = ip_config.private_ip_address
+
+    return (internal_ip, external_ip)
+
+
 def _get_head_instance_id(instances: List) -> Optional[str]:
     head_instance_id = None
     head_node_markers = (
@@ -121,14 +166,72 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
                 break
     return head_instance_id
 
-def _create_instances(compute_client, cluster_name_on_cloud: str, resource_group: str, node_config: Dict[str, Any], tags: Dict[str, str], count: int) -> List:
+
+def _create_instances(compute_client, resource_client,
+                      cluster_name_on_cloud: str, resource_group: str,
+                      provider_config: Dict[str, Any], node_config: Dict[str,
+                                                                         Any],
+                      tags: Dict[str, str], count: int) -> List:
+    vm_id = uuid4().hex[:UNIQUE_ID_LEN]
+    tags = {
+        constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
+        constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+        constants.TAG_RAY_NODE_KIND: 'worker',
+        constants.TAG_SKYPILOT_HEAD_NODE: '0',
+        _TAG_SKYPILOT_VM_ID: vm_id,
+        **tags,
+    }
+    node_tags = node_config['tags'].copy()
+    node_tags.update(tags)
+
     # load the template file
     current_path = pathlib.Path(__file__).parent
     template_path = current_path.joinpath("azure-vm-template.json")
     with open(template_path, "r") as template_fp:
         template = json.load(template_fp)
 
-def run_instances(region: str, cluster_name_on_cloud: str, config: common.ProvisionConfig) -> common.ProvisionRecord:
+    vm_name = f'{cluster_name_on_cloud}-{vm_id}'
+    use_internal_ips = provider_config.get("use_internal_ips", False)
+
+    template_params = node_config["azure_arm_parameters"].copy()
+    template_params["vmName"] = vm_name
+    template_params["provisionPublicIp"] = not use_internal_ips
+    template_params["vmTags"] = node_tags
+    template_params["vmCount"] = count
+    template_params["msi"] = provider_config["msi"]
+    template_params["nsg"] = provider_config["nsg"]
+    template_params["subnet"] = provider_config["subnet"]
+
+    parameters = {
+        "properties": {
+            "mode": azure.deployment_mode().incremental,
+            "template": template,
+            "parameters": {
+                key: {
+                    "value": value
+                } for key, value in template_params.items()
+            },
+        }
+    }
+
+    create_or_update = _get_azure_sdk_function(
+        client=resource_client.deployments, function_name="create_or_update")
+    create_or_update(
+        resource_group_name=resource_group,
+        deployment_name=vm_name,
+        parameters=parameters,
+    ).wait()
+    filters = {
+        constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
+        _TAG_SKYPILOT_VM_ID: vm_id
+    }
+    instances = _filter_instances(compute_client, resource_group, filters)
+    assert len(instances) == count, (len(instances), count)
+    return instances
+
+
+def run_instances(region: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     provider_config = config.provider_config
     resource_group = provider_config['resource_group']
@@ -142,10 +245,13 @@ def run_instances(region: str, cluster_name_on_cloud: str, config: common.Provis
     tags = dict(sorted(copy.deepcopy(config.tags).items()))
     filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
-    existing_instances = _filter_instances(filters=filters, resource_group=resource_group)
+    existing_instances = _filter_instances(
+        compute_client,
+        filters=filters,
+        resource_group=resource_group,
+    )
     existing_instances.sort(key=lambda x: x.name)
     non_deleting_existing_instances = []
-
 
     pending_instances = []
     running_instances = []
@@ -153,7 +259,7 @@ def run_instances(region: str, cluster_name_on_cloud: str, config: common.Provis
     stopped_instances = []
 
     for instance in existing_instances:
-        status = _get_instance_status(compute_client, instance.name, resource_group)
+        status = _get_instance_status(compute_client, instance, resource_group)
 
         if status == AzureInstanceStatus.RUNNING:
             running_instances.append(instance)
@@ -163,10 +269,9 @@ def run_instances(region: str, cluster_name_on_cloud: str, config: common.Provis
             stopping_instances.append(instance)
         elif status == AzureInstanceStatus.PENDING:
             pending_instances.append(instance)
-        
+
         if status != AzureInstanceStatus.DELETING:
             non_deleting_existing_instances.append(instance)
-    
 
     def _create_instance_tag(target_instance, is_head: bool = True) -> str:
         if is_head:
@@ -194,8 +299,8 @@ def run_instances(region: str, cluster_name_on_cloud: str, config: common.Provis
         tags = target_instance.tags
         tags.update(new_instance_tags)
 
-        update = get_azure_sdk_function(
-            compute_client.virtual_machines, 'update')
+        update = _get_azure_sdk_function(compute_client.virtual_machines,
+                                         'update')
         update(resource_group, target_instance.name, parameters={'tags': tags})
         return target_instance.name
 
@@ -205,8 +310,8 @@ def run_instances(region: str, cluster_name_on_cloud: str, config: common.Provis
             head_instance_id = _create_instance_tag(running_instances[0])
         elif pending_instances:
             head_instance_id = _create_instance_tag(pending_instances[0])
-    
-    if config.resume_stopped_nodes and len(existing_instances)> config.count:
+
+    if config.resume_stopped_nodes and len(existing_instances) > config.count:
         raise RuntimeError(
             'The number of running/stopped/stopping '
             f'instances combined ({len(non_deleting_existing_instances)}) in '
@@ -214,8 +319,9 @@ def run_instances(region: str, cluster_name_on_cloud: str, config: common.Provis
             f'number requested by the user ({config.count}). '
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
-    
-    to_start_count = config.count - len(non_deleting_existing_instances) - len(pending_instances)
+
+    to_start_count = config.count - len(non_deleting_existing_instances) - len(
+        pending_instances)
 
     if to_start_count < 0:
         raise RuntimeError(
@@ -225,9 +331,9 @@ def run_instances(region: str, cluster_name_on_cloud: str, config: common.Provis
             f'requested by the user ({config.count}). '
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
-    
+
     if config.resume_stopped_nodes and to_start_count > 0 and (
-        stopping_instances or stopped_instances):
+            stopping_instances or stopped_instances):
         time_start = time.time()
         if stopping_instances:
             plural = 's' if len(stopping_instances) > 1 else ''
@@ -237,21 +343,24 @@ def run_instances(region: str, cluster_name_on_cloud: str, config: common.Provis
                 f'Instance{plural} {stopping_instances} {verb} still in '
                 'STOPPING state on Azure. It can only be resumed after it is '
                 'fully STOPPED. Waiting ...')
-        while (stopping_instances and to_start_count > len(stopped_instances)  and
+        while (stopping_instances and
+               to_start_count > len(stopped_instances) and
                time.time() - time_start < _RESUME_INSTANCE_TIMEOUT):
             inst = stopping_instances.pop(0)
             per_instance_time_start = time.time()
             while (time.time() - per_instance_time_start <
-                _RESUME_PER_INSTANCE_TIMEOUT):
-                status = _get_instance_status(compute_client, instance.name, resource_group)
-                if status in (AzureInstanceStatus.RUNNING, AzureInstanceStatus.STOPPED):
+                   _RESUME_PER_INSTANCE_TIMEOUT):
+                status = _get_instance_status(compute_client, inst,
+                                              resource_group)
+                if status in (AzureInstanceStatus.RUNNING,
+                              AzureInstanceStatus.STOPPED):
                     break
                 time.sleep(1)
             else:
                 logger.warning(
-                        f'Instance {inst.id} is still in stopping state '
-                        f'(Timeout: {_RESUME_PER_INSTANCE_TIMEOUT}). '
-                        'Retrying ...')
+                    f'Instance {inst.name} is still in stopping state '
+                    f'(Timeout: {_RESUME_PER_INSTANCE_TIMEOUT}). '
+                    'Retrying ...')
                 stopping_instances.append(inst)
                 time.sleep(5)
         if stopping_instances and to_start_count > len(stopped_instances):
@@ -265,31 +374,247 @@ def run_instances(region: str, cluster_name_on_cloud: str, config: common.Provis
         resumed_instances.sort(key=lambda x: x.name)
         resumed_instance_ids = [t.name for t in resumed_instances]
         logger.debug(f'Resuming stopped instances {resumed_instance_ids}.')
-        start_virtual_machine = get_azure_sdk_function(
+        start_virtual_machine = _get_azure_sdk_function(
             compute_client.virtual_machines, 'start')
         with pool.ThreadPool() as p:
-            p.starmap(start_virtual_machine,
-                      [(resource_group, inst.name) for inst in resumed_instances])
+            p.starmap(
+                start_virtual_machine,
+                [(resource_group, inst.name) for inst in resumed_instances])
 
         instances_to_tag = copy.copy(resumed_instances)
         if head_instance_id is None:
             head_instance_id = _create_instance_tag(instances_to_tag[0])
             instances_to_tag = instances_to_tag[1:]
-        
+
         if tags:
             # empty tags will result in error in the API call
             with pool.ThreadPool() as p:
-                p.starmap(
-                    _create_instance_tag,
-                    [(inst, False) for inst in instances_to_tag])
-                
-        to_start_count -= len(resumed_instances)
+                p.starmap(_create_instance_tag,
+                          [(inst, False) for inst in instances_to_tag])
 
-        if to_start_count > 0:
-            created_instances = _create_instances()
+    to_start_count -= len(resumed_instance_ids)
 
-        
-    pass
+    if to_start_count > 0:
+        resource_client = azure.get_client('resource', subscription_id)
+        created_instances = _create_instances(
+            compute_client=compute_client,
+            resource_client=resource_client,
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            resource_group=resource_group,
+            provider_config=provider_config,
+            node_config=config.node_config,
+            tags=tags,
+            count=to_start_count)
+        created_instance_ids = [inst.name for inst in created_instances]
+        if head_instance_id is None:
+            head_instance_id = _create_instance_tag(created_instances[0])
+
+    assert head_instance_id is not None, head_instance_id
+    return common.ProvisionRecord(
+        provider_name='azure',
+        region=region,
+        zone=None,
+        cluster_name=cluster_name_on_cloud,
+        head_instance_id=head_instance_id,
+        created_instance_ids=created_instance_ids,
+        resumed_instance_ids=resumed_instance_ids,
+    )
+
+
+def wait_instances(region: str, cluster_name_on_cloud: str,
+                   state: Optional[status_lib.ClusterStatus]) -> None:
+    """See sky/provision/__init__.py"""
+    del region, cluster_name_on_cloud, state
+    # We already wait for the instances to be running in run_instances.
+    # So we don't need to wait here.
+
+
+def get_cluster_info(
+        region: str,
+        cluster_name_on_cloud: str,
+        provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
+    """See sky/provision/__init__.py"""
+    del region
+    filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    resource_group = provider_config['resource_group']
+    subscription_id = provider_config.get('subscription_id',
+                                          azure.get_subscription_id())
+    compute_client = azure.get_client('compute', subscription_id)
+
+    running_instances = _filter_instances(
+        compute_client,
+        resource_group,
+        filters,
+        status_filters=[AzureInstanceStatus.RUNNING])
+    head_instance_id = _get_head_instance_id(running_instances)
+
+    instances = {}
+    use_internal_ips = provider_config.get("use_internal_ips", False)
+    for inst in running_instances:
+        internal_ip, external_ip = _get_instance_ips(compute_client, inst,
+                                                     resource_group,
+                                                     use_internal_ips)
+        instances[inst.name] = [
+            common.InstanceInfo(
+                instance_id=inst.name,
+                internal_ip=internal_ip,
+                external_ip=external_ip,
+                tags=inst.tags,
+            )
+        ]
+    instances = (dict(sorted(instances.items(), key=lambda x: x[0])))
+    return common.ClusterInfo(
+        provider_name='azure',
+        head_instance_id=head_instance_id,
+        instances=instances,
+        provider_config=provider_config,
+    )
+
+
+def stop_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+
+    subscription_id = provider_config['subscription_id']
+    resource_group = provider_config['resource_group']
+    compute_client = azure.get_client('compute', subscription_id)
+    tag_filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    if worker_only:
+        tag_filters[constants.TAG_RAY_NODE_KIND] = 'worker'
+
+    nodes = _filter_instances(compute_client, resource_group, tag_filters)
+    stop_virtual_machine = _get_azure_sdk_function(
+        client=compute_client.virtual_machines, function_name='deallocate')
+    with pool.ThreadPool() as p:
+        p.starmap(stop_virtual_machine,
+                  [(resource_group, node.name) for node in nodes])
+
+
+def terminate_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    # TODO(zhwu): check the following. Also, seems we can directly force
+    # delete a resource group.
+    subscription_id = provider_config['subscription_id']
+    resource_group = provider_config['resource_group']
+    if worker_only:
+        compute_client = azure.get_client('compute', subscription_id)
+        delete_virtual_machine = _get_azure_sdk_function(
+            client=compute_client.virtual_machines, function_name='delete')
+        filters = {
+            constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
+            constants.TAG_RAY_NODE_KIND: 'worker'
+        }
+        nodes = _filter_instances(compute_client, resource_group, filters)
+        with pool.ThreadPool() as p:
+            p.starmap(delete_virtual_machine,
+                      [(resource_group, node.name) for node in nodes])
+        return
+
+    assert provider_config is not None, cluster_name_on_cloud
+
+    resource_group_client = azure.get_client('resource', subscription_id)
+    delete_resource_group = _get_azure_sdk_function(
+        client=resource_group_client.resource_groups, function_name='delete')
+
+    delete_resource_group(resource_group, force_deletion_types=None)
+
+
+def _get_instance_status(compute_client, vm,
+                         resource_group: str) -> Optional[AzureInstanceStatus]:
+    try:
+        instance = compute_client.virtual_machines.instance_view(
+            resource_group_name=resource_group, vm_name=vm.name)
+    except azure.exceptions().ResourceNotFoundError as e:
+        if 'ResourceNotFound' in str(e):
+            return None
+        raise
+    provisioning_state = vm.provisioning_state
+    instance_dict = instance.as_dict()
+    for status in instance_dict['statuses']:
+        code_state = status['code'].split('/')
+        # It is possible that sometimes the 'code' is empty string, and we
+        # should skip them.
+        if len(code_state) != 2:
+            continue
+        code, state = code_state
+        # skip provisioning status
+        if code == 'PowerState':
+            return AzureInstanceStatus.from_raw_states(provisioning_state,
+                                                       state)
+    return AzureInstanceStatus.from_raw_states(provisioning_state, None)
+
+
+def _filter_instances(
+        compute_client,
+        resource_group: str,
+        filters: Dict[str, str],
+        status_filters: Optional[List[AzureInstanceStatus]] = None
+) -> List[Any]:
+
+    def match_tags(vm):
+        for k, v in filters.items():
+            if vm.tags.get(k) != v:
+                return False
+        return True
+
+    try:
+        list_virtual_machines = _get_azure_sdk_function(
+            client=compute_client.virtual_machines, function_name='list')
+        vms = list_virtual_machines(resource_group_name=resource_group)
+        nodes = list(filter(match_tags, vms))
+    except azure.exceptions().ResourceNotFoundError as e:
+        if 'ResourceGroupNotFound' in str(e):
+            return []
+        raise
+    if status_filters is not None:
+        nodes = [
+            node for node in nodes if _get_instance_status(
+                compute_client, node, resource_group) in status_filters
+        ]
+    return nodes
+
+
+@common_utils.retry
+def query_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
+) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, cluster_name_on_cloud
+
+    subscription_id = provider_config['subscription_id']
+    resource_group = provider_config['resource_group']
+    filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    compute_client = azure.get_client('compute', subscription_id)
+    nodes = _filter_instances(compute_client, resource_group, filters)
+    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+
+    def _fetch_and_map_status(node, resource_group: str):
+        compute_client = azure.get_client('compute', subscription_id)
+        status = _get_instance_status(compute_client, node, resource_group)
+
+        if status is None and non_terminated_only:
+            return
+        statuses[node.name] = (None if status is None else
+                               status.to_cluster_status())
+
+    with pool.ThreadPool() as p:
+        p.starmap(_fetch_and_map_status,
+                  [(node, resource_group) for node in nodes])
+
+    return statuses
+
 
 def open_ports(
     cluster_name_on_cloud: str,
@@ -302,10 +627,10 @@ def open_ports(
     resource_group = provider_config['resource_group']
     network_client = azure.get_client('network', subscription_id)
 
-    update_network_security_groups = get_azure_sdk_function(
+    update_network_security_groups = _get_azure_sdk_function(
         client=network_client.network_security_groups,
         function_name='create_or_update')
-    list_network_security_groups = get_azure_sdk_function(
+    list_network_security_groups = _get_azure_sdk_function(
         client=network_client.network_security_groups, function_name='list')
     for nsg in list_network_security_groups(resource_group):
         try:
@@ -368,160 +693,3 @@ def cleanup_ports(
     # Azure will automatically cleanup network security groups when cleanup
     # resource group. So we don't need to do anything here.
     del cluster_name_on_cloud, ports, provider_config  # Unused.
-
-
-def stop_instances(
-    cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
-    worker_only: bool = False,
-) -> None:
-    """See sky/provision/__init__.py"""
-    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
-
-    subscription_id = provider_config['subscription_id']
-    resource_group = provider_config['resource_group']
-    compute_client = azure.get_client('compute', subscription_id)
-    tag_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
-    if worker_only:
-        tag_filters[TAG_RAY_NODE_KIND] = 'worker'
-
-    nodes = _filter_instances(compute_client, tag_filters, resource_group)
-    stop_virtual_machine = get_azure_sdk_function(
-        client=compute_client.virtual_machines, function_name='deallocate')
-    with pool.ThreadPool() as p:
-        p.starmap(stop_virtual_machine,
-                  [(resource_group, node.name) for node in nodes])
-
-
-def terminate_instances(
-    cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
-    worker_only: bool = False,
-) -> None:
-    """See sky/provision/__init__.py"""
-    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
-    # TODO(zhwu): check the following. Also, seems we can directly force
-    # delete a resource group.
-    subscription_id = provider_config['subscription_id']
-    resource_group = provider_config['resource_group']
-    if worker_only:
-        compute_client = azure.get_client('compute', subscription_id)
-        delete_virtual_machine = get_azure_sdk_function(
-            client=compute_client.virtual_machines, function_name='delete')
-        filters = {
-            TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-            TAG_RAY_NODE_KIND: 'worker'
-        }
-        nodes = _filter_instances(compute_client, filters, resource_group)
-        with pool.ThreadPool() as p:
-            p.starmap(delete_virtual_machine,
-                      [(resource_group, node.name) for node in nodes])
-        return
-
-    assert provider_config is not None, cluster_name_on_cloud
-
-    resource_group_client = azure.get_client('resource', subscription_id)
-    delete_resource_group = get_azure_sdk_function(
-        client=resource_group_client.resource_groups, function_name='delete')
-
-    delete_resource_group(resource_group, force_deletion_types=None)
-
-
-# def _get_vm_ips(network_client, vm, resource_group: str,
-#                 use_internal_ips: bool) -> Tuple[str, str]:
-#     nic_id = vm.network_profile.network_interfaces[0].id
-#     nic_name = nic_id.split("/")[-1]
-#     nic = network_client.network_interfaces.get(
-#         resource_group_name=resource_group,
-#         network_interface_name=nic_name,
-#     )
-#     ip_config = nic.ip_configurations[0]
-
-#     external_ip = None
-#     if not use_internal_ips:
-#         public_ip_id = ip_config.public_ip_address.id
-#         public_ip_name = public_ip_id.split("/")[-1]
-#         public_ip = network_client.public_ip_addresses.get(
-#             resource_group_name=resource_group,
-#             public_ip_address_name=public_ip_name,
-#         )
-#         external_ip = public_ip.ip_address
-
-#     internal_ip = ip_config.private_ip_address
-
-#     return (external_ip, internal_ip)
-
-
-def _get_instance_status(compute_client, vm_name: str, resource_group: str) -> Optional[AzureInstanceStatus]:
-    try:
-        instance = compute_client.virtual_machines.instance_view(
-        resource_group_name=resource_group, vm_name=vm_name)
-    except azure.exceptions().ResourceNotFoundError as e:
-        if 'ResourceNotFound' in str(e):
-            return None
-        raise
-    provisioning_state = instance.provisioning_state
-    instance_dict = instance.as_dict()
-    for status in instance_dict['statuses']:
-        code_state = status['code'].split('/')
-        # It is possible that sometimes the 'code' is empty string, and we
-        # should skip them.
-        if len(code_state) != 2:
-            continue
-        code, state = code_state
-        # skip provisioning status
-        if code == 'PowerState':
-            return AzureInstanceStatus.from_raw_states(provisioning_state, state)
-    raise ValueError(f'Failed to parse status from Azure response: {instance_dict}')
-
-
-def _filter_instances(compute_client, filters: Dict[str, str],
-                      resource_group: str) -> List[Any]:
-
-    def match_tags(vm):
-        for k, v in filters.items():
-            if vm.tags.get(k) != v:
-                return False
-        return True
-
-    try:
-        list_virtual_machines = get_azure_sdk_function(
-            client=compute_client.virtual_machines, function_name='list')
-        vms = list_virtual_machines(resource_group_name=resource_group)
-        nodes = list(filter(match_tags, vms))
-    except azure.exceptions().ResourceNotFoundError as e:
-        if 'ResourceGroupNotFound' in str(e):
-            return []
-        raise
-    return nodes
-
-
-@common_utils.retry
-def query_instances(
-    cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
-    non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
-    """See sky/provision/__init__.py"""
-    assert provider_config is not None, cluster_name_on_cloud
-
-    subscription_id = provider_config['subscription_id']
-    resource_group = provider_config['resource_group']
-    filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
-    compute_client = azure.get_client('compute', subscription_id)
-    nodes = _filter_instances(compute_client, filters, resource_group)
-    statuses = {}
-
-    def _fetch_and_map_status(node, resource_group: str) -> 'status_lib.ClusterStatus':
-        compute_client = azure.get_client('compute', subscription_id)
-        status = _get_instance_status(compute_client, node.name, resource_group)
-        
-        if status is None and non_terminated_only:
-            return
-        statuses[node.name] = status
-
-    with pool.ThreadPool() as p:
-        p.starmap(_fetch_and_map_status,
-                  [(node, resource_group) for node in nodes])
-
-    return statuses

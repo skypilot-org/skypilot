@@ -34,7 +34,9 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
 
 
 @common.log_function_start_end
-def bootstrap_instances(region: str, cluster_name: str, config: common.ProvisionConfig) -> common.ProvisionConfig:
+def bootstrap_instances(
+        region: str, cluster_name_on_cloud: str,
+        config: common.ProvisionConfig) -> common.ProvisionConfig:
     """See sky/provision/__init__.py"""
     provider_config = config.provider_config
     subscription_id = provider_config.get('subscription_id')
@@ -47,13 +49,13 @@ def bootstrap_instances(region: str, cluster_name: str, config: common.Provision
     provider_config['subscription_id'] = subscription_id
     logger.info(f'Using subscription id: {subscription_id}')
 
-    assert ('resource_group' in provider_config
-           ), 'Provider config must include resource_group field'
+    assert (
+        'resource_group'
+        in provider_config), 'Provider config must include resource_group field'
     resource_group = provider_config['resource_group']
 
-    assert (
-        'location'
-        in provider_config), 'Provider config must include location field'
+    assert ('location'
+            in provider_config), 'Provider config must include location field'
     params = {'location': provider_config['location']}
 
     if 'tags' in provider_config:
@@ -71,24 +73,12 @@ def bootstrap_instances(region: str, cluster_name: str, config: common.Provision
     with open(template_path, 'r') as template_fp:
         template = json.load(template_fp)
 
-    logger.info('Using cluster name: %s', config['cluster_name'])
-
-    # set unique id for resources in this cluster
-    unique_id = provider_config.get('unique_id')
-    if unique_id is None:
-        hasher = sha256()
-        hasher.update(provider_config['resource_group'].encode('utf-8'))
-        unique_id = hasher.hexdigest()[:UNIQUE_ID_LEN]
-    else:
-        unique_id = str(unique_id)
-    provider_config['unique_id'] = unique_id
-    logger.info('Using unique id: %s', unique_id)
-    cluster_id = '{}-{}'.format(config['cluster_name'], unique_id)
+    logger.info(f'Using cluster name: {cluster_name_on_cloud}')
 
     subnet_mask = provider_config.get('subnet_mask')
     if subnet_mask is None:
         # choose a random subnet, skipping most common value of 0
-        random.seed(unique_id)
+        random.seed(cluster_name_on_cloud)
         subnet_mask = '10.{}.0.0/16'.format(random.randint(1, 254))
     logger.info('Using subnet mask: %s', subnet_mask)
 
@@ -101,24 +91,39 @@ def bootstrap_instances(region: str, cluster_name: str, config: common.Provision
                     'value': subnet_mask
                 },
                 'clusterId': {
-                    'value': cluster_id
+                    # We use the cluster name as the unique ID for the cluster,
+                    # as we have already appended the user hash to the cluster
+                    # name.
+                    'value': cluster_name_on_cloud
                 },
             },
         }
     }
 
+    # Skip creating or updating the deployment if the deployment already exists
+    # and the cluster name is the same.
+    check_existance = get_azure_sdk_function(client=resource_client.deployments,
+                                             function_name='check_existence')
+    try:
+        deployment_exists = check_existance(resource_group_name=resource_group,
+                                            deployment_name='skypilot-config')
+    except azure.exceptions().ResourceNotFoundError:
+        deployment_exists = False
+
+    if deployment_exists:
+        logger.info('Deployment already exists. Skipping deployment creation.')
+        return config
+
+    logger.info('Creating/Updating deployment: skypilot-config')
     create_or_update = get_azure_sdk_function(
         client=resource_client.deployments, function_name='create_or_update')
-    # TODO (skypilot): this takes a long time (> 40 seconds) for stopping an
-    # azure VM, and this can be called twice during ray down.
-    outputs = (create_or_update(
+    # TODO (skypilot): this takes a long time (> 40 seconds) to run.
+    outputs = create_or_update(
         resource_group_name=resource_group,
-        deployment_name='ray-config',
+        deployment_name='skypilot-config',
         parameters=parameters,
-    ).result().properties.outputs)
+    ).result().properties.outputs
 
-    # We should wait for the NSG to be created before opening any ports
-    # to avoid overriding the newly-added NSG rules.
     nsg_id = outputs['nsg']['value']
 
     # append output resource ids to be used with vm creation
