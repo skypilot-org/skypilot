@@ -328,6 +328,56 @@ class AzureNodeProvider(NodeProvider):
             parameters=parameters,
         ).wait()
 
+        # Configure driver extension for A10 GPUs
+        # TODO(tian): Only do this for A10 vms.
+        logger.info("Begin to configure A10 driver extension for VM: %s", vm_name)
+        self._configure_a10_driver_extension(vm_name)
+        logger.info("A10 driver extension configured for VM: %s", vm_name)
+
+    def _configure_a10_driver_extension(self, vm_name):
+        resource_group = self.provider_config["resource_group"]
+        parameters = {
+            "properties": {
+                "mode": DeploymentMode.incremental,
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "vmName": {
+                            "type": "string",
+                            "metadata": {
+                                "description": "Name of the virtual machine"
+                            }
+                        }
+                    },
+                    "resources": [
+                        {
+                            "type": "Microsoft.Compute/virtualMachines/extensions",
+                            "apiVersion": "2015-06-15",
+                            "location": "[resourceGroup().location]",
+                            "name": "[concat(parameters('vmName'),'/NvidiaGpuDriverLinux')]",
+                            "properties": {
+                                "publisher": "Microsoft.HpcCompute",
+                                "type": "NvidiaGpuDriverLinux",
+                                "typeHandlerVersion": "1.9",
+                                "autoUpgradeMinorVersion": True,
+                                "settings": {},
+                            },
+                        }
+                    ],
+                },
+                "parameters": {"vmName": {"value": vm_name}},
+            }
+        }
+        create_or_update = get_azure_sdk_function(
+            client=self.resource_client.deployments, function_name="create_or_update"
+        )
+        create_or_update(
+            resource_group_name=resource_group,
+            deployment_name=vm_name,
+            parameters=parameters,
+        ).wait()
+
     @synchronized
     def set_node_tags(self, node_id, tags):
         """Sets the tag values (string dict) for the specified node."""
