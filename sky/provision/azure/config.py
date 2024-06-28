@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 import random
+import time
 from typing import Any, Callable
 
 from azure.mgmt.resource.resources.models import DeploymentMode
@@ -17,6 +18,8 @@ from sky.provision import common
 UNIQUE_ID_LEN = 4
 
 logger = logging.getLogger(__name__)
+
+_RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT = 480  # 8 minutes
 
 
 def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
@@ -69,7 +72,25 @@ def bootstrap_instances(
     rg_create_or_update = get_azure_sdk_function(
         client=resource_client.resource_groups,
         function_name='create_or_update')
-    rg_create_or_update(resource_group_name=resource_group, parameters=params)
+    rg_creation_start = time.time()
+    while time.time(
+    ) - rg_creation_start < _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT:
+        try:
+            rg_create_or_update(resource_group_name=resource_group,
+                                parameters=params)
+            break
+        except azure.exceptions().ResourceExistsError as e:
+            if 'ResourceGroupBeingDeleted' in str(e):
+                logger.info(
+                    f'Resource group {resource_group} is being deleted. '
+                    'Waiting for deletion before creating a new one.')
+                time.sleep(1)
+                continue
+            raise
+    else:
+        raise TimeoutError(
+            f'Timed out waiting for resource group {resource_group} to be '
+            'deleted.')
 
     # load the template file
     current_path = Path(__file__).parent
@@ -108,13 +129,19 @@ def bootstrap_instances(
     # and the cluster name is the same.
     get_deployment = get_azure_sdk_function(client=resource_client.deployments,
                                             function_name='get')
+    deployment_exists = False
     try:
         deployment = get_deployment(resource_group_name=resource_group,
                                     deployment_name='skypilot-config')
         logger.info('Deployment already exists. Skipping deployment creation.')
 
         outputs = deployment.properties.outputs
+        if outputs is not None:
+            deployment_exists = True
     except azure.exceptions().ResourceNotFoundError:
+        deployment_exists = False
+
+    if not deployment_exists:
         logger.info('Creating/Updating deployment: skypilot-config')
         create_or_update = get_azure_sdk_function(
             client=resource_client.deployments,
