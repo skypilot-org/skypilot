@@ -162,7 +162,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
                         f'(current head instance id: {head_instance_id}, '
                         f'newly discovered id: {inst.id}). It is likely '
                         f'that something goes wrong.')
-                head_instance_id = inst.id
+                head_instance_id = inst.name
                 break
     return head_instance_id
 
@@ -275,27 +275,15 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     def _create_instance_tag(target_instance, is_head: bool = True) -> str:
         if is_head:
-            new_instance_tags = [{
-                'Key': constants.TAG_SKYPILOT_HEAD_NODE,
-                'Value': '1'
-            }, {
-                'Key': constants.TAG_RAY_NODE_KIND,
-                'Value': 'head'
-            }, {
-                'Key': 'Name',
-                'Value': f'sky-{cluster_name_on_cloud}-head'
-            }]
+            new_instance_tags = {
+                constants.TAG_SKYPILOT_HEAD_NODE: '1',
+                constants.TAG_RAY_NODE_KIND: 'head'
+            }
         else:
-            new_instance_tags = [{
-                'Key': constants.TAG_SKYPILOT_HEAD_NODE,
-                'Value': '0'
-            }, {
-                'Key': constants.TAG_RAY_NODE_KIND,
-                'Value': 'worker'
-            }, {
-                'Key': 'Name',
-                'Value': f'sky-{cluster_name_on_cloud}-worker'
-            }]
+            new_instance_tags = {
+                constants.TAG_SKYPILOT_HEAD_NODE: '0',
+                constants.TAG_RAY_NODE_KIND: 'worker'
+            }
         tags = target_instance.tags
         tags.update(new_instance_tags)
 
@@ -441,6 +429,7 @@ def get_cluster_info(
     subscription_id = provider_config.get('subscription_id',
                                           azure.get_subscription_id())
     compute_client = azure.get_client('compute', subscription_id)
+    network_client = azure.get_client('network', subscription_id)
 
     running_instances = _filter_instances(
         compute_client,
@@ -452,7 +441,7 @@ def get_cluster_info(
     instances = {}
     use_internal_ips = provider_config.get("use_internal_ips", False)
     for inst in running_instances:
-        internal_ip, external_ip = _get_instance_ips(compute_client, inst,
+        internal_ip, external_ip = _get_instance_ips(network_client, inst,
                                                      resource_group,
                                                      use_internal_ips)
         instances[inst.name] = [
@@ -463,7 +452,7 @@ def get_cluster_info(
                 tags=inst.tags,
             )
         ]
-    instances = (dict(sorted(instances.items(), key=lambda x: x[0])))
+    instances = dict(sorted(instances.items(), key=lambda x: x[0]))
     return common.ClusterInfo(
         provider_name='azure',
         head_instance_id=head_instance_id,

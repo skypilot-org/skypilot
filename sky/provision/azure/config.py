@@ -102,27 +102,25 @@ def bootstrap_instances(
 
     # Skip creating or updating the deployment if the deployment already exists
     # and the cluster name is the same.
-    check_existance = get_azure_sdk_function(client=resource_client.deployments,
-                                             function_name='check_existence')
+    get_deployment = get_azure_sdk_function(client=resource_client.deployments,
+                                            function_name='get')
     try:
-        deployment_exists = check_existance(resource_group_name=resource_group,
-                                            deployment_name='skypilot-config')
-    except azure.exceptions().ResourceNotFoundError:
-        deployment_exists = False
-
-    if deployment_exists:
+        deployment = get_deployment(resource_group_name=resource_group,
+                                    deployment_name='skypilot-config')
         logger.info('Deployment already exists. Skipping deployment creation.')
-        return config
 
-    logger.info('Creating/Updating deployment: skypilot-config')
-    create_or_update = get_azure_sdk_function(
-        client=resource_client.deployments, function_name='create_or_update')
-    # TODO (skypilot): this takes a long time (> 40 seconds) to run.
-    outputs = create_or_update(
-        resource_group_name=resource_group,
-        deployment_name='skypilot-config',
-        parameters=parameters,
-    ).result().properties.outputs
+        outputs = deployment.properties.outputs
+    except azure.exceptions().ResourceNotFoundError:
+        logger.info('Creating/Updating deployment: skypilot-config')
+        create_or_update = get_azure_sdk_function(
+            client=resource_client.deployments,
+            function_name='create_or_update')
+        # TODO (skypilot): this takes a long time (> 40 seconds) to run.
+        outputs = create_or_update(
+            resource_group_name=resource_group,
+            deployment_name='skypilot-config',
+            parameters=parameters,
+        ).result().properties.outputs
 
     nsg_id = outputs['nsg']['value']
 
