@@ -1,9 +1,12 @@
-from hashlib import sha256
+"""Azure configuration bootstrapping.
+
+Creates the resource group and deploys the configuration template to Azure for
+a cluster to be launched.
+"""
 import json
 import logging
 from pathlib import Path
 import random
-import time
 from typing import Any, Callable
 
 from azure.mgmt.resource.resources.models import DeploymentMode
@@ -38,13 +41,14 @@ def bootstrap_instances(
         region: str, cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     """See sky/provision/__init__.py"""
+    del region  # unused
     provider_config = config.provider_config
     subscription_id = provider_config.get('subscription_id')
     if subscription_id is None:
         subscription_id = azure.get_subscription_id()
     # Increase the timeout to fix the Azure get-access-token (used by ray azure
     # node_provider) timeout issue.
-    # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
+    # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110 # pylint: disable=line-too-long
     resource_client = azure.get_client('resource', subscription_id)
     provider_config['subscription_id'] = subscription_id
     logger.info(f'Using subscription id: {subscription_id}')
@@ -70,7 +74,7 @@ def bootstrap_instances(
     # load the template file
     current_path = Path(__file__).parent
     template_path = current_path.joinpath('azure-config-template.json')
-    with open(template_path, 'r') as template_fp:
+    with open(template_path, 'r', encoding='utf-8') as template_fp:
         template = json.load(template_fp)
 
     logger.info(f'Using cluster name: {cluster_name_on_cloud}')

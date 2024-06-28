@@ -32,6 +32,7 @@ _TAG_SKYPILOT_VM_ID = 'skypilot-vm-id'
 
 
 class AzureInstanceStatus(enum.Enum):
+    """Statuses enum for Azure instances with power and provisioning states."""
     PENDING = 'pending'
     RUNNING = 'running'
     STOPPING = 'stopping'
@@ -47,8 +48,8 @@ class AzureInstanceStatus(enum.Enum):
             # for the VM.
             'stopping': cls.STOPPING,
             'stopped': cls.STOPPED,
-            # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
-            # bill for the VM.
+            # 'VM deallocated' in Azure means Stopped (Deallocated), which does
+            # not bill for the VM.
             'deallocating': cls.STOPPING,
             'deallocated': cls.STOPPED,
         }
@@ -61,8 +62,8 @@ class AzureInstanceStatus(enum.Enum):
             'Failed': cls.PENDING,
             'Migrating': cls.PENDING,
             'Deleting': cls.DELETING,
-            # Succeeded in provisioning state means the VM is provisioned but not
-            # necessarily running.
+            # Succeeded in provisioning state means the VM is provisioned but
+            # not necessarily running.
             # 'Succeeded': status_lib.ClusterStatus.UP,
         }
 
@@ -87,8 +88,8 @@ class AzureInstanceStatus(enum.Enum):
             if provisioning_state not in provisioning_state_map:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ClusterStatusFetchingError(
-                        f'Failed to parse status from Azure response: {provisioning_state}'
-                    )
+                        'Failed to parse status from Azure response: '
+                        f'{provisioning_state}')
             status = provisioning_state_map[provisioning_state]
         else:
             if power_state not in power_state_map:
@@ -125,7 +126,7 @@ def _get_azure_sdk_function(client: Any, function_name: str) -> Callable:
 def _get_instance_ips(network_client, vm, resource_group: str,
                       use_internal_ips: bool) -> Tuple[str, Optional[str]]:
     nic_id = vm.network_profile.network_interfaces[0].id
-    nic_name = nic_id.split("/")[-1]
+    nic_name = nic_id.split('/')[-1]
     nic = network_client.network_interfaces.get(
         resource_group_name=resource_group,
         network_interface_name=nic_name,
@@ -135,7 +136,7 @@ def _get_instance_ips(network_client, vm, resource_group: str,
     external_ip = None
     if not use_internal_ips:
         public_ip_id = ip_config.public_ip_address.id
-        public_ip_name = public_ip_id.split("/")[-1]
+        public_ip_name = public_ip_id.split('/')[-1]
         public_ip = network_client.public_ip_addresses.get(
             resource_group_name=resource_group,
             public_ip_address_name=public_ip_name,
@@ -186,36 +187,36 @@ def _create_instances(compute_client, resource_client,
 
     # load the template file
     current_path = pathlib.Path(__file__).parent
-    template_path = current_path.joinpath("azure-vm-template.json")
-    with open(template_path, "r") as template_fp:
+    template_path = current_path.joinpath('azure-vm-template.json')
+    with open(template_path, 'r', encoding='utf-8') as template_fp:
         template = json.load(template_fp)
 
     vm_name = f'{cluster_name_on_cloud}-{vm_id}'
-    use_internal_ips = provider_config.get("use_internal_ips", False)
+    use_internal_ips = provider_config.get('use_internal_ips', False)
 
-    template_params = node_config["azure_arm_parameters"].copy()
-    template_params["vmName"] = vm_name
-    template_params["provisionPublicIp"] = not use_internal_ips
-    template_params["vmTags"] = node_tags
-    template_params["vmCount"] = count
-    template_params["msi"] = provider_config["msi"]
-    template_params["nsg"] = provider_config["nsg"]
-    template_params["subnet"] = provider_config["subnet"]
+    template_params = node_config['azure_arm_parameters'].copy()
+    template_params['vmName'] = vm_name
+    template_params['provisionPublicIp'] = not use_internal_ips
+    template_params['vmTags'] = node_tags
+    template_params['vmCount'] = count
+    template_params['msi'] = provider_config['msi']
+    template_params['nsg'] = provider_config['nsg']
+    template_params['subnet'] = provider_config['subnet']
 
     parameters = {
-        "properties": {
-            "mode": azure.deployment_mode().incremental,
-            "template": template,
-            "parameters": {
+        'properties': {
+            'mode': azure.deployment_mode().incremental,
+            'template': template,
+            'parameters': {
                 key: {
-                    "value": value
+                    'value': value
                 } for key, value in template_params.items()
             },
         }
     }
 
     create_or_update = _get_azure_sdk_function(
-        client=resource_client.deployments, function_name="create_or_update")
+        client=resource_client.deployments, function_name='create_or_update')
     create_or_update(
         resource_group_name=resource_group,
         deployment_name=vm_name,
@@ -439,7 +440,7 @@ def get_cluster_info(
     head_instance_id = _get_head_instance_id(running_instances)
 
     instances = {}
-    use_internal_ips = provider_config.get("use_internal_ips", False)
+    use_internal_ips = provider_config.get('use_internal_ips', False)
     for inst in running_instances:
         internal_ip, external_ip = _get_instance_ips(network_client, inst,
                                                      resource_group,
@@ -623,8 +624,9 @@ def open_ports(
         client=network_client.network_security_groups, function_name='list')
     for nsg in list_network_security_groups(resource_group):
         try:
-            # Wait the NSG creation to be finished before opening a port. The cluster
-            # provisioning triggers the NSG creation, but it may not be finished yet.
+            # Wait the NSG creation to be finished before opening a port. The
+            # cluster provisioning triggers the NSG creation, but it may not be
+            # finished yet.
             backoff = common_utils.Backoff(max_backoff_factor=1)
             start_time = time.time()
             while True:
