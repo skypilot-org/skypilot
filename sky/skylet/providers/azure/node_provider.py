@@ -329,8 +329,15 @@ class AzureNodeProvider(NodeProvider):
         )
         poller.wait()
 
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import azure_catalog
+
+        instance_type = node_config["azure_arm_parameters"].get("vmSize", "")
+        accs = azure_catalog.get_accelerators_from_instance_type(instance_type)
+        if accs is None or "A10" not in accs:
+            return
+
         # Configure driver extension for A10 GPUs
-        # TODO(tian): Only do this for A10 vms.
         create_result = poller.result().as_dict()
         output_resources = create_result.get("properties", {}).get(
             "output_resources", []
