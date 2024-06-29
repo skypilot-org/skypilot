@@ -15,14 +15,14 @@ workdir: ./examples
 
 file_mounts:
   ~/bucket_workdir:
-    # Change this to the your own globally unique bucket name.
+    # Change this to your own globally unique bucket name.
     name: sky-workdir-zhwu
     source: ./examples
     persistent: false
     mode: COPY
 
   /output_path:
-    # Change this to the your own globally unique bucket name.
+    # Change this to your own globally unique bucket name.
     name: sky-output-bucket
     mode: MOUNT
 
