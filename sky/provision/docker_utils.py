@@ -139,7 +139,8 @@ class DockerInitializer:
     def _run(self,
              cmd,
              run_env='host',
-             wait_for_docker_daemon: bool = False) -> str:
+             wait_for_docker_daemon: bool = False,
+             separate_stderr: bool = False) -> str:
 
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
@@ -155,10 +156,12 @@ class DockerInitializer:
         cnt = 0
         retry = 3
         while True:
-            rc, stdout, stderr = self.runner.run(cmd,
-                                                 require_outputs=True,
-                                                 stream_logs=False,
-                                                 log_path=self.log_path)
+            rc, stdout, stderr = self.runner.run(
+                cmd,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=separate_stderr,
+                log_path=self.log_path)
             if (not wait_for_docker_daemon or
                     DOCKER_PERMISSION_DENIED_STR not in stdout + stderr):
                 break
@@ -173,8 +176,10 @@ class DockerInitializer:
         subprocess_utils.handle_returncode(
             rc,
             cmd,
-            error_msg='Failed to run docker setup commands',
-            stderr=stdout + stderr)
+            error_msg='Failed to run docker setup commands.',
+            stderr=stdout + stderr,
+            # Print out the error message if the command failed.
+            stream_logs=True)
         return stdout.strip()
 
     def initialize(self) -> str:
@@ -340,9 +345,14 @@ class DockerInitializer:
         user_pos = string.find('~')
         if user_pos > -1:
             if self.home_dir is None:
-                self.home_dir = (self._run(
-                    f'{self.docker_cmd} exec {self.container_name} '
-                    'printenv HOME',))
+                cmd = (f'{self.docker_cmd} exec {self.container_name} '
+                       'printenv HOME')
+                self.home_dir = self._run(cmd, separate_stderr=True)
+                # Check for unexpected newline in home directory, which can be
+                # a common issue when the output is mixed with stderr.
+                assert '\n' not in self.home_dir, (
+                    'Unexpected newline in home directory '
+                    f'({{self.home_dir}}) retrieved with {cmd}')
 
             if any_char:
                 return string.replace('~/', self.home_dir + '/')
