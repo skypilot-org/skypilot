@@ -44,12 +44,16 @@ def _api_logging_decorator(logger: str, level: int):
     This is used to suppress the verbose logging from urllib3 when calls to the
     Kubernetes API timeout.
     """
+
     def decorated_api(api):
+
         def wrapped(*args, **kwargs):
             obj = api(*args, **kwargs)
             _decorate_methods(obj, set_logging_level(logger, level))
             return obj
+
         return wrapped
+
     return decorated_api
 
 
