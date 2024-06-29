@@ -31,7 +31,6 @@ API_TIMEOUT = 5
 
 
 def _decorate_methods(obj, decorator):
-
     for attr_name in dir(obj):
         attr = getattr(obj, attr_name)
         if callable(attr) and not attr_name.startswith('__'):
@@ -40,16 +39,17 @@ def _decorate_methods(obj, decorator):
 
 
 def _api_logging_decorator(logger: str, level: int):
+    """Decorator to set logging level for API calls.
 
+    This is used to suppress the verbose logging from urllib3 when calls to the
+    Kubernetes API timeout.
+    """
     def decorated_api(api):
-
         def wrapped(*args, **kwargs):
             obj = api(*args, **kwargs)
             _decorate_methods(obj, set_logging_level(logger, level))
             return obj
-
         return wrapped
-
     return decorated_api
 
 
