@@ -32,7 +32,7 @@ docker:
 provider:
   # We use a custom node provider for GCP to create, stop and reuse instances.
   type: external  # type: gcp
-  module: sky.skylet.providers.gcp.GCPNodeProvider
+  module: sky.provision.gcp
   region: {{region}}
   availability_zone: {{zones}}
   # Keep (otherwise cannot reuse when re-provisioning).
@@ -50,6 +50,7 @@ provider:
   firewall_rule: {{firewall_rule}}
 {% endif %}
   use_internal_ips: {{use_internal_ips}}
+  force_enable_external_ips: {{force_enable_external_ips}}
 {%- if tpu_vm %}
   _has_tpus: True
 {%- endif %}
