@@ -91,12 +91,17 @@ class AzureNodeProvider(NodeProvider):
             return True
 
         try:
-            vms = self.compute_client.virtual_machines.list(
-                resource_group_name=self.provider_config["resource_group"]
+            vms = list(
+                self.compute_client.virtual_machines.list(
+                    resource_group_name=self.provider_config["resource_group"]
+                )
             )
-        except azure.exceptions().HttpResponseError as e:
-            if e.reason == "ResourceGroupNotFound":
-                vms = {}
+        except azure.exceptions().ResourceNotFoundError as e:
+            if "Code: ResourceGroupNotFound" in e.exc_msg:
+                logger.debug(
+                    "Resource group not found. VMs should have been terminated."
+                )
+                vms = []
             else:
                 raise
 
