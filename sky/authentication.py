@@ -439,6 +439,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             f'Key {secret_name} does not exist in the cluster, creating it...')
         kubernetes.core_api().create_namespaced_secret(namespace, secret)
 
+    private_key_path, _ = get_or_generate_keys()
     if network_mode == nodeport_mode:
         ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
         service_type = kubernetes_enums.KubernetesServiceType.NODEPORT
@@ -450,7 +451,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
             ssh_jump_name,
             nodeport_mode,
-            private_key_path=PRIVATE_SSH_KEY_PATH,
+            private_key_path=private_key_path,
             namespace=namespace)
     elif network_mode == port_forward_mode:
         # Using `kubectl port-forward` creates a direct tunnel to the pod and
@@ -468,7 +469,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
             ssh_target,
             port_forward_mode,
-            private_key_path=PRIVATE_SSH_KEY_PATH)
+            private_key_path=private_key_path)
     else:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')
