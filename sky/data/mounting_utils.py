@@ -117,7 +117,7 @@ def get_mount_cmd_rclone(rclone_config_data: str, rclone_config_path: str,
                  f'{bucket_rclone_profile}:{bucket_name} {mount_path} '
                  '--daemon --daemon-wait 0 '
                  '--allow-other --rc --vfs-cache-mode full '#--dir-cache-time 10s '
-                 '--transfers 1 --vfs-cache-poll-interval 5s && ' #todo: figure out if this should be a semicolon or an &&
+                 '--transfers 1 && '#--vfs-cache-poll-interval 5s && ' #todo: figure out if this should be a semicolon or an &&
                  'rclone rc vfs/refresh')
     return mount_cmd
 
