@@ -38,9 +38,6 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-    PORT_FORWARD_PROXY_CMD_TEMPLATE = \
-        'kubernetes-port-forward-proxy-command.sh.j2'
-    PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
     # Timeout for resource provisioning. This timeout determines how long to
     # wait for pod to be in pending status before giving up.
     # Larger timeout may be required for autoscaling clusters, since autoscaler
@@ -323,6 +320,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
+            'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
