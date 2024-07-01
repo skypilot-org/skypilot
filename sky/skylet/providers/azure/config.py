@@ -18,6 +18,8 @@ from sky.provision import common
 
 UNIQUE_ID_LEN = 4
 _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
+_WAIT_FOR_RESOURCE_GROUP_DELETION_TIMEOUT = 480  # 8 minutes
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +82,9 @@ def _configure_resource_group(config):
     rg_create_or_update = get_azure_sdk_function(
         client=resource_client.resource_groups, function_name="create_or_update"
     )
+    rg_creation_start = time.time()
     retry = 0
-    while True:
+    while time.time() - rg_creation_start < _WAIT_FOR_RESOURCE_GROUP_DELETION_TIMEOUT:
         try:
             rg_create_or_update(resource_group_name=resource_group, parameters=params)
             break
