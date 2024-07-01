@@ -701,58 +701,6 @@ class FailoverCloudErrorHandlerV1:
     """
 
     @staticmethod
-    def _azure_handler(blocked_resources: Set['resources_lib.Resources'],
-                       launchable_resources: 'resources_lib.Resources',
-                       region: 'clouds.Region',
-                       zones: Optional[List['clouds.Zone']], stdout: str,
-                       stderr: str):
-        del zones  # Unused.
-        # The underlying ray autoscaler will try all zones of a region at once.
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if ('Exception Details:' in s.strip() or 'InvalidTemplateDeployment'
-                in s.strip() or '(ReadOnlyDisabledSubscription)' in s.strip())
-        ]
-        if not errors:
-            if 'Head node fetch timed out' in stderr:
-                # Example: click.exceptions.ClickException: Head node fetch
-                # timed out. Failed to create head node.
-                # This is a transient error, but we have retried in need_ray_up
-                # and failed.  So we skip this region.
-                logger.info('Got \'Head node fetch timed out\' in '
-                            f'{region.name}.')
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(region=region.name))
-            elif 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
-
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        if any('(ReadOnlyDisabledSubscription)' in s for s in errors):
-            _add_to_blocked_resources(
-                blocked_resources,
-                resources_lib.Resources(cloud=clouds.Azure()))
-        else:
-            _add_to_blocked_resources(blocked_resources,
-                                      launchable_resources.copy(zone=None))
-
-    @staticmethod
     def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
                         launchable_resources: 'resources_lib.Resources',
                         region: 'clouds.Region',
@@ -1020,6 +968,24 @@ class FailoverCloudErrorHandlerV2:
     the errors raised by the cloud's API using the exception, instead of the
     stdout and stderr.
     """
+
+    @staticmethod
+    def _azure_handler(blocked_resources: Set['resources_lib.Resources'],
+                       launchable_resources: 'resources_lib.Resources',
+                       region: 'clouds.Region', zones: List['clouds.Zone'],
+                       err: Exception):
+        if '(ReadOnlyDisabledSubscription)' in str(err):
+            logger.info(
+                f'{colorama.Style.DIM}Azure subscription is read-only. '
+                'Skip provisioning on Azure. Please check the subscription set with '
+                'az account set -s <subscription_id>.'
+                f'{colorama.Style.RESET_ALL}')
+            _add_to_blocked_resources(
+                blocked_resources,
+                resources_lib.Resources(cloud=clouds.Azure()))
+        else:
+            _add_to_blocked_resources(blocked_resources,
+                                      launchable_resources.copy(zone=None))
 
     @staticmethod
     def _gcp_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -1822,19 +1788,6 @@ class RetryingVmProvisioner(object):
             returncode, stdout, stderr = ray_up_return_value
             if returncode == 0:
                 return False
-
-            if isinstance(to_provision_cloud, clouds.Azure):
-                if 'Failed to invoke the Azure CLI' in stderr:
-                    logger.info(
-                        'Retrying head node provisioning due to Azure CLI '
-                        'issues.')
-                    return True
-                if ('Head node fetch timed out. Failed to create head node.'
-                        in stderr):
-                    logger.info(
-                        'Retrying head node provisioning due to head fetching '
-                        'timeout.')
-                    return True
 
             if isinstance(to_provision_cloud, clouds.Lambda):
                 if 'Your API requests are being rate limited.' in stderr:
