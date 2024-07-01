@@ -429,8 +429,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         head_instance_id = _create_instance_tag(instances_to_tag[0])
         instances_to_tag = instances_to_tag[1:]
     else:
-        instances_to_tag = [inst for inst in instances_to_tag
-                            if inst.name != head_instance_id]
+        instances_to_tag = [
+            inst for inst in instances_to_tag if inst.name != head_instance_id
+        ]
 
     if instances_to_tag:
         # Tag the instances in case the old resumed instances are not correctly
