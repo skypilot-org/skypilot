@@ -440,7 +440,8 @@ def _post_provision_setup(
         raise RuntimeError(
             f'Provision failed for cluster {cluster_name!r}. '
             'Could not find any head instance. To fix: refresh '
-            'status with: sky status -r; and retry provisioning.')
+            f'status with: sky status -r; and retry provisioning. {cluster_info}'
+        )
 
     # TODO(suquark): Move wheel build here in future PRs.
     # We don't set docker_user here, as we are configuring the VM itself.
