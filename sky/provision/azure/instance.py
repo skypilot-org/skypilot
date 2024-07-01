@@ -70,7 +70,7 @@ class AzureInstanceStatus(enum.Enum):
             'Deleting': cls.DELETING,
             # Succeeded in provisioning state means the VM is provisioned but
             # not necessarily running.
-            # 'Succeeded': status_lib.ClusterStatus.UP,
+            'Succeeded': cls.RUNNING,
         }
 
     @classmethod
@@ -97,7 +97,9 @@ class AzureInstanceStatus(enum.Enum):
                         'Failed to parse status from Azure response: '
                         f'{provisioning_state}')
             status = provisioning_state_map[provisioning_state]
-        else:
+        if status == cls.RUNNING:
+            # We should further check the power state to determine the actual
+            # VM status.
             if power_state not in power_state_map:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ClusterStatusFetchingError(
