@@ -61,7 +61,7 @@ def exceptions():
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 @functools.lru_cache()
-def get_client(name: str, subscription_id: str):
+def get_client(name: str, subscription_id: str, **kwargs):
     # Sky only supports Azure CLI credential for now.
     # Increase the timeout to fix the Azure get-access-token timeout issue.
     # Tracked in
