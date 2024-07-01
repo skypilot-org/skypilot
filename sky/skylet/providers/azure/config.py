@@ -88,6 +88,9 @@ def _configure_resource_group(config):
         except azure.exceptions().ResourceExistsError as e:
             if "ResourceGroupBeingDeleted" in str(e):
                 if retry % 5 == 0:
+                    # TODO(zhwu): This should be shown in terminal for better
+                    # UX, which will be achieved after we move Azure to use 
+                    # SkyPilot provisioner.
                     logger.warning(
                         f"Azure resource group {resource_group} is being deleted. "
                         "It can only be provisioned after it is fully deleted. "
