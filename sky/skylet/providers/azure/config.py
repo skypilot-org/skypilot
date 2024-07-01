@@ -90,7 +90,8 @@ def _configure_resource_group(config):
                 if retry % 5 == 0:
                     logger.warning(
                         f"Azure resource group {resource_group} is being deleted. "
-                        "Waiting for it to finish."
+                        "It can only be provisioned after it is fully deleted. "
+                        "Waiting..."
                     )
                 time.sleep(1)
                 retry += 1
