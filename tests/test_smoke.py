@@ -2859,7 +2859,9 @@ def test_managed_jobs_storage(generic_cloud: str):
     name = _get_cluster_name()
     yaml_str = pathlib.Path(
         'examples/managed_job_with_storage.yaml').read_text()
-    storage_name = f'sky-test-{int(time.time())}'
+    timestamp = int(time.time())
+    storage_name = f'sky-test-{timestamp}'
+    output_storage_name = f'sky-test-output-{timestamp}'
 
     # Also perform region testing for bucket creation to validate if buckets are
     # created in the correct region and correctly mounted in managed jobs.
@@ -2874,16 +2876,32 @@ def test_managed_jobs_storage(generic_cloud: str):
         region_cmd = TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.S3, storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
+        s3_check_file_count = TestStorageWithCredentials.cli_count_name_in_bucket(
+            storage_lib.StoreType.S3, output_storage_name, 'output.txt')
+        output_check_cmd = f'{s3_check_file_count} | grep 1'
     elif generic_cloud == 'gcp':
         region = 'us-west2'
         region_flag = f' --region {region}'
         region_cmd = TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.GCS, storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
+        gcs_check_file_count = TestStorageWithCredentials.cli_count_name_in_bucket(
+            storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
+        output_check_cmd = f'{gcs_check_file_count} | grep 1'
     elif generic_cloud == 'kubernetes':
+        # With Kubernetes, we don't know which object storage provider is used.
+        # Check both S3 and GCS if bucket exists in either.
+        s3_check_file_count = TestStorageWithCredentials.cli_count_name_in_bucket(
+            storage_lib.StoreType.S3, output_storage_name, 'output.txt')
+        s3_output_check_cmd = f'{s3_check_file_count} | grep 1'
+        gcs_check_file_count = TestStorageWithCredentials.cli_count_name_in_bucket(
+            storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
+        gcs_output_check_cmd = f'{gcs_check_file_count} | grep 1'
+        output_check_cmd = f'{s3_output_check_cmd} || {gcs_output_check_cmd}'
         use_spot = ' --no-use-spot'
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
+    yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(yaml_str)
         f.flush()
@@ -2896,9 +2914,12 @@ def test_managed_jobs_storage(generic_cloud: str):
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 'sleep 60',  # Wait the spot queue to be updated
                 f'{_JOB_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
-                f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
+                f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
+                # Check if file was written to the mounted output bucket
+                output_check_cmd
             ],
-            _JOB_CANCEL_WAIT.format(job_name=name),
+            (_JOB_CANCEL_WAIT.format(job_name=name),
+             f'; sky storage delete {output_storage_name} || true'),
             # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
             timeout=20 * 60,
         )
