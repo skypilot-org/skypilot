@@ -105,6 +105,63 @@ def cleanup_ports(
     del cluster_name_on_cloud, ports, provider_config  # Unused.
 
 
+def stop_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+
+    subscription_id = provider_config['subscription_id']
+    resource_group = provider_config['resource_group']
+    compute_client = azure.get_client('compute', subscription_id)
+    tag_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    if worker_only:
+        tag_filters[TAG_RAY_NODE_KIND] = 'worker'
+
+    nodes = _filter_instances(compute_client, tag_filters, resource_group)
+    stop_virtual_machine = get_azure_sdk_function(
+        client=compute_client.virtual_machines, function_name='deallocate')
+    with pool.ThreadPool() as p:
+        p.starmap(stop_virtual_machine,
+                  [(resource_group, node.name) for node in nodes])
+
+
+def terminate_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    # TODO(zhwu): check the following. Also, seems we can directly force
+    # delete a resource group.
+    subscription_id = provider_config['subscription_id']
+    resource_group = provider_config['resource_group']
+    if worker_only:
+        compute_client = azure.get_client('compute', subscription_id)
+        delete_virtual_machine = get_azure_sdk_function(
+            client=compute_client.virtual_machines, function_name='delete')
+        filters = {
+            TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
+            TAG_RAY_NODE_KIND: 'worker'
+        }
+        nodes = _filter_instances(compute_client, filters, resource_group)
+        with pool.ThreadPool() as p:
+            p.starmap(delete_virtual_machine,
+                      [(resource_group, node.name) for node in nodes])
+        return
+
+    assert provider_config is not None, cluster_name_on_cloud
+
+    resource_group_client = azure.get_client('resource', subscription_id)
+    delete_resource_group = get_azure_sdk_function(
+        client=resource_group_client.resource_groups, function_name='delete')
+
+    delete_resource_group(resource_group, force_deletion_types=None)
+
+
 def _get_vm_status(compute_client: 'azure_compute.ComputeManagementClient',
                    vm_name: str, resource_group: str) -> str:
     instance = compute_client.virtual_machines.instance_view(
@@ -119,7 +176,7 @@ def _get_vm_status(compute_client: 'azure_compute.ComputeManagementClient',
         # skip provisioning status
         if code == 'PowerState':
             return state
-    raise ValueError(f'Failed to get status for VM {vm_name}')
+    raise ValueError(f'Failed to get power state for VM {vm_name}: {instance}')
 
 
 def _filter_instances(
@@ -185,8 +242,9 @@ def query_instances(
     statuses = {}
 
     def _fetch_and_map_status(
-            compute_client: 'azure_compute.ComputeManagementClient', node,
-            resource_group: str):
+            compute_client: 'azure_compute.ComputeManagementClient',
+            node: 'azure_compute.models.VirtualMachine',
+            resource_group: str) -> None:
         if node.provisioning_state in provisioning_state_map:
             status = provisioning_state_map[node.provisioning_state]
         else:

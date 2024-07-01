@@ -3888,22 +3888,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self.post_teardown_cleanup(handle, terminate, purge)
             return
 
-        if terminate and isinstance(cloud, clouds.Azure):
-            # Here we handle termination of Azure by ourselves instead of Ray
-            # autoscaler.
-            resource_group = config['provider']['resource_group']
-            terminate_cmd = f'az group delete -y --name {resource_group}'
-            with rich_utils.safe_status(f'[bold cyan]Terminating '
-                                        f'[green]{cluster_name}'):
-                returncode, stdout, stderr = log_lib.run_with_log(
-                    terminate_cmd,
-                    log_abs_path,
-                    shell=True,
-                    stream_logs=False,
-                    require_outputs=True)
-
-        elif (isinstance(cloud, clouds.IBM) and terminate and
-              prev_cluster_status == status_lib.ClusterStatus.STOPPED):
+        if (isinstance(cloud, clouds.IBM) and terminate and
+                prev_cluster_status == status_lib.ClusterStatus.STOPPED):
             # pylint: disable= W0622 W0703 C0415
             from sky.adaptors import ibm
             from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
@@ -4021,14 +4007,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             #   never launched and the errors are related to pre-launch
             #   configurations (such as VPC not found). So it's safe & good UX
             #   to not print a failure message.
-            #
-            # '(ResourceGroupNotFound)': this indicates the resource group on
-            #   Azure is not found. That means the cluster is already deleted
-            #   on the cloud. So it's safe & good UX to not print a failure
-            #   message.
             elif ('TPU must be specified.' not in stderr and
-                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr and
-                  '(ResourceGroupNotFound)' not in stderr):
+                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr):
                 raise RuntimeError(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
