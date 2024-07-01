@@ -299,6 +299,9 @@ def get_service_schema():
                         'initial_delay_seconds': {
                             'type': 'number',
                         },
+                        'timeout_seconds': {
+                            'type': 'number',
+                        },
                         'post_data': {
                             'anyOf': [{
                                 'type': 'string',
@@ -648,6 +651,19 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
+                'managed_instance_group': {
+                    'type': 'object',
+                    'required': ['run_duration'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'run_duration': {
+                            'type': 'integer',
+                        },
+                        'provision_timeout': {
+                            'type': 'integer',
+                        }
+                    }
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -741,6 +757,34 @@ def get_config_schema():
         }
     }
 
+    docker_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'run_options': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    }
+                }]
+            }
+        }
+    }
+    gpu_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'disable_ecc': {
+                'type': 'boolean',
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
@@ -758,6 +802,8 @@ def get_config_schema():
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
+            'docker': docker_configs,
+            'nvidia_gpus': gpu_configs,
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.

@@ -1,9 +1,11 @@
 """Common data structures for provisioning"""
 import abc
 import dataclasses
+import functools
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import sky_logging
 from sky.utils import resources_utils
 
 # NOTE: we can use pydantic instead of dataclasses or namedtuples, because
@@ -14,6 +16,10 @@ from sky.utils import resources_utils
 # -------------------- input data model -------------------- #
 
 InstanceId = str
+_START_TITLE = '\n' + '-' * 20 + 'Start: {} ' + '-' * 20
+_END_TITLE = '-' * 20 + 'End:   {} ' + '-' * 20 + '\n'
+
+logger = sky_logging.init_logger(__name__)
 
 
 class ProvisionerError(RuntimeError):
@@ -268,3 +274,16 @@ def query_ports_passthrough(
     for port in ports:
         result[port] = [SocketEndpoint(port=port, host=head_ip)]
     return result
+
+
+def log_function_start_end(func):
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        logger.info(_START_TITLE.format(func.__name__))
+        try:
+            return func(*args, **kwargs)
+        finally:
+            logger.info(_END_TITLE.format(func.__name__))
+
+    return wrapper

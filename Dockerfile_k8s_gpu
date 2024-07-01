@@ -1,46 +1,52 @@
-# TODO(romilb) - The base image used here (ray) is very large (11.4GB).
-#  as a result, this built image is about 13.5GB. We need to pick a lighter base
-#  image.
-FROM rayproject/ray:2.9.3-py310-gpu
+# We use the cuda runtime image instead of devel image to reduce size (1.3GB vs 3.6GB)
+FROM nvidia/cuda:12.1.1-runtime-ubuntu20.04
 
-# Initialize conda for root user, install ssh and other local dependencies
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Install ssh and other local dependencies
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
-RUN sudo rm -rf /etc/apt/sources.list.d/cuda* && \
-    sudo apt update -y && \
-    sudo apt install gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat curl -y && \
-    sudo rm -rf /var/lib/apt/lists/* && \
-    sudo apt remove -y python3 && \
-    conda init
+RUN rm -rf /etc/apt/sources.list.d/cuda* && \
+    apt update -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat curl -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# Setup SSH and generate hostkeys
+RUN sudo mkdir -p /var/run/sshd && \
+    sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sudo sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
+    cd /etc/ssh/ && \
+    sudo ssh-keygen -A
 
 # Setup new user named sky and add to sudoers. \
-# Also add /opt/conda/bin to sudo path and give sky user access to /home/ray
+# Also add /opt/conda/bin to sudo path and give sky user permission to run sudo without password
 RUN sudo useradd -m -s /bin/bash sky && \
     sudo /bin/bash -c 'echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers' && \
-    sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky" && \
-    sudo chmod -R a+rwx /home/ray
+    sudo /bin/bash -c "echo 'Defaults        secure_path=\"/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"' > /etc/sudoers.d/sky"
 
 # Switch to sky user
 USER sky
 
-# Set HOME environment variable for sky user, otherwise Ray base image HOME overrides
+# Set HOME environment variable for sky user
 ENV HOME /home/sky
 
-# Setup SSH and generate hostkeys
-RUN sudo mkdir -p /var/run/sshd && \
-    sudo chmod 0755 /var/run/sshd && \
-    sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sudo sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
-    cd /etc/ssh/ && \
-    ssh-keygen -A
+# Set current working directory
+WORKDIR /home/sky
 
-# Install SkyPilot pip dependencies
-RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
-    pip install networkx oauth2client pandas pendulum PrettyTable && \
-    pip install rich tabulate filelock && \
-    pip install packaging 'protobuf<4.0.0' pulp && \
-    pip install pycryptodome==3.12.0 && \
-    pip install docker kubernetes==28.1.0 && \
-    pip install grpcio==1.51.3 python-dotenv==1.0.1
+SHELL ["/bin/bash", "-c"]
+
+# Install conda and other dependencies
+# Keep the conda and Ray versions below in sync with the ones in skylet.constants
+RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
+    bash Miniconda3-Linux-x86_64.sh -b && \
+    eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
+    grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
+    rm Miniconda3-Linux-x86_64.sh && \
+    pip install wheel Click colorama cryptography jinja2 jsonschema networkx  \
+    oauth2client pandas pendulum PrettyTable rich tabulate filelock packaging  \
+    'protobuf<4.0.0' pulp pycryptodome==3.12.0 docker kubernetes==28.1.0  \
+    grpcio==1.51.3 python-dotenv==1.0.1 ray[default]==2.9.3 && \
+    curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
+    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
 # Add /home/sky/.local/bin/ to PATH
 RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
@@ -51,7 +57,3 @@ COPY --chown=sky . /skypilot/sky/
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1
-
-# Set WORKDIR and initialize conda for sky user
-WORKDIR /home/sky
-RUN conda init

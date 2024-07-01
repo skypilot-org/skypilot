@@ -14,6 +14,9 @@ docker:
     {%- if custom_resources is not none %}
       --gpus all
     {%- endif %}
+    {%- for run_option in docker_run_options %}
+    - {{run_option}}
+    {%- endfor %}
   {%- if docker_login_config is not none %}
   docker_login_config:
     username: |-
@@ -153,6 +156,9 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
     {{ conda_installation_commands }}
     conda config --remove channels "https://aws-ml-conda-ec2.s3.us-west-2.amazonaws.com" || true;
     {{ ray_skypilot_installation_commands }}
