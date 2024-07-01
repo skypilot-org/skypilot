@@ -176,7 +176,7 @@ def _get_vm_status(compute_client: 'azure_compute.ComputeManagementClient',
         # skip provisioning status
         if code == 'PowerState':
             return state
-    raise ValueError(f'Failed to get status for VM {vm_name}')
+    raise ValueError(f'Failed to get power state for VM {vm_name}: {instance}')
 
 
 def _filter_instances(
