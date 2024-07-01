@@ -242,8 +242,9 @@ def query_instances(
     statuses = {}
 
     def _fetch_and_map_status(
-            compute_client: 'azure_compute.ComputeManagementClient', node,
-            resource_group: str):
+            compute_client: 'azure_compute.ComputeManagementClient',
+            node: 'azure_compute.models.VirtualMachine',
+            resource_group: str) -> None:
         if node.provisioning_state in provisioning_state_map:
             status = provisioning_state_map[node.provisioning_state]
         else:
