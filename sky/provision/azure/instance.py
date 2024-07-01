@@ -6,6 +6,7 @@ import logging
 from multiprocessing import pool
 import pathlib
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -18,6 +19,9 @@ from sky.provision import constants
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from azure.mgmt import compute as azure_compute
+
 logger = sky_logging.init_logger(__name__)
 
 # Suppress noisy logs from Azure SDK. Reference:
@@ -29,6 +33,8 @@ _RESUME_INSTANCE_TIMEOUT = 480  # 8 minutes
 _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 UNIQUE_ID_LEN = 4
 _TAG_SKYPILOT_VM_ID = 'skypilot-vm-id'
+
+_RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 
 
 class AzureInstanceStatus(enum.Enum):
@@ -691,3 +697,106 @@ def cleanup_ports(
     # Azure will automatically cleanup network security groups when cleanup
     # resource group. So we don't need to do anything here.
     del cluster_name_on_cloud, ports, provider_config  # Unused.
+
+
+def _get_vm_status(compute_client: 'azure_compute.ComputeManagementClient',
+                   vm_name: str, resource_group: str) -> str:
+    instance = compute_client.virtual_machines.instance_view(
+        resource_group_name=resource_group, vm_name=vm_name).as_dict()
+    for status in instance['statuses']:
+        code_state = status['code'].split('/')
+        # It is possible that sometimes the 'code' is empty string, and we
+        # should skip them.
+        if len(code_state) != 2:
+            continue
+        code, state = code_state
+        # skip provisioning status
+        if code == 'PowerState':
+            return state
+    raise ValueError(f'Failed to get status for VM {vm_name}')
+
+
+def _filter_instances(
+        compute_client: 'azure_compute.ComputeManagementClient',
+        filters: Dict[str, str],
+        resource_group: str) -> List['azure_compute.models.VirtualMachine']:
+
+    def match_tags(vm):
+        for k, v in filters.items():
+            if vm.tags.get(k) != v:
+                return False
+        return True
+
+    try:
+        list_virtual_machines = get_azure_sdk_function(
+            client=compute_client.virtual_machines, function_name='list')
+        vms = list_virtual_machines(resource_group_name=resource_group)
+        nodes = list(filter(match_tags, vms))
+    except azure.exceptions().ResourceNotFoundError as e:
+        if _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE in str(e):
+            return []
+        raise
+    return nodes
+
+
+@common_utils.retry
+def query_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
+) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, cluster_name_on_cloud
+    status_map = {
+        'starting': status_lib.ClusterStatus.INIT,
+        'running': status_lib.ClusterStatus.UP,
+        # 'stopped' in Azure means Stopped (Allocated), which still bills
+        # for the VM.
+        'stopping': status_lib.ClusterStatus.INIT,
+        'stopped': status_lib.ClusterStatus.INIT,
+        # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
+        # bill for the VM.
+        'deallocating': status_lib.ClusterStatus.STOPPED,
+        'deallocated': status_lib.ClusterStatus.STOPPED,
+    }
+    provisioning_state_map = {
+        'Creating': status_lib.ClusterStatus.INIT,
+        'Updating': status_lib.ClusterStatus.INIT,
+        'Failed': status_lib.ClusterStatus.INIT,
+        'Migrating': status_lib.ClusterStatus.INIT,
+        'Deleting': None,
+        # Succeeded in provisioning state means the VM is provisioned but not
+        # necessarily running. We exclude Succeeded state here, and the caller
+        # should determine the status of the VM based on the power state.
+        # 'Succeeded': status_lib.ClusterStatus.UP,
+    }
+
+    subscription_id = provider_config['subscription_id']
+    resource_group = provider_config['resource_group']
+    compute_client = azure.get_client('compute', subscription_id)
+    filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    nodes = _filter_instances(compute_client, filters, resource_group)
+    statuses = {}
+
+    def _fetch_and_map_status(
+            compute_client: 'azure_compute.ComputeManagementClient', node,
+            resource_group: str):
+        if node.provisioning_state in provisioning_state_map:
+            status = provisioning_state_map[node.provisioning_state]
+        else:
+            original_status = _get_vm_status(compute_client, node.name,
+                                             resource_group)
+            if original_status not in status_map:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ClusterStatusFetchingError(
+                        f'Failed to parse status from Azure response: {status}')
+            status = status_map[original_status]
+        if status is None and non_terminated_only:
+            return
+        statuses[node.name] = status
+
+    with pool.ThreadPool() as p:
+        p.starmap(_fetch_and_map_status,
+                  [(compute_client, node, resource_group) for node in nodes])
+
+    return statuses
