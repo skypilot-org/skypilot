@@ -6,6 +6,7 @@ import logging
 from multiprocessing import pool
 import pathlib
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -18,6 +19,9 @@ from sky.provision import constants
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from azure.mgmt import compute as azure_compute
+
 logger = sky_logging.init_logger(__name__)
 
 # Suppress noisy logs from Azure SDK. Reference:
@@ -29,6 +33,9 @@ _RESUME_INSTANCE_TIMEOUT = 480  # 8 minutes
 _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 UNIQUE_ID_LEN = 4
 _TAG_SKYPILOT_VM_ID = 'skypilot-vm-id'
+
+_RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
+_POLL_INTERVAL = 1
 
 
 class AzureInstanceStatus(enum.Enum):
@@ -63,7 +70,8 @@ class AzureInstanceStatus(enum.Enum):
             'Migrating': cls.PENDING,
             'Deleting': cls.DELETING,
             # Succeeded in provisioning state means the VM is provisioned but
-            # not necessarily running.
+            # not necessarily running. The caller should further check the
+            # power state to determine the actual VM status.
             'Succeeded': cls.RUNNING,
         }
 
@@ -84,6 +92,7 @@ class AzureInstanceStatus(enum.Enum):
                         power_state: Optional[str]) -> 'AzureInstanceStatus':
         provisioning_state_map = cls.provisioning_state_map()
         power_state_map = cls.power_state_map()
+        status = None
         if power_state is None:
             if provisioning_state not in provisioning_state_map:
                 with ux_utils.print_exception_no_traceback():
@@ -91,14 +100,21 @@ class AzureInstanceStatus(enum.Enum):
                         'Failed to parse status from Azure response: '
                         f'{provisioning_state}')
             status = provisioning_state_map[provisioning_state]
-        if status == cls.RUNNING:
+        if status is None or status == cls.RUNNING:
             # We should further check the power state to determine the actual
             # VM status.
             if power_state not in power_state_map:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ClusterStatusFetchingError(
-                        f'Failed to parse status from Azure response: {status}')
+                        'Failed to parse status from Azure response: '
+                        f'{power_state}.')
             status = power_state_map[power_state]
+        if status is None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ClusterStatusFetchingError(
+                    'Failed to parse status from Azure response: '
+                    f'provisioning state ({provisioning_state}), '
+                    f'power state ({power_state})')
         return status
 
     def to_cluster_status(self) -> Optional[status_lib.ClusterStatus]:
@@ -166,7 +182,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
                         f'newly discovered id: {inst.id}). It is likely '
                         f'that something goes wrong.')
                 head_instance_id = inst.name
-                break
+                continue
     return head_instance_id
 
 
@@ -241,6 +257,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     subscription_id = provider_config['subscription_id']
     compute_client = azure.get_client('compute', subscription_id)
 
+    resumed_instances = []
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
 
@@ -248,13 +265,15 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     tags = dict(sorted(copy.deepcopy(config.tags).items()))
     filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
+    non_deleting_states = (set(AzureInstanceStatus) -
+                           {AzureInstanceStatus.DELETING})
     existing_instances = _filter_instances(
         compute_client,
         filters=filters,
         resource_group=resource_group,
+        status_filters=list(non_deleting_states),
     )
     existing_instances.sort(key=lambda x: x.name)
-    non_deleting_existing_instances = []
 
     pending_instances = []
     running_instances = []
@@ -272,9 +291,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             stopping_instances.append(instance)
         elif status == AzureInstanceStatus.PENDING:
             pending_instances.append(instance)
-
-        if status != AzureInstanceStatus.DELETING:
-            non_deleting_existing_instances.append(instance)
 
     def _create_instance_tag(target_instance, is_head: bool = True) -> str:
         if is_head:
@@ -295,7 +311,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         update(resource_group, target_instance.name, parameters={'tags': tags})
         return target_instance.name
 
-    head_instance_id = _get_head_instance_id(non_deleting_existing_instances)
+    head_instance_id = _get_head_instance_id(existing_instances)
     if head_instance_id is None:
         if running_instances:
             head_instance_id = _create_instance_tag(running_instances[0])
@@ -304,15 +320,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     if config.resume_stopped_nodes and len(existing_instances) > config.count:
         raise RuntimeError(
-            'The number of running/stopped/stopping '
-            f'instances combined ({len(non_deleting_existing_instances)}) in '
+            'The number of pending/running/stopped/stopping '
+            f'instances combined ({len(existing_instances)}) in '
             f'cluster "{cluster_name_on_cloud}" is greater than the '
             f'number requested by the user ({config.count}). '
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
 
-    to_start_count = config.count - len(non_deleting_existing_instances) - len(
-        pending_instances)
+    to_start_count = config.count - len(pending_instances)
 
     if to_start_count < 0:
         raise RuntimeError(
@@ -372,17 +387,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 start_virtual_machine,
                 [(resource_group, inst.name) for inst in resumed_instances])
 
-        instances_to_tag = copy.copy(resumed_instances)
-        if head_instance_id is None:
-            head_instance_id = _create_instance_tag(instances_to_tag[0])
-            instances_to_tag = instances_to_tag[1:]
-
-        if tags:
-            # empty tags will result in error in the API call
-            with pool.ThreadPool() as p:
-                p.starmap(_create_instance_tag,
-                          [(inst, False) for inst in instances_to_tag])
-
     to_start_count -= len(resumed_instance_ids)
 
     if to_start_count > 0:
@@ -397,8 +401,44 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             tags=tags,
             count=to_start_count)
         created_instance_ids = [inst.name for inst in created_instances]
-        if head_instance_id is None:
-            head_instance_id = _create_instance_tag(created_instances[0])
+
+    non_running_instances = list(
+        set(AzureInstanceStatus) - {AzureInstanceStatus.RUNNING})
+    while True:
+        # Wait for all instances to be in running state
+        instances = _filter_instances(compute_client,
+                                      resource_group,
+                                      filters,
+                                      status_filters=non_running_instances,
+                                      included_instances=created_instance_ids +
+                                      resumed_instance_ids)
+        if not instances:
+            break
+        logger.debug(f'run_instances: Waiting for {len(instances)} instances '
+                     'in PENDING status.')
+        time.sleep(_POLL_INTERVAL)
+
+    running_instances = _filter_instances(
+        compute_client,
+        resource_group,
+        filters,
+        status_filters=[AzureInstanceStatus.RUNNING])
+    head_instance_id = _get_head_instance_id(running_instances)
+    instances_to_tag = copy.copy(running_instances)
+    if head_instance_id is None:
+        head_instance_id = _create_instance_tag(instances_to_tag[0])
+        instances_to_tag = instances_to_tag[1:]
+    else:
+        instances_to_tag = [
+            inst for inst in instances_to_tag if inst.name != head_instance_id
+        ]
+
+    if instances_to_tag:
+        # Tag the instances in case the old resumed instances are not correctly
+        # tagged.
+        with pool.ThreadPool() as p:
+            p.starmap(_create_instance_tag,
+                      [(inst, False) for inst in instances_to_tag])
 
     assert head_instance_id is not None, head_instance_id
     return common.ProvisionRecord(
@@ -554,11 +594,12 @@ def _get_instance_status(compute_client, vm,
 
 
 def _filter_instances(
-        compute_client,
-        resource_group: str,
-        filters: Dict[str, str],
-        status_filters: Optional[List[AzureInstanceStatus]] = None
-) -> List[Any]:
+    compute_client: 'azure_compute.ComputeManagementClient',
+    resource_group: str,
+    filters: Dict[str, str],
+    status_filters: Optional[List[AzureInstanceStatus]] = None,
+    included_instances: Optional[List[str]] = None,
+) -> List['azure_compute.models.VirtualMachine']:
 
     def match_tags(vm):
         for k, v in filters.items():
@@ -572,7 +613,7 @@ def _filter_instances(
         vms = list_virtual_machines(resource_group_name=resource_group)
         nodes = list(filter(match_tags, vms))
     except azure.exceptions().ResourceNotFoundError as e:
-        if 'ResourceGroupNotFound' in str(e):
+        if _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE in str(e):
             return []
         raise
     if status_filters is not None:
@@ -580,6 +621,8 @@ def _filter_instances(
             node for node in nodes if _get_instance_status(
                 compute_client, node, resource_group) in status_filters
         ]
+    if included_instances:
+        nodes = [node for node in nodes if node.name in included_instances]
     return nodes
 
 
