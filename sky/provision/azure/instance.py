@@ -122,9 +122,10 @@ def _get_vm_status(compute_client: 'azure_compute.ComputeManagementClient',
     raise ValueError(f'Failed to get status for VM {vm_name}')
 
 
-def _filter_instances(compute_client: 'azure_compute.ComputeManagementClient',
-                      filters: Dict[str,
-                                    str], resource_group: str) -> List[Any]:
+def _filter_instances(
+        compute_client: 'azure_compute.ComputeManagementClient',
+        filters: Dict[str, str],
+        resource_group: str) -> List['azure_compute.models.VirtualMachine']:
 
     def match_tags(vm):
         for k, v in filters.items():
@@ -183,7 +184,9 @@ def query_instances(
     nodes = _filter_instances(compute_client, filters, resource_group)
     statuses = {}
 
-    def _fetch_and_map_status(compute_client, node, resource_group: str):
+    def _fetch_and_map_status(
+            compute_client: 'azure_compute.ComputeManagementClient', node,
+            resource_group: str):
         if node.provisioning_state in provisioning_state_map:
             status = provisioning_state_map[node.provisioning_state]
         else:
