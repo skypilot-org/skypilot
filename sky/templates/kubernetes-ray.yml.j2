@@ -24,6 +24,9 @@ provider:
     # This should be one of KubernetesPortMode
     port_mode: {{k8s_port_mode}}
 
+    # The networking mode used to ssh to pods. One of KubernetesNetworkingMode.
+    networking_mode: {{k8s_networking_mode}}
+
     # We use internal IPs since we set up a port-forward between the kubernetes
     # cluster and the local machine, or directly use NodePort to reach the
     # head node.
@@ -276,9 +279,22 @@ available_node_types:
         restartPolicy: Never
 
         # Add node selector if GPUs are requested:
-        {% if k8s_acc_label_key is not none and k8s_acc_label_value is not none %}
+        {% if (k8s_acc_label_key is not none and k8s_acc_label_value is not none) or (k8s_spot_label_key is not none) %}
         nodeSelector:
+            {% if k8s_acc_label_key is not none and k8s_acc_label_value is not none %}
             {{k8s_acc_label_key}}: {{k8s_acc_label_value}}
+            {% endif %}
+            {% if k8s_spot_label_key is not none %}
+            {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
+            {% endif %}
+        {% endif %}
+
+        {% if k8s_spot_label_key is not none %}
+        tolerations:
+          - key: {{k8s_spot_label_key}}
+            operator: Equal
+            value: {{k8s_spot_label_value|tojson}}
+            effect: NoSchedule
         {% endif %}
 
         # This volume allocates shared memory for Ray to use for its plasma
@@ -351,6 +367,9 @@ setup_commands:
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - sudo DEBIAN_FRONTEND=noninteractive apt install gcc patch pciutils rsync fuse curl -y;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     sudo touch ~/.sudo_as_admin_successful;

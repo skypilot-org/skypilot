@@ -12,6 +12,7 @@ from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -307,12 +308,14 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
     for new_node in new_nodes:
         runner = command_runner.KubernetesCommandRunner(
             (namespace, new_node.metadata.name))
-        rc, stdout, _ = runner.run(check_k8s_user_sudo_cmd,
-                                   require_outputs=True,
-                                   stream_logs=False)
+        rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
+                                        require_outputs=True,
+                                        separate_stderr=True,
+                                        stream_logs=False)
         _raise_command_running_error('check user privilege',
                                      check_k8s_user_sudo_cmd,
-                                     new_node.metadata.name, rc, stdout)
+                                     new_node.metadata.name, rc,
+                                     stdout + stderr)
         if stdout == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
@@ -493,14 +496,18 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
 
-    # Adding the jump pod to the new_nodes list as well so it can be
-    # checked if it's scheduled and running along with other pods.
-    ssh_jump_pod_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
-    jump_pod = kubernetes.core_api().read_namespaced_pod(
-        ssh_jump_pod_name, namespace)
     wait_pods_dict = _filter_pods(namespace, tags, ['Pending'])
     wait_pods = list(wait_pods_dict.values())
-    wait_pods.append(jump_pod)
+
+    networking_mode = network_utils.get_networking_mode(
+        config.provider_config.get('networking_mode'))
+    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
+        # Adding the jump pod to the new_nodes list as well so it can be
+        # checked if it's scheduled and running along with other pods.
+        ssh_jump_pod_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
+        jump_pod = kubernetes.core_api().read_namespaced_pod(
+            ssh_jump_pod_name, namespace)
+        wait_pods.append(jump_pod)
     provision_timeout = provider_config['timeout']
 
     wait_str = ('indefinitely'
@@ -690,11 +697,12 @@ def get_cluster_info(
     get_k8s_ssh_user_cmd = 'echo $(whoami)'
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner((namespace, head_pod_name))
-    rc, stdout, _ = runner.run(get_k8s_ssh_user_cmd,
-                               require_outputs=True,
-                               stream_logs=False)
+    rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
+                                    require_outputs=True,
+                                    separate_stderr=True,
+                                    stream_logs=False)
     _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
-                                 head_pod_name, rc, stdout)
+                                 head_pod_name, rc, stdout + stderr)
     ssh_user = stdout.strip()
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')

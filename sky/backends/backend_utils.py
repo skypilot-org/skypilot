@@ -146,6 +146,7 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # Clouds with new provisioner has docker_login_config in the
     # docker field, instead of the provider field.
     ('docker', 'docker_login_config'),
+    ('docker', 'run_options'),
     # Other clouds
     ('provider', 'docker_login_config'),
     ('provider', 'firewall_rule'),
@@ -873,8 +874,23 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
+    # Docker run options
+    docker_run_options = skypilot_config.get_nested(('docker', 'run_options'),
+                                                    [])
+    if isinstance(docker_run_options, str):
+        docker_run_options = [docker_run_options]
+    if docker_run_options and isinstance(to_provision.cloud, clouds.Kubernetes):
+        logger.warning(f'{colorama.Style.DIM}Docker run options are specified, '
+                       'but ignored for Kubernetes: '
+                       f'{" ".join(docker_run_options)}'
+                       f'{colorama.Style.RESET_ALL}')
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
+    initial_setup_commands = []
+    if (skypilot_config.get_nested(('nvidia_gpus', 'disable_ecc'), False) and
+            to_provision.accelerators is not None):
+        initial_setup_commands.append(constants.DISABLE_GPU_ECC_COMMAND)
     tmp_yaml_path = yaml_path + '.tmp'
     common_utils.fill_template(
         cluster_config_template,
@@ -906,6 +922,8 @@ def write_cluster_config(
                 # currently only used by GCP.
                 'specific_reservations': specific_reservations,
 
+                # Initial setup commands.
+                'initial_setup_commands': initial_setup_commands,
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
@@ -916,6 +934,9 @@ def write_cluster_config(
                         '{sky_wheel_hash}',
                         wheel_hash).replace('{cloud}',
                                             str(cloud).lower())),
+
+                # Docker
+                'docker_run_options': docker_run_options,
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
@@ -1230,6 +1251,12 @@ def ssh_credential_from_yaml(
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
+
+    # Update the ssh_user placeholder in proxy command, if required
+    if (ssh_proxy_command is not None and
+            constants.SKY_SSH_USER_PLACEHOLDER in ssh_proxy_command):
+        ssh_proxy_command = ssh_proxy_command.replace(
+            constants.SKY_SSH_USER_PLACEHOLDER, ssh_user)
     credentials = {
         'ssh_user': ssh_user,
         'ssh_private_key': ssh_private_key,

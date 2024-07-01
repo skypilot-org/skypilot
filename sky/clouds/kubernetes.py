@@ -38,9 +38,6 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-    PORT_FORWARD_PROXY_CMD_TEMPLATE = \
-        'kubernetes-port-forward-proxy-command.sh.j2'
-    PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
     # Timeout for resource provisioning. This timeout determines how long to
     # wait for pod to be in pending status before giving up.
     # Larger timeout may be required for autoscaling clusters, since autoscaler
@@ -99,7 +96,8 @@ class Kubernetes(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
+        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+        # Features to be disabled for exec auth
         is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
         if is_exec_auth:
             assert isinstance(message, str), message
@@ -109,6 +107,11 @@ class Kubernetes(clouds.Cloud):
             # Pod does not have permissions to terminate itself with exec auth.
             unsupported_features[
                 clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
+        # Allow spot instances if supported by the cluster
+        spot_label_key, _ = kubernetes_utils.get_spot_label()
+        if spot_label_key is not None:
+            unsupported_features.pop(
+                clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
         return unsupported_features
 
     @classmethod
@@ -301,6 +304,11 @@ class Kubernetes(clouds.Cloud):
 
         fuse_device_required = bool(resources.requires_fuse)
 
+        # Configure spot labels, if requested and supported
+        spot_label_key, spot_label_value = None, None
+        if resources.use_spot:
+            spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -312,6 +320,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
+            'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
@@ -322,6 +331,8 @@ class Kubernetes(clouds.Cloud):
             'k8s_fuse_device_required': fuse_device_required,
             # Namespace to run the FUSE device manager in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
+            'k8s_spot_label_key': spot_label_key,
+            'k8s_spot_label_value': spot_label_value,
             'image_id': image_id,
         }
 

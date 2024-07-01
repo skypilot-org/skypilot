@@ -12,7 +12,9 @@ from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resource.resources.models import DeploymentMode
 
+from sky.adaptors import azure
 from sky.utils import common_utils
+from sky.provision import common
 
 UNIQUE_ID_LEN = 4
 _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
@@ -46,6 +48,7 @@ def bootstrap_azure(config):
     return config
 
 
+@common.log_function_start_end
 def _configure_resource_group(config):
     # TODO: look at availability sets
     # https://docs.microsoft.com/en-us/azure/virtual-machines/windows/tutorial-availability-sets
@@ -120,17 +123,36 @@ def _configure_resource_group(config):
     create_or_update = get_azure_sdk_function(
         client=resource_client.deployments, function_name="create_or_update"
     )
-    # TODO (skypilot): this takes a long time (> 40 seconds) for stopping an
-    # azure VM, and this can be called twice during ray down.
-    outputs = (
-        create_or_update(
-            resource_group_name=resource_group,
-            deployment_name="ray-config",
-            parameters=parameters,
-        )
-        .result()
-        .properties.outputs
+    # Skip creating or updating the deployment if the deployment already exists
+    # and the cluster name is the same.
+    get_deployment = get_azure_sdk_function(
+        client=resource_client.deployments, function_name="get"
     )
+    deployment_exists = False
+    try:
+        deployment = get_deployment(
+            resource_group_name=resource_group, deployment_name="ray-config"
+        )
+        logger.info("Deployment already exists. Skipping deployment creation.")
+
+        outputs = deployment.properties.outputs
+        if outputs is not None:
+            deployment_exists = True
+    except azure.exceptions().ResourceNotFoundError:
+        deployment_exists = False
+
+    if not deployment_exists:
+        # This takes a long time (> 40 seconds), we should be careful calling
+        # this function.
+        outputs = (
+            create_or_update(
+                resource_group_name=resource_group,
+                deployment_name="ray-config",
+                parameters=parameters,
+            )
+            .result()
+            .properties.outputs
+        )
 
     # We should wait for the NSG to be created before opening any ports
     # to avoid overriding the newly-added NSG rules.

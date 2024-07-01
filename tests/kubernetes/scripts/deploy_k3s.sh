@@ -10,7 +10,7 @@
 #   # deploy k3s
 #   chmod +x deploy_k3s.sh && ./deploy_k3s.sh
 
-set -e
+set -ex
 
 # Function to wait for SkyPilot GPU labeling jobs to complete
 wait_for_gpu_labeling_jobs() {
@@ -127,4 +127,4 @@ then
     wait_for_gpu_labeling_jobs
 fi
 
-echo "K3s cluster ready! Run sky check to setup Kubernetes access."
+echo "K3s cluster ready! To setup Kubernetes access in SkyPilot, run: sky check kubernetes"
