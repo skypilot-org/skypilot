@@ -257,6 +257,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     subscription_id = provider_config['subscription_id']
     compute_client = azure.get_client('compute', subscription_id)
 
+    resumed_instances = []
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
 
@@ -386,17 +387,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 start_virtual_machine,
                 [(resource_group, inst.name) for inst in resumed_instances])
 
-        instances_to_tag = copy.copy(resumed_instances)
-        if head_instance_id is None and resumed_instances:
-            head_instance_id = _create_instance_tag(instances_to_tag[0])
-            instances_to_tag = instances_to_tag[1:]
-
-        if tags:
-            # empty tags will result in error in the API call
-            with pool.ThreadPool() as p:
-                p.starmap(_create_instance_tag,
-                          [(inst, False) for inst in instances_to_tag])
-
     to_start_count -= len(resumed_instance_ids)
 
     if to_start_count > 0:
@@ -411,8 +401,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             tags=tags,
             count=to_start_count)
         created_instance_ids = [inst.name for inst in created_instances]
-        if head_instance_id is None:
-            head_instance_id = _create_instance_tag(created_instances[0])
 
     non_running_instances = list(
         set(AzureInstanceStatus) - {AzureInstanceStatus.RUNNING})
@@ -429,6 +417,27 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         logger.debug(f'run_instances: Waiting for {len(instances)} instances '
                      'in PENDING status.')
         time.sleep(_POLL_INTERVAL)
+
+    running_instances = _filter_instances(
+        compute_client,
+        resource_group,
+        filters,
+        status_filters=[AzureInstanceStatus.RUNNING])
+    head_instance_id = _get_head_instance_id(running_instances)
+    instances_to_tag = copy.copy(running_instances)
+    if head_instance_id is None:
+        head_instance_id = _create_instance_tag(instances_to_tag[0])
+        instances_to_tag = instances_to_tag[1:]
+    else:
+        instances_to_tag = [inst for inst in instances_to_tag
+                            if inst.name != head_instance_id]
+
+    if instances_to_tag:
+        # Tag the instances in case the old resumed instances are not correctly
+        # tagged.
+        with pool.ThreadPool() as p:
+            p.starmap(_create_instance_tag,
+                      [(inst, False) for inst in instances_to_tag])
 
     assert head_instance_id is not None, head_instance_id
     return common.ProvisionRecord(
