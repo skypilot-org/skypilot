@@ -744,7 +744,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             storage_obj.force_delete = True
 
     # Step 7: Convert all `MOUNT` mode storages which don't specify a source
-    # to specifying a source.
+    # to specifying a source. If the source is specified with a local path, it was
+    # handled in step 6.
     updated_mount_storages = {}
     for storage_path, storage_obj in task.storage_mounts.items():
         if (storage_obj.mode == storage_lib.StorageMode.MOUNT and
