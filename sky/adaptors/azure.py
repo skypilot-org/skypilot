@@ -5,6 +5,7 @@ import datetime
 import functools
 import logging
 import threading
+import time
 
 from sky import exceptions as sky_exceptions
 from sky.adaptors import common
@@ -18,13 +19,30 @@ azure = common.LazyImport(
 _LAZY_MODULES = (azure,)
 
 _session_creation_lock = threading.RLock()
+_MAX_RETRY_FOR_GET_SUBSCRIPTION_ID = 5
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
+@functools.lru_cache()
 def get_subscription_id() -> str:
     """Get the default subscription id."""
     from azure.common import credentials
-    return credentials.get_cli_profile().get_subscription_id()
+    retry = 0
+    backoff = common_utils.Backoff(initial_backoff=0.5, max_backoff_factor=4)
+    while True:
+        try:
+            return credentials.get_cli_profile().get_subscription_id()
+        except Exception as e:
+            if ('Please run \'az login\' to setup account.' in str(e) and
+                    retry < _MAX_RETRY_FOR_GET_SUBSCRIPTION_ID):
+                # When there are multiple processes trying to get the
+                # subscription id, it may fail with the above error message.
+                # Retry will fix the issue.
+                retry += 1
+
+                time.sleep(backoff.current_backoff())
+                continue
+            raise
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
@@ -41,9 +59,9 @@ def exceptions():
     return azure_exceptions
 
 
-@functools.lru_cache()
 @common.load_lazy_modules(modules=_LAZY_MODULES)
-def get_client(name: str, subscription_id: str, **kwargs):
+@functools.lru_cache()
+def get_client(name: str, subscription_id: str):
     # Sky only supports Azure CLI credential for now.
     # Increase the timeout to fix the Azure get-access-token timeout issue.
     # Tracked in
