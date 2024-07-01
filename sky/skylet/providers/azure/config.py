@@ -80,7 +80,22 @@ def _configure_resource_group(config):
     rg_create_or_update = get_azure_sdk_function(
         client=resource_client.resource_groups, function_name="create_or_update"
     )
-    rg_create_or_update(resource_group_name=resource_group, parameters=params)
+    retry = 0
+    while True:
+        try:
+            rg_create_or_update(resource_group_name=resource_group, parameters=params)
+            break
+        except azure.exceptions().ResourceExistsError as e:
+            if "ResourceGroupBeingDeleted" in str(e):
+                if retry % 5 == 0:
+                    logger.warning(
+                        f"Azure resource group {resource_group} is being deleted. "
+                        "Waiting for it to finish."
+                    )
+                time.sleep(1)
+                retry += 1
+                continue
+            raise
 
     # load the template file
     current_path = Path(__file__).parent
