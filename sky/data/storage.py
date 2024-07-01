@@ -798,10 +798,10 @@ class Storage(object):
                     assert isinstance(s_metadata,
                                       AzureBlobStore.AzureBlobStoreMetadata)
                     logger.debug(f'Storage object {self.name!r} was attempted '
-                                'to be reconstructed while the corresponding '
-                                'storage account '
-                                f'{s_metadata.storage_account_name!r} does not'
-                                ' exist.')
+                                 'to be reconstructed while the corresponding '
+                                 'storage account '
+                                 f'{s_metadata.storage_account_name!r} does '
+                                 'not exist.')
                 else:
                     logger.debug(f'Storage object {self.name!r} was attempted '
                                  'to be reconstructed while the corresponding '
