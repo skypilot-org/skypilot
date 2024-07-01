@@ -217,8 +217,9 @@ def get_az_resource_group(
             resource_group_name = split_account_id[4]
             return resource_group_name
     # resource group cannot be found when using container not created
-    # under the user's subscription id, i.e. public container or
-    # private containers not belonging to the user.
+    # under the user's subscription id, i.e. public container, or
+    # private containers not belonging to the user or when the storage account
+    # does not exist.
     return None
 
 

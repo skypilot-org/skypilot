@@ -791,12 +791,21 @@ class Storage(object):
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Unknown store type: {s_type}')
-            # Following error is raised from _get_bucket and caught only when
-            # an externally removed storage is attempted to be fetched.
-            except exceptions.StorageExternalDeletionError:
-                logger.debug(f'Storage object {self.name!r} was attempted to '
-                             'be reconstructed while the corresponding bucket'
-                             ' was externally deleted.')
+            # Following error is caught when an externally removed storage
+            # is attempted to be fetched.
+            except exceptions.StorageExternalDeletionError as e:
+                if isinstance(e, exceptions.NonExistentStorageAccountError):
+                    assert isinstance(s_metadata,
+                                      AzureBlobStore.AzureBlobStoreMetadata)
+                    logger.debug(f'Storage object {self.name!r} was attempted '
+                                'to be reconstructed while the corresponding '
+                                'storage account '
+                                f'{s_metadata.storage_account_name!r} does not'
+                                ' exist.')
+                else:
+                    logger.debug(f'Storage object {self.name!r} was attempted '
+                                 'to be reconstructed while the corresponding '
+                                 'bucket was externally deleted.')
                 continue
 
             self._add_store(store, is_reconstructed=True)
@@ -2112,8 +2121,9 @@ class AzureBlobStore(AbstractStore):
                 account attempted to be created already exists.
             StorageBucketGetError: If fetching existing container fails.
             StorageInitError: If general initialization fails.
-            ValueError: When user provided storage account that does not belong
-                to the user through config.yaml.
+            NonExistentStorageAccountError: When storage account provided
+                either through config.yaml or local db does not exist under
+                user's subscription ID.
         """
         self.storage_client = data_utils.create_az_client('storage')
         self.resource_client = data_utils.create_az_client('resource')
@@ -2162,14 +2172,24 @@ class AzureBlobStore(AbstractStore):
         Raises:
             StorageBucketCreateError: If storage account attempted to be
                 created already exists
-            ValueError: When user provided storage account that does not belong
-                to the user through config.yaml.
+            NonExistentStorageAccountError: When storage account provided
+                either through config.yaml or local db does not exist under
+                user's subscription ID.
         """
         # self.storage_account_name already has a value only when it is being
         # reconstructed with metadata from local db.
         if self.storage_account_name:
             resource_group_name = data_utils.get_az_resource_group(
                 self.storage_account_name)
+            if resource_group_name is None:
+                # If the storage account does not exist, the containers under
+                # the account does not exist as well.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NonExistentStorageAccountError(
+                        f'The storage account {self.storage_account_name!r} '
+                        'read from local db does not exist under your '
+                        'subscription ID. The account may have been externally'
+                        ' deleted.')
             storage_account_name = self.storage_account_name
         # Using externally created container
         elif (isinstance(self.source, str) and
@@ -2193,7 +2213,7 @@ class AzureBlobStore(AbstractStore):
                 # subscription id.
                 if resource_group_name is None:
                     with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
+                        raise exceptions.NonExistentStorageAccountError(
                             'The storage account '
                             f'{storage_account_name!r} specified in '
                             'config.yaml does not exist under the user\'s '
