@@ -99,61 +99,6 @@ def cleanup_ports(
     del cluster_name_on_cloud, ports, provider_config  # Unused.
 
 
-# def terminate_instances(
-#     cluster_name_on_cloud: str,
-#     provider_config: Optional[Dict[str, Any]] = None,
-#     worker_only: bool = False,
-# ) -> None:
-#     """See sky/provision/__init__.py"""
-#     # TODO(zhwu): check the following. Also, seems we can directly force
-#     # delete a resource group.
-#
-#     assert provider_config is not None, cluster_name_on_cloud
-#     subscription_id = provider_config['subscription_id']
-#     resource_group = provider_config['resource_group']
-#     compute_client = azure.get_client('compute', subscription_id)
-#     delete_virtual_machine = get_azure_sdk_function(
-#         client=compute_client.virtual_machines, function_name='delete')
-#     list_virtual_machines = get_azure_sdk_function(
-#         client=compute_client.virtual_machines, function_name='list')
-#     for vm in list_virtual_machines(resource_group):
-#         if azure.get_tag(vm.tags,
-#                          TAG_RAY_CLUSTER_NAME) == cluster_name_on_cloud:
-#             if worker_only:
-#                 if azure.get_tag(vm.tags, TAG_RAY_NODE_KIND) != 'worker':
-#                     continue
-#             poller = delete_virtual_machine(resource_group, vm.name)
-#             poller.wait()
-#             if poller.status() != 'Succeeded':
-#                 with ux_utils.print_exception_no_traceback():
-#                     raise ValueError(f'Failed to delete VM {vm.name}: '
-#                                      f'{poller.status()}')
-
-# def _get_vm_ips(network_client, vm, resource_group: str,
-#                 use_internal_ips: bool) -> Tuple[str, str]:
-#     nic_id = vm.network_profile.network_interfaces[0].id
-#     nic_name = nic_id.split("/")[-1]
-#     nic = network_client.network_interfaces.get(
-#         resource_group_name=resource_group,
-#         network_interface_name=nic_name,
-#     )
-#     ip_config = nic.ip_configurations[0]
-
-#     external_ip = None
-#     if not use_internal_ips:
-#         public_ip_id = ip_config.public_ip_address.id
-#         public_ip_name = public_ip_id.split("/")[-1]
-#         public_ip = network_client.public_ip_addresses.get(
-#             resource_group_name=resource_group,
-#             public_ip_address_name=public_ip_name,
-#         )
-#         external_ip = public_ip.ip_address
-
-#     internal_ip = ip_config.private_ip_address
-
-#     return (external_ip, internal_ip)
-
-
 def _get_vm_status(compute_client, vm_name: str, resource_group: str) -> str:
     instance = compute_client.virtual_machines.instance_view(
         resource_group_name=resource_group, vm_name=vm_name).as_dict()
