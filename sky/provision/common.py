@@ -129,7 +129,8 @@ class ClusterInfo:
         if self.head_instance_id is None:
             return None
         if self.head_instance_id not in self.instances:
-            raise ValueError('Head instance ID not in the cluster metadata.')
+            raise ValueError('Head instance ID not in the cluster metadata. '
+                             f'ClusterInfo: {self.__dict__}')
         return self.instances[self.head_instance_id][0]
 
     def get_worker_instances(self) -> List[InstanceInfo]:

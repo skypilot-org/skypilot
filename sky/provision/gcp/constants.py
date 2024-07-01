@@ -215,12 +215,6 @@ MAX_POLLS = 60 // POLL_INTERVAL
 # Stopping instances can take several minutes, so we increase the timeout
 MAX_POLLS_STOP = MAX_POLLS * 8
 
-TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
-# Tag uniquely identifying all nodes of a cluster
-TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
-TAG_RAY_NODE_KIND = 'ray-node-type'
-TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
-
 # MIG constants
 MANAGED_INSTANCE_GROUP_CONFIG = 'managed-instance-group'
 DEFAULT_MANAGED_INSTANCE_GROUP_PROVISION_TIMEOUT = 900  # 15 minutes

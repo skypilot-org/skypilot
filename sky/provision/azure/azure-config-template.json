@@ -5,7 +5,7 @@
         "clusterId": {
             "type": "string",
             "metadata": {
-                "description": "Unique string appended to resource names to isolate resources from different ray clusters."
+                "description": "Unique string appended to resource names to isolate resources from different SkyPilot clusters."
             }
         },
         "subnet": {
@@ -18,12 +18,12 @@
     "variables": {
         "contributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
         "location": "[resourceGroup().location]",
-        "msiName": "[concat('ray-', parameters('clusterId'), '-msi')]",
-        "roleAssignmentName": "[concat('ray-', parameters('clusterId'), '-ra')]",
-        "nsgName": "[concat('ray-', parameters('clusterId'), '-nsg')]",
+        "msiName": "[concat('sky-', parameters('clusterId'), '-msi')]",
+        "roleAssignmentName": "[concat('sky-', parameters('clusterId'), '-ra')]",
+        "nsgName": "[concat('sky-', parameters('clusterId'), '-nsg')]",
         "nsg": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]",
-        "vnetName": "[concat('ray-', parameters('clusterId'), '-vnet')]",
-        "subnetName": "[concat('ray-', parameters('clusterId'), '-subnet')]"
+        "vnetName": "[concat('sky-', parameters('clusterId'), '-vnet')]",
+        "subnetName": "[concat('sky-', parameters('clusterId'), '-subnet')]"
     },
     "resources": [
        {

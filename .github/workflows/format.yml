@@ -33,12 +33,10 @@ jobs:
     - name: Running yapf
       run: |
         yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' \
-            --exclude 'sky/skylet/providers/azure/**' \
             --exclude 'sky/skylet/providers/ibm/**'
     - name: Running black
       run: |
-        black --diff --check sky/skylet/providers/azure/ \
-            sky/skylet/providers/ibm/
+        black --diff --check sky/skylet/providers/ibm/
     - name: Running isort for black formatted files
       run: |
         isort --diff --check --profile black -l 88 -m 3 \
@@ -46,5 +44,4 @@ jobs:
     - name: Running isort for yapf formatted files
       run: |
         isort --diff --check ./ --sg 'sky/skylet/ray_patches/**' \
-            --sg 'sky/skylet/providers/azure/**' \
             --sg 'sky/skylet/providers/ibm/**'

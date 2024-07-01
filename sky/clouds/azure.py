@@ -67,7 +67,7 @@ class Azure(clouds.Cloud):
 
     _INDENT_PREFIX = ' ' * 4
 
-    PROVISIONER_VERSION = clouds.ProvisionerVersion.RAY_AUTOSCALER
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod

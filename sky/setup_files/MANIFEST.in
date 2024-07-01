@@ -1,13 +1,11 @@
 include sky/backends/monkey_patches/*.py
 exclude sky/clouds/service_catalog/data_fetchers/analyze.py
 include sky/provision/kubernetes/manifests/*
+include sky/provision/azure/*
 include sky/setup_files/*
 include sky/skylet/*.sh
 include sky/skylet/LICENSE
-include sky/skylet/providers/azure/*
-include sky/skylet/providers/gcp/*
 include sky/skylet/providers/ibm/*
-include sky/skylet/providers/kubernetes/*
 include sky/skylet/providers/lambda_cloud/*
 include sky/skylet/providers/oci/*
 include sky/skylet/providers/scp/*
