@@ -346,7 +346,8 @@ class Task:
     @staticmethod
     def from_yaml_config(
         config: Dict[str, Any],
-        env_overrides: Optional[List[Tuple[str, str]]] = None,
+        env_overrides: Optional[Union[Dict[str, str], List[Tuple[str,
+                                                                 str]]]] = None,
     ) -> 'Task':
         # More robust handling for 'envs': explicitly convert keys and values to
         # str, since users may pass '123' as keys/values which will get parsed
@@ -469,7 +470,11 @@ class Task:
         return task
 
     @staticmethod
-    def from_yaml(yaml_path: str) -> 'Task':
+    def from_yaml(
+        yaml_path: str,
+        env_overrides: Optional[Union[Dict[str, str], List[Tuple[str,
+                                                                 str]]]] = None
+    ) -> 'Task':
         """Initializes a task from a task YAML.
 
         Example:
@@ -479,6 +484,8 @@ class Task:
 
         Args:
           yaml_path: file path to a valid task yaml file.
+          env_overrides: Environment variables to override when creating the
+            task. Equivalent to the `--env` flag when calling `sky launch`.
 
         Raises:
           ValueError: if the path gets loaded into a str instead of a dict; or
@@ -497,7 +504,7 @@ class Task:
 
         if config is None:
             config = {}
-        return Task.from_yaml_config(config)
+        return Task.from_yaml_config(config, env_overrides)
 
     @property
     def num_nodes(self) -> int:
