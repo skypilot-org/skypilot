@@ -4,6 +4,7 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 import enum
+from typing import Any, Dict
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -145,7 +146,8 @@ def _get_single_resources_schema():
                     'type': 'null',
                 }]
             },
-            # The following fields are for internal use only.
+            # The following fields are for internal use only. Should not be
+            # specified in the task config.
             '_docker_login_config': {
                 'type': 'object',
                 'required': ['username', 'password', 'server'],
@@ -167,6 +169,9 @@ def _get_single_resources_schema():
             },
             '_requires_fuse': {
                 'type': 'boolean',
+            },
+            '_cluster_config_override': {
+                'type': 'object',
             },
         }
     }
@@ -370,6 +375,70 @@ def get_service_schema():
     }
 
 
+def _filter_schema(schema: dict, keys_to_keep: dict) -> dict:
+    """Recursively filter a schema to include only certain keys.
+
+    Args:
+        schema: The original schema dictionary.
+        keys_to_keep: List of tuples with the path of keys to retain.
+
+    Returns:
+        The filtered schema.
+    """
+    # Convert list of tuples to a dictionary for easier access
+    paths_dict: Dict[str, Any] = {}
+    for path in keys_to_keep:
+        current = paths_dict
+        for step in path:
+            if step not in current:
+                current[step] = {}
+            current = current[step]
+
+    def keep_keys(current_schema: dict, current_path_dict: dict,
+                  new_schema: dict) -> dict:
+        # Base case: if we reach a leaf in the path_dict, we stop.
+        if (not current_path_dict or not isinstance(current_schema, dict) or
+                not current_schema.get('properties')):
+            return current_schema
+
+        if 'properties' not in new_schema:
+            new_schema = {
+                key: current_schema[key]
+                for key in current_schema
+                if key != 'properties'
+            }
+            new_schema['properties'] = {}
+
+        for key, sub_schema in current_schema['properties'].items():
+            if key in current_path_dict:
+                # Recursively keep keys if further path dict exists
+                new_schema['properties'][key] = {}
+                new_schema['properties'][key] = keep_keys(
+                    sub_schema, current_path_dict[key],
+                    new_schema['properties'][key])
+
+        return new_schema
+
+    # Start the recursive filtering
+    return keep_keys(schema, paths_dict, {})
+
+
+def _experimental_task_schema() -> dict:
+    from sky import resources  # pylint: disable=import-outside-toplevel
+    config_override_schema = _filter_schema(get_config_schema(),
+                                            resources.OVERRIDEABLE_CONFIG_KEYS)
+    return {
+        'experimental': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'config_overrides': config_override_schema,
+            }
+        }
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -435,6 +504,7 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
+            **_experimental_task_schema(),
         }
     }
 
