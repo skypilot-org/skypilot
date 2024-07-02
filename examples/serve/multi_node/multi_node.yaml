@@ -1,0 +1,53 @@
+# SkyServe YAML to launch a service where each replica contains multiple gang-scheduled nodes.
+# Preemption of one node will cause the replica to be preempted and new replica to be launched.
+
+envs:
+  MODEL_NAME: meta-llama/Llama-2-13b-chat-hf
+  HF_TOKEN: <your-huggingface-token>  # TODO: Replace with huggingface token
+
+service:
+  readiness_probe: 
+    # Use an actual workload for multi-node service.
+    path: /v1/completions
+    post_data:
+      model: $MODEL_NAME
+      prompt: "Hello world,"
+      max_tokens: 7
+  replicas: 1
+
+num_nodes: 2
+
+resources:
+  ports: 8000
+  accelerators: A100:2
+  use_spot: true
+  memory: 64+
+
+setup: |
+  conda create -n vllm python=3.11 -y
+  conda activate vllm
+  pip install "ray[default]==2.10.0"
+  pip install "transformers==4.39.2"
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+  # Need to install vllm from source.
+  pip install git+https://github.com/vllm-project/vllm.git@563c1d7ec56aa0f9fdc28720f3517bf9297f5476
+
+
+run: |
+  conda activate vllm
+  head_ip=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  num_gpus=$(($SKYPILOT_NUM_GPUS_PER_NODE*$num_nodes))
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+      ray start --head --port=6379  --disable-usage-stats
+      sleep 60
+      python -u -m vllm.entrypoints.openai.api_server \
+        --host 0.0.0.0 --port 8000 \
+        --model $MODEL_NAME \
+        --tensor-parallel-size $num_gpus \
+        --max-num-seqs 64
+  else
+      sleep 20
+      ray start --address $head_ip:6379 --disable-usage-stats
+  fi
