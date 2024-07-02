@@ -18,8 +18,6 @@ GCSFUSE_VERSION = '1.3.0'
 RCLONE_INSTALL_COMMAND = ('rclone version >/dev/null 2>&1 || '
                           '(curl https://rclone.org/install.sh | '
                           'sudo bash)')
-# TODO(Doyoung): update the way how we keep on track of used ports for rclone remote control
-_RCLONE_DEFAULT_RC_PORT = 5572
 
 def get_s3_mount_install_cmd() -> str:
     """Returns a command to install S3 mount utility goofys."""
@@ -116,22 +114,43 @@ def get_mount_cmd_rclone(rclone_config_data: str, rclone_config_path: str,
                                 f'echo "{rclone_config_data}" >> '
                                 f'{rclone_config_path}')
     # --daemon will keep the mounting process running in the background.
-    global _RCLONE_DEFAULT_RC_PORT
-    _RCLONE_DEFAULT_RC_PORT += 1
-    log_path = os.path.expanduser(f'~/.sky/rclone_log/{bucket_name}')
+    # TODO(Doyoung): remove rclone log related scripts and options when done with implementation.
+    log_dir_path = os.path.expanduser(f'~/.sky/rclone_log')
+    log_file_path = os.path.join(log_dir_path, f'{bucket_name}.log')
+    create_log_cmd = f'mkdir -p {log_dir_path} && touch {log_file_path}'
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
-    mount_cmd = (f'{configure_rclone_profile} && '
+    mount_cmd = (f'{create_log_cmd}; '
+                 f'{configure_rclone_profile} && '
                  'rclone mount '
                  f'{bucket_rclone_profile}:{bucket_name} {mount_path} '
                  '--daemon --daemon-wait 0 '
                  # need to update the log fiel so it grabs the home directory from the remote instance.
-                 f'--log-file /home/gcpuser/.sky --log-level DEBUG ' #log related flags
-                 f'--allow-other --rc --rc-addr 127.0.0.1:{_RCLONE_DEFAULT_RC_PORT} --vfs-cache-mode full &&'#--dir-cache-time 10s '
-                 #'--transfers 1 && '#--vfs-cache-poll-interval 5s && ' #todo: figure out if this should be a semicolon or an &&
-                 'rclone rc vfs/refresh')
+                 #f'--log-file {log_file_path} --log-level DEBUG ' #log related flags
+                 f'--allow-other --vfs-cache-mode full --dir-cache-time 30s '
+                 '--transfers 1 && --vfs-cache-poll-interval 5s')
     return mount_cmd
+
+
+def _get_mount_binary(mount_cmd: str) -> str:
+    """Returns mounting binary in string given as the mount command.
+
+    Args:
+        mount_cmd: str; command used to mount a cloud storage.
+
+    Returns:
+        str: name of the binary used to mount a cloud storage.
+    """
+    if 'goofys' in mount_cmd:
+        return 'goofys'
+    elif 'gcsfuse' in mount_cmd:
+        return 'gcsfuse'
+    elif 'blobfuse2' in mount_cmd:
+        return 'blobfuse2'
+    else:
+        assert 'rclone' in mount_cmd
+        return 'rclone'
 
 
 def get_mounting_script(
@@ -158,7 +177,7 @@ def get_mounting_script(
         str: Mounting script as a str.
     """
 
-    mount_binary = mount_cmd.split()[0]
+    mount_binary = _get_mount_binary(mount_cmd)
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if version_check_cmd is not None:
         installed_check += f' && {version_check_cmd}'

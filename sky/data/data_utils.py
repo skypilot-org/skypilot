@@ -446,7 +446,7 @@ class Rclone():
                 [{bucket_rclone_profile}]
                 type = google cloud storage
                 project_number = {clouds.GCP.get_project_id()}
-                bucket_acl = private
+                bucket_policy_only = true
                 """)
         elif cloud is Rclone.RcloneClouds.AWS:
             config_data = textwrap.dedent(f"""\
