@@ -230,3 +230,13 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
                                       None) == PROXY_COMMAND
     assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('gcp', 'use_internal_ips'), None)
+
+
+def test_config_with_override(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / 'config.yaml'
+    _create_config_file(config_path)
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
+
+    _reload_config()
+
+    
