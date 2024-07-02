@@ -33,10 +33,6 @@ class RunPod(clouds.Cloud):
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is not '
              'supported yet on RunPod.'),
-        clouds.CloudImplementationFeatures.IMAGE_ID:
-            ('Specifying image ID is not supported on RunPod.'),
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            (f'Docker image is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on RunPod.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
@@ -170,19 +166,33 @@ class RunPod(clouds.Cloud):
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del zones, dryrun  # unused
+        del cluster_name_on_cloud, zones, dryrun  # unused
 
-        r = resources
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        acc_dict = self.get_accelerators_from_instance_type(
+            resources.instance_type)
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
 
+        if resources.image_id is None:
+            # Use the same default image as kubernetes cloud for
+            # the best performance.
+            image_id = service_catalog.get_image_id_from_tag(
+                'skypilot:gpu-ubuntu-2004', clouds='kubernetes')
+        elif None in resources.image_id:
+            image_id = resources.image_id[None]
+        else:
+            image_id = resources.image_id[region.name]
+
+        if image_id.startswith('docker:'):
+            image_id = image_id[len('docker:'):]
+
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'image_id': image_id,
         }
 
     def _get_feasible_launchable_resources(
