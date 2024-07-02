@@ -190,6 +190,12 @@ class StorageExternalDeletionError(StorageBucketGetError):
     pass
 
 
+class NonExistentStorageAccountError(StorageExternalDeletionError):
+    # Error raise when storage account provided through config.yaml or read
+    # from store handle(local db) does not exist.
+    pass
+
+
 class FetchClusterInfoError(Exception):
     """Raised when fetching the cluster info fails."""
 

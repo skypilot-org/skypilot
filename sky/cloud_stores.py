@@ -7,10 +7,12 @@ TODO:
 * Better interface.
 * Better implementation (e.g., fsspec, smart_open, using each cloud's SDK).
 """
+import shlex
 import subprocess
 import urllib.parse
 
 from sky.adaptors import aws
+from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import gcp
@@ -153,6 +155,113 @@ class GcsCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class AzureBlobCloudStorage(CloudStorage):
+    """Azure Blob Storage."""
+    # AzCopy is utilized for downloading data from Azure Blob Storage
+    # containers to remote systems due to its superior performance compared to
+    # az-cli. While az-cli's `az storage blob sync` can synchronize data from
+    # local to container, it lacks support to sync from container to remote
+    # synchronization. Moreover, `az storage blob download-batch` in az-cli
+    # does not leverage AzCopy's efficient multi-threaded capabilities, leading
+    # to slower performance.
+    #
+    # AzCopy requires appending SAS tokens directly in commands, as it does not
+    # support using STORAGE_ACCOUNT_KEY, unlike az-cli, which can generate
+    # SAS tokens but lacks direct multi-threading support like AzCopy.
+    # Hence, az-cli for SAS token generation is ran on the local machine and
+    # AzCopy is installed at the remote machine for efficient data transfer
+    # from containers to remote systems.
+    # Note that on Azure instances, both az-cli and AzCopy are typically
+    # pre-installed. And installing both would be used with AZ container is
+    # used from non-Azure instances.
+
+    _GET_AZCOPY = [
+        'azcopy --version > /dev/null 2>&1 || '
+        '(mkdir -p /usr/local/bin; '
+        'curl -L https://aka.ms/downloadazcopy-v10-linux -o azcopy.tar.gz; '
+        'sudo tar -xvzf azcopy.tar.gz --strip-components=1 -C /usr/local/bin --exclude=*.txt; '  # pylint: disable=line-too-long
+        'sudo chmod +x /usr/local/bin/azcopy; '
+        'rm azcopy.tar.gz)'
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether 'url' of the AZ Container is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        # split the url using split_az_path
+        storage_account_name, container_name, path = data_utils.split_az_path(
+            url)
+        # If there aren't more than just container name and storage account,
+        # that's a directory.
+        if not path:
+            return True
+        container_url = data_utils.AZURE_CONTAINER_URL.format(
+            storage_account_name=storage_account_name,
+            container_name=container_name)
+        # If there's more, we'd need to check if it's a directory or a file.
+        container_client = data_utils.create_az_client(
+            client_type='container', container_url=container_url)
+        num_objects = 0
+        for blob in container_client.list_blobs(name_starts_with=path):
+            if blob.name == path:
+                return False
+            num_objects += 1
+            if num_objects > 1:
+                return True
+
+        # A directory with few or no items
+        return True
+
+    def _get_azcopy_source(self, source: str, is_dir: bool) -> str:
+        """Converts the source so it can be used as an argument for azcopy."""
+        storage_account_name, container_name, blob_path = (
+            data_utils.split_az_path(source))
+        storage_account_key = data_utils.get_az_storage_account_key(
+            storage_account_name)
+
+        if storage_account_key is None:
+            # public containers do not require SAS token for access
+            sas_token = ''
+        else:
+            if is_dir:
+                sas_token = azure.get_az_container_sas_token(
+                    storage_account_name, storage_account_key, container_name)
+            else:
+                sas_token = azure.get_az_blob_sas_token(storage_account_name,
+                                                        storage_account_key,
+                                                        container_name,
+                                                        blob_path)
+        # "?" is a delimiter character used when SAS token is attached to the
+        # container endpoint.
+        # Reference: https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/how-to-guides/create-sas-tokens?tabs=Containers # pylint: disable=line-too-long
+        converted_source = f'{source}?{sas_token}' if sas_token else source
+
+        return shlex.quote(converted_source)
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Fetches a directory using AZCOPY from storage to remote instance."""
+        source = self._get_azcopy_source(source, is_dir=True)
+        # destination is guaranteed to not have '/' at the end of the string
+        # by tasks.py::set_file_mounts(). It is necessary to add from this
+        # method due to syntax of azcopy.
+        destination = f'{destination}/'
+        download_command = (f'azcopy sync {source} {destination} '
+                            '--recursive --delete-destination=false')
+        all_commands = list(self._GET_AZCOPY)
+        all_commands.append(download_command)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Fetches a file using AZCOPY from storage to remote instance."""
+        source = self._get_azcopy_source(source, is_dir=False)
+        download_command = f'azcopy copy {source} {destination}'
+        all_commands = list(self._GET_AZCOPY)
+        all_commands.append(download_command)
+        return ' && '.join(all_commands)
+
+
 class R2CloudStorage(CloudStorage):
     """Cloudflare Cloud Storage."""
 
@@ -216,16 +325,6 @@ class R2CloudStorage(CloudStorage):
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
         return ' && '.join(all_commands)
-
-
-def get_storage_from_path(url: str) -> CloudStorage:
-    """Returns a CloudStorage by identifying the scheme:// in a URL."""
-    result = urllib.parse.urlsplit(url)
-
-    if result.scheme not in _REGISTRY:
-        assert False, (f'Scheme {result.scheme} not found in'
-                       f' supported storage ({_REGISTRY.keys()}); path {url}')
-    return _REGISTRY[result.scheme]
 
 
 class IBMCosCloudStorage(CloudStorage):
@@ -294,10 +393,20 @@ class IBMCosCloudStorage(CloudStorage):
         return self.make_sync_dir_command(source, destination)
 
 
+def get_storage_from_path(url: str) -> CloudStorage:
+    """Returns a CloudStorage by identifying the scheme:// in a URL."""
+    result = urllib.parse.urlsplit(url)
+    if result.scheme not in _REGISTRY:
+        assert False, (f'Scheme {result.scheme} not found in'
+                       f' supported storage ({_REGISTRY.keys()}); path {url}')
+    return _REGISTRY[result.scheme]
+
+
 # Maps bucket's URIs prefix(scheme) to its corresponding storage class
 _REGISTRY = {
     'gs': GcsCloudStorage(),
     's3': S3CloudStorage(),
     'r2': R2CloudStorage(),
     'cos': IBMCosCloudStorage(),
+    'https': AzureBlobCloudStorage()
 }
