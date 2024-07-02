@@ -439,29 +439,38 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             f'Key {secret_name} does not exist in the cluster, creating it...')
         kubernetes.core_api().create_namespaced_secret(namespace, secret)
 
-    ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
+    private_key_path, _ = get_or_generate_keys()
     if network_mode == nodeport_mode:
+        ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
         service_type = kubernetes_enums.KubernetesServiceType.NODEPORT
+        # Setup service for SSH jump pod. We create the SSH jump service here
+        # because we need to know the service IP address and port to set the
+        # ssh_proxy_command in the autoscaler config.
+        kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace,
+                                            service_type)
+        ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+            ssh_jump_name,
+            nodeport_mode,
+            private_key_path=private_key_path,
+            namespace=namespace)
     elif network_mode == port_forward_mode:
+        # Using `kubectl port-forward` creates a direct tunnel to the pod and
+        # does not require a ssh jump pod.
         kubernetes_utils.check_port_forward_mode_dependencies()
-        # Using `kubectl port-forward` creates a direct tunnel to jump pod and
-        # does not require opening any ports on Kubernetes nodes. As a result,
-        # the service can be a simple ClusterIP service which we access with
-        # `kubectl port-forward`.
-        service_type = kubernetes_enums.KubernetesServiceType.CLUSTERIP
+        # TODO(romilb): This can be further optimized. Instead of using the
+        #   head node as a jump pod for worker nodes, we can also directly
+        #   set the ssh_target to the worker node. However, that requires
+        #   changes in the downstream code to return a mapping of node IPs to
+        #   pod names (to be used as ssh_target) and updating the upstream
+        #   SSHConfigHelper to use a different ProxyCommand for each pod.
+        #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
+        #   on GKE.
+        ssh_target = config['cluster_name'] + '-head'
+        ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+            ssh_target, port_forward_mode, private_key_path=private_key_path)
     else:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')
-    # Setup service for SSH jump pod. We create the SSH jump service here
-    # because we need to know the service IP address and port to set the
-    # ssh_proxy_command in the autoscaler config.
-    kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, service_type)
-
-    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-        PRIVATE_SSH_KEY_PATH, ssh_jump_name, network_mode, namespace,
-        clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH,
-        clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
-
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
 
     return config

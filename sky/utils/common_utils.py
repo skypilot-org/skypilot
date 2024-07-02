@@ -233,7 +233,7 @@ class Backoff:
     MULTIPLIER = 1.6
     JITTER = 0.4
 
-    def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
+    def __init__(self, initial_backoff: float = 5, max_backoff_factor: int = 5):
         self._initial = True
         self._backoff = 0.0
         self._initial_backoff = initial_backoff

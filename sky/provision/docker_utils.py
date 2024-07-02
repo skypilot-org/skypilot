@@ -176,8 +176,10 @@ class DockerInitializer:
         subprocess_utils.handle_returncode(
             rc,
             cmd,
-            error_msg='Failed to run docker setup commands',
-            stderr=stdout + stderr)
+            error_msg='Failed to run docker setup commands.',
+            stderr=stdout + stderr,
+            # Print out the error message if the command failed.
+            stream_logs=True)
         return stdout.strip()
 
     def initialize(self) -> str:
