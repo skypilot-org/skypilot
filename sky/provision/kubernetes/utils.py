@@ -193,8 +193,13 @@ class GKELabelFormatter(GPULabelFormatter):
             return value.replace('nvidia-tesla-', '').upper()
         elif value.startswith('nvidia-'):
             acc = value.replace('nvidia-', '').upper()
-            if acc == 'H100-80GB':
-                # H100 is named as H100-80GB in GKE.
+            if acc in ['H100-80GB', 'H100-MEGA-80GB']:
+                # H100 is named H100-80GB or H100-MEGA-80GB in GKE,
+                # where the latter has improved bandwidth.
+                # See a3-mega instances on GCP.
+                # TODO: we do not distinguish the two GPUs for simplicity,
+                # but we can evaluate whether we should distinguish
+                # them based on users' requests.
                 return 'H100'
             return acc
         else:
