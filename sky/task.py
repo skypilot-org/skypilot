@@ -470,11 +470,11 @@ class Task:
         # Parse resources field.
         resources_config = config.pop('resources', {})
         if cluster_config_override is not None:
-            assert resources_config.get('_cluster_config_override') is None, (
-                'Cannot set _cluster_config_override in both resources and '
+            assert resources_config.get('_cluster_config_overrides') is None, (
+                'Cannot set _cluster_config_overrides in both resources and '
                 'experimental.config_overrides')
             resources_config[
-                '_cluster_config_override'] = cluster_config_override
+                '_cluster_config_overrides'] = cluster_config_override
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)

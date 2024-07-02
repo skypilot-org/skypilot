@@ -76,7 +76,7 @@ class Resources:
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None,
-        _cluster_config_override: Optional[Dict[str, Any]] = None,
+        _cluster_config_overrides: Optional[Dict[str, Any]] = None,
     ):
         """Initialize a Resources object.
 
@@ -227,7 +227,7 @@ class Resources:
 
         self._requires_fuse = _requires_fuse
 
-        self._cluster_config_override = _cluster_config_override
+        self._cluster_config_overrides = _cluster_config_overrides
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -460,10 +460,10 @@ class Resources:
         return self._requires_fuse
 
     @property
-    def cluster_config_override(self) -> Dict[str, Any]:
-        if self._cluster_config_override is None:
+    def cluster_config_overrides(self) -> Dict[str, Any]:
+        if self._cluster_config_overrides is None:
             return {}
-        return self._cluster_config_override
+        return self._cluster_config_overrides
 
     @requires_fuse.setter
     def requires_fuse(self, value: Optional[bool]) -> None:
@@ -1033,7 +1033,7 @@ class Resources:
         if (skypilot_config.get_nested(
             ('nvidia_gpus', 'disable_ecc'),
                 False,
-                override_configs=self._cluster_config_override) and
+                override_configs=self._cluster_config_overrides) and
                 self.accelerators is not None):
             initial_setup_commands = [constants.DISABLE_GPU_ECC_COMMAND]
 
@@ -1041,7 +1041,7 @@ class Resources:
         docker_run_options = skypilot_config.get_nested(
             ('docker', 'run_options'),
             default_value=[],
-            override_configs=self._cluster_config_override)
+            override_configs=self._cluster_config_overrides)
         if isinstance(docker_run_options, str):
             docker_run_options = [docker_run_options]
         if docker_run_options and isinstance(self.cloud, clouds.Kubernetes):
@@ -1253,8 +1253,8 @@ class Resources:
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
-            _cluster_config_override=override.pop(
-                '_cluster_config_override', self._cluster_config_override),
+            _cluster_config_overrides=override.pop(
+                '_cluster_config_overrides', self._cluster_config_overrides),
         )
         assert len(override) == 0
         return resources
@@ -1414,8 +1414,8 @@ class Resources:
         resources_fields['_is_image_managed'] = config.pop(
             '_is_image_managed', None)
         resources_fields['_requires_fuse'] = config.pop('_requires_fuse', None)
-        resources_fields['_cluster_config_override'] = config.pop(
-            '_cluster_config_override', None)
+        resources_fields['_cluster_config_overrides'] = config.pop(
+            '_cluster_config_overrides', None)
 
         if resources_fields['cpus'] is not None:
             resources_fields['cpus'] = str(resources_fields['cpus'])
@@ -1459,8 +1459,8 @@ class Resources:
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
-        add_if_not_none('_cluster_config_override',
-                        self._cluster_config_override)
+        add_if_not_none('_cluster_config_overrides',
+                        self._cluster_config_overrides)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         if self._requires_fuse is not None:
@@ -1577,7 +1577,7 @@ class Resources:
             self._job_recovery = state.pop('_spot_recovery', None)
 
         if version < 19:
-            self._cluster_config_override = state.pop(
-                '_cluster_config_override', None)
+            self._cluster_config_overrides = state.pop(
+                '_cluster_config_overrides', None)
 
         self.__dict__.update(state)

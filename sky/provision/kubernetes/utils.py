@@ -1389,7 +1389,7 @@ def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
 
 def combine_pod_config_fields(
     cluster_yaml_path: str,
-    skypilot_override_configs: Dict[str, Any],
+    cluster_config_overrides: Dict[str, Any],
 ) -> None:
     """Adds or updates fields in the YAML with fields from the ~/.sky/config's
     kubernetes.pod_spec dict.
@@ -1432,9 +1432,13 @@ def combine_pod_config_fields(
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
-    kubernetes_config = skypilot_config.get_nested(
-        ('kubernetes', 'pod_config'), {},
-        override_configs=skypilot_override_configs)
+    # We don't use override_config in `skypilot_config.get_nested`, as merging
+    # the pod config requires special handling.
+    kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
+                                                   default_value={})
+    override_pod_config = (cluster_config_overrides.get('kubernetes', {}).get(
+        'pod_config', {}))
+    merge_dicts(override_pod_config, kubernetes_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     merge_dicts(

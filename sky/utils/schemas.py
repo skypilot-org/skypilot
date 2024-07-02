@@ -170,7 +170,7 @@ def _get_single_resources_schema():
             '_requires_fuse': {
                 'type': 'boolean',
             },
-            '_cluster_config_override': {
+            '_cluster_config_overrides': {
                 'type': 'object',
             },
         }
