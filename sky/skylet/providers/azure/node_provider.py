@@ -333,6 +333,7 @@ class AzureNodeProvider(NodeProvider):
                             },
                         },
                     ]
+                    break
 
         parameters = {
             "properties": {
