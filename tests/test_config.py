@@ -15,7 +15,7 @@ PROXY_COMMAND = 'ssh -W %h:%p -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no'
 NODEPORT_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.NODEPORT.value
 PORT_FORWARD_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value
 RUN_DURATION = 30
-OVERRIDE_RUN_DURATION = 10
+RUN_DURATION_OVERRIDE = 10
 PROVISION_TIMEOUT = 600
 
 
@@ -36,7 +36,7 @@ def _check_empty_config() -> None:
 
 
 def _create_config_file(config_file_path: pathlib.Path) -> None:
-    config_file_path.open('w', encoding='utf-8').write(
+    config_file_path.write_text(
         textwrap.dedent(f"""\
             aws:
                 vpc_name: {VPC_NAME}
@@ -61,8 +61,37 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
                         imagePullSecrets:
                             - name: my-secret     # Pull images from a private registry using a secret
 
-            allowed_clouds: ['aws', 'gcp', 'kubernetes']
             """))
+
+def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
+    task_file_path.write_text(textwrap.dedent(f"""\
+        experimental:
+            config_overrides:
+                docker:
+                    run_options:
+                        - -v /tmp:/tmp
+                kubernetes:
+                    pod_config:
+                        metadata:
+                            labels:
+                                test-key: test-value
+                            annotations:
+                                abc: def
+                        spec:
+                            imagePullSecrets:
+                                - name: my-secret-2
+                gcp:
+                    managed_instance_group:
+                        run_duration: {RUN_DURATION_OVERRIDE}
+                nvidia_gpus:
+                    disable_ecc: true
+        resources:
+            image_id: docker:ubuntu:latest
+
+        setup: echo 'Setting up...'
+        run: echo 'Running...'
+        """))
+        
 
 
 def test_no_config(monkeypatch) -> None:
@@ -250,42 +279,14 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('gcp', 'use_internal_ips'), None)
 
 
-def test_config_with_override(monkeypatch, tmp_path, enable_all_clouds) -> None:
+def test_k8s_config_with_override(monkeypatch, tmp_path, enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
 
     _reload_config()
-
-    task_config_yaml = textwrap.dedent(f"""\
-        experimental:
-            config_overrides:
-                docker:
-                    run_options:
-                        - -v /tmp:/tmp
-                kubernetes:
-                    pod_config:
-                        metadata:
-                            labels:
-                                test-key: test-value
-                            annotations:
-                                abc: def
-                        spec:
-                            imagePullSecrets:
-                                - name: my-secret-2
-                gcp:
-                    managed_instance_group:
-                        run_duration: {OVERRIDE_RUN_DURATION}
-                nvidia_gpus:
-                    disable_ecc: true
-        resources:
-            image_id: docker:ubuntu:latest
-
-        setup: echo 'Setting up...'
-        run: echo 'Running...'
-        """)
     task_path = tmp_path / 'task.yaml'
-    task_path.write_text(task_config_yaml)
+    _create_task_yaml_file(task_path)
     task = sky.Task.from_yaml(task_path)
 
     # Test Kubernetes overrides
@@ -293,7 +294,7 @@ def test_config_with_override(monkeypatch, tmp_path, enable_all_clouds) -> None:
     cluster_name = 'test-kubernetes-config-with-override'
     task.set_resources_override({'cloud': sky.Kubernetes()})
     sky.launch(task, cluster_name=cluster_name, dryrun=True)
-    cluster_yaml = pathlib.Path(f'~/.sky/generated/{cluster_name}.yml').expanduser().rename(tmp_path / cluster_name + '.yml')
+    cluster_yaml = pathlib.Path(f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(tmp_path / (cluster_name + '.yml'))
    
     # Load the cluster YAML
     cluster_config = common_utils.read_yaml(cluster_yaml)
@@ -306,21 +307,31 @@ def test_config_with_override(monkeypatch, tmp_path, enable_all_clouds) -> None:
     assert cluster_pod_config['spec']['runtimeClassName'] == 'nvidia'
 
 
+def test_gcp_config_with_override(monkeypatch, tmp_path, enable_all_clouds) -> None:
+    config_path = tmp_path / 'config.yaml'
+    _create_config_file(config_path)
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
+
+    _reload_config()
+    task_path = tmp_path / 'task.yaml'
+    _create_task_yaml_file(task_path)
+    task = sky.Task.from_yaml(task_path)
+    
     # Test GCP overrides
     cluster_name = 'test-gcp-config-with-override'
-    task.set_resources_override({'cloud': sky.GCP()})
+    task.set_resources_override({'cloud': sky.GCP(), 'accelerators': 'L4'})
     sky.launch(task, cluster_name=cluster_name, dryrun=True)
-    cluster_yaml = pathlib.Path(f'~/.sky/generated/{cluster_name}.yml').expanduser().rename(tmp_path / cluster_name + '.yml')
+    cluster_yaml = pathlib.Path(f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(tmp_path / (cluster_name + '.yml'))
 
     # Load the cluster YAML
     cluster_config = common_utils.read_yaml(cluster_yaml)
     assert cluster_config['provider']['vpc_name'] == VPC_NAME
-    assert '-v /tmp:/tmp' in cluster_config['docker']['run_options']
-    assert constants.DISABLE_GPU_ECC_COMMAND in cluster_config['setup_commands']
+    assert '-v /tmp:/tmp' in cluster_config['docker']['run_options'], cluster_config
+    assert constants.DISABLE_GPU_ECC_COMMAND in cluster_config['setup_commands'][0]
     head_node_type = cluster_config['head_node_type']
     cluster_node_config = cluster_config['available_node_types'][head_node_type]['node_config']
-    assert cluster_node_config['managed-instance-group']['run_duration'] == RUN_DURATION
-    assert cluster_node_config['managed-instance-group']['provision-timeout'] == PROVISION_TIMEOUT
+    assert cluster_node_config['managed-instance-group']['run_duration'] == RUN_DURATION_OVERRIDE
+    assert cluster_node_config['managed-instance-group']['provision_timeout'] == PROVISION_TIMEOUT
 
 def test_config_with_invalid_override(monkeypatch, tmp_path, enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'

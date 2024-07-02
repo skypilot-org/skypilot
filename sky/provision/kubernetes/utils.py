@@ -1362,9 +1362,10 @@ def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
         elif isinstance(value, list) and key in destination:
             assert isinstance(destination[key], list), \
                 f'Expected {key} to be a list, found {destination[key]}'
-            if key == 'containers':
-                # If the key is 'containers', we take the first and only
-                # container in the list and merge it.
+            if key in ['containers', 'imagePullSecrets']:
+                # If the key is 'containers' or 'imagePullSecrets, we take the
+                # first and only container/secret in the list and merge it, as
+                # we only support one container per pod.
                 assert len(value) == 1, \
                     f'Expected only one container, found {value}'
                 merge_dicts(value[0], destination[key][0])
