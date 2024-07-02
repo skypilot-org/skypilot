@@ -63,8 +63,10 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
 
             """))
 
+
 def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
-    task_file_path.write_text(textwrap.dedent(f"""\
+    task_file_path.write_text(
+        textwrap.dedent(f"""\
         experimental:
             config_overrides:
                 docker:
@@ -91,7 +93,6 @@ def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
         setup: echo 'Setting up...'
         run: echo 'Running...'
         """))
-        
 
 
 def test_no_config(monkeypatch) -> None:
@@ -279,7 +280,8 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('gcp', 'use_internal_ips'), None)
 
 
-def test_k8s_config_with_override(monkeypatch, tmp_path, enable_all_clouds) -> None:
+def test_k8s_config_with_override(monkeypatch, tmp_path,
+                                  enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
@@ -294,20 +296,26 @@ def test_k8s_config_with_override(monkeypatch, tmp_path, enable_all_clouds) -> N
     cluster_name = 'test-kubernetes-config-with-override'
     task.set_resources_override({'cloud': sky.Kubernetes()})
     sky.launch(task, cluster_name=cluster_name, dryrun=True)
-    cluster_yaml = pathlib.Path(f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(tmp_path / (cluster_name + '.yml'))
-   
+    cluster_yaml = pathlib.Path(
+        f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(
+            tmp_path / (cluster_name + '.yml'))
+
     # Load the cluster YAML
     cluster_config = common_utils.read_yaml(cluster_yaml)
     head_node_type = cluster_config['head_node_type']
-    cluster_pod_config = cluster_config['available_node_types'][head_node_type]['node_config']
-    assert cluster_pod_config['metadata']['labels']['test-key']  == 'test-value'
-    assert cluster_pod_config['metadata']['labels']['parent']  == 'skypilot'
+    cluster_pod_config = cluster_config['available_node_types'][head_node_type][
+        'node_config']
+    assert cluster_pod_config['metadata']['labels']['test-key'] == 'test-value'
+    assert cluster_pod_config['metadata']['labels']['parent'] == 'skypilot'
     assert cluster_pod_config['metadata']['annotations']['abc'] == 'def'
-    assert len(cluster_pod_config['spec']['imagePullSecrets']) == 1 and cluster_pod_config['spec']['imagePullSecrets'][0]['name'] == 'my-secret-2'
+    assert len(cluster_pod_config['spec']
+               ['imagePullSecrets']) == 1 and cluster_pod_config['spec'][
+                   'imagePullSecrets'][0]['name'] == 'my-secret-2'
     assert cluster_pod_config['spec']['runtimeClassName'] == 'nvidia'
 
 
-def test_gcp_config_with_override(monkeypatch, tmp_path, enable_all_clouds) -> None:
+def test_gcp_config_with_override(monkeypatch, tmp_path,
+                                  enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
@@ -316,24 +324,33 @@ def test_gcp_config_with_override(monkeypatch, tmp_path, enable_all_clouds) -> N
     task_path = tmp_path / 'task.yaml'
     _create_task_yaml_file(task_path)
     task = sky.Task.from_yaml(task_path)
-    
+
     # Test GCP overrides
     cluster_name = 'test-gcp-config-with-override'
     task.set_resources_override({'cloud': sky.GCP(), 'accelerators': 'L4'})
     sky.launch(task, cluster_name=cluster_name, dryrun=True)
-    cluster_yaml = pathlib.Path(f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(tmp_path / (cluster_name + '.yml'))
+    cluster_yaml = pathlib.Path(
+        f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(
+            tmp_path / (cluster_name + '.yml'))
 
     # Load the cluster YAML
     cluster_config = common_utils.read_yaml(cluster_yaml)
     assert cluster_config['provider']['vpc_name'] == VPC_NAME
-    assert '-v /tmp:/tmp' in cluster_config['docker']['run_options'], cluster_config
-    assert constants.DISABLE_GPU_ECC_COMMAND in cluster_config['setup_commands'][0]
+    assert '-v /tmp:/tmp' in cluster_config['docker'][
+        'run_options'], cluster_config
+    assert constants.DISABLE_GPU_ECC_COMMAND in cluster_config[
+        'setup_commands'][0]
     head_node_type = cluster_config['head_node_type']
-    cluster_node_config = cluster_config['available_node_types'][head_node_type]['node_config']
-    assert cluster_node_config['managed-instance-group']['run_duration'] == RUN_DURATION_OVERRIDE
-    assert cluster_node_config['managed-instance-group']['provision_timeout'] == PROVISION_TIMEOUT
+    cluster_node_config = cluster_config['available_node_types'][
+        head_node_type]['node_config']
+    assert cluster_node_config['managed-instance-group'][
+        'run_duration'] == RUN_DURATION_OVERRIDE
+    assert cluster_node_config['managed-instance-group'][
+        'provision_timeout'] == PROVISION_TIMEOUT
 
-def test_config_with_invalid_override(monkeypatch, tmp_path, enable_all_clouds) -> None:
+
+def test_config_with_invalid_override(monkeypatch, tmp_path,
+                                      enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
