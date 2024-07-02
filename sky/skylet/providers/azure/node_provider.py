@@ -308,6 +308,37 @@ class AzureNodeProvider(NodeProvider):
         template_params["nsg"] = self.provider_config["nsg"]
         template_params["subnet"] = self.provider_config["subnet"]
 
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import azure_catalog
+
+        instance_type = node_config["azure_arm_parameters"].get("vmSize", "")
+        accs = azure_catalog.get_accelerators_from_instance_type(instance_type)
+        if accs is not None and "A10" in accs:
+            # Configure driver extension for A10 GPUs. A10 GPUs requires a
+            # special type of drivers which is available at Microsoft HPC
+            # extension. Reference: https://forums.developer.nvidia.com/t/ubuntu-22-04-installation-driver-error-nvidia-a10/285195/2
+            for r in template["resources"]:
+                if r["type"] == "Microsoft.Compute/virtualMachines":
+                    # Add a nested extension resource for A10 GPUs
+                    r["resources"] = [
+                        {
+                            "type": "extensions",
+                            "apiVersion": "2015-06-15",
+                            "location": "[variables('location')]",
+                            "dependsOn": [
+                                "[concat('Microsoft.Compute/virtualMachines/', parameters('vmName'), copyIndex())]"
+                            ],
+                            "name": "NvidiaGpuDriverLinux",
+                            "properties": {
+                                "publisher": "Microsoft.HpcCompute",
+                                "type": "NvidiaGpuDriverLinux",
+                                "typeHandlerVersion": "1.9",
+                                "autoUpgradeMinorVersion": True,
+                                "settings": {},
+                            },
+                        },
+                    ]
+
         parameters = {
             "properties": {
                 "mode": DeploymentMode.incremental,
@@ -319,73 +350,6 @@ class AzureNodeProvider(NodeProvider):
         }
 
         # TODO: we could get the private/public ips back directly
-        create_or_update = get_azure_sdk_function(
-            client=self.resource_client.deployments, function_name="create_or_update"
-        )
-        poller = create_or_update(
-            resource_group_name=resource_group,
-            deployment_name=vm_name,
-            parameters=parameters,
-        )
-        poller.wait()
-
-        # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import azure_catalog
-
-        instance_type = node_config["azure_arm_parameters"].get("vmSize", "")
-        accs = azure_catalog.get_accelerators_from_instance_type(instance_type)
-        if accs is None or "A10" not in accs:
-            return
-
-        # Configure driver extension for A10 GPUs
-        create_result = poller.result().as_dict()
-        output_resources = create_result.get("properties", {}).get(
-            "output_resources", []
-        )
-        vms_to_add_driver = []
-        for r in output_resources:
-            r_id = r.get("id", "")
-            if "Microsoft.Compute/virtualMachines" in r_id:
-                vms_to_add_driver.append(r_id.split("/")[-1])
-
-        for v in vms_to_add_driver:
-            logger.info(f"Begin to configure A10 driver extension for VM: {v}")
-            self._configure_a10_driver_extension(v)
-            logger.info(f"A10 driver extension configured for VM: {v}")
-
-    def _configure_a10_driver_extension(self, vm_name):
-        resource_group = self.provider_config["resource_group"]
-        parameters = {
-            "properties": {
-                "mode": DeploymentMode.incremental,
-                "template": {
-                    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
-                    "contentVersion": "1.0.0.0",
-                    "parameters": {
-                        "vmName": {
-                            "type": "string",
-                            "metadata": {"description": "Name of the virtual machine"},
-                        }
-                    },
-                    "resources": [
-                        {
-                            "type": "Microsoft.Compute/virtualMachines/extensions",
-                            "apiVersion": "2015-06-15",
-                            "location": "[resourceGroup().location]",
-                            "name": "[concat(parameters('vmName'),'/NvidiaGpuDriverLinux')]",
-                            "properties": {
-                                "publisher": "Microsoft.HpcCompute",
-                                "type": "NvidiaGpuDriverLinux",
-                                "typeHandlerVersion": "1.9",
-                                "autoUpgradeMinorVersion": True,
-                                "settings": {},
-                            },
-                        }
-                    ],
-                },
-                "parameters": {"vmName": {"value": vm_name}},
-            }
-        }
         create_or_update = get_azure_sdk_function(
             client=self.resource_client.deployments, function_name="create_or_update"
         )
