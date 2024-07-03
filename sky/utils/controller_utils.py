@@ -760,8 +760,13 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 not storage_obj.source):
             # Construct source URL with first store type and storage name
             # E.g., s3://my-storage-name
-            source = list(
-                storage_obj.stores.keys())[0].store_prefix() + storage_obj.name
+            store_types = list(storage_obj.stores.keys())
+            assert len(store_types) == 1, (
+                'We only support one store type for now.', storage_obj.stores)
+            store_type = store_types[0]
+            store_object = storage_obj.stores[store_type]
+            source = storage_lib.StoreType.get_endpoint_url(
+                store_object, storage_obj.name)
             new_storage = storage_lib.Storage.from_yaml_config({
                 'source': source,
                 'persistent': storage_obj.persistent,
