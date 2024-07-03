@@ -23,8 +23,6 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
-_START_TITLE = '\n' + '-' * 20 + 'Start: {} ' + '-' * 20
-_END_TITLE = '-' * 20 + 'End:   {} ' + '-' * 20 + '\n'
 
 _MAX_RETRY = 6
 
@@ -99,19 +97,6 @@ def _auto_retry(should_retry: Callable[[Exception], bool] = lambda _: True):
     return decorator
 
 
-def _log_start_end(func):
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        logger.info(_START_TITLE.format(func.__name__))
-        try:
-            return func(*args, **kwargs)
-        finally:
-            logger.info(_END_TITLE.format(func.__name__))
-
-    return wrapper
-
-
 def _hint_worker_log_path(cluster_name: str, cluster_info: common.ClusterInfo,
                           stage_name: str):
     if cluster_info.num_instances > 1:
@@ -153,7 +138,7 @@ def _parallel_ssh_with_cache(func,
         return [future.result() for future in results]
 
 
-@_log_start_end
+@common.log_function_start_end
 def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
                       cluster_info: common.ClusterInfo,
                       ssh_credentials: Dict[str, Any]) -> Optional[str]:
@@ -184,7 +169,7 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
     return docker_users[0]
 
 
-@_log_start_end
+@common.log_function_start_end
 def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                              cluster_info: common.ClusterInfo,
                              ssh_credentials: Dict[str, Any]) -> None:
@@ -260,7 +245,7 @@ def _ray_gpu_options(custom_resource: str) -> str:
     return f' --num-gpus={acc_count}'
 
 
-@_log_start_end
+@common.log_function_start_end
 @_auto_retry()
 def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                            cluster_info: common.ClusterInfo,
@@ -320,7 +305,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                            f'===== stderr ====={stderr}')
 
 
-@_log_start_end
+@common.log_function_start_end
 @_auto_retry()
 def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                               custom_resource: Optional[str], ray_port: int,
@@ -417,7 +402,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                                    f'===== stderr ====={stderr}')
 
 
-@_log_start_end
+@common.log_function_start_end
 @_auto_retry()
 def start_skylet_on_head_node(cluster_name: str,
                               cluster_info: common.ClusterInfo,
@@ -501,7 +486,7 @@ def _max_workers_for_file_mounts(common_file_mounts: Dict[str, str]) -> int:
     return max_workers
 
 
-@_log_start_end
+@common.log_function_start_end
 def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
                          cluster_info: common.ClusterInfo,
                          ssh_credentials: Dict[str, str]) -> None:

@@ -15,11 +15,17 @@ workdir: ./examples
 
 file_mounts:
   ~/bucket_workdir:
-    # Change this to the your own globally unique bucket name.
+    # Change this to your own globally unique bucket name.
     name: sky-workdir-zhwu
     source: ./examples
     persistent: false
     mode: COPY
+
+  /output_path:
+    # Change this to your own globally unique bucket name.
+    name: sky-output-bucket
+    mode: MOUNT
+
   /imagenet-image:
     source: s3://sky-imagenet-data
   
@@ -55,3 +61,6 @@ run: |
 
   cat ~/tmpfile
   cat ~/a/b/c/tmpfile
+  
+  # Write to a file in the mounted bucket
+  echo "hello world!" > /output_path/output.txt
