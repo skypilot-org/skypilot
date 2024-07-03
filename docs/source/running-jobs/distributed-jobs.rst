@@ -69,7 +69,8 @@ SkyPilot exposes these environment variables that can be accessed in a task's ``
 - :code:`SKYPILOT_NUM_GPUS_PER_NODE`: number of GPUs reserved on each node to execute the
   task; the same as the count in ``accelerators: <name>:<count>`` (rounded up if a fraction).
 
-See :ref:`env-vars` for more details.
+See :ref:`sky-env-vars` for more details.
+
 Launching a multi-node task (new cluster)
 -------------------------------------------------
 
