@@ -2255,14 +2255,26 @@ class AzureBlobStore(AbstractStore):
                     with rich_utils.safe_status(
                             '[bold cyan]Setting up storage account: '
                             f'{storage_account_name}'):
-                        self._setup_new_storage_account(resource_group_name,
+                        self._create_storage_account(resource_group_name,
                                                         storage_account_name)
                         # wait until new resource creation propagates to Azure.
                         time.sleep(1)
 
         return storage_account_name, resource_group_name
 
-    def _setup_new_storage_account(self, resource_group_name: str, storage_account_name: str) -> None:
+    def _create_storage_account(self, resource_group_name: str, storage_account_name: str) -> None:
+        """Creates new storage account and assign Storage Blob Data Owner role.
+        
+        Args:
+            resource_group_name: str; Name of the resource group which the
+                storage account will be created under.
+            storage_account_name: str; Name of the storage account to be created
+
+        Raises:
+            StorageBucketCreateError: If storage account attempted to be
+                created already exists
+            AttributeError: When role assignment to the storage account fails.
+        """
         try:
             creation_response = (
                 self.storage_client.storage_accounts.
@@ -2348,7 +2360,7 @@ class AzureBlobStore(AbstractStore):
                         logger.info(
                             'Retrying role assignment due to propagation '
                             'delay of the newly created storage account. '
-                            f'Retry count: {retry}'
+                            f'Retry count: {retry}.'
                         )
                     time.sleep(1)
                     retry += 1
