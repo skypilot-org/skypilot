@@ -253,7 +253,7 @@ def get_loadbalancer_ip(namespace: str,
 
     start_time = time.time()
     retry_cnt = 0
-    while ip is None and time.time() - start_time < timeout:
+    while ip is None and (retry_cnt == 0 or time.time() - start_time < timeout):
         service = core_api.read_namespaced_service(
             service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
         if service.status.load_balancer.ingress is not None:
