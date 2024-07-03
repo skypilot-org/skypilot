@@ -476,14 +476,16 @@ class Azure(clouds.Cloud):
 
         # Check if the azure blob storage dependencies are installed.
         try:
+            # pylint: disable=redefined-outer-name, import-outside-toplevel, unused-import
             import azure.storage.blob
             import msgraph
         except ImportError as e:
-            return False, (f'Azure blob storage depdencies are not installed. '
-                           'Run the following commands:'
-                           f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
-                           f'\n{cls._INDENT_PREFIX}Details: '
-                           f'{common_utils.format_exception(e)}')
+            return False, (
+                f'Azure blob storage depdencies are not installed. '
+                'Run the following commands:'
+                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e)}')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

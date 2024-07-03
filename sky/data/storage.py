@@ -2230,9 +2230,8 @@ class AzureBlobStore(AbstractStore):
                     self.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                         region=self.region,
                         user_hash=common_utils.get_user_hash()))
-                resource_group_name = (
-                    self.DEFAULT_RESOURCE_GROUP_NAME.format(
-                        user_hash=common_utils.get_user_hash()))
+                resource_group_name = (self.DEFAULT_RESOURCE_GROUP_NAME.format(
+                    user_hash=common_utils.get_user_hash()))
                 try:
                     # obtains detailed information about resource group under
                     # the user's subscription. Used to check if the name
