@@ -6,19 +6,19 @@ Secrets and Environment Variables
 
 Environment variables are a powerful way to pass configuration and secrets to your tasks. There are two types of environment variables in SkyPilot:
 
-- :ref:`User-specified environment variables <user-specified-env-vars>`: Passed by users to tasks, for secrets and arguments.
-- :ref:`SkyPilot environment variables <sky-env-vars>`: Predefined by SkyPilot with information about the cluster and task.
+- :ref:`User-specified environment variables <user-specified-env-vars>`: Passed by users to tasks, useful for secrets and configurations.
+- :ref:`SkyPilot environment variables <sky-env-vars>`: Predefined by SkyPilot with information about the current cluster and task.
 
 .. _user-specified-env-vars:
 
 User-specified environment variables
 ------------------------------------------------------------------
 
-Passing user-specified environment variables is useful for passing secrets and arguments for ``file_mounts``, ``setup``, and ``run``.
+User-specified environment variables are useful for passing secrets and any arguments or configurations needed for your tasks. They are made available in ``file_mounts``, ``setup``, and ``run``.
 
 You can specify environment variables to be made available to a task in two ways:
 
-- ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`
+- ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`:
 
   .. code-block:: yaml
 
@@ -49,7 +49,7 @@ Passing secrets
 ~~~~~~~~~~~~~~~
 
 We recommend passing secrets to any node(s) executing your task by first making
-it available in your current shell, then using ``--env`` to pass it to SkyPilot:
+it available in your current shell, then using ``--env SECRET`` to pass it to SkyPilot:
 
 .. code-block:: console
 
@@ -117,11 +117,10 @@ See complete examples at `llm/vllm/serve.yaml <https://github.com/skypilot-org/s
 SkyPilot environment variables
 ------------------------------------------------------------------
 
-SkyPilot exports several predefined environment variables for a task's execution, which
-are useful for frameworks that require information about the cluster or task, such as
+SkyPilot exports several predefined environment variables made available during a task's execution. These variables contain information about the current cluster or task, which can be useful for distributed frameworks such as
 torch.distributed, OpenMPI, etc. See examples in :ref:`dist-jobs` and :ref:`managed-jobs`.
 
-``setup`` and ``run`` stages have different environment variables available:
+The ``setup`` and ``run`` stages can access different sets of SkyPilot environment variables:
 
 Environment variables for ``setup``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -140,7 +139,7 @@ Environment variables for ``setup``
    * - ``SKYPILOT_SETUP_NODE_IPS``
      - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
      
-       Note that this is not necessarily the same as the nodes in ``run`` stage, as the ``setup`` stage runs on all nodes of the cluster, while the ``run`` stage can run on a subset of nodes.
+       Note that this is not necessarily the same as the nodes in ``run`` stage: the ``setup`` stage runs on all nodes of the cluster, while the ``run`` stage can run on a subset of nodes.
      -      
        .. code-block:: text
 

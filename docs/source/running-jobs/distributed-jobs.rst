@@ -65,8 +65,7 @@ SkyPilot exposes these environment variables that can be accessed in a task's ``
   the node executing the task.
 - :code:`SKYPILOT_NODE_IPS`: a string of IP addresses of the nodes reserved to execute
   the task, where each line contains one IP address.
-- :code:`SKYPILOT_NUM_NODES`: number of nodes reserved for the task, specified by ``num_nodes: <n>``, 
-  which is equivalent to :code:`echo "$SKYPILOT_NODE_IPS" | wc -l`
+- :code:`SKYPILOT_NUM_NODES`: number of nodes reserved for the task, which can be specified by ``num_nodes: <n>``. Same value as :code:`echo "$SKYPILOT_NODE_IPS" | wc -l`.
 - :code:`SKYPILOT_NUM_GPUS_PER_NODE`: number of GPUs reserved on each node to execute the
   task; the same as the count in ``accelerators: <name>:<count>`` (rounded up if a fraction).
 
@@ -177,5 +176,5 @@ To execute a distributed Ray program on many nodes, you can download the `traini
 
 .. warning:: 
 
-  When using ray, please avoid calling `ray stop` as that will also cause SkyPilot runtime to be stopped as well.
+  When using Ray, avoid calling ``ray stop`` as that will also cause the SkyPilot runtime to be stopped.
 
