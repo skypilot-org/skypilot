@@ -157,11 +157,10 @@ def terminate_instances(
     del provider_config
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
-        logger.info(f'Terminating instance {inst_id}.'
-                    f'{inst}')
         if worker_only and inst['name'].endswith('-head'):
             continue
-        logger.info(f'Removing {inst_id}: {inst}')
+        logger.debug(f'Terminating Cudo instance {inst_id}.'
+                    f'{inst}')
         cudo_wrapper.remove(inst_id)
 
 
