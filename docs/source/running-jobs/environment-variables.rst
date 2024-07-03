@@ -14,7 +14,7 @@ Environment variables are a powerful way to pass configuration and secrets to yo
 User-specified environment variables
 ------------------------------------------------------------------
 
-Passing user-specified environment variables is useful for passing secrets and arguments for ``file_mounts``, ``setup``, and ``run``.
+User-specified environment variables are useful for passing secrets and any arguments or configurations needed for your tasks. They are made available in ``file_mounts``, ``setup``, and ``run``.
 
 You can specify environment variables to be made available to a task in two ways:
 
