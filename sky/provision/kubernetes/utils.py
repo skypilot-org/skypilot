@@ -1529,6 +1529,14 @@ def create_namespace(namespace: str) -> None:
         namespace: Name of the namespace to create
     """
     kubernetes_client = kubernetes.kubernetes.client
+    try:
+        kubernetes.core_api().read_namespace(namespace)
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            raise
+    else:
+        return
+
     ns_metadata = dict(name=namespace, labels={'parent': 'skypilot'})
     merge_custom_metadata(ns_metadata)
     namespace_obj = kubernetes_client.V1Namespace(metadata=ns_metadata)
