@@ -2229,12 +2229,10 @@ class AzureBlobStore(AbstractStore):
                 storage_account_name = (
                     self.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                         region=self.region,
-                        #user_hash=common_utils.get_user_hash()))
-                        user_hash=f'dy{common_utils.get_user_hash()}'))
+                        user_hash=common_utils.get_user_hash()))
                 resource_group_name = (
                     self.DEFAULT_RESOURCE_GROUP_NAME.format(
-                        #user_hash=common_utils.get_user_hash()))
-                        user_hash=f'dy{common_utils.get_user_hash()}'))
+                        user_hash=common_utils.get_user_hash()))
                 try:
                     # obtains detailed information about resource group under
                     # the user's subscription. Used to check if the name
@@ -2368,6 +2366,17 @@ class AzureBlobStore(AbstractStore):
                         f'{role_assignment_failure_error_msg}'
                         f'Details: {common_utils.format_exception(e, use_bracket=True)}'
                     )
+            except azure.exceptions().ResourceExistsError as e:
+                # Break the loop and return if the storage account already has
+                # been assigned the role.
+                if 'RoleAssignmentExists' in str(e):
+                    return
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketCreateError(
+                            f'{role_assignment_failure_error_msg}'
+                            f'Details: {common_utils.format_exception(e, use_bracket=True)}'
+                        )
             except azure.exceptions().HttpResponseError as e:
                 if 'AuthorizationFailed' in str(e):
                     with ux_utils.print_exception_no_traceback():
