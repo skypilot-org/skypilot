@@ -117,8 +117,7 @@ See complete examples at `llm/vllm/serve.yaml <https://github.com/skypilot-org/s
 SkyPilot environment variables
 ------------------------------------------------------------------
 
-SkyPilot exports several predefined environment variables for a task's execution, which
-are useful for frameworks that require information about the cluster or task, such as
+SkyPilot exports several predefined environment variables made available during a task's execution. These variables contain information about the current cluster or task, which can be useful for distributed frameworks such as
 torch.distributed, OpenMPI, etc. See examples in :ref:`dist-jobs` and :ref:`managed-jobs`.
 
 ``setup`` and ``run`` stages have different environment variables available:
