@@ -139,7 +139,7 @@ Environment variables for ``setup``
    * - ``SKYPILOT_SETUP_NODE_IPS``
      - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
      
-       Note that this is not necessarily the same as the nodes in ``run`` stage, as the ``setup`` stage runs on all nodes of the cluster, while the ``run`` stage can run on a subset of nodes.
+       Note that this is not necessarily the same as the nodes in ``run`` stage: the ``setup`` stage runs on all nodes of the cluster, while the ``run`` stage can run on a subset of nodes.
      -      
        .. code-block:: text
 
