@@ -220,6 +220,16 @@ def query_instances(
     return statuses
 
 
+def open_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    del cluster_name_on_cloud, ports, provider_config
+    # Cudo has all ports open by default. Nothing to do here.
+    return
+
+
 def cleanup_ports(
     cluster_name_on_cloud: str,
     ports: List[str],

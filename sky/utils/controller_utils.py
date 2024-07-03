@@ -247,6 +247,11 @@ def _get_cloud_dependencies_installation_commands(
                 '/bin/linux/amd64/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
+        elif isinstance(cloud, clouds.Cudo):
+            commands.append(
+                f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
+                'pip list | grep cudo-compute > /dev/null 2>&1 || '
+                'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1')
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 commands.append(
@@ -263,12 +268,6 @@ def _get_cloud_dependencies_installation_commands(
                     f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
                     'pip list | grep runpod > /dev/null 2>&1 || '
                     'pip install "runpod>=1.5.1" > /dev/null 2>&1')
-            elif isinstance(cloud, clouds.Cudo):
-                # cudo doesn't support open port
-                commands.append(
-                    f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
-                    'pip list | grep cudo-compute > /dev/null 2>&1 || '
-                    'pip install "cudo-compute>=0.1.8" > /dev/null 2>&1')
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
         commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
