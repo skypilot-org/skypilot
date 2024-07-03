@@ -49,7 +49,7 @@ Passing secrets
 ~~~~~~~~~~~~~~~
 
 We recommend passing secrets to any node(s) executing your task by first making
-it available in your current shell, then using ``--env`` to pass it to SkyPilot:
+it available in your current shell, then using ``--env SECRET`` to pass it to SkyPilot:
 
 .. code-block:: console
 
