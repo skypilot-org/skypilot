@@ -85,8 +85,8 @@ def get_client(name: str, subscription_id: str, **kwargs):
             from azure.mgmt.authorization import AuthorizationManagementClient
             return AuthorizationManagementClient(credential, subscription_id)
         elif name == 'graph':
-            from msgraph import GraphServiceClient
-            return GraphServiceClient(credential)
+            import msgraph
+            return msgraph.GraphServiceClient(credential)
         elif name == 'container':
             # Currently, there is no way to check if the given endpoint url
             # of a container is private or public. Hence, we approach with
