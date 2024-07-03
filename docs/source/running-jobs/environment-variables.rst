@@ -121,6 +121,12 @@ SkyPilot environment variables
 SkyPilot exports several predefined environment variables made available during a task's execution. These variables contain information about the current cluster or task, which can be useful for distributed frameworks such as
 torch.distributed, OpenMPI, etc. See examples in :ref:`dist-jobs` and :ref:`managed-jobs`.
 
+The values of these variables are filled in by SkyPilot at task execution time.
+You can access these variables in the following ways:
+
+* In the task YAML's ``setup``/``run`` commands (a Bash script), access them using the ``${MYVAR}`` syntax;
+* In the program(s) launched in ``setup``/``run``, access them using the language's standard method (e.g., ``os.environ`` for Python).
+
 The ``setup`` and ``run`` stages can access different sets of SkyPilot environment variables:
 
 Environment variables for ``setup``
@@ -230,11 +236,3 @@ Environment variables for ``run``
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
-
-The values of these variables are filled in by SkyPilot at task execution time.
-
-You can access these variables in the following ways:
-
-* In the task YAML's ``setup``/``run`` commands (a Bash script), access them using the ``${MYVAR}`` syntax;
-* In the program(s) launched in ``setup``/``run``, access them using the
-  language's standard method (e.g., ``os.environ`` for Python).
