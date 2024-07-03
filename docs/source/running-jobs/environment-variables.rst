@@ -58,8 +58,8 @@ it available in your current shell, then using ``--env SECRET`` to pass it to Sk
 
 .. tip::
 
-  When value is not specified for ``--env HF_TOKEN``, SkyPilot reads it from
-  local environment variables
+  When the value is not specified (e.g., ``--env HF_TOKEN``), SkyPilot reads it from
+  local environment variables.
 
 
 Using in ``file_mounts``
