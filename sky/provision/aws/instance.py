@@ -728,7 +728,7 @@ def open_ports(
             # For AWS, IpProtocol = -1 means all traffic
             for group_pairs in existing_rule['UserIdGroupPairs']:
                 if group_pairs['GroupId'] != sg.id:
-                    # We skip the port opening when the rule allows access from 
+                    # We skip the port opening when the rule allows access from
                     # other security groups, as that is likely added by a user
                     # manually and satisfy their requirement.
                     # The security group created by SkyPilot allows all traffic
