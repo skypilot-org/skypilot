@@ -155,9 +155,9 @@ Contents
    :maxdepth: 1
    :caption: User Guides
 
+   ../running-jobs/environment-variables
    ../examples/docker-containers
    ../examples/ports
-   ../running-jobs/environment-variables
    ../reference/tpu
    ../reference/logging
    ../reference/faq
