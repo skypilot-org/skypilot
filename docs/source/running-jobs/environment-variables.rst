@@ -120,7 +120,7 @@ SkyPilot environment variables
 SkyPilot exports several predefined environment variables made available during a task's execution. These variables contain information about the current cluster or task, which can be useful for distributed frameworks such as
 torch.distributed, OpenMPI, etc. See examples in :ref:`dist-jobs` and :ref:`managed-jobs`.
 
-``setup`` and ``run`` stages have different environment variables available:
+The ``setup`` and ``run`` stages can access different sets of SkyPilot environment variables:
 
 Environment variables for ``setup``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
