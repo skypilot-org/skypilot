@@ -160,7 +160,7 @@ def terminate_instances(
         if worker_only and inst['name'].endswith('-head'):
             continue
         logger.debug(f'Terminating Cudo instance {inst_id}.'
-                    f'{inst}')
+                     f'{inst}')
         cudo_wrapper.remove(inst_id)
 
 
