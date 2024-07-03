@@ -166,5 +166,5 @@ To execute a distributed Ray program on many nodes, you can download the `traini
 
 .. warning:: 
 
-  When using ray, please avoid calling `ray stop` as that will also cause SkyPilot runtime to be stopped as well.
+  When using Ray, avoid calling ``ray stop`` as that will also cause the SkyPilot runtime to be stopped.
 
