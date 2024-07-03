@@ -33,7 +33,7 @@ You can specify environment variables to be made available to a task in two ways
   its existence (errors out if not specified), set it to an empty string or
   ``null`` in the task YAML. For example, ``WANDB_API_KEY`` and ``HF_TOKEN`` in
   the following task YAML are marked as required:
-  
+
   .. code-block:: yaml
 
     envs:
@@ -58,8 +58,9 @@ it available in your current shell, then using ``--env SECRET`` to pass it to Sk
 
 .. tip::
 
-  When value is not specified for ``--env HF_TOKEN``, SkyPilot reads it from
-  local environment variables
+  You do not need to pass the value directly such as ``--env
+  WANDB_API_KEY=1234``. When the value is not specified (e.g., ``--env HF_TOKEN``),
+  SkyPilot reads it from local environment variables.
 
 
 Using in ``file_mounts``
