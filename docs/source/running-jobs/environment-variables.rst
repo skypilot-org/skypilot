@@ -18,7 +18,7 @@ User-specified environment variables are useful for passing secrets and any argu
 
 You can specify environment variables to be made available to a task in two ways:
 
-- ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`
+- ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`:
 
   .. code-block:: yaml
 
