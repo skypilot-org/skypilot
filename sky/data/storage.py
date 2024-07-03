@@ -73,6 +73,7 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'Bucket {bucket_name!r} does not exist. '
     'It may have been deleted externally.')
 
+_WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
 
 def get_cached_enabled_storage_clouds_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[str]:
@@ -2145,6 +2146,7 @@ class AzureBlobStore(AbstractStore):
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
 
+
     def _get_storage_account_and_resource_group(
             self) -> Tuple[str, Optional[str]]:
         """Get storage account and resource group to be used for AzureBlobStore
@@ -2227,9 +2229,11 @@ class AzureBlobStore(AbstractStore):
                 storage_account_name = (
                     self.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                         region=self.region,
-                        user_hash=common_utils.get_user_hash()))
+                        #user_hash=common_utils.get_user_hash()))
+                        user_hash=f'dy{common_utils.get_user_hash()}'))
                 resource_group_name = (self.DEFAULT_RESOURCE_GROUP_NAME.format(
-                    user_hash=common_utils.get_user_hash()))
+                    #user_hash=common_utils.get_user_hash()))
+                    user_hash=f'dy{common_utils.get_user_hash()}'))
                 try:
                     # obtains detailed information about resource group under
                     # the user's subscription. Used to check if the name
@@ -2251,83 +2255,105 @@ class AzureBlobStore(AbstractStore):
                     with rich_utils.safe_status(
                             '[bold cyan]Setting up storage account: '
                             f'{storage_account_name}'):
-                        try:
-                            creation_response = (
-                                self.storage_client.storage_accounts.
-                                begin_create(
-                                    resource_group_name, storage_account_name, {
-                                        'sku': {
-                                            'name': 'Standard_GRS'
-                                        },
-                                        'kind': 'StorageV2',
-                                        'location': self.region,
-                                        'encryption': {
-                                            'services': {
-                                                'blob': {
-                                                    'key_type': 'Account',
-                                                    'enabled': True
-                                                }
-                                            },
-                                            'key_source': 'Microsoft.Storage'
-                                        },
-                                    }).result())
-                            # Wait until storage account creation propagates
-                            # to Azure
-                            time.sleep(1)
-                            # Assigning Storage Blob Data Owner role to the
-                            # storage account.
-                            # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
-                            authorization_client = data_utils.create_az_client(
-                                'authorization')
-                            graph_client = data_utils.create_az_client('graph')
-
-                            async def get_object_id():
-                                httpx_logger = logging.getLogger('httpx')
-                                original_level = httpx_logger.getEffectiveLevel(
-                                )
-                                # silencing the INFO level response log from httpx request
-                                httpx_logger.setLevel(logging.WARNING)
-                                user = await graph_client.users.with_url(
-                                    'https://graph.microsoft.com/v1.0/me'
-                                ).get()
-                                httpx_logger.setLevel(original_level)
-                                object_id = str(user.additional_data['id'])
-                                return object_id
-
-                            object_id = asyncio.run(get_object_id())
-                            # Defintion ID of Storage Blob Data Owner role.
-                            # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # pylint: disable=line-too-long
-                            storage_blob_data_owner_role_id = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
-                            role_definition_id = (
-                                '/subscriptions'
-                                f'/{azure.get_subscription_id()}'
-                                '/providers/Microsoft.Authorization'
-                                '/roleDefinitions'
-                                f'/{storage_blob_data_owner_role_id}')
-                            authorization_client.role_assignments.create(
-                                scope=creation_response.id,
-                                role_assignment_name=uuid.uuid4(),
-                                parameters={
-                                    'properties': {
-                                        'principalId': f'{object_id}',
-                                        'principalType': 'User',
-                                        'roleDefinitionId': role_definition_id,
-                                    }
-                                },
-                            )
-                        except azure.exceptions().ResourceExistsError as error:
-                            with ux_utils.print_exception_no_traceback():
-                                raise exceptions.StorageBucketCreateError(
-                                    'Failed to create storage account '
-                                    f'{storage_account_name!r}. You may be '
-                                    'attempting to create a storage account '
-                                    'already being in use. '
-                                    f'Details: {common_utils.format_exception(error, use_bracket=True)}'
-                                )
+                        self._setup_new_storage_account(resource_group_name,
+                                                        storage_account_name)
                         # wait until new resource creation propagates to Azure.
                         time.sleep(1)
 
         return storage_account_name, resource_group_name
+
+    def _setup_new_storage_account(self, resource_group_name: str, storage_account_name: str) -> None:
+        try:
+            creation_response = (
+                self.storage_client.storage_accounts.
+                begin_create(
+                    resource_group_name, storage_account_name, {
+                        'sku': {
+                            'name': 'Standard_GRS'
+                        },
+                        'kind': 'StorageV2',
+                        'location': self.region,
+                        'encryption': {
+                            'services': {
+                                'blob': {
+                                    'key_type': 'Account',
+                                    'enabled': True
+                                }
+                            },
+                            'key_source': 'Microsoft.Storage'
+                        },
+                    }).result())
+        except azure.exceptions().ResourceExistsError as error:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketCreateError(
+                    'Failed to create storage account '
+                    f'{storage_account_name!r}. You may be '
+                    'attempting to create a storage account '
+                    'already being in use. '
+                    f'Details: {common_utils.format_exception(error, use_bracket=True)}'
+                )
+        # Assigning Storage Blob Data Owner role to the
+        # storage account.
+        # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
+        authorization_client = data_utils.create_az_client(
+            'authorization')
+        graph_client = data_utils.create_az_client('graph')
+
+        async def get_object_id():
+            httpx_logger = logging.getLogger('httpx')
+            original_level = httpx_logger.getEffectiveLevel()
+            # silencing the INFO level response log from httpx request
+            httpx_logger.setLevel(logging.WARNING)
+            user = await graph_client.users.with_url(
+                'https://graph.microsoft.com/v1.0/me'
+            ).get()
+            httpx_logger.setLevel(original_level)
+            object_id = str(user.additional_data['id'])
+            return object_id
+
+        object_id = asyncio.run(get_object_id())
+        # Defintion ID of Storage Blob Data Owner role.
+        # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # pylint: disable=line-too-long
+        storage_blob_data_owner_role_id = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
+        role_definition_id = (
+            '/subscriptions'
+            f'/{azure.get_subscription_id()}'
+            '/providers/Microsoft.Authorization'
+            '/roleDefinitions'
+            f'/{storage_blob_data_owner_role_id}')
+        
+        # It may take some time for the created storage account to propagate
+        # to Azure, we retry to assign the role for several times until
+        # it propagates
+        role_assignment_start = time.time()
+        retry = 0
+        while (
+            time.time() - role_assignment_start
+            < _WAIT_FOR_STORAGE_ACCOUNT_CREATION):
+            try:
+                authorization_client.role_assignments.create(
+                    scope=creation_response.id,
+                    role_assignment_name=uuid.uuid4(),
+                    parameters={
+                        'properties': {
+                            'principalId': f'{object_id}',
+                            'principalType': 'User',
+                            'roleDefinitionId': role_definition_id,
+                        }
+                    },
+                )
+            except AttributeError as e:
+                if 'signed_session' in str(e):
+                    if retry % 5 == 0:
+                        logger.info(
+                            'Retrying role assignment due to propagation '
+                            'delay of the newly created storage account. '
+                            f'Retry count: {retry}'
+                        )
+                    time.sleep(1)
+                    retry += 1
+                    continue
+                raise
 
     def upload(self):
         """Uploads source to store bucket.
