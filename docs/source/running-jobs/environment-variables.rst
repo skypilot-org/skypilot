@@ -29,16 +29,16 @@ You can specify environment variables to be made available to a task in two ways
 
 .. tip::
 
-  If an environment variable is required to be specified with `--env` during
-  ``sky launch/exec``, you can set it to empty or ``null`` in task YAML to raise an
-  error when it is forgotten to be specified. For example, the ``WANDB_API_KEY``
-  and ``HF_TOKEN`` in the following task YAML:
-
+  To mark an environment variable as required and make SkyPilot forcefully check
+  its existence (errors out if not specified), set it to an empty string or
+  ``null`` in the task YAML. For example, ``WANDB_API_KEY`` and ``HF_TOKEN`` in
+  the following task YAML are marked as required:
+  
   .. code-block:: yaml
 
     envs:
-      HF_TOKEN: null
       WANDB_API_KEY:
+      HF_TOKEN: null
       MYVAR: val
 
 The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via the ``${MYVAR}`` syntax.
