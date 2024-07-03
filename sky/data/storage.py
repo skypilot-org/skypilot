@@ -2272,8 +2272,8 @@ class AzureBlobStore(AbstractStore):
 
         Raises:
             StorageBucketCreateError: If storage account attempted to be
-                created already exists
-            AttributeError: When role assignment to the storage account fails.
+                created already exists or fails to assign role to the create
+                storage account.
         """
         try:
             creation_response = (
@@ -2339,6 +2339,9 @@ class AzureBlobStore(AbstractStore):
         # it propagates
         role_assignment_start = time.time()
         retry = 0
+        role_assignment_failure_error_msg = (
+            'Failed to assign Storage Blob Data Owner role to the '
+            f'storage account {storage_account_name!r}. ')
         while (
             time.time() - role_assignment_start
             < _WAIT_FOR_STORAGE_ACCOUNT_CREATION):
@@ -2365,7 +2368,27 @@ class AzureBlobStore(AbstractStore):
                     time.sleep(1)
                     retry += 1
                     continue
-                raise
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketCreateError(
+                        f'{role_assignment_failure_error_msg}'
+                        f'Details: {common_utils.format_exception(error, use_bracket=True)}'
+                    )
+            except azure.exceptions().HttpResponseError as e:
+                if 'AuthorizationFailed' in str(e):
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketCreateError(
+                            f'{role_assignment_failure_error_msg}'
+                            'Please check to see if you have the authorization'
+                            ' "Microsoft.Authorization/roleAssignments/write" '
+                            'to assign the role.'
+                        )
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketCreateError(
+                            f'{role_assignment_failure_error_msg}'
+                            f'Details: {common_utils.format_exception(error, use_bracket=True)}'
+                        )
+                
 
     def upload(self):
         """Uploads source to store bucket.
