@@ -127,7 +127,8 @@ def endpoints(cluster: str,
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
     """
-    with rich_utils.safe_status('[bold cyan]Fetching endpoints...[/]'):
+    with rich_utils.safe_status('[bold cyan]Fetching endpoints for cluster '
+                                f'{cluster}...[/]'):
         return backend_utils.get_endpoints(cluster=cluster, port=port)
 
 
