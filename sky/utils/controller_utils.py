@@ -191,7 +191,7 @@ def _get_cloud_dependencies_installation_commands(
     prefix_str = 'Check & install cloud dependencies on controller: '
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
-    empty_str = ' ' * 5
+    empty_str = ' ' * 10
     aws_dependencies_installation = (
         'pip list | grep boto3 > /dev/null 2>&1 || pip install '
         'botocore>=1.29.10 boto3>=1.26.1; '
