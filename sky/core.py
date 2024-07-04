@@ -19,6 +19,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import controller_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -126,7 +127,8 @@ def endpoints(cluster: str,
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
     """
-    return backend_utils.get_endpoints(cluster=cluster, port=port)
+    with rich_utils.safe_status('[bold cyan]Fetching endpoints...[/]'):
+        return backend_utils.get_endpoints(cluster=cluster, port=port)
 
 
 @usage_lib.entrypoint
