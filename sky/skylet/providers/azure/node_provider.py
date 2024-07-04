@@ -303,12 +303,7 @@ class AzureNodeProvider(NodeProvider):
         template_params["nsg"] = self.provider_config["nsg"]
         template_params["subnet"] = self.provider_config["subnet"]
 
-        # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import azure_catalog
-
-        instance_type = node_config["azure_arm_parameters"].get("vmSize", "")
-        accs = azure_catalog.get_accelerators_from_instance_type(instance_type)
-        if accs is not None and "A10" in accs:
+        if node_config.get("need_nvidia_driver_extension", False):
             # Configure driver extension for A10 GPUs. A10 GPUs requires a
             # special type of drivers which is available at Microsoft HPC
             # extension. Reference: https://forums.developer.nvidia.com/t/ubuntu-22-04-installation-driver-error-nvidia-a10/285195/2

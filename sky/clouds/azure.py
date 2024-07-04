@@ -7,7 +7,7 @@ import re
 import subprocess
 import textwrap
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import colorama
 
@@ -269,13 +269,12 @@ class Azure(clouds.Cloud):
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
-    def make_deploy_resources_variables(
-            self,
-            resources: 'resources.Resources',
-            cluster_name_on_cloud: str,
-            region: 'clouds.Region',
-            zones: Optional[List['clouds.Zone']],
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+    def make_deploy_resources_variables(self,
+                                        resources: 'resources.Resources',
+                                        cluster_name_on_cloud: str,
+                                        region: 'clouds.Region',
+                                        zones: Optional[List['clouds.Zone']],
+                                        dryrun: bool = False) -> Dict[str, Any]:
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
@@ -314,6 +313,10 @@ class Azure(clouds.Cloud):
             'image_sku': sku,
             'image_version': version,
         }
+
+        # Setup the A10 nvidia driver.
+        need_nvidia_driver_extension = (resources.accelerators is not None and
+                                        'A10' in resources.accelerators)
 
         # Setup commands to eliminate the banner and restart sshd.
         # This script will modify /etc/ssh/sshd_config and add a bash script
@@ -367,6 +370,7 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
+            'need_nvidia_driver_extension': need_nvidia_driver_extension,
             'disk_tier': Azure._get_disk_type(_failover_disk_tier()),
             'cloud_init_setup_commands': cloud_init_setup_commands,
             'azure_subscription_id': self.get_project_id(dryrun),
