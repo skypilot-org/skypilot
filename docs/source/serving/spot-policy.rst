@@ -3,7 +3,7 @@
 Using Spot Instances for Serving
 ================================
 
-SkyServe supports serving models on a mixture of spot and on-demand replicas with two options: :code:`base_ondemand_fallback_replicas` and :code:`dynamic_ondemand_fallback`.
+SkyServe supports serving models on a mixture of spot and on-demand replicas with two options: :code:`base_ondemand_fallback_replicas` and :code:`dynamic_ondemand_fallback`. Currently, SkyServe relies on the user side to retry in the event of spot instance preemptions. 
 
 
 Base on-demand Fallback
