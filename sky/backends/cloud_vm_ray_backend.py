@@ -18,7 +18,8 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+                    Union)
 
 import colorama
 import filelock
@@ -701,36 +702,54 @@ class FailoverCloudErrorHandlerV1:
     """
 
     @staticmethod
+    def _handle_unknown_error(
+            stdout: str, stderr: str,
+            is_error_str_known: Callable[[str], bool]) -> List[str]:
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if is_error_str_known(s.strip())
+        ]
+        if errors:
+            return errors
+        if 'rsync: command not found' in stderr:
+            with ux_utils.print_exception_no_traceback():
+                e = RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
+                setattr(e, 'detailed_reason',
+                        f'stdout: {stdout}\nstderr: {stderr}')
+                raise e
+        detailed_reason = textwrap.dedent(f"""\
+        ====== stdout ======
+        {stdout}
+        ====== stderr ======
+        {stderr}
+        """)
+        logger.info('====== stdout ======')
+        print(stdout)
+        logger.info('====== stderr ======')
+        print(stderr)
+        with ux_utils.print_exception_no_traceback():
+            e = RuntimeError('Errors occurred during provision; '
+                             'check logs above.')
+            setattr(e, 'detailed_reason', detailed_reason)
+            raise e
+
+    @staticmethod
     def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
                         launchable_resources: 'resources_lib.Resources',
                         region: 'clouds.Region',
                         zones: Optional[List['clouds.Zone']], stdout: str,
                         stderr: str):
         del zones  # Unused.
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'LambdaCloudError:' in s.strip()
-        ]
-        if not errors:
-            if 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
-
+        errors = FailoverCloudErrorHandlerV1._handle_unknown_error(
+            stdout,
+            stderr,
+            is_error_str_known=lambda x: 'LambdaCloudError:' in x.strip())
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
+        style = colorama.Style
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         _add_to_blocked_resources(blocked_resources,
                                   launchable_resources.copy(zone=None))
@@ -745,64 +764,20 @@ class FailoverCloudErrorHandlerV1:
                             launchable_resources.copy(region=r.name, zone=None))
 
     @staticmethod
-    def _kubernetes_handler(blocked_resources: Set['resources_lib.Resources'],
-                            launchable_resources: 'resources_lib.Resources',
-                            region, zones, stdout, stderr):
-        del zones  # Unused.
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'KubernetesError:' in s.strip()
-        ]
-        if not errors:
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provisioning; '
-                                   'check logs above.')
-
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(blocked_resources,
-                                  launchable_resources.copy(zone=None))
-
-    @staticmethod
     def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources', region,
-                     zones, stdout, stderr):
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']], stdout: str,
+                     stderr: str):
         del zones  # Unused.
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'SCPError:' in s.strip()
-        ]
-        if not errors:
-            if 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
+        errors = FailoverCloudErrorHandlerV1._handle_unknown_error(
+            stdout,
+            stderr,
+            is_error_str_known=lambda x: 'SCPError:' in x.strip())
 
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
+        style = colorama.Style
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         _add_to_blocked_resources(blocked_resources,
                                   launchable_resources.copy(zone=None))
@@ -823,29 +798,13 @@ class FailoverCloudErrorHandlerV1:
                      zones: Optional[List['clouds.Zone']], stdout: str,
                      stderr: str):
 
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'ERR' in s.strip() or 'PANIC' in s.strip()
-        ]
-        if not errors:
-            if 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
+        errors = FailoverCloudErrorHandlerV1._handle_unknown_error(
+            stdout, stderr,
+            lambda x: 'ERR' in x.strip() or 'PANIC' in x.strip())
+
         logger.warning(f'Got error(s) on IBM cluster, in {region.name}:')
         messages = '\n\t'.join(errors)
+        style = colorama.Style
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
 
         for zone in zones:  # type: ignore[union-attr]
@@ -859,35 +818,15 @@ class FailoverCloudErrorHandlerV1:
                      region: 'clouds.Region',
                      zones: Optional[List['clouds.Zone']], stdout: str,
                      stderr: str):
-
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if ('VcnSubnetNotFound' in s.strip()) or
-            ('oci.exceptions.ServiceError' in s.strip() and
-             ('NotAuthorizedOrNotFound' in s.strip() or 'CannotParseRequest' in
-              s.strip() or 'InternalError' in s.strip() or
-              'LimitExceeded' in s.strip() or 'NotAuthenticated' in s.strip()))
-        ]
-        if not errors:
-            if 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
-
+        errors = FailoverCloudErrorHandlerV1._handle_unknown_error(
+            stdout, stderr, lambda x: 'VcnSubnetNotFound' in x.strip() or
+            ('oci.exceptions.ServiceError' in x.strip() and
+             ('NotAuthorizedOrNotFound' in x.strip() or 'CannotParseRequest' in
+              x.strip() or 'InternalError' in x.strip() or 'LimitExceeded' in x.
+              strip() or 'NotAuthenticated' in x.strip())))
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
+        style = colorama.Style
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
 
         if zones is not None:
