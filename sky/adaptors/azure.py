@@ -66,24 +66,26 @@ def get_client(name: str, subscription_id: str, **kwargs):
     # Increase the timeout to fix the Azure get-access-token timeout issue.
     # Tracked in
     # https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
-    from azure.identity import AzureCliCredential
+    from azure import identity
     with _session_creation_lock:
-        credential = AzureCliCredential(process_timeout=30)
+        credential = identity.AzureCliCredential(process_timeout=30)
         if name == 'compute':
-            from azure.mgmt.compute import ComputeManagementClient
-            return ComputeManagementClient(credential, subscription_id)
+            from azure.mgmt import compute
+            return compute.ComputeManagementClient(credential, subscription_id)
         elif name == 'network':
-            from azure.mgmt.network import NetworkManagementClient
-            return NetworkManagementClient(credential, subscription_id)
+            from azure.mgmt import network
+            return network.NetworkManagementClient(credential, subscription_id)
         elif name == 'resource':
-            from azure.mgmt.resource import ResourceManagementClient
-            return ResourceManagementClient(credential, subscription_id)
+            from azure.mgmt import resource
+            return resource.ResourceManagementClient(credential,
+                                                     subscription_id)
         elif name == 'storage':
-            from azure.mgmt.storage import StorageManagementClient
-            return StorageManagementClient(credential, subscription_id)
+            from azure.mgmt import storage
+            return storage.StorageManagementClient(credential, subscription_id)
         elif name == 'authorization':
-            from azure.mgmt.authorization import AuthorizationManagementClient
-            return AuthorizationManagementClient(credential, subscription_id)
+            from azure.mgmt import authorization
+            return authorization.AuthorizationManagementClient(
+                credential, subscription_id)
         elif name == 'graph':
             import msgraph
             return msgraph.GraphServiceClient(credential)
@@ -96,12 +98,13 @@ def get_client(name: str, subscription_id: str, **kwargs):
             # If it turns out to be a private container, an error is caught
             # and the credential is passed, treating it as private container.
             # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35770 # pylint: disable=line-too-long
-            from azure.storage.blob import ContainerClient
+            from azure.storage import blob
             container_url = kwargs.pop('container_url', None)
             assert container_url is not None, ('Must provide "container_url"'
                                                ' keyword arguments for '
                                                'container client.')
-            container_client = ContainerClient.from_container_url(container_url)
+            container_client = blob.ContainerClient.from_container_url(
+                container_url)
             try:
                 container_client.exists()
             except exceptions().ClientAuthenticationError:
@@ -109,7 +112,7 @@ def get_client(name: str, subscription_id: str, **kwargs):
                 # container url or wrong container name is provided as the
                 # public container url. We reattempt with credentials assuming
                 # user is using private container with access rights.
-                container_client = ContainerClient.from_container_url(
+                container_client = blob.ContainerClient.from_container_url(
                     container_url, credential)
                 try:
                     # Suppress noisy logs from Azure SDK when attempting
@@ -165,16 +168,15 @@ def get_az_container_sas_token(
     Returns:
         A SAS token with a 1-hour lifespan to access the specified container.
     """
-    from azure.storage.blob import ContainerSasPermissions
-    from azure.storage.blob import generate_container_sas
-    sas_token = generate_container_sas(
+    from azure.storage import blob
+    sas_token = blob.generate_container_sas(
         account_name=storage_account_name,
         container_name=container_name,
         account_key=storage_account_key,
-        permission=ContainerSasPermissions(read=True,
-                                           write=True,
-                                           list=True,
-                                           create=True),
+        permission=blob.ContainerSasPermissions(read=True,
+                                                write=True,
+                                                list=True,
+                                                create=True),
         expiry=datetime.datetime.now(datetime.timezone.utc) +
         datetime.timedelta(hours=1))
     return sas_token
@@ -195,17 +197,16 @@ def get_az_blob_sas_token(storage_account_name: str, storage_account_key: str,
     Returns:
         A SAS token with a 1-hour lifespan to access the specified blob.
     """
-    from azure.storage.blob import BlobSasPermissions
-    from azure.storage.blob import generate_blob_sas
-    sas_token = generate_blob_sas(
+    from azure.storage import blob
+    sas_token = blob.generate_blob_sas(
         account_name=storage_account_name,
         container_name=container_name,
         blob_name=blob_name,
         account_key=storage_account_key,
-        permission=BlobSasPermissions(read=True,
-                                      write=True,
-                                      list=True,
-                                      create=True),
+        permission=blob.BlobSasPermissions(read=True,
+                                           write=True,
+                                           list=True,
+                                           create=True),
         expiry=datetime.datetime.now(datetime.timezone.utc) +
         datetime.timedelta(hours=1))
     return sas_token
