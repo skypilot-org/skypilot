@@ -214,5 +214,5 @@ def get_az_blob_sas_token(storage_account_name: str, storage_account_key: str,
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def create_security_rule(**kwargs):
-    from azure.mgmt.network.models import SecurityRule
-    return SecurityRule(**kwargs)
+    from azure.mgmt.network import models
+    return models.SecurityRule(**kwargs)
