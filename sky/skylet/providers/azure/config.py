@@ -18,6 +18,8 @@ from sky.provision import common
 
 UNIQUE_ID_LEN = 4
 _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
+_WAIT_FOR_RESOURCE_GROUP_DELETION_TIMEOUT_SECONDS = 480  # 8 minutes
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +82,31 @@ def _configure_resource_group(config):
     rg_create_or_update = get_azure_sdk_function(
         client=resource_client.resource_groups, function_name="create_or_update"
     )
-    rg_create_or_update(resource_group_name=resource_group, parameters=params)
+    rg_creation_start = time.time()
+    retry = 0
+    while (
+        time.time() - rg_creation_start
+        < _WAIT_FOR_RESOURCE_GROUP_DELETION_TIMEOUT_SECONDS
+    ):
+        try:
+            rg_create_or_update(resource_group_name=resource_group, parameters=params)
+            break
+        except azure.exceptions().ResourceExistsError as e:
+            if "ResourceGroupBeingDeleted" in str(e):
+                if retry % 5 == 0:
+                    # TODO(zhwu): This should be shown in terminal for better
+                    # UX, which will be achieved after we move Azure to use
+                    # SkyPilot provisioner.
+                    logger.warning(
+                        f"Azure resource group {resource_group} of a recent "
+                        "terminated cluster {config['cluster_name']} is being "
+                        "deleted. It can only be provisioned after it is fully"
+                        "deleted. Waiting..."
+                    )
+                time.sleep(1)
+                retry += 1
+                continue
+            raise
 
     # load the template file
     current_path = Path(__file__).parent

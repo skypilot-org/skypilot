@@ -66,6 +66,10 @@ class Cudo(clouds.Cloud):
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             ('Docker image is currently not supported on Cudo. You can try '
              'running docker command inside the `run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: (
+            'Cudo Compute cannot host a controller as it does not '
+            'autostopping, which will leave the controller to run indefinitely.'
+        ),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
 
