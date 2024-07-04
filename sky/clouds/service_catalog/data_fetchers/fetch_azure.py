@@ -95,7 +95,7 @@ DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 # Some A10 instance types only contains a fractional of GPU. We temporarily
 # filter them out here to avoid using it as a whole A10 GPU.
-# TODO(zhwu,cbmemo): support fractional GPUs, which can be done on
+# TODO(zhwu,tian): support fractional GPUs, which can be done on
 # kubernetes as well.
 # Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
 FILTERED_A10_INSTANCE_TYPES = [
