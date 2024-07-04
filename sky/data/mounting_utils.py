@@ -14,10 +14,8 @@ _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '1.3.0'
-# TODO(doyoung): need to install specific version of RCLONE
-RCLONE_INSTALL_COMMAND = ('rclone version >/dev/null 2>&1 || '
-                          '(curl https://rclone.org/install.sh | '
-                          'sudo bash)')
+# https://github.com/rclone/rclone/releases
+RCLONE_VERSION = '1.67.0'
 
 def get_s3_mount_install_cmd() -> str:
     """Returns a command to install S3 mount utility goofys."""
@@ -72,6 +70,16 @@ def get_r2_mount_cmd(r2_credentials_path: str, r2_profile_name: str,
     return mount_cmd
 
 
+
+def get_rclone_install_cmd() -> str:
+    """Returns a command to install Rclone."""
+    install_cmd = ('wget -nc https://github.com/rclone/rclone/releases'
+                   f'/download/v{RCLONE_VERSION}/rclone-v{RCLONE_VERSION}'
+                   '-linux-amd64.deb -O /tmp/rclone.deb && '
+                   'sudo dpkg --install /tmp/rclone.deb')
+    return install_cmd
+
+
 def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
                       bucket_rclone_profile: str, bucket_name: str,
                       mount_path: str) -> str:
@@ -94,12 +102,7 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
     return mount_cmd
 
 
-def get_mount_install_cmd_rclone() -> str:
-    """Returns a command to install mount utility rclone."""
-    return RCLONE_INSTALL_COMMAND
-
-
-def get_mount_cmd_rclone(rclone_config_data: str, rclone_config_path: str,
+def get_mount_cache_cmd(rclone_config_data: str, rclone_config_path: str,
                               bucket_rclone_profile: str, bucket_name: str,
                               mount_path: str) -> str:
     """Returns a command to mount a GCP/AWS bucket using rclone."""

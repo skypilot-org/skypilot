@@ -402,9 +402,9 @@ class Rclone():
     # Mapping of storage providers using rclone
     # to their respective profile prefix
     class RcloneClouds(Enum):
-        IBM = 'sky-ibm-'
-        GCP = 'sky-gcp-'
         AWS = 'sky-aws-'
+        GCP = 'sky-gcp-'
+        IBM = 'sky-ibm-'
 
     @staticmethod
     def generate_rclone_bucket_profile_name(bucket_name: str,
@@ -412,23 +412,42 @@ class Rclone():
         """Returns rclone profile name for specified bucket
 
         Args:
-            bucket_name (str): name of bucket
-            cloud (RcloneClouds): enum object of storage provider
+            bucket_name: str; name of bucket
+            cloud: RcloneClouds; enum object of storage provider
                 supported via rclone
         """
         try:
-            return cloud.value + bucket_name
+            profile_name = f'{cloud.value}{bucket_name}'
+            return profile_name
         except AttributeError as e:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Value: {cloud} isn\'t a member of '
+                raise ValueError(f'{cloud!r} is not a member of '
                                  'Rclone.RcloneClouds') from e
 
     @staticmethod
     def get_rclone_config(bucket_name: str, cloud: RcloneClouds,
                           region: Optional[str]) -> str:
+        """
+        """
         bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
                 bucket_name, cloud)
-        if cloud is Rclone.RcloneClouds.IBM:
+        if cloud is Rclone.RcloneClouds.AWS:
+            config_data = textwrap.dedent(f"""\
+                [{bucket_rclone_profile}]
+                type = s3
+                provider = AWS
+                access_key_id = {aws.session().get_credentials().get_frozen_credentials().access_key}
+                secret_access_key = {aws.session().get_credentials().get_frozen_credentials().secret_key}
+                acl = private
+                """)
+        elif cloud is Rclone.RcloneClouds.GCP:
+            config_data = textwrap.dedent(f"""\
+                [{bucket_rclone_profile}]
+                type = google cloud storage
+                project_number = {clouds.GCP.get_project_id()}
+                bucket_policy_only = true
+                """)
+        elif cloud is Rclone.RcloneClouds.IBM:
             access_key_id, secret_access_key = ibm.get_hmac_keys()
             config_data = textwrap.dedent(f"""\
                 [{bucket_rclone_profile}]
@@ -439,22 +458,6 @@ class Rclone():
                 region = {region}
                 endpoint = s3.{region}.cloud-object-storage.appdomain.cloud
                 location_constraint = {region}-smart
-                acl = private
-                """)
-        elif cloud is Rclone.RcloneClouds.GCP:
-            config_data = textwrap.dedent(f"""\
-                [{bucket_rclone_profile}]
-                type = google cloud storage
-                project_number = {clouds.GCP.get_project_id()}
-                bucket_policy_only = true
-                """)
-        elif cloud is Rclone.RcloneClouds.AWS:
-            config_data = textwrap.dedent(f"""\
-                [{bucket_rclone_profile}]
-                type = s3
-                provider = AWS
-                access_key_id = {aws.session().get_credentials().get_frozen_credentials().access_key}
-                secret_access_key = {aws.session().get_credentials().get_frozen_credentials().secret_key}
                 acl = private
                 """)
         else:

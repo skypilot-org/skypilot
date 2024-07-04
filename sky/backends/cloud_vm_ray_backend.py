@@ -4548,7 +4548,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Handle cases where `storage_mounts` is None. This occurs when users
         # initiate a 'sky start' command from a Skypilot version that predates
         # the introduction of the `storage_mounts_metadata` feature.
-        if not storage_mounts:
+        if storage_mounts is None:
             return
 
         # Process only mount mode objects here. COPY mode objects have been
@@ -4558,10 +4558,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
             if (storage_mount.mode == storage_lib.StorageMode.MOUNT or
-                storage_mount.mode == storage_lib.StorageMode.RCLONE)
+                storage_mount.mode == storage_lib.StorageMode.MOUNT_CACHE)
         }
 
-        # Handle cases when there aren't any Storages with MOUNT mode.
+        # Handle cases when there aren't any Storages with either MOUNT or
+        # MOUNT_CACHE mode.
         if not storage_mounts:
             return
 
@@ -4591,7 +4592,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if storage_obj.mode == storage_lib.StorageMode.MOUNT:
                 mount_cmd = store.mount_command(dst)
             else:
-                mount_cmd = store.mount_command_rclone(dst)
+                assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHE
+                mount_cmd = store.mount_cache_command(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):

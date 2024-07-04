@@ -165,7 +165,7 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
-    RCLONE = 'RCLONE'
+    MOUNT_CACHE = 'MOUNT_CACHE'
 
 
 class AbstractStore:
@@ -1359,14 +1359,14 @@ class S3Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
     
-    def mount_command_rclone(self, mount_path: str) -> str:
+    def mount_cache_command(self, mount_path: str) -> str:
         install_cmd = mounting_utils.get_mount_install_cmd_rclone()
         rclone_config_data = Rclone.get_rclone_config(
             self.bucket.name,
             Rclone.RcloneClouds.AWS,
             None
         )
-        mount_cmd = mounting_utils.get_mount_cmd_rclone(rclone_config_data,
+        mount_cmd = mounting_utils.get_mount_cache_cmd(rclone_config_data,
                                                             Rclone.RCLONE_CONFIG_PATH,
                                                             self.bucket_rclone_profile,
                                                             self.bucket.name,
@@ -1819,14 +1819,14 @@ class GcsStore(AbstractStore):
                                                    mount_cmd, version_check_cmd)
             
     
-    def mount_command_rclone(self, mount_path: str) -> str:
+    def mount_cache_command(self, mount_path: str) -> str:
         install_cmd = mounting_utils.get_mount_install_cmd_rclone()
         rclone_config_data = Rclone.get_rclone_config(
             self.bucket.name,
             Rclone.RcloneClouds.GCP,
             None
         )
-        mount_cmd = mounting_utils.get_mount_cmd_rclone(rclone_config_data,
+        mount_cmd = mounting_utils.get_mount_cache_cmd(rclone_config_data,
                                                             Rclone.RCLONE_CONFIG_PATH,
                                                             self.bucket_rclone_profile,
                                                             self.bucket.name,
