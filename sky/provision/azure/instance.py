@@ -555,7 +555,7 @@ def terminate_instances(
     assert provider_config is not None, cluster_name_on_cloud
 
     resource_group_client = azure.get_client('resource', subscription_id)
-    delete_resource_group = _get_azure_sdk_function(
+    delete_resource_group = get_azure_sdk_function(
         client=resource_group_client.resource_groups, function_name='delete')
 
     try:
@@ -568,7 +568,7 @@ def terminate_instances(
         raise
 
 
-def _get_instance_status(compute_client, vm,
+def _get_instance_status(compute_client: 'azure_compute.ComputeManagementClient', vm,
                          resource_group: str) -> Optional[AzureInstanceStatus]:
     try:
         instance = compute_client.virtual_machines.instance_view(
