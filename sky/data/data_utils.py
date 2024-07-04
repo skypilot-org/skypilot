@@ -300,9 +300,9 @@ def is_az_container_endpoint(endpoint_url: str) -> bool:
     pattern = re.compile(
         r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)*$')
     match = pattern.match(endpoint_url)
-    if match:
-        return True
-    return False
+    if match is None:
+        return False
+    return True
 
 
 def create_r2_client(region: str = 'auto') -> Client:
