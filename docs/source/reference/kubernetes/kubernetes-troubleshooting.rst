@@ -71,7 +71,7 @@ If you see an error, ensure that your kubeconfig file at :code:`~/.kube/config` 
 Step A3 - Do your nodes have enough disk space?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If your nodes are out of disk space, pulling the SkyPilot images may fail with :code:`rpc error: code = Canceled desc = failed to pull and unpack image: context canceled`.
+If your nodes are out of disk space, pulling the SkyPilot images may fail with :code:`rpc error: code = Canceled desc = failed to pull and unpack image: context canceled` error in the terminal during provisioning.
 Make sure your nodes are not under disk pressure by checking :code:`Conditions` in :code:`kubectl describe nodes`, or by running:
 
 .. code-block:: bash
