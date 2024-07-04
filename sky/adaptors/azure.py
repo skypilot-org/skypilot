@@ -89,10 +89,12 @@ def get_client(name: str, subscription_id: str, **kwargs):
             return msgraph.GraphServiceClient(credential)
         elif name == 'container':
             # Currently, there is no way to check if the given endpoint url
-            # of a container is private or public. Hence, we approach with
+            # of a container is private or public. Also, either passing
+            # a credential to public container or not passing credential to
+            # private container throws an error. Hence, we approach with
             # try-except block by first assuming the url is a public container.
-            # If it turns out to be a private container, an error will be
-            # caught and treated as private container.
+            # If it turns out to be a private container, an error is caught
+            # and the credential is passed, treating it as private container.
             # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35770 # pylint: disable=line-too-long
             from azure.storage.blob import ContainerClient
             container_url = kwargs.pop('container_url', None)
