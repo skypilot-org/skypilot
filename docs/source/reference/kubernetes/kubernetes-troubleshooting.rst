@@ -68,11 +68,11 @@ Run :code:`sky check` to verify that SkyPilot can access your cluster.
 If you see an error, ensure that your kubeconfig file at :code:`~/.kube/config` is correctly set up.
 
 
-Step A2 - Do your nodes have enough disk space?
+Step A3 - Do your nodes have enough disk space?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If your nodes are out of disk space, pulling the SkyPilot images may fail with `rpc error: code = Canceled desc = failed to pull and unpack image: context canceled`.
-Make sure your nodes are not under disk pressure by checking `Conditions` in `kubectl describe nodes`, or by running:
+If your nodes are out of disk space, pulling the SkyPilot images may fail with :code:`rpc error: code = Canceled desc = failed to pull and unpack image: context canceled`.
+Make sure your nodes are not under disk pressure by checking :code:`Conditions` in :code:`kubectl describe nodes`, or by running:
 
 .. code-block:: bash
 
@@ -80,7 +80,7 @@ Make sure your nodes are not under disk pressure by checking `Conditions` in `ku
     # Should not show DiskPressure=True for any node
 
 
-Step A3 - Can you launch a SkyPilot task?
+Step A4 - Can you launch a SkyPilot task?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Next, try running a simple hello world task to verify that SkyPilot can launch tasks on your cluster.
