@@ -74,8 +74,8 @@ def bootstrap_instances(
         function_name='create_or_update')
     rg_creation_start = time.time()
     retry = 0
-    while (time.time(
-    ) - rg_creation_start < _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT):
+    while (time.time() - rg_creation_start <
+           _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT):
         try:
             rg_create_or_update(resource_group_name=resource_group,
                                 parameters=params)
@@ -87,8 +87,7 @@ def bootstrap_instances(
                         f"Azure resource group {resource_group} of a recent "
                         "terminated cluster {config['cluster_name']} is being "
                         "deleted. It can only be provisioned after it is fully"
-                        "deleted. Waiting..."
-                    )
+                        "deleted. Waiting...")
                 time.sleep(1)
                 retry += 1
                 continue

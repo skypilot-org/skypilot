@@ -568,8 +568,9 @@ def terminate_instances(
         raise
 
 
-def _get_instance_status(compute_client: 'azure_compute.ComputeManagementClient', vm,
-                         resource_group: str) -> Optional[AzureInstanceStatus]:
+def _get_instance_status(
+        compute_client: 'azure_compute.ComputeManagementClient', vm,
+        resource_group: str) -> Optional[AzureInstanceStatus]:
     try:
         instance = compute_client.virtual_machines.instance_view(
             resource_group_name=resource_group, vm_name=vm.name)
