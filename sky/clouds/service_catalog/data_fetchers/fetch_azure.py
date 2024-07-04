@@ -93,8 +93,10 @@ def get_regions() -> List[str]:
 # We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
-# Some A10 instance types only contains a fractional of GPU. We filter them out
-# here to avoid using it as a whole A10 GPU and causing memory out of capacity.
+# Some A10 instance types only contains a fractional of GPU. We temporarily
+# filter them out here to avoid using it as a whole A10 GPU.
+# TODO(zhwu,cbmemo): support fractional GPUs, which can be done on
+# kubernetes as well.
 # Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
 FILTERED_A10_INSTANCE_TYPES = [
     f'Standard_NV{vcpu}ads_A10_v5' for vcpu in [6, 12, 18]
