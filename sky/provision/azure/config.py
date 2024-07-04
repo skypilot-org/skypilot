@@ -10,8 +10,6 @@ import random
 import time
 from typing import Any, Callable
 
-from azure.mgmt.resource.resources.models import DeploymentMode
-
 from sky.adaptors import azure
 from sky.provision import common
 
@@ -114,7 +112,7 @@ def bootstrap_instances(
 
     parameters = {
         'properties': {
-            'mode': DeploymentMode.incremental,
+            'mode': azure.deployment_mode().incremental,
             'template': template,
             'parameters': {
                 'subnet': {
