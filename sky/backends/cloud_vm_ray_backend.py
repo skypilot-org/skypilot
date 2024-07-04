@@ -974,11 +974,12 @@ class FailoverCloudErrorHandlerV2:
                        launchable_resources: 'resources_lib.Resources',
                        region: 'clouds.Region', zones: List['clouds.Zone'],
                        err: Exception):
+        del region, zones  # Unused.
         if '(ReadOnlyDisabledSubscription)' in str(err):
             logger.info(
                 f'{colorama.Style.DIM}Azure subscription is read-only. '
-                'Skip provisioning on Azure. Please check the subscription set with '
-                'az account set -s <subscription_id>.'
+                'Skip provisioning on Azure. Please check the subscription set '
+                'with az account set -s <subscription_id>.'
                 f'{colorama.Style.RESET_ALL}')
             _add_to_blocked_resources(
                 blocked_resources,

@@ -81,13 +81,13 @@ def bootstrap_instances(
                                 parameters=params)
             break
         except azure.exceptions().ResourceExistsError as e:
-            if "ResourceGroupBeingDeleted" in str(e):
+            if 'ResourceGroupBeingDeleted' in str(e):
                 if retry % 5 == 0:
                     logger.info(
-                        f"Azure resource group {resource_group} of a recent "
-                        "terminated cluster {config['cluster_name']} is being "
-                        "deleted. It can only be provisioned after it is fully"
-                        "deleted. Waiting...")
+                        f'Azure resource group {resource_group} of a recent '
+                        f'terminated cluster {cluster_name_on_cloud} is being '
+                        'deleted. It can only be provisioned after it is fully'
+                        'deleted. Waiting...')
                 time.sleep(1)
                 retry += 1
                 continue
