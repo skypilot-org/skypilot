@@ -59,7 +59,7 @@ it available in your current shell, then using ``--env SECRET`` to pass it to Sk
 .. tip::
 
   You do not need to pass the value directly such as ``--env
-  WANDB_API_KEY=1234``. When the value is not specified (e.g., ``--env HF_TOKEN``),
+  WANDB_API_KEY=1234``. When the value is not specified (e.g., ``--env WANDB_API_KEY``),
   SkyPilot reads it from local environment variables.
 
 
