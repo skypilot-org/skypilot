@@ -2497,6 +2497,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
+        
+        if (self.cached_external_ips is not None and self.cached_cluster_info is None):
+            # When a cluster's cloud is just upgraded to the new provsioner,
+            # even if the cluster is alive with the cached_external_ips, the
+            # cached_cluster_info is None. We need to update it here.
+            self._update_cluster_info()
+
 
 
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
