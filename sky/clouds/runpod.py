@@ -286,4 +286,6 @@ class RunPod(clouds.Cloud):
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        # TODO: use 0.0 for now to allow all images. We should change this to
+        # return the docker image size.
         return 0.0
