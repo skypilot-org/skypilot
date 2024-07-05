@@ -21,6 +21,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from azure.mgmt import compute as azure_compute
+    from azure.mgmt import resource as azure_resource
 
 logger = sky_logging.init_logger(__name__)
 
@@ -179,18 +180,19 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
                     logger.warning(
                         'There are multiple head nodes in the cluster '
                         f'(current head instance id: {head_instance_id}, '
-                        f'newly discovered id: {inst.id}). It is likely '
+                        f'newly discovered id: {inst.name}). It is likely '
                         f'that something goes wrong.')
                 head_instance_id = inst.name
                 continue
     return head_instance_id
 
 
-def _create_instances(compute_client, resource_client,
-                      cluster_name_on_cloud: str, resource_group: str,
-                      provider_config: Dict[str, Any], node_config: Dict[str,
-                                                                         Any],
-                      tags: Dict[str, str], count: int) -> List:
+def _create_instances(
+        compute_client: 'azure_compute.ComputeManagementClient',
+        resource_client: 'azure_resource.ResourceManagementClient',
+        cluster_name_on_cloud: str, resource_group: str,
+        provider_config: Dict[str, Any], node_config: Dict[str, Any],
+        tags: Dict[str, str], count: int) -> List:
     vm_id = uuid4().hex[:UNIQUE_ID_LEN]
     tags = {
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
@@ -213,6 +215,9 @@ def _create_instances(compute_client, resource_client,
     use_internal_ips = provider_config.get('use_internal_ips', False)
 
     template_params = node_config['azure_arm_parameters'].copy()
+    # We don't include 'head' or 'worker' in the VM name as on Azure the VM
+    # name is immutable and we may change the node type for existing VM in the
+    # multi-node cluster, due to manual termination of the head node.
     template_params['vmName'] = vm_name
     template_params['provisionPublicIp'] = not use_internal_ips
     template_params['vmTags'] = node_tags
