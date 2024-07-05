@@ -169,13 +169,13 @@ def _get_instance_ips(network_client, vm, resource_group: str,
 
 def _get_head_instance_id(instances: List) -> Optional[str]:
     head_instance_id = None
-    head_node_markers = (
+    head_node_tags = (
         (constants.TAG_SKYPILOT_HEAD_NODE, '1'),
         (constants.TAG_RAY_NODE_KIND, 'head'),  # backward compat with Ray
     )
     for inst in instances:
         for k, v in inst.tags.items():
-            if (k, v) in head_node_markers:
+            if (k, v) in head_node_tags:
                 if head_instance_id is not None:
                     logger.warning(
                         'There are multiple head nodes in the cluster '
@@ -183,7 +183,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
                         f'newly discovered id: {inst.name}). It is likely '
                         f'that something goes wrong.')
                 head_instance_id = inst.name
-                continue
+                break
     return head_instance_id
 
 
