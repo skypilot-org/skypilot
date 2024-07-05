@@ -145,7 +145,7 @@ def bootstrap_instances(
             outputs = deployment.properties.outputs
             if outputs is not None:
                 deployment_exists = True
-            break
+                break
         except azure.exceptions().ResourceNotFoundError:
             deployment_exists = False
 

@@ -34,6 +34,7 @@ _RESUME_INSTANCE_TIMEOUT = 480  # 8 minutes
 _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 UNIQUE_ID_LEN = 4
 _TAG_SKYPILOT_VM_ID = 'skypilot-vm-id'
+_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
 
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
@@ -120,9 +121,6 @@ class AzureInstanceStatus(enum.Enum):
 
     def to_cluster_status(self) -> Optional[status_lib.ClusterStatus]:
         return self.cluster_status_map().get(self)
-
-
-_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
 
 
 def _get_azure_sdk_function(client: Any, function_name: str) -> Callable:
@@ -278,6 +276,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         resource_group=resource_group,
         status_filters=list(non_deleting_states),
     )
+    logger.debug(
+        f'run_instances: Found {[inst.name for inst in existing_instances]} '
+        'existing instances in cluster.')
     existing_instances.sort(key=lambda x: x.name)
 
     pending_instances = []
@@ -287,6 +288,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     for instance in existing_instances:
         status = _get_instance_status(compute_client, instance, resource_group)
+        logger.debug(
+            f'run_instances: Instance {instance.name} has status {status}.')
 
         if status == AzureInstanceStatus.RUNNING:
             running_instances.append(instance)
@@ -332,7 +335,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
 
-    to_start_count = config.count - len(pending_instances)
+    to_start_count = config.count - len(pending_instances) - len(
+        running_instances)
 
     if to_start_count < 0:
         raise RuntimeError(
@@ -690,8 +694,8 @@ def open_ports(
             while True:
                 if nsg.provisioning_state not in ['Creating', 'Updating']:
                     break
-                if time.time(
-                ) - start_time > _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS:
+                if (time.time() - start_time >
+                        _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS):
                     logger.warning(
                         f'Fails to wait for the creation of NSG {nsg.name} in '
                         f'{resource_group} within '
