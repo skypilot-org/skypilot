@@ -20,5 +20,5 @@ run: |
   echo "hello" > /mount_private_rclone/hello.txt
 
   # Ensure that write is reflected in bucket
-  rclone ls {{ bucket_rclone_profile }}:{{ storage_name }}/hello.txt
+  rclone ls {{ rclone_profile_name }}:{{ storage_name }}/hello.txt
 

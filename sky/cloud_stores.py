@@ -15,7 +15,7 @@ from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import gcp
 from sky.data import data_utils
-from sky.data.data_utils import Rclone
+from sky.data import mounting_utils
 
 
 class CloudStorage:
@@ -262,19 +262,18 @@ class IBMCosCloudStorage(CloudStorage):
     def _get_rclone_sync_command(self, source: str, destination: str):
         bucket_name, data_path, bucket_region = data_utils.split_cos_path(
             source)
-        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-            bucket_name, Rclone.RcloneClouds.IBM)
-        data_path_in_bucket = bucket_name + data_path
-        rclone_config_data = Rclone.get_rclone_config(bucket_name,
-                                                      Rclone.RcloneClouds.IBM,
-                                                      bucket_region)
+        rclone_profile_name = data_utils.Rclone.RcloneStores.IBM.get_profile_name(
+            bucket_name)
+        data_path_in_bucket = f'{bucket_name}{data_path}'
+        rclone_config = data_utils.Rclone.RcloneStores.IBM.get_config(
+            rclone_profile_name=rclone_profile_name, region=bucket_region)
         # configure_rclone stores bucket profile in remote cluster's rclone.conf
         configure_rclone = (
             f' mkdir -p ~/.config/rclone/ &&'
-            f' echo "{rclone_config_data}">> {Rclone.RCLONE_CONFIG_PATH}')
+            f' echo "{rclone_config}">> {mounting_utils.RCLONE_CONFIG_PATH}')
         download_via_rclone = (
             'rclone copy '
-            f'{bucket_rclone_profile}:{data_path_in_bucket} {destination}')
+            f'{rclone_profile_name}:{data_path_in_bucket} {destination}')
 
         all_commands = list(self._GET_RCLONE)
         all_commands.append(configure_rclone)

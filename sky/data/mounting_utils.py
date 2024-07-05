@@ -5,6 +5,7 @@ import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky.skylet import constants
 from sky.utils import command_runner
 
 # Values used to construct mounting commands
@@ -16,6 +17,12 @@ _RENAME_DIR_LIMIT = 10000
 GCSFUSE_VERSION = '1.3.0'
 # https://github.com/rclone/rclone/releases
 RCLONE_VERSION = '1.67.0'
+# Creates a fusermount3 soft link on older (<22) Ubuntu systems to utilize
+# Rclone's mounting utility.
+FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
+                             'sudo ln -s /bin/fusermount /bin/fusermount3 || '
+                             'true')
+
 
 def get_s3_mount_install_cmd() -> str:
     """Returns a command to install S3 mount utility goofys."""
@@ -70,7 +77,6 @@ def get_r2_mount_cmd(r2_credentials_path: str, r2_profile_name: str,
     return mount_cmd
 
 
-
 def get_rclone_install_cmd() -> str:
     """Returns a command to install Rclone."""
     install_cmd = ('wget -nc https://github.com/rclone/rclone/releases'
@@ -80,59 +86,48 @@ def get_rclone_install_cmd() -> str:
     return install_cmd
 
 
-def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
-                      bucket_rclone_profile: str, bucket_name: str,
-                      mount_path: str) -> str:
+def get_cos_mount_cmd(rclone_config: str, rclone_profile_name: str,
+                      bucket_name: str, mount_path: str) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
-    # creates a fusermount soft link on older (<22) Ubuntu systems for
-    # rclone's mount utility.
-    set_fuser3_soft_link = ('[ ! -f /bin/fusermount3 ] && '
-                            'sudo ln -s /bin/fusermount /bin/fusermount3 || '
-                            'true')
     # stores bucket profile in rclone config file at the cluster's nodes.
-    configure_rclone_profile = (f'{set_fuser3_soft_link}; '
-                                'mkdir -p ~/.config/rclone/ && '
-                                f'echo "{rclone_config_data}" >> '
-                                f'{rclone_config_path}')
+    configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
+                                f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
+                                f'echo "{rclone_config}" >> '
+                                f'{constants.RCLONE_CONFIG_PATH}')
     # --daemon will keep the mounting process running in the background.
     mount_cmd = (f'{configure_rclone_profile} && '
                  'rclone mount '
-                 f'{bucket_rclone_profile}:{bucket_name} {mount_path} '
+                 f'{rclone_profile_name}:{bucket_name} {mount_path} '
                  '--daemon')
     return mount_cmd
 
 
-def get_mount_cache_cmd(rclone_config_data: str, rclone_config_path: str,
-                              bucket_rclone_profile: str, bucket_name: str,
-                              mount_path: str) -> str:
+def get_mount_cache_cmd(rclone_config: str, rclone_profile_name: str,
+                        bucket_name: str, mount_path: str) -> str:
     """Returns a command to mount a GCP/AWS bucket using rclone."""
-    # creates a fusermount soft link on older (<22) Ubuntu systems for
-    # rclone's mount utility.
-    set_fuser3_soft_link = ('[ ! -f /bin/fusermount3 ] && '
-                            'sudo ln -s /bin/fusermount /bin/fusermount3 || '
-                            'true')
-    # stores bucket profile in rclone config file at the cluster's nodes.
-    configure_rclone_profile = (f'{set_fuser3_soft_link}; '
-                                'mkdir -p ~/.config/rclone/ && '
-                                f'echo "{rclone_config_data}" >> '
-                                f'{rclone_config_path}')
+    # stores bucket profile in rclone config file at the remote nodes.
+    configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
+                                f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
+                                f'echo "{rclone_config}" >> '
+                                f'{constants.RCLONE_CONFIG_PATH}')
     # --daemon will keep the mounting process running in the background.
     # TODO(Doyoung): remove rclone log related scripts and options when done with implementation.
-    log_dir_path = os.path.expanduser(f'~/.sky/rclone_log')
+    log_dir_path = os.path.expanduser('~/.sky/rclone_log')
     log_file_path = os.path.join(log_dir_path, f'{bucket_name}.log')
     create_log_cmd = f'mkdir -p {log_dir_path} && touch {log_file_path}'
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
-    mount_cmd = (f'{create_log_cmd}; '
-                 f'{configure_rclone_profile} && '
-                 'rclone mount '
-                 f'{bucket_rclone_profile}:{bucket_name} {mount_path} '
-                 '--daemon --daemon-wait 0 '
-                 # need to update the log fiel so it grabs the home directory from the remote instance.
-                 #f'--log-file {log_file_path} --log-level DEBUG ' #log related flags
-                 f'--allow-other --vfs-cache-mode full --dir-cache-time 30s '
-                 '--transfers 1 && --vfs-cache-poll-interval 5s')
+    mount_cmd = (
+        #f'{create_log_cmd}; '
+        f'{configure_rclone_profile} && '
+        'rclone mount '
+        f'{rclone_profile_name}:{bucket_name} {mount_path} '
+        '--daemon --daemon-wait 0 '
+        # need to update the log fiel so it grabs the home directory from the remote instance.
+        #f'--log-file {log_file_path} --log-level DEBUG ' #log related flags
+        '--allow-other --vfs-cache-mode full --dir-cache-time 30s '
+        '--transfers 1 --vfs-cache-poll-interval 5s')
     return mount_cmd
 
 
