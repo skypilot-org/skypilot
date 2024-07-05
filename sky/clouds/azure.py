@@ -315,8 +315,8 @@ class Azure(clouds.Cloud):
         }
 
         # Setup the A10 nvidia driver.
-        need_nvidia_driver_extension = (resources.accelerators is not None and
-                                        'A10' in resources.accelerators)
+        need_nvidia_driver_extension = (acc_dict is not None and
+                                        'A10' in acc_dict)
 
         # Setup commands to eliminate the banner and restart sshd.
         # This script will modify /etc/ssh/sshd_config and add a bash script
