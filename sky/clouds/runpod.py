@@ -33,8 +33,6 @@ class RunPod(clouds.Cloud):
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is not '
              'supported yet on RunPod.'),
-        clouds.CloudImplementationFeatures.IMAGE_ID:
-            ('Specifying image ID is not supported on RunPod.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on RunPod.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
