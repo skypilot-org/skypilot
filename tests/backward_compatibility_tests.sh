@@ -90,8 +90,8 @@ rm -r  ~/.sky/wheels || true
 sky stop -y ${CLUSTER_NAME}-2
 sky start -y ${CLUSTER_NAME}-2
 s=$(sky exec --cloud ${CLOUD} -d ${CLUSTER_NAME}-2 examples/minimal.yaml)
-echo $s
-echo $s | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 2" || exit 1
+echo "$s"
+echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 2" || exit 1
 fi
 
 # `sky autostop` + `sky status -r`
