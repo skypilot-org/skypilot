@@ -2342,7 +2342,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 zip(ip_list, port_list), **ssh_credentials)
             return runners
         if self.cached_cluster_info is None:
-            assert not force_cached, 'cached_cluster_info is None.'
+            # When a cluster's cloud is just upgraded to the new provsioner,
+            # although it has the cached_external_ips, the cached_cluster_info
+            # can be None. We need to update it here, even when force_cached is
+            # set to True.
+            assert not force_cached or self.cached_external_ips is not None, (
+                force_cached, self.cached_external_ips)
             self._update_cluster_info()
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
@@ -2497,13 +2502,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # This occurs when an old cluster from was autostopped,
                 # so the head IP in the database is not updated.
                 pass
-        
-        if (self.cached_external_ips is not None and self.cached_cluster_info is None):
-            # When a cluster's cloud is just upgraded to the new provsioner,
-            # even if the cluster is alive with the cached_external_ips, the
-            # cached_cluster_info is None. We need to update it here.
-            self._update_cluster_info()
-
 
 
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
