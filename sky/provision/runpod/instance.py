@@ -1,11 +1,15 @@
 """RunPod instance provisioning."""
+import textwrap
 import time
 from typing import Any, Dict, List, Optional
 
+from sky import authentication as auth
 from sky import sky_logging
 from sky import status_lib
+from sky.adaptors import runpod
 from sky.provision import common
 from sky.provision.runpod import utils
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -85,6 +89,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 region=region,
                 disk_size=config.node_config['DiskSize'],
                 image_id=config.node_config['ImageId'],
+                public_key=config.node_config['PublicKey'],
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
@@ -173,11 +178,36 @@ def get_cluster_info(
         if instance_info['name'].endswith('-head'):
             head_instance_id = instance_id
 
+    # Get the docker username by querying
+    pod_query = textwrap.dedent(f"""\
+        query pod {{
+            pod(input: {{podId: "{head_instance_id}"}}) {{
+                machine {{
+                    gpuDisplayName
+                    podHostId
+                }}
+            }}
+        }}
+        """)
+    instance = runpod.runpod.api.graphql.run_graphql_query(
+        pod_query)['data']['pod']
+    pod_host_id = instance['machine']['podHostId']
+    # TODO: the following fail to work due to the following error:
+    #   Error: Your SSH client doesn't support PTY
+    runner = command_runner.SSHCommandRunner(
+        node=('ssh.runpod.io', 22),
+        ssh_user=pod_host_id,
+        ssh_private_key=auth.PRIVATE_SSH_KEY_PATH)
+    rc, stdout, _ = runner.run('whoami', require_outputs=True)
+    assert rc == 0, f'Failed to run command. {stdout}'
+    ssh_user = stdout.strip()
+
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
         provider_name='runpod',
         provider_config=provider_config,
+        ssh_user=ssh_user,
     )
 
 

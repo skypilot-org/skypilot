@@ -179,8 +179,9 @@ def bulk_provision(
                 zone_str = ','.join(zone.name for zone in zones)
             logger.debug(f'Failed to provision {cluster_name.display_name!r} '
                          f'on {cloud} ({zone_str}).')
-            logger.debug(f'bulk_provision for {cluster_name!r} '
-                         f'failed. Stacktrace:\n{traceback.format_exc()}')
+            with ux_utils.enable_traceback():
+                logger.debug(f'bulk_provision for {cluster_name!r} '
+                             f'failed. Stacktrace:\n{traceback.format_exc()}')
             # If the cluster was ever up, stop it; otherwise terminate it.
             terminate = not prev_cluster_ever_up
             terminate_str = ('Terminating' if terminate else 'Stopping')

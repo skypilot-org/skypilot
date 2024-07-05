@@ -1030,7 +1030,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
     if isinstance(cloud, (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere,
-                          clouds.Cudo, clouds.Paperspace)):
+                          clouds.Cudo, clouds.Paperspace, clouds.RunPod)):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
@@ -1042,8 +1042,6 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_kubernetes_authentication(config)
     elif isinstance(cloud, clouds.IBM):
         config = auth.setup_ibm_authentication(config)
-    elif isinstance(cloud, clouds.RunPod):
-        config = auth.setup_runpod_authentication(config)
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
     else:
