@@ -367,8 +367,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                    _RESUME_PER_INSTANCE_TIMEOUT):
                 status = _get_instance_status(compute_client, inst,
                                               resource_group)
-                if status in (AzureInstanceStatus.RUNNING,
-                              AzureInstanceStatus.STOPPED):
+                if status == AzureInstanceStatus.STOPPED:
                     break
                 time.sleep(1)
             else:
@@ -378,6 +377,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                     'Retrying ...')
                 stopping_instances.append(inst)
                 time.sleep(5)
+                continue
+            stopped_instances.append(inst)
         if stopping_instances and to_start_count > len(stopped_instances):
             msg = ('Timeout for waiting for existing instances '
                    f'{stopping_instances} in STOPPING state to '
