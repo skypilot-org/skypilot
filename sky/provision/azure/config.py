@@ -17,6 +17,8 @@ UNIQUE_ID_LEN = 4
 
 logger = logging.getLogger(__name__)
 
+_DEPLOYMENT_NAME = 'skypilot-config'
+_LEGACY_DEPLOYMENT_NAME = 'ray-config'
 _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT = 480  # 8 minutes
 
 
@@ -107,8 +109,8 @@ def bootstrap_instances(
     if subnet_mask is None:
         # choose a random subnet, skipping most common value of 0
         random.seed(cluster_name_on_cloud)
-        subnet_mask = '10.{}.0.0/16'.format(random.randint(1, 254))
-    logger.info('Using subnet mask: %s', subnet_mask)
+        subnet_mask = f'10.{random.randint(1, 254)}.0.0/16'
+    logger.info(f'Using subnet mask: {subnet_mask}')
 
     parameters = {
         'properties': {
@@ -133,26 +135,29 @@ def bootstrap_instances(
     get_deployment = get_azure_sdk_function(client=resource_client.deployments,
                                             function_name='get')
     deployment_exists = False
-    try:
-        deployment = get_deployment(resource_group_name=resource_group,
-                                    deployment_name='skypilot-config')
-        logger.info('Deployment already exists. Skipping deployment creation.')
+    for deployment_name in [_DEPLOYMENT_NAME, _LEGACY_DEPLOYMENT_NAME]:
+        try:
+            deployment = get_deployment(resource_group_name=resource_group,
+                                        deployment_name=deployment_name)
+            logger.info(f'Deployment {deployment_name!r} already exists. '
+                        'Skipping deployment creation.')
 
-        outputs = deployment.properties.outputs
-        if outputs is not None:
-            deployment_exists = True
-    except azure.exceptions().ResourceNotFoundError:
-        deployment_exists = False
+            outputs = deployment.properties.outputs
+            if outputs is not None:
+                deployment_exists = True
+            break
+        except azure.exceptions().ResourceNotFoundError:
+            deployment_exists = False
 
     if not deployment_exists:
-        logger.info('Creating/Updating deployment: skypilot-config')
+        logger.info(f'Creating/Updating deployment: {_DEPLOYMENT_NAME}')
         create_or_update = get_azure_sdk_function(
             client=resource_client.deployments,
             function_name='create_or_update')
         # TODO (skypilot): this takes a long time (> 40 seconds) to run.
         outputs = create_or_update(
             resource_group_name=resource_group,
-            deployment_name='skypilot-config',
+            deployment_name=_DEPLOYMENT_NAME,
             parameters=parameters,
         ).result().properties.outputs
 
