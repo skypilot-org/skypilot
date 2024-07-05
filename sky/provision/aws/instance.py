@@ -257,9 +257,9 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
                     logger.warning(
                         'There are multiple head nodes in the cluster '
                         f'(current head instance id: {head_instance_id}, '
-                        f'newly discovered id: {inst.name}). It is likely '
+                        f'newly discovered id: {inst.id}). It is likely '
                         f'that something goes wrong.')
-                head_instance_id = inst.name
+                head_instance_id = inst.id
                 break
     return head_instance_id
 
