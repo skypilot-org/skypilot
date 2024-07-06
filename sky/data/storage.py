@@ -1378,7 +1378,7 @@ class S3Store(AbstractStore):
                 }
             s3_client.create_bucket(**create_bucket_config)
             logger.info(
-                f'Created S3 bucket {bucket_name} in {region or "us-east-1"}')
+                f'Created S3 bucket {bucket_name!r} in {region or "us-east-1"}')
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
