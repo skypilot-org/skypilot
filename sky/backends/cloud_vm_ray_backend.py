@@ -4559,11 +4559,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
             if (storage_mount.mode == storage_lib.StorageMode.MOUNT or
-                storage_mount.mode == storage_lib.StorageMode.MOUNT_CACHE)
+                storage_mount.mode == storage_lib.StorageMode.MOUNT_CACHED)
         }
 
         # Handle cases when there aren't any Storages with either MOUNT or
-        # MOUNT_CACHE mode.
+        # MOUNT_CACHED mode.
         if not storage_mounts:
             return
 
@@ -4594,9 +4594,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 mount_cmd = store.mount_command(dst)
                 action_message = 'Mounting'
             else:
-                assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHE
-                mount_cmd = store.mount_cache_command(dst)
-                action_message = 'Mounting cache mode'
+                assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
+                mount_cmd = store.mount_cached_command(dst)
+                action_message = 'Mounting cached mode'
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):

@@ -102,8 +102,8 @@ def get_cos_mount_cmd(rclone_config: str, rclone_profile_name: str,
     return mount_cmd
 
 
-def get_mount_cache_cmd(rclone_config: str, rclone_profile_name: str,
-                        bucket_name: str, mount_path: str) -> str:
+def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
+                         bucket_name: str, mount_path: str) -> str:
     """Returns a command to mount a GCP/AWS bucket using rclone."""
     # stores bucket profile in rclone config file at the remote nodes.
     configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '

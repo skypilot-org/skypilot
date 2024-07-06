@@ -164,7 +164,7 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
-    MOUNT_CACHE = 'MOUNT_CACHE'
+    MOUNT_CACHED = 'MOUNT_CACHED'
 
 
 class AbstractStore:
@@ -319,10 +319,10 @@ class AbstractStore:
         """
         raise NotImplementedError
 
-    def mount_cache_command(self, mount_path: str) -> str:
+    def mount_cached_command(self, mount_path: str) -> str:
         """Returns the command to mount the Store to the specified mount_path.
 
-        This command is used for MOUNT_CACHE mode. Includes the setup commands
+        This command is used for MOUNT_CACHED mode. Includes the setup commands
         to install mounting tools.
 
         Args:
@@ -1367,18 +1367,16 @@ class S3Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def mount_cache_command(self, mount_path: str) -> str:
+    def mount_cached_command(self, mount_path: str) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
             data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
         rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
             rclone_profile_name=rclone_profile_name)
-        mount_cmd = mounting_utils.get_mount_cache_cmd(rclone_config,
-                                                       rclone_profile_name,
-                                                       self.bucket.name,
-                                                       mount_path)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd)
+                                                   mount_cached_cmd)
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -1820,18 +1818,16 @@ class GcsStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
-    def mount_cache_command(self, mount_path: str) -> str:
+    def mount_cached_command(self, mount_path: str) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = data_utils.Rclone.RcloneStores.GCS.get_profile_name(
             self.name)
         rclone_config = data_utils.Rclone.RcloneStores.GCS.get_config(
             rclone_profile_name=rclone_profile_name)
-        mount_cmd = mounting_utils.get_mount_cache_cmd(rclone_config,
-                                                       rclone_profile_name,
-                                                       self.bucket.name,
-                                                       mount_path)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd)
+                                                   mount_cached_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
