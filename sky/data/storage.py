@@ -1368,24 +1368,22 @@ class S3Store(AbstractStore):
         """
         s3_client = self.client
         try:
-            if region is None:
-                s3_client.create_bucket(Bucket=bucket_name)
-            else:
-                if region == 'us-east-1':
-                    # If default us-east-1 region is used, the
-                    # LocationConstraint must not be specified.
-                    # https://stackoverflow.com/a/51912090
-                    s3_client.create_bucket(Bucket=bucket_name)
-                else:
-                    location = {'LocationConstraint': region}
-                    s3_client.create_bucket(Bucket=bucket_name,
-                                            CreateBucketConfiguration=location)
-                logger.info(f'Created S3 bucket {bucket_name} in {region}')
+            create_bucket_config: Dict[str, Any] = {'Bucket': bucket_name}
+            # If default us-east-1 region of create_bucket API is used,
+            # the LocationConstraint must not be specified.
+            # Reference: https://stackoverflow.com/a/51912090
+            if region and region != 'us-east-1':
+                create_bucket_config['CreateBucketConfiguration'] = {
+                    'LocationConstraint': region
+                }
+            s3_client.create_bucket(**create_bucket_config)
+            logger.info(
+                f'Created S3 bucket {bucket_name} in {region or "us-east-1"}')
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
-                    f'Attempted to create a bucket '
-                    f'{self.name} but failed.') from e
+                    f'Attempted to create a bucket {self.name} but failed.'
+                ) from e
         return aws.resource('s3').Bucket(bucket_name)
 
     def _delete_s3_bucket(self, bucket_name: str) -> bool:
