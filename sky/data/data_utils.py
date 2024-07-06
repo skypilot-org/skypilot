@@ -405,24 +405,42 @@ class Rclone:
         IBM = 'IBM'
 
         def get_profile_name(self, bucket_name: str) -> str:
+            """Gets the Rclone profile name for a given bucket.
+
+            Args:
+                bucket_name: The name of the bucket.
+
+            Returns:
+                A string containing the Rclone profile name, which combines
+                prefix based on the storage type and the bucket name.
             """
-            """
-            if self is Rclone.RcloneStores.S3:
-                return f'sky-s3-{bucket_name}'
-            elif self is Rclone.RcloneStores.GCS:
-                return f'sky-gcs-{bucket_name}'
-            elif self is Rclone.RcloneStores.IBM:
-                return f'sky-ibm-{bucket_name}'
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise NotImplementedError(
-                        f'Unsupported store type for Rclone: {self}')
+            profile_prefix = {
+                Rclone.RcloneStores.S3: 'sky-s3',
+                Rclone.RcloneStores.GCS: 'sky-gcs',
+                Rclone.RcloneStores.IBM: 'sky-ibm',
+            }
+            return f'{profile_prefix[self]}-{bucket_name}'
 
         def get_config(self,
                        bucket_name: Optional[str] = None,
                        rclone_profile_name: Optional[str] = None,
                        region: Optional[str] = None) -> str:
-            """
+            """Generates an Rclone configuration for a specific storage type.
+
+            This method creates an Rclone configuration string based on the storage
+            type and the provided parameters.
+
+            Args:
+                bucket_name: The name of the bucket.
+                rclone_profile_name: The name of the Rclone profile. If not
+                    provided, it will be generated using the bucket_name.
+                region: Region of bucket.
+
+            Returns:
+                A string containing the Rclone configuration.
+
+            Raises:
+                NotImplementedError: If the storage type is not supported.
             """
             if rclone_profile_name is None:
                 assert bucket_name is not None

@@ -15,7 +15,7 @@ from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import gcp
 from sky.data import data_utils
-from sky.data import mounting_utils
+from sky.skylet import constants
 
 
 class CloudStorage:
@@ -269,8 +269,8 @@ class IBMCosCloudStorage(CloudStorage):
             rclone_profile_name=rclone_profile_name, region=bucket_region)
         # configure_rclone stores bucket profile in remote cluster's rclone.conf
         configure_rclone = (
-            f' mkdir -p ~/.config/rclone/ &&'
-            f' echo "{rclone_config}">> {mounting_utils.RCLONE_CONFIG_PATH}')
+            f' mkdir -p {constants.RCLONE_CONFIG_DIR} &&'
+            f' echo "{rclone_config}">> {constants.RCLONE_CONFIG_PATH}')
         download_via_rclone = (
             'rclone copy '
             f'{rclone_profile_name}:{data_path_in_bucket} {destination}')
