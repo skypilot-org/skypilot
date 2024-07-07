@@ -843,6 +843,10 @@ class ManagedJobCodeGen:
     @classmethod
     def _build(cls, code: str) -> str:
         generated_code = cls._PREFIX + '\n' + code
+        # Activate the python env to make sure some cloud CLI, such as az
+        # command is available in the subprocess. This useful for a controller
+        # to query statuses of old Azure instances that was provisioned with ray
+        # autoscaler.
         return (
             f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};'
             f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}')
