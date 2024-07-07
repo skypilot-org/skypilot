@@ -224,9 +224,9 @@ def _create_instances(
     template_params['msi'] = provider_config['msi']
     template_params['nsg'] = provider_config['nsg']
     template_params['subnet'] = provider_config['subnet']
-    template_params['cloudInitSetupCommands'] = base64.b64encode(
+    template_params['cloudInitSetupCommands'] = (base64.b64encode(
         template_params['cloudInitSetupCommands'].encode('utf-8')).decode(
-            'utf-8')
+            'utf-8'))
 
     if node_config.get('need_nvidia_driver_extension', False):
         # pylint: disable=line-too-long

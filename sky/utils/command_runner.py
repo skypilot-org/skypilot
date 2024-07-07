@@ -384,6 +384,10 @@ class CommandRunner:
         returncode = self.run('true', connect_timeout=5, stream_logs=False)
         return returncode == 0
 
+    def close_cached_connection(self) -> None:
+        """Close the cached connection to the remote machine."""
+        pass
+
 
 class SSHCommandRunner(CommandRunner):
     """Runner for SSH commands."""
@@ -481,6 +485,26 @@ class SSHCommandRunner(CommandRunner):
             disable_control_master=self.disable_control_master) + [
                 f'{self.ssh_user}@{self.ip}'
             ]
+
+    def close_cached_connection(self) -> None:
+        """Close the cached connection to the remote machine.
+
+        This is useful when we need to make the permission update effective of a
+        ssh user, e.g. usermod -aG docker $USER.
+        """
+        if self.ssh_control_name is not None:
+            control_path = _ssh_control_path(self.ssh_control_name)
+            if control_path is not None:
+                logger.debug(f'Closing cached connection: {control_path}')
+                cmd = (f'ssh -O exit -S {control_path}/%C '
+                       f'{self.ssh_user}@{self.ip}')
+                print(cmd)
+                log_lib.run_with_log(cmd,
+                                     log_path=os.devnull,
+                                     require_outputs=False,
+                                     stream_logs=False,
+                                     process_stream=False,
+                                     shell=True)
 
     @timeline.event
     def run(
@@ -682,6 +706,7 @@ class KubernetesCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
+
 
         Returns:
             returncode

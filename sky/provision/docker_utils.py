@@ -28,7 +28,7 @@ SETUP_ENV_VARS_CMD = (
 # the command.
 DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
                                 'the Docker daemon socket')
-_DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 240
+_DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
 
 @dataclasses.dataclass
@@ -174,9 +174,13 @@ class DockerInitializer:
                         # daemon after timeout.
                         rc = 1
                     break
+                # Close the cached connection to make the permission update of
+                # ssh user take effect, e.g. usermod -aG docker $USER, called
+                # by cloud-init of Azure.
+                self.runner.close_cached_connection()
                 logger.info('Failed to connect to docker daemon. It might be '
-                            'initializing, retrying in 30 seconds...')
-                time.sleep(30)
+                            'initializing, retrying in 5 seconds...')
+                time.sleep(5)
                 continue
             break
         subprocess_utils.handle_returncode(

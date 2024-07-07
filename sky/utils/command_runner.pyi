@@ -114,6 +114,9 @@ class CommandRunner:
     def check_connection(self) -> bool:
         ...
 
+    def close_cached_connection(self) -> None:
+        ...
+
 
 class SSHCommandRunner(CommandRunner):
     ip: str
