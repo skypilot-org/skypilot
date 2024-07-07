@@ -1372,7 +1372,7 @@ class S3Store(AbstractStore):
             # If default us-east-1 region of create_bucket API is used,
             # the LocationConstraint must not be specified.
             # Reference: https://stackoverflow.com/a/51912090
-            if region and region != 'us-east-1':
+            if region is not None and region != 'us-east-1':
                 create_bucket_config['CreateBucketConfiguration'] = {
                     'LocationConstraint': region
                 }
