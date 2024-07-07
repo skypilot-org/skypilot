@@ -238,7 +238,8 @@ def _get_cloud_dependencies_installation_commands(
                 '! command -v curl &> /dev/null || '
                 '! command -v socat &> /dev/null || '
                 '! command -v netcat &> /dev/null; '
-                'then apt update && apt install curl socat netcat -y; '
+                'then apt update && apt install curl socat netcat -y '
+                '&> /dev/null; '
                 'fi" && '
                 # Install kubectl
                 '(command -v kubectl &>/dev/null || '
@@ -253,7 +254,7 @@ def _get_cloud_dependencies_installation_commands(
                 'pip list | grep cudo-compute > /dev/null 2>&1 || '
                 'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1 && '
                 'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
-                'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
+                'sudo dpkg -i ~/cudoctl.deb 2>&1 > /dev/null')
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 commands.append(
