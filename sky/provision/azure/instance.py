@@ -4,7 +4,6 @@ import enum
 import json
 import logging
 from multiprocessing import pool
-import os
 import pathlib
 import time
 import typing
@@ -17,7 +16,6 @@ from sky import status_lib
 from sky.adaptors import azure
 from sky.provision import common
 from sky.provision import constants
-from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -227,6 +225,7 @@ def _create_instances(
     template_params['subnet'] = provider_config['subnet']
 
     if node_config.get('need_nvidia_driver_extension', False):
+        # pylint: disable=line-too-long
         # Configure driver extension for A10 GPUs. A10 GPUs requires a
         # special type of drivers which is available at Microsoft HPC
         # extension. Reference: https://forums.developer.nvidia.com/t/ubuntu-22-04-installation-driver-error-nvidia-a10/285195/2
