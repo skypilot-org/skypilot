@@ -110,7 +110,6 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
                                 f'echo "{rclone_config}" >> '
                                 f'{constants.RCLONE_CONFIG_PATH}')
-    # --daemon will keep the mounting process running in the background.
     # TODO(Doyoung): remove rclone log related scripts and options when done with implementation.
     log_dir_path = os.path.expanduser('~/.sky/rclone_log')
     log_file_path = os.path.join(log_dir_path, f'{bucket_name}.log')
@@ -123,10 +122,17 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         f'{configure_rclone_profile} && '
         'rclone mount '
         f'{rclone_profile_name}:{bucket_name} {mount_path} '
+        # '--daemon' keeps the mounting process running in the background.
         '--daemon --daemon-wait 0 '
         # need to update the log fiel so it grabs the home directory from the remote instance.
         #f'--log-file {log_file_path} --log-level DEBUG ' #log related flags
+        # '--dir-cache-time' specifies the frequency of how often rclone should
+        # check the backend storage for an update when there is a discrepancy.
         '--allow-other --vfs-cache-mode full --dir-cache-time 30s '
+        # '--transfers 1' guarantees the files written at the local mount point
+        # to be  uploaded to the backend storage in the order of creation.
+        # '--vfs-cache-poll-interval' specifies the frequency of how often
+        # rclone checks the local mount point to upload newly written files.
         '--transfers 1 --vfs-cache-poll-interval 5s')
     return mount_cmd
 
