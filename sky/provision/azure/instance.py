@@ -4,6 +4,7 @@ import enum
 import json
 import logging
 from multiprocessing import pool
+import os
 import pathlib
 import time
 import typing
@@ -16,6 +17,7 @@ from sky import status_lib
 from sky.adaptors import azure
 from sky.provision import common
 from sky.provision import constants
+from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -503,6 +505,15 @@ def get_cluster_info(
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
     del region
+    # Add the executable path to the PATH environment variable to make sure, az
+    # command is available in the subprocess. Thisis useful for a controller to
+    # query statuses of old Azure instances that was provisioned with ray
+    # autoscaler.
+    os.environ['PATH'] = os.pathsep.join([
+        os.environ.get('PATH', ''),
+        os.path.expanduser(
+            os.path.join(skylet_constants.SKY_REMOTE_PYTHON_ENV, 'bin'))
+    ])
     filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     resource_group = provider_config['resource_group']
