@@ -476,7 +476,7 @@ class Azure(clouds.Cloud):
         # Check if the azure blob storage dependencies are installed.
         try:
             # pylint: disable=redefined-outer-name, import-outside-toplevel, unused-import
-            import azure.storage.blob
+            from azure.storage import blob
             import msgraph
         except ImportError as e:
             return False, (

@@ -172,6 +172,15 @@ class StoreType(enum.Enum):
 
     @classmethod
     def get_endpoint_url(cls, store: 'AbstractStore', path: str) -> str:
+        """Generates the endpoint URL for a given store and path.
+
+        Args:
+            store: Store object implementing AbstractStore.
+            path: Path within the store.
+
+        Returns:
+            Endpoint URL of the bucket as a string.
+        """
         store_type = cls.from_store(store)
         if store_type == StoreType.AZURE:
             assert isinstance(store, AzureBlobStore)
@@ -1943,7 +1952,7 @@ class AzureBlobStore(AbstractStore):
     DEFAULT_RESOURCE_GROUP_NAME = 'sky{user_hash}'
 
     class AzureBlobStoreMetadata(AbstractStore.StoreMetadata):
-        """A pickle-able representation of Azure Blob Store
+        """A pickle-able representation of Azure Blob Store.
 
         Allows store objects to be written to and reconstructed from
         global_user_state.
@@ -1992,11 +2001,17 @@ class AzureBlobStore(AbstractStore):
 
     @classmethod
     def from_metadata(cls, metadata: AbstractStore.StoreMetadata,
-                      **override_args):
-        """Create a Store from a AzureBlobStoreMetadata object.
+                      **override_args) -> 'AzureBlobStore':
+        """Creates AzureBlobStore from a AzureBlobStoreMetadata object.
 
         Used when reconstructing Storage and Store objects from
         global_user_state.
+
+        Args:
+            metadata: Metadata object containing AzureBlobStore information.
+
+        Returns:
+            An instance of AzureBlobStore.
         """
         assert isinstance(metadata, AzureBlobStore.AzureBlobStoreMetadata)
         return cls(name=override_args.get('name', metadata.name),
@@ -2072,10 +2087,10 @@ class AzureBlobStore(AbstractStore):
         Source for rules: https://learn.microsoft.com/en-us/rest/api/storageservices/Naming-and-Referencing-Containers--Blobs--and-Metadata#container-names # pylint: disable=line-too-long
 
         Args:
-            name: str; name of the container
+            name: Name of the container
 
         Returns:
-            name: str; name of the container
+            Name of the container
 
         Raises:
             StorageNameError: if the given container name does not follow the
@@ -2171,6 +2186,10 @@ class AzureBlobStore(AbstractStore):
         4) If none of the above are true, default naming conventions are used
         to create the resource group and storage account for the users.
 
+        Returns:
+            str: The storage account name.
+            Optional[str]: The resource group name, or None if not found.
+
         Raises:
             StorageBucketCreateError: If storage account attempted to be
                 created already exists
@@ -2265,9 +2284,9 @@ class AzureBlobStore(AbstractStore):
         """Creates new storage account and assign Storage Blob Data Owner role.
 
         Args:
-            resource_group_name: str; Name of the resource group which the
-                storage account will be created under.
-            storage_account_name: str; Name of the storage account to be created
+            resource_group_name: Name of the resource group which the storage
+                account will be created under.
+            storage_account_name: Name of the storage account to be created.
 
         Raises:
             StorageBucketCreateError: If storage account attempted to be
@@ -2607,7 +2626,7 @@ class AzureBlobStore(AbstractStore):
         Uses blobfuse2 to mount the container.
 
         Args:
-            mount_path: str; Path to mount the container to
+            mount_path: Path to mount the container to
 
         Returns:
             str: a heredoc used to setup the AZ Container mount
@@ -2624,16 +2643,17 @@ class AzureBlobStore(AbstractStore):
         """Creates AZ Container.
 
         Args:
-            container_name: str; Name of bucket(container)
-            region: str; Region name, e.g. eastus, westus
+            container_name: Name of bucket(container)
 
         Returns:
-            StorageHandle: handle to interact with the container
+            StorageHandle: Handle to interact with the container
 
         Raises:
             StorageBucketCreateError: If container creation fails.
         """
         try:
+            # Container is created under the region which the storage account
+            # belongs to.
             container = self.storage_client.blob_containers.create(
                 self.resource_group_name,
                 self.storage_account_name,
@@ -2662,11 +2682,15 @@ class AzureBlobStore(AbstractStore):
         """Deletes AZ Container, including all objects in Container.
 
         Args:
-            container_name: str; Name of bucket(container)
+            container_name: Name of bucket(container).
 
         Returns:
-            bool: True if container was deleted, False if it's
-                deleted externally.
+            bool: True if container was deleted, False if it's deleted
+                externally.
+
+        Raises:
+            StorageBucketDeleteError: If deletion fails for reasons other than
+                the container not existing.
         """
         try:
             with rich_utils.safe_status(
@@ -2683,7 +2707,7 @@ class AzureBlobStore(AbstractStore):
                     container_name,
                 )
         except azure.exceptions().ResourceNotFoundError as e:
-            if 'Code: ContainerNotFound' in e.message:
+            if 'Code: ContainerNotFound' in str(e):
                 logger.debug(
                     _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
                         bucket_name=container_name))
@@ -2692,7 +2716,7 @@ class AzureBlobStore(AbstractStore):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
                         f'Failed to delete Azure container {container_name}. '
-                        f'Detailed error: {e.output}')
+                        f'Detailed error: {e}')
         return True
 
 

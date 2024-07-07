@@ -85,15 +85,14 @@ def get_az_mount_cmd(container_name: str,
     """Returns a command to mount an AZ Container using blobfuse2.
 
     Args:
-        container_name: str; Name of the mounting container
-        storage_account_name: str; Name of the storage account the given
-            container belongs to
-        mount_path: str; Path where the container will be mounting
-        storage_account_key: Optional[str]; Access key for the given storage
-            account
+        container_name: Name of the mounting container.
+        storage_account_name: Name of the storage account the given container
+            belongs to.
+        mount_path: Path where the container will be mounting.
+        storage_account_key: Access key for the given storage account.
 
     Returns:
-        str: command used to mount AZ container with blobfuse2
+        str: Command used to mount AZ container with blobfuse2.
     """
     # Storage_account_key is set to None when mounting public container, and
     # mounting public containers are not officially supported by blobfuse2 yet.
@@ -163,10 +162,10 @@ def _get_mount_binary(mount_cmd: str) -> str:
     """Returns mounting binary in string given as the mount command.
 
     Args:
-        mount_cmd: str; command used to mount a cloud storage.
+        mount_cmd: Command used to mount a cloud storage.
 
     Returns:
-        str: name of the binary used to mount a cloud storage.
+        str: Name of the binary used to mount a cloud storage.
     """
     if 'goofys' in mount_cmd:
         return 'goofys'
