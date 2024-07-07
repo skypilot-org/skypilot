@@ -80,6 +80,7 @@ available_node_types:
             # billingProfile:
             #     maxPrice: -1
             {%- endif %}
+        need_nvidia_driver_extension: {{need_nvidia_driver_extension}}
         # TODO: attach disk
 
 head_node_type: ray.head.default

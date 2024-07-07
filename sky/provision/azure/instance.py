@@ -224,6 +224,33 @@ def _create_instances(
     template_params['nsg'] = provider_config['nsg']
     template_params['subnet'] = provider_config['subnet']
 
+    if node_config.get("need_nvidia_driver_extension", False):
+        # Configure driver extension for A10 GPUs. A10 GPUs requires a
+        # special type of drivers which is available at Microsoft HPC
+        # extension. Reference: https://forums.developer.nvidia.com/t/ubuntu-22-04-installation-driver-error-nvidia-a10/285195/2
+        for r in template["resources"]:
+            if r["type"] == "Microsoft.Compute/virtualMachines":
+                # Add a nested extension resource for A10 GPUs
+                r["resources"] = [
+                    {
+                        "type": "extensions",
+                        "apiVersion": "2015-06-15",
+                        "location": "[variables('location')]",
+                        "dependsOn": [
+                            "[concat('Microsoft.Compute/virtualMachines/', parameters('vmName'), copyIndex())]"
+                        ],
+                        "name": "NvidiaGpuDriverLinux",
+                        "properties": {
+                            "publisher": "Microsoft.HpcCompute",
+                            "type": "NvidiaGpuDriverLinux",
+                            "typeHandlerVersion": "1.9",
+                            "autoUpgradeMinorVersion": True,
+                            "settings": {},
+                        },
+                    },
+                ]
+                break
+
     parameters = {
         'properties': {
             'mode': azure.deployment_mode().incremental,
