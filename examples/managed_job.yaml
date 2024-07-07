@@ -6,6 +6,7 @@ setup: |
 
 run: |
   conda env list
+  echo "start counting"
   python -u - << EOF
   import time
   import tqdm

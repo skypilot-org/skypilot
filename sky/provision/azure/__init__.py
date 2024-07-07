@@ -2,3 +2,6 @@
 
 from sky.provision.azure.instance import cleanup_ports
 from sky.provision.azure.instance import open_ports
+from sky.provision.azure.instance import query_instances
+from sky.provision.azure.instance import stop_instances
+from sky.provision.azure.instance import terminate_instances

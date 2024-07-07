@@ -191,7 +191,7 @@ def _get_cloud_dependencies_installation_commands(
     prefix_str = 'Check & install cloud dependencies on controller: '
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
-    empty_str = ' ' * 5
+    empty_str = ' ' * 10
     aws_dependencies_installation = (
         'pip list | grep boto3 > /dev/null 2>&1 || pip install '
         'botocore>=1.29.10 boto3>=1.26.1; '
@@ -207,7 +207,7 @@ def _get_cloud_dependencies_installation_commands(
             # fluidstack and paperspace
             continue
         if isinstance(cloud, clouds.AWS):
-            commands.append(f'echo -n "{prefix_str}AWS{empty_str}" && ' +
+            commands.append(f'echo -en "\\r{prefix_str}AWS{empty_str}" && ' +
                             aws_dependencies_installation)
         elif isinstance(cloud, clouds.Azure):
             commands.append(
@@ -247,6 +247,13 @@ def _get_cloud_dependencies_installation_commands(
                 '/bin/linux/amd64/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
+        elif isinstance(cloud, clouds.Cudo):
+            commands.append(
+                f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
+                'pip list | grep cudo-compute > /dev/null 2>&1 || '
+                'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1 && '
+                'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
+                'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 commands.append(
@@ -263,12 +270,6 @@ def _get_cloud_dependencies_installation_commands(
                     f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
                     'pip list | grep runpod > /dev/null 2>&1 || '
                     'pip install "runpod>=1.5.1" > /dev/null 2>&1')
-            elif isinstance(cloud, clouds.Cudo):
-                # cudo doesn't support open port
-                commands.append(
-                    f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
-                    'pip list | grep cudo-compute > /dev/null 2>&1 || '
-                    'pip install "cudo-compute>=0.1.8" > /dev/null 2>&1')
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
         commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
@@ -742,3 +743,25 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_prefix = store_type.store_prefix()
             storage_obj.source = f'{store_prefix}{storage_obj.name}'
             storage_obj.force_delete = True
+
+    # Step 7: Convert all `MOUNT` mode storages which don't specify a source
+    # to specifying a source. If the source is specified with a local path,
+    # it was handled in step 6.
+    updated_mount_storages = {}
+    for storage_path, storage_obj in task.storage_mounts.items():
+        if (storage_obj.mode == storage_lib.StorageMode.MOUNT and
+                not storage_obj.source):
+            # Construct source URL with first store type and storage name
+            # E.g., s3://my-storage-name
+            source = list(
+                storage_obj.stores.keys())[0].store_prefix() + storage_obj.name
+            new_storage = storage_lib.Storage.from_yaml_config({
+                'source': source,
+                'persistent': storage_obj.persistent,
+                'mode': storage_lib.StorageMode.MOUNT.value,
+                # We enable force delete to allow the controller to delete
+                # the object store in case persistent is set to False.
+                '_force_delete': True
+            })
+            updated_mount_storages[storage_path] = new_storage
+    task.update_storage_mounts(updated_mount_storages)

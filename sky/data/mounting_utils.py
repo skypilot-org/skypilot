@@ -14,7 +14,7 @@ _STAT_CACHE_CAPACITY = 4096
 _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
-GCSFUSE_VERSION = '1.3.0'
+GCSFUSE_VERSION = '2.2.0'
 # https://github.com/rclone/rclone/releases
 RCLONE_VERSION = '1.67.0'
 # Creates a fusermount3 soft link on older (<22) Ubuntu systems to utilize

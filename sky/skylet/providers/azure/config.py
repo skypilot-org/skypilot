@@ -12,10 +12,14 @@ from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resource.resources.models import DeploymentMode
 
+from sky.adaptors import azure
 from sky.utils import common_utils
+from sky.provision import common
 
 UNIQUE_ID_LEN = 4
 _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
+_WAIT_FOR_RESOURCE_GROUP_DELETION_TIMEOUT_SECONDS = 480  # 8 minutes
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,7 @@ def bootstrap_azure(config):
     return config
 
 
+@common.log_function_start_end
 def _configure_resource_group(config):
     # TODO: look at availability sets
     # https://docs.microsoft.com/en-us/azure/virtual-machines/windows/tutorial-availability-sets
@@ -77,7 +82,31 @@ def _configure_resource_group(config):
     rg_create_or_update = get_azure_sdk_function(
         client=resource_client.resource_groups, function_name="create_or_update"
     )
-    rg_create_or_update(resource_group_name=resource_group, parameters=params)
+    rg_creation_start = time.time()
+    retry = 0
+    while (
+        time.time() - rg_creation_start
+        < _WAIT_FOR_RESOURCE_GROUP_DELETION_TIMEOUT_SECONDS
+    ):
+        try:
+            rg_create_or_update(resource_group_name=resource_group, parameters=params)
+            break
+        except azure.exceptions().ResourceExistsError as e:
+            if "ResourceGroupBeingDeleted" in str(e):
+                if retry % 5 == 0:
+                    # TODO(zhwu): This should be shown in terminal for better
+                    # UX, which will be achieved after we move Azure to use
+                    # SkyPilot provisioner.
+                    logger.warning(
+                        f"Azure resource group {resource_group} of a recent "
+                        "terminated cluster {config['cluster_name']} is being "
+                        "deleted. It can only be provisioned after it is fully"
+                        "deleted. Waiting..."
+                    )
+                time.sleep(1)
+                retry += 1
+                continue
+            raise
 
     # load the template file
     current_path = Path(__file__).parent
@@ -120,17 +149,36 @@ def _configure_resource_group(config):
     create_or_update = get_azure_sdk_function(
         client=resource_client.deployments, function_name="create_or_update"
     )
-    # TODO (skypilot): this takes a long time (> 40 seconds) for stopping an
-    # azure VM, and this can be called twice during ray down.
-    outputs = (
-        create_or_update(
-            resource_group_name=resource_group,
-            deployment_name="ray-config",
-            parameters=parameters,
-        )
-        .result()
-        .properties.outputs
+    # Skip creating or updating the deployment if the deployment already exists
+    # and the cluster name is the same.
+    get_deployment = get_azure_sdk_function(
+        client=resource_client.deployments, function_name="get"
     )
+    deployment_exists = False
+    try:
+        deployment = get_deployment(
+            resource_group_name=resource_group, deployment_name="ray-config"
+        )
+        logger.info("Deployment already exists. Skipping deployment creation.")
+
+        outputs = deployment.properties.outputs
+        if outputs is not None:
+            deployment_exists = True
+    except azure.exceptions().ResourceNotFoundError:
+        deployment_exists = False
+
+    if not deployment_exists:
+        # This takes a long time (> 40 seconds), we should be careful calling
+        # this function.
+        outputs = (
+            create_or_update(
+                resource_group_name=resource_group,
+                deployment_name="ray-config",
+                parameters=parameters,
+            )
+            .result()
+            .properties.outputs
+        )
 
     # We should wait for the NSG to be created before opening any ports
     # to avoid overriding the newly-added NSG rules.

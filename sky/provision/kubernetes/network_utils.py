@@ -1,5 +1,6 @@
 """Kubernetes network provisioning utils."""
 import os
+import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import jinja2
@@ -7,11 +8,14 @@ import yaml
 
 import sky
 from sky import exceptions
+from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
 
 _INGRESS_TEMPLATE_NAME = 'kubernetes-ingress.yml.j2'
 _LOADBALANCER_TEMPLATE_NAME = 'kubernetes-loadbalancer.yml.j2'
@@ -41,6 +45,23 @@ def get_port_mode(
                 from None
 
     return port_mode
+
+
+def get_networking_mode(
+    mode_str: Optional[str] = None
+) -> kubernetes_enums.KubernetesNetworkingMode:
+    """Get the networking mode from the provider config."""
+    mode_str = mode_str or skypilot_config.get_nested(
+        ('kubernetes', 'networking_mode'),
+        kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value)
+    try:
+        networking_mode = kubernetes_enums.KubernetesNetworkingMode.from_str(
+            mode_str)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(str(e) +
+                             ' Please check: ~/.sky/config.yaml.') from None
+    return networking_mode
 
 
 def fill_loadbalancer_template(namespace: str, service_name: str,
@@ -222,18 +243,29 @@ def get_ingress_external_ip_and_ports(
     return external_ip, None
 
 
-def get_loadbalancer_ip(namespace: str, service_name: str) -> Optional[str]:
+def get_loadbalancer_ip(namespace: str,
+                        service_name: str,
+                        timeout: int = 0) -> Optional[str]:
     """Returns the IP address of the load balancer."""
     core_api = kubernetes.core_api()
-    service = core_api.read_namespaced_service(
-        service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
 
-    if service.status.load_balancer.ingress is None:
-        return None
+    ip = None
 
-    ip = service.status.load_balancer.ingress[
-        0].ip or service.status.load_balancer.ingress[0].hostname
-    return ip if ip is not None else None
+    start_time = time.time()
+    retry_cnt = 0
+    while ip is None and (retry_cnt == 0 or time.time() - start_time < timeout):
+        service = core_api.read_namespaced_service(
+            service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+        if service.status.load_balancer.ingress is not None:
+            ip = (service.status.load_balancer.ingress[0].ip or
+                  service.status.load_balancer.ingress[0].hostname)
+        if ip is None:
+            retry_cnt += 1
+            if retry_cnt % 5 == 0:
+                logger.debug('Waiting for load balancer IP to be assigned'
+                             '...')
+            time.sleep(1)
+    return ip
 
 
 def get_pod_ip(namespace: str, pod_name: str) -> Optional[str]:
