@@ -28,7 +28,7 @@ SETUP_ENV_VARS_CMD = (
 # the command.
 DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
                                 'the Docker daemon socket')
-_DOCKER_WAIT_FOR_SOCKET_TIMEOUT_SECONDS = 60
+_DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 240
 
 
 @dataclasses.dataclass
