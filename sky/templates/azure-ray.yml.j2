@@ -72,14 +72,17 @@ available_node_types:
             imageVersion: {{image_version}}
             osDiskSizeGB: {{disk_size}}
             osDiskTier: {{disk_tier}}
-            cloudInitSetupCommands: {{cloud_init_setup_commands}}
-            # optionally set priority to use Spot instances
             {%- if use_spot %}
+            # optionally set priority to use Spot instances
             priority: Spot
             # set a maximum price for spot instances if desired
             # billingProfile:
             #     maxPrice: -1
             {%- endif %}
+            cloudInitSetupCommands: |-
+              {%- for cmd in cloud_init_setup_commands %}
+              {{ cmd }}
+              {%- endfor %}
         need_nvidia_driver_extension: {{need_nvidia_driver_extension}}
         # TODO: attach disk
 

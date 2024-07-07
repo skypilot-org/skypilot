@@ -166,15 +166,19 @@ class DockerInitializer:
                 stream_logs=False,
                 separate_stderr=separate_stderr,
                 log_path=self.log_path)
-            if (not wait_for_docker_daemon or
-                    DOCKER_PERMISSION_DENIED_STR not in stdout + stderr):
-                break
-
-            if time.time() - start > _DOCKER_WAIT_FOR_SOCKET_TIMEOUT_SECONDS:
-                break
-            logger.info(
-                'Failed to run docker command, retrying in 15 seconds...')
-            time.sleep(15)
+            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr and
+                    wait_for_docker_daemon):
+                if time.time() - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
+                    if rc == 0:
+                        # Set returncode to 1 if failed to connect to docker
+                        # daemon after timeout.
+                        rc = 1
+                    break
+                logger.info('Failed to connect to docker daemon. It might be '
+                            'initializing, retrying in 30 seconds...')
+                time.sleep(30)
+                continue
+            break
         subprocess_utils.handle_returncode(
             rc,
             cmd,
