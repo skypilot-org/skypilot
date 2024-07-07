@@ -158,7 +158,6 @@ class DockerInitializer:
                    f' {shlex.quote(cmd)} ')
 
         logger.debug(f'+ {cmd}')
-        cnt = 0
         start = time.time()
         while True:
             rc, stdout, stderr = self.runner.run(
@@ -167,15 +166,15 @@ class DockerInitializer:
                 stream_logs=False,
                 separate_stderr=separate_stderr,
                 log_path=self.log_path)
-            if (rc == 0 or not wait_for_docker_daemon or
+            if (not wait_for_docker_daemon or
                     DOCKER_PERMISSION_DENIED_STR not in stdout + stderr):
                 break
 
             if time.time() - start > _DOCKER_WAIT_FOR_SOCKET_TIMEOUT_SECONDS:
                 break
             logger.info(
-                'Failed to run docker command, retrying in 10 seconds...')
-            time.sleep(10)
+                'Failed to run docker command, retrying in 15 seconds...')
+            time.sleep(15)
         subprocess_utils.handle_returncode(
             rc,
             cmd,
