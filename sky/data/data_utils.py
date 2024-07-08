@@ -390,15 +390,8 @@ def get_cos_regions() -> List[str]:
 
 
 class Rclone:
-    """Static class implementing common utilities of rclone without rclone sdk.
+    """Provides methods to manage and generate Rclone configuration profile."""
 
-    Storage providers supported by rclone are required to:
-    - list their rclone profile prefix in RcloneStores
-    - implement configuration in get_config()
-    """
-
-    # Mapping of storage providers using rclone
-    # to their respective profile prefix
     class RcloneStores(enum.Enum):
         S3 = 'S3'
         GCS = 'GCS'
@@ -487,8 +480,19 @@ class Rclone:
     @staticmethod
     def store_rclone_config(bucket_name: str, cloud: RcloneStores,
                             region: str) -> str:
-        """Creates a configuration files for rclone - used for
-        bucket syncing and mounting """
+        """Creates rclone configuration files for bucket syncing and mounting.
+
+        Args:
+            bucket_name: Name of the bucket.
+            cloud: RcloneStores enum representing the cloud provider.
+            region: Region of the bucket.
+
+        Returns:
+            str: The configuration data written to the file.
+
+        Raises:
+            StorageError: If rclone is not installed.
+        """
         rclone_config_path = os.path.expanduser(constants.RCLONE_CONFIG_PATH)
         config_data = cloud.get_config(bucket_name=bucket_name, region=region)
         try:
@@ -526,8 +530,15 @@ class Rclone:
 
     @staticmethod
     def get_region_from_rclone(bucket_name: str, cloud: RcloneStores) -> str:
-        """Returns region field of the specified bucket in rclone.conf
-         if bucket exists, else empty string"""
+        """Returns the region field of the specified bucket in rclone.conf.
+
+        Args:
+            bucket_name: Name of the bucket.
+            cloud: RcloneStores enum representing the cloud provider.
+
+        Returns:
+            The region field if the bucket exists, otherwise an empty string.
+        """
         rclone_profile = cloud.get_profile_name(bucket_name)
         rclone_config_path = os.path.expanduser(constants.RCLONE_CONFIG_PATH)
         with open(rclone_config_path, 'r', encoding='utf-8') as file:
@@ -548,7 +559,12 @@ class Rclone:
 
     @staticmethod
     def delete_rclone_bucket_profile(bucket_name: str, cloud: RcloneStores):
-        """Deletes specified bucket profile for rclone.conf"""
+        """Deletes specified bucket profile from rclone.conf.
+
+        Args:
+            bucket_name: Name of the bucket.
+            cloud: RcloneStores enum representing the cloud provider.
+        """
         rclone_profile = cloud.get_profile_name(bucket_name)
         rclone_config_path = os.path.expanduser(constants.RCLONE_CONFIG_PATH)
 
@@ -568,8 +584,14 @@ class Rclone:
     @staticmethod
     def _remove_bucket_profile_rclone(bucket_name: str,
                                       cloud: RcloneStores) -> List[str]:
-        """Returns rclone profiles without profiles matching
-          [profile_prefix+bucket_name]
+        """Returns rclone profiles without profiles matching [profile_prefix+bucket_name].
+
+        Args:
+            bucket_name: Name of the bucket.
+            cloud: RcloneStores enum representing the cloud provider.
+
+        Returns:
+            Lines to keep in the rclone config file.
         """
         rclone_profile_name = cloud.get_profile_name(bucket_name)
         rclone_config_path = os.path.expanduser(constants.RCLONE_CONFIG_PATH)
