@@ -1216,6 +1216,12 @@ class S3Store(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+        region_arg = ''
+        if self.region == 'eu-south-1':
+            # We have to specify the region for eu-south-1, as AWS s3 uses
+            # a different endpoint for this region, and will error out if
+            # the region is not specified.
+            region_arg = f'--region {self.region}'
 
         def get_file_sync_command(base_dir_path, file_names):
             includes = ' '.join([
@@ -1224,6 +1230,7 @@ class S3Store(AbstractStore):
             ])
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
+                            f'{region_arg}'
                             f'{includes} {base_dir_path} '
                             f's3://{self.name}')
             return sync_command
@@ -1239,6 +1246,7 @@ class S3Store(AbstractStore):
             ])
             src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
+                            f'{region_arg}'
                             f'{src_dir_path} '
                             f's3://{self.name}/{dest_dir_name}')
             return sync_command
