@@ -1433,10 +1433,11 @@ def combine_pod_config_fields(
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
-    # We don't use override_config in `skypilot_config.get_nested`, as merging
+    # We don't use override_configs in `skypilot_config.get_nested`, as merging
     # the pod config requires special handling.
     kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
-                                                   default_value={})
+                                                   default_value={},
+                                                   override_configs={})
     override_pod_config = (cluster_config_overrides.get('kubernetes', {}).get(
         'pod_config', {}))
     merge_dicts(override_pod_config, kubernetes_config)
