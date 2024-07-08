@@ -104,7 +104,11 @@ def get_cos_mount_cmd(rclone_config: str, rclone_profile_name: str,
 
 def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                          bucket_name: str, mount_path: str) -> str:
-    """Returns a command to mount a GCP/AWS bucket using rclone."""
+    """Returns a command to mount a bucket using rclone with vfs cache.
+    
+    
+    
+    """
     # stores bucket profile in rclone config file at the remote nodes.
     configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
@@ -124,11 +128,11 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         f'{rclone_profile_name}:{bucket_name} {mount_path} '
         # '--daemon' keeps the mounting process running in the background.
         '--daemon --daemon-wait 0 '
-        # need to update the log fiel so it grabs the home directory from the remote instance.
+        # need to update the log file so it grabs the home directory from the remote instance.
         #f'--log-file {log_file_path} --log-level DEBUG ' #log related flags
         # '--dir-cache-time' specifies the frequency of how often rclone should
         # check the backend storage for an update when there is a discrepancy.
-        '--allow-other --vfs-cache-mode full --dir-cache-time 30s '
+        '--allow-other --vfs-cache-mode writes --dir-cache-time 30s '
         # '--transfers 1' guarantees the files written at the local mount point
         # to be  uploaded to the backend storage in the order of creation.
         # '--vfs-cache-poll-interval' specifies the frequency of how often

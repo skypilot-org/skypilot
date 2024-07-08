@@ -1020,13 +1020,13 @@ def test_aws_storage_mounts_with_stop():
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name,
                               include_mount_cached=True)
-    
+
     # Creating a temporary YAML file
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
         file_path = f.name
-        
+
         # List of test commands
         test_commands = [
             *storage_setup_commands,
@@ -1039,7 +1039,7 @@ def test_aws_storage_mounts_with_stop():
             f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt; '
             f'rclone ls {rclone_profile_name}:{storage_name}/hello.txt;"',
         ]
-        
+
         # Creating and running the test
         test = Test(
             'aws_storage_mounts',
@@ -1056,20 +1056,20 @@ def test_gcp_storage_mounts_with_stop():
     storage_name = f'sky-test-{int(time.time())}'
     rclone_profile_name = data_utils.Rclone.RcloneStores.GCS.get_profile_name(
         storage_name)
-    
+
     # Reading and rendering the template
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name,
                               include_mount_cached=True)
-    
+
     # Creating a temporary YAML file
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
         file_path = f.name
-        
+
         # List of test commands
         test_commands = [
             *storage_setup_commands,
@@ -1082,7 +1082,7 @@ def test_gcp_storage_mounts_with_stop():
             f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt; '
             f'rclone ls {rclone_profile_name}:{storage_name}/hello.txt;"',
         ]
-        
+
         # Creating and running the test
         test = Test(
             'gcp_storage_mounts',
