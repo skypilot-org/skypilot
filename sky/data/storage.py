@@ -2369,6 +2369,7 @@ class AzureBlobStore(AbstractStore):
                         }
                     },
                 )
+                return
             except AttributeError as e:
                 if 'signed_session' in str(e):
                     if retry % 5 == 0:
