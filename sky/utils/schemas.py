@@ -4,7 +4,9 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 import enum
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
+
+from sky.skylet import constants
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -375,7 +377,7 @@ def get_service_schema():
     }
 
 
-def _filter_schema(schema: dict, keys_to_keep: dict) -> dict:
+def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
     """Recursively filter a schema to include only certain keys.
 
     Args:
@@ -424,9 +426,8 @@ def _filter_schema(schema: dict, keys_to_keep: dict) -> dict:
 
 
 def _experimental_task_schema() -> dict:
-    from sky import resources  # pylint: disable=import-outside-toplevel
     config_override_schema = _filter_schema(get_config_schema(),
-                                            resources.OVERRIDEABLE_CONFIG_KEYS)
+                                            constants.OVERRIDEABLE_CONFIG_KEYS)
     return {
         'experimental': {
             'type': 'object',

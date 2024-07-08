@@ -26,14 +26,6 @@ logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
 
-OVERRIDEABLE_CONFIG_KEYS = [
-    ('docker',),
-    ('nvidia_gpus',),
-    ('kubernetes', 'pod_config'),
-    ('kubernetes', 'provision_timeout'),
-    ('gcp', 'managed_instance_group'),
-]
-
 
 class Resources:
     """Resources: compute requirements of Tasks.
@@ -1033,7 +1025,7 @@ class Resources:
         if (skypilot_config.get_nested(
             ('nvidia_gpus', 'disable_ecc'),
                 False,
-                override_configs=self._cluster_config_overrides) and
+                override_configs=self.cluster_config_overrides) and
                 self.accelerators is not None):
             initial_setup_commands = [constants.DISABLE_GPU_ECC_COMMAND]
 
@@ -1041,7 +1033,7 @@ class Resources:
         docker_run_options = skypilot_config.get_nested(
             ('docker', 'run_options'),
             default_value=[],
-            override_configs=self._cluster_config_overrides)
+            override_configs=self.cluster_config_overrides)
         if isinstance(docker_run_options, str):
             docker_run_options = [docker_run_options]
         if docker_run_options and isinstance(self.cloud, clouds.Kubernetes):

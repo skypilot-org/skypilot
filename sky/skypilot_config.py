@@ -44,11 +44,12 @@ then:
 import copy
 import os
 import pprint
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 import yaml
 
 from sky import sky_logging
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -73,7 +74,7 @@ CONFIG_PATH = '~/.sky/config.yaml'
 logger = sky_logging.init_logger(__name__)
 
 # The loaded config.
-_dict = None
+_dict: Optional[Dict[str, Any]] = None
 _loaded_config_path = None
 
 
@@ -98,14 +99,38 @@ def get_nested(keys: Iterable[str],
 
     If any key is not found, or any intermediate key does not point to a dict
     value, returns 'default_value'.
+
+    When 'keys' is within OVERRIDEABLE_CONFIG_KEYS, 'override_configs' must be
+    provided (can be empty). Otherwise, 'override_configs' must not be provided.
+
+    Args:
+        keys: A tuple of strings representing the nested keys.
+        default_value: The default value to return if the key is not found.
+        override_configs: A dict of override configs with the same schema as
+            the config file, but only containing the keys to override.
+
+    Returns:
+        The value of the nested key, or 'default_value' if not found.
     """
-    # TODO (zhwu): Verify that the override_configs is provided when keys is
-    # within resources.OVERRIDEABLE_CONFIG_KEYS.
-    if _dict is None:
-        if override_configs is not None:
-            return _get_nested(override_configs, keys, default_value)
-        return default_value
-    config = _recursive_update(copy.deepcopy(_dict), override_configs or {})
+    assert (
+        keys in constants.OVERRIDEABLE_CONFIG_KEYS or
+        override_configs is not None
+    ), (f'Override configs must be provided when keys {keys} is within '
+        'constants.OVERRIDEABLE_CONFIG_KEYS: '
+        f'{constants.OVERRIDEABLE_CONFIG_KEYS}'
+       )
+    assert (
+        keys in constants.OVERRIDEABLE_CONFIG_KEYS or override_configs is None
+    ), (f'Override configs must not be provided when keys {keys} is not within '
+        'constants.OVERRIDEABLE_CONFIG_KEYS: '
+        f'{constants.OVERRIDEABLE_CONFIG_KEYS}'
+       )
+    config: Dict[str, Any] = {}
+    if _dict is not None:
+        config = copy.deepcopy(_dict)
+    if override_configs is None:
+        override_configs = {}
+    config = _recursive_update(config, override_configs)
     return _get_nested(config, keys, default_value)
 
 
@@ -121,7 +146,7 @@ def _recursive_update(base_config: Dict[str, Any],
     return base_config
 
 
-def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
+def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
     """Returns a deep-copied config with the nested key set to value.
 
     Like get_nested(), if any key is not found, this will not raise an error.
