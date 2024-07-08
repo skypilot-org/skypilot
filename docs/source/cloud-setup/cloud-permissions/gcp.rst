@@ -341,7 +341,7 @@ If proxy is not needed, but the regions need to be limited, you can set the ``gc
 
 
 Force Enable Exteral IPs
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 An alternative to setting up cloud NAT for instances that need to access the public internet but are in a VPC and communicated with via their internal IP is to force them to be created with an external IP address.
 
