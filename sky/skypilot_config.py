@@ -99,7 +99,7 @@ def _get_nested(configs: Optional[Dict[str, Any]], keys: Iterable[str],
     return curr
 
 
-def get_nested(keys: Iterable[str],
+def get_nested(keys: Tuple[str, ...],
                default_value: Any,
                override_configs: Optional[Dict[str, Any]] = None) -> Any:
     """Gets a nested key.

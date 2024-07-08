@@ -1563,7 +1563,7 @@ def get_head_pod_name(cluster_name_on_cloud: str):
 def get_autoscaler_type(
 ) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
     """Returns the autoscaler type by reading from config"""
-    autoscaler_type = skypilot_config.get_nested(['kubernetes', 'autoscaler'],
+    autoscaler_type = skypilot_config.get_nested(('kubernetes', 'autoscaler'),
                                                  None)
     if autoscaler_type is not None:
         autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(

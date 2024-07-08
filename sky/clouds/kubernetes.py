@@ -308,7 +308,7 @@ class Kubernetes(clouds.Cloud):
         # itself, which can be upto 2-3 seconds.
         # For non-autoscaling clusters, we conservatively set this to 10s.
         timeout = skypilot_config.get_nested(
-            ['kubernetes', 'provision_timeout'],
+            ('kubernetes', 'provision_timeout'),
             10,
             override_configs=resources.cluster_config_overrides)
         deploy_vars = {
