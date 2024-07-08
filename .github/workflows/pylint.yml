@@ -11,6 +11,7 @@ on:
     branches:
       - master
       - 'releases/**'
+  merge_group:
 
 jobs:
   pylint:
