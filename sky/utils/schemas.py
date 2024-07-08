@@ -407,25 +407,26 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
             new_schema = {
                 key: current_schema[key]
                 for key in current_schema
-                if key != 'properties'
+                # We do not support the handling of `oneOf`, `anyOf`, `allOf`,
+                # `required` for now.
+                if key not in {'properties', 'oneOf', 'anyOf', 'allOf', 'required'}
             }
             new_schema['properties'] = {}
         for key, sub_schema in current_schema['properties'].items():
-            assert key not in {
-                'oneOf', 'anyOf', 'allOf'
-            }, ('Schema filtering does not work with oneOf, anyOf, allOf. '
-                f'Key: {key}, Schema: {current_schema}')
             if key in current_path_dict:
                 # Recursively keep keys if further path dict exists
                 new_schema['properties'][key] = {}
+                current_path_value = current_path_dict.pop(key)
                 new_schema['properties'][key] = keep_keys(
-                    sub_schema, current_path_dict[key],
+                    sub_schema, current_path_value,
                     new_schema['properties'][key])
 
         return new_schema
 
     # Start the recursive filtering
-    return keep_keys(schema, paths_dict, {})
+    new_schema = keep_keys(schema, paths_dict, {})
+    assert not paths_dict, f'Unprocessed keys: {paths_dict}'
+    return new_schema
 
 
 def _experimental_task_schema() -> dict:
