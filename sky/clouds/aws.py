@@ -973,7 +973,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def is_label_valid(cls, label_key: str,
                        label_value: str) -> Tuple[bool, Optional[str]]:
-        key_regex = re.compile(r'^[^aws:][\S]{0,127}$')
+        key_regex = re.compile(r'^(?!aws:)[\S]{0,127}$')
         value_regex = re.compile(r'^[\S]{0,255}$')
         key_valid = bool(key_regex.match(label_key))
         value_valid = bool(value_regex.match(label_value))
