@@ -1,7 +1,7 @@
 """Immutable user configurations (EXPERIMENTAL).
 
-On module import, we attempt to parse the config located at CONFIG_PATH. Caller
-can then use
+On module import, we attempt to parse the config located at CONFIG_PATH
+(default: ~/.sky/config.yaml). Caller can then use
 
   >> skypilot_config.loaded()
 
@@ -10,6 +10,13 @@ to check if the config is successfully loaded.
 To read a nested-key config:
 
   >> skypilot_config.get_nested(('auth', 'some_auth_config'), default_value)
+
+The config can be overridden by the configs in task YAMLs. Callers are
+responsible to provide the override_configs. If the nested key is part of
+OVERRIDEABLE_CONFIG_KEYS, override_configs must be provided (can be empty):
+
+  >> skypilot_config.get_nested(('docker', 'run_options'), default_value
+                        override_configs={'docker': {'run_options': 'value'}})
 
 To set a value in the nested-key config:
 
