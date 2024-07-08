@@ -807,15 +807,15 @@ def test_gcp_force_enable_external_ips():
          '"value(networkInterfaces.network)" | grep "networks/default"'),
         # Check External NAT in network access configs, corresponds to external ip
         (f'gcloud compute instances list --filter=name~"{name}" --format='
-         '"value(networkInterfaces.accessConfigs[0].name)" | grep "External NAT"'),
+         '"value(networkInterfaces.accessConfigs[0].name)" | grep "External NAT"'
+        ),
         f'sky down -y {name}',
     ]
     skypilot_config = 'tests/test_yamls/force_enable_external_ips_config.yaml'
-    test = Test(
-        'gcp_force_enable_external_ips',
-        test_commands,
-        f'sky down -y {name}',
-        env={'SKYPILOT_CONFIG': skypilot_config})
+    test = Test('gcp_force_enable_external_ips',
+                test_commands,
+                f'sky down -y {name}',
+                env={'SKYPILOT_CONFIG': skypilot_config})
     run_one_test(test)
 
 
