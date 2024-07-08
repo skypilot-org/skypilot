@@ -749,19 +749,20 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # it was handled in step 6.
     updated_mount_storages = {}
     for storage_path, storage_obj in task.storage_mounts.items():
-        if (storage_obj.mode == storage_lib.StorageMode.MOUNT and
-                not storage_obj.source):
-            # Construct source URL with first store type and storage name
-            # E.g., s3://my-storage-name
-            source = list(
-                storage_obj.stores.keys())[0].store_prefix() + storage_obj.name
-            new_storage = storage_lib.Storage.from_yaml_config({
-                'source': source,
-                'persistent': storage_obj.persistent,
-                'mode': storage_lib.StorageMode.MOUNT.value,
-                # We enable force delete to allow the controller to delete
-                # the object store in case persistent is set to False.
-                '_force_delete': True
-            })
-            updated_mount_storages[storage_path] = new_storage
+        if (storage_obj.mode == storage_lib.StorageMode.MOUNT or
+            storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED):
+            if storage_obj.source is None:
+                # Construct source URL with first store type and storage name
+                # E.g., s3://my-storage-name
+                source = list(
+                    storage_obj.stores.keys())[0].store_prefix() + storage_obj.name
+                new_storage = storage_lib.Storage.from_yaml_config({
+                    'source': source,
+                    'persistent': storage_obj.persistent,
+                    'mode': storage_obj.mode.value,
+                    # We enable force delete to allow the controller to delete
+                    # the object store in case persistent is set to False.
+                    '_force_delete': True
+                })
+                updated_mount_storages[storage_path] = new_storage
     task.update_storage_mounts(updated_mount_storages)
