@@ -801,17 +801,17 @@ def test_gcp_mig():
 def test_gcp_use_internal_ips():
     name = _get_cluster_name()
     test_commands = [
-        # Launch detached because internal ips will prevent sshing for setup
-        f'(sky launch -y -s -c {name} tests/test_yamls/minimal.yaml)',
+        # Launch in background because internal ips will prevent sshing for setup
+        f'sky launch -y -c {name} tests/test_yamls/minimal.yaml &',
         # Wait for the vm to be up
-        'sleep 20',
+        'sleep 30',
         # Check network of vm is "default"
         (f'gcloud compute instances list --filter=name~"{name}" --format='
          '"value(networkInterfaces.network)" | grep "networks/default"'),
         # Check no entries in network interfaces access configs,
         # where external ips would be
         (f'gcloud compute instances list --filter=name~"{name}" --format='
-         '"value(networkInterfaces.accessConfigs)" | wc -w  | grep 0'),
+         '"value(networkInterfaces.accessConfigs)" | wc -w | grep 0'),
         f'sky down -y {name}',
     ]
     test = Test(
