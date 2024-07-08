@@ -1,12 +1,15 @@
 """Kubernetes network provisioning."""
 from typing import Any, Dict, List, Optional
 
+from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils.resources_utils import port_ranges_to_set
+
+logger = sky_logging.init_logger(__name__)
 
 _PATH_PREFIX = '/skypilot/{namespace}/{cluster_name_on_cloud}/{port}'
 _LOADBALANCER_SERVICE_NAME = '{cluster_name_on_cloud}--skypilot-lb'
@@ -218,12 +221,17 @@ def _query_ports_for_loadbalancer(
     ports: List[int],
     provider_config: Dict[str, Any],
 ) -> Dict[int, List[common.Endpoint]]:
+    logger.debug(f'Getting loadbalancer IP for cluster {cluster_name_on_cloud}')
     result: Dict[int, List[common.Endpoint]] = {}
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
     external_ip = network_utils.get_loadbalancer_ip(
         namespace=provider_config.get('namespace', 'default'),
-        service_name=service_name)
+        service_name=service_name,
+        # Timeout is set so that we can retry the query when the
+        # cluster is firstly created and the load balancer is not ready yet.
+        timeout=60,
+    )
 
     if external_ip is None:
         return {}

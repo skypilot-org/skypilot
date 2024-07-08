@@ -155,6 +155,10 @@ def query_ports(
     return the endpoint without querying the cloud provider. If head_ip is not
     provided, the cloud provider will be queried to get the endpoint info.
 
+    The underlying implementation is responsible for retries and timeout, e.g.
+    kubernetes will wait for the service that expose the ports to be ready
+    before returning the endpoint info.
+
     Returns a dict with port as the key and a list of common.Endpoint.
     """
     del provider_name, provider_config, cluster_name_on_cloud  # unused

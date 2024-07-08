@@ -93,6 +93,15 @@ def get_regions() -> List[str]:
 # We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
+# Some A10 instance types only contains a fractional of GPU. We temporarily
+# filter them out here to avoid using it as a whole A10 GPU.
+# TODO(zhwu,tian): support fractional GPUs, which can be done on
+# kubernetes as well.
+# Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
+FILTERED_A10_INSTANCE_TYPES = [
+    f'Standard_NV{vcpu}ads_A10_v5' for vcpu in [6, 12, 18]
+]
+
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
     'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation'
@@ -285,6 +294,10 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     df_ret.dropna(subset=['InstanceType'], inplace=True, how='all')
     after_drop_len = len(df_ret)
     print(f'Dropped {before_drop_len - after_drop_len} duplicated rows')
+
+    # Filter out instance types that only contain a fractional of GPU.
+    df_ret = df_ret.loc[~df_ret['InstanceType'].isin(FILTERED_A10_INSTANCE_TYPES
+                                                    )]
 
     # Filter out deprecated families
     df_ret = df_ret.loc[~df_ret['family'].isin(DEPRECATED_FAMILIES)]

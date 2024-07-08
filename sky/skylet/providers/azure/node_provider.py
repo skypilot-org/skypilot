@@ -11,11 +11,11 @@ from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resource.resources.models import DeploymentMode
 
+from sky.adaptors import azure
 from sky.skylet.providers.azure.config import (
     bootstrap_azure,
     get_azure_sdk_function,
 )
-from sky.skylet import autostop_lib
 from sky.skylet.providers.command_runner import SkyDockerCommandRunner
 from sky.provision import docker_utils
 
@@ -62,23 +62,7 @@ class AzureNodeProvider(NodeProvider):
 
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
-        if not autostop_lib.get_is_autostopping():
-            # TODO(suquark): This is a temporary patch for resource group.
-            # By default, Ray autoscaler assumes the resource group is still
-            # here even after the whole cluster is destroyed. However, now we
-            # deletes the resource group after tearing down the cluster. To
-            # comfort the autoscaler, we need to create/update it here, so the
-            # resource group always exists.
-            #
-            # We should not re-configure the resource group again, when it is
-            # running on the remote VM and the autostopping is in progress,
-            # because the VM is running which guarantees the resource group
-            # exists.
-            from sky.skylet.providers.azure.config import _configure_resource_group
 
-            _configure_resource_group(
-                {"cluster_name": cluster_name, "provider": provider_config}
-            )
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         # Sky only supports Azure CLI credential for now.
@@ -106,9 +90,20 @@ class AzureNodeProvider(NodeProvider):
                     return False
             return True
 
-        vms = self.compute_client.virtual_machines.list(
-            resource_group_name=self.provider_config["resource_group"]
-        )
+        try:
+            vms = list(
+                self.compute_client.virtual_machines.list(
+                    resource_group_name=self.provider_config["resource_group"]
+                )
+            )
+        except azure.exceptions().ResourceNotFoundError as e:
+            if "Code: ResourceGroupNotFound" in e.exc_msg:
+                logger.debug(
+                    "Resource group not found. VMs should have been terminated."
+                )
+                vms = []
+            else:
+                raise
 
         nodes = [self._extract_metadata(vm) for vm in filter(match_tags, vms)]
         self.cached_nodes = {node["name"]: node for node in nodes}
@@ -307,6 +302,33 @@ class AzureNodeProvider(NodeProvider):
         template_params["msi"] = self.provider_config["msi"]
         template_params["nsg"] = self.provider_config["nsg"]
         template_params["subnet"] = self.provider_config["subnet"]
+
+        if node_config.get("need_nvidia_driver_extension", False):
+            # Configure driver extension for A10 GPUs. A10 GPUs requires a
+            # special type of drivers which is available at Microsoft HPC
+            # extension. Reference: https://forums.developer.nvidia.com/t/ubuntu-22-04-installation-driver-error-nvidia-a10/285195/2
+            for r in template["resources"]:
+                if r["type"] == "Microsoft.Compute/virtualMachines":
+                    # Add a nested extension resource for A10 GPUs
+                    r["resources"] = [
+                        {
+                            "type": "extensions",
+                            "apiVersion": "2015-06-15",
+                            "location": "[variables('location')]",
+                            "dependsOn": [
+                                "[concat('Microsoft.Compute/virtualMachines/', parameters('vmName'), copyIndex())]"
+                            ],
+                            "name": "NvidiaGpuDriverLinux",
+                            "properties": {
+                                "publisher": "Microsoft.HpcCompute",
+                                "type": "NvidiaGpuDriverLinux",
+                                "typeHandlerVersion": "1.9",
+                                "autoUpgradeMinorVersion": True,
+                                "settings": {},
+                            },
+                        },
+                    ]
+                    break
 
         parameters = {
             "properties": {
