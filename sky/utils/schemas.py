@@ -664,7 +664,7 @@ def get_config_schema():
                         }
                     }
                 },
-                'force_enable_exteral_ips': {
+                'force_enable_external_ips': {
                     'type': 'boolean'
                 },
                 **_LABELS_SCHEMA,
