@@ -804,7 +804,7 @@ def test_gcp_force_enable_external_ips():
         f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
         (
             f'gcloud compute instances list --filter=name~"{name}" --format='
-            '"value(networkInterfaces.subnetwork)" | grep "subnetworks/default"'
+            '"value(networkInterfaces.network)" | grep "networks/default"'
         ),
         (
             f'gcloud compute instances list --filter=name~"{name}" --format='
