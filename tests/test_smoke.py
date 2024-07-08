@@ -798,25 +798,41 @@ def test_gcp_mig():
 
 
 @pytest.mark.gcp
+def test_gcp_use_internal_ips():
+    name = _get_cluster_name()
+    test_commands = [
+        f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
+        (f'gcloud compute instances list --filter=name~"{name}" --format='
+         '"value(networkInterfaces.network)" | grep "networks/default"'),
+        (f'gcloud compute instances list --filter=name~"{name}" --format='
+         '"value(networkInterfaces.accessConfigs[0].name)" | wc -w  | grep 0'),
+        f'sky down -y {name}',
+    ]
+    test = Test(
+        'gcp_use_internal_ips',
+        test_commands,
+        f'sky down -y {name}',
+        env={'SKYPILOT_CONFIG': 'tests/test_yamls/use_internal_ips_config.yaml'})
+    run_one_test(test)
+
+
+@pytest.mark.gcp
 def test_gcp_force_enable_external_ips():
     name = _get_cluster_name()
     test_commands = [
         f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
-        (
-            f'gcloud compute instances list --filter=name~"{name}" --format='
-            '"value(networkInterfaces.network)" | grep "networks/default"'
-        ),
-        (
-            f'gcloud compute instances list --filter=name~"{name}" --format='
-            '"value(networkInterfaces.accessConfigs[0].name)" | grep "External"'
-        ),
+        (f'gcloud compute instances list --filter=name~"{name}" --format='
+         '"value(networkInterfaces.network)" | grep "networks/default"'),
+        (f'gcloud compute instances list --filter=name~"{name}" --format='
+         '"value(networkInterfaces.accessConfigs[0].name)" | grep "External"'),
         f'sky down -y {name}',
     ]
+    skypilot_config = 'tests/test_yamls/force_enable_external_ips_config.yaml'
     test = Test(
         'gcp_force_enable_external_ips',
         test_commands,
         f'sky down -y {name}',
-        env={'SKYPILOT_CONFIG': 'tests/test_yamls/force_enable_external_ips_config.yaml'})
+        env={'SKYPILOT_CONFIG': skypilot_config})
     run_one_test(test)
 
 
