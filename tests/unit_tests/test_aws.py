@@ -11,6 +11,8 @@ def test_aws_label():
     assert not aws.is_label_valid('aws:whatever', 'value')[0]
     # Valid - valid prefix
     assert aws.is_label_valid('any:whatever', 'value')[0]
+    # Valid - valid prefix
+    assert aws.is_label_valid('Owner', 'username-1')[0]
     # Invalid - Too long
     assert not (aws.is_label_valid(
         'sprinto:thisiexample_string_with_123_characters_length_thing_thing_thing_thing_thing_thing_thing_thin_thing_thing_thing_thing_thing_thing',
