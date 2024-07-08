@@ -82,6 +82,7 @@ def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
                         spec:
                             imagePullSecrets:
                                 - name: my-secret-2
+                    provision_timeout: 100
                 gcp:
                     managed_instance_group:
                         run_duration: {RUN_DURATION_OVERRIDE}

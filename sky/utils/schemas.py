@@ -410,8 +410,11 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
                 if key != 'properties'
             }
             new_schema['properties'] = {}
-
         for key, sub_schema in current_schema['properties'].items():
+            assert key not in {
+                'oneOf', 'anyOf', 'allOf'
+            }, ('Schema filtering does not work with oneOf, anyOf, allOf. '
+                f'Key: {key}, Schema: {current_schema}')
             if key in current_path_dict:
                 # Recursively keep keys if further path dict exists
                 new_schema['properties'][key] = {}
