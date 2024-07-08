@@ -409,7 +409,8 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
                 for key in current_schema
                 # We do not support the handling of `oneOf`, `anyOf`, `allOf`,
                 # `required` for now.
-                if key not in {'properties', 'oneOf', 'anyOf', 'allOf', 'required'}
+                if key not in
+                {'properties', 'oneOf', 'anyOf', 'allOf', 'required'}
             }
             new_schema['properties'] = {}
         for key, sub_schema in current_schema['properties'].items():
