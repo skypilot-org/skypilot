@@ -119,7 +119,7 @@ def get_nested(keys: Iterable[str],
     Returns:
         The value of the nested key, or 'default_value' if not found.
     """
-    assert (keys in constants.OVERRIDEABLE_CONFIG_KEYS or
+    assert (keys not in constants.OVERRIDEABLE_CONFIG_KEYS or
             override_configs is not None), (
                 f'Override configs must be provided when keys {keys} is within '
                 'constants.OVERRIDEABLE_CONFIG_KEYS: '
