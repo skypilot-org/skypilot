@@ -262,10 +262,16 @@ def _delete_remote_dir(remote_dir: str, bucket_type: data.StoreType) -> None:
                        check=True)
     elif bucket_type == data.StoreType.GCS:
         remote_dir = f'gs://{remote_dir}'
-        subprocess.run(['gsutil', '-m', 'rm', '-r', remote_dir],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       check=True)
+        proc = subprocess.run(['gsutil', '-m', 'rm', '-r', remote_dir],
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              check=False)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode('utf-8')
+            if 'BucketNotFoundException: 404' in stderr:
+                logger.warning(f'Bucket {remote_dir} does not exist. Skip')
+            else:
+                raise RuntimeError(f'Failed to delete {remote_dir}: {stderr}')
     else:
         raise RuntimeError('Azure Blob Storage is not supported yet.')
 

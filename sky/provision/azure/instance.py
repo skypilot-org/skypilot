@@ -387,9 +387,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             verb = 'are' if len(stopping_instances) > 1 else 'is'
             # TODO(zhwu): double check the correctness of the following on Azure
             logger.warning(
-                f'Instance{plural} {stopping_instances} {verb} still in '
-                'STOPPING state on Azure. It can only be resumed after it is '
-                'fully STOPPED. Waiting ...')
+                f'Instance{plural} {[inst.name for inst in stopping_instances]}'
+                f' {verb} still in STOPPING state on Azure. It can only be '
+                'resumed after it is fully STOPPED. Waiting ...')
         while (stopping_instances and
                to_start_count > len(stopped_instances) and
                time.time() - time_start < _RESUME_INSTANCE_TIMEOUT):
@@ -421,7 +421,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         resumed_instances = stopped_instances[:to_start_count]
         resumed_instances.sort(key=lambda x: x.name)
         resumed_instance_ids = [t.name for t in resumed_instances]
-        logger.debug(f'Resuming stopped instances {resumed_instance_ids}.')
+        logger.debug(
+            f'run_instances: Resuming stopped instances {resumed_instance_ids}.'
+        )
         start_virtual_machine = _get_azure_sdk_function(
             compute_client.virtual_machines, 'start')
         with pool.ThreadPool() as p:
@@ -433,6 +435,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     if to_start_count > 0:
         resource_client = azure.get_client('resource', subscription_id)
+        logger.debug(f'run_instances: Creating {to_start_count} instances.')
         created_instances = _create_instances(
             compute_client=compute_client,
             resource_client=resource_client,

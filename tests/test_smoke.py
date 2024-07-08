@@ -3053,7 +3053,6 @@ def test_kubernetes_custom_image(image_id):
     run_one_test(test)
 
 
-@pytest.mark.slow
 def test_azure_start_stop_two_nodes():
     name = _get_cluster_name()
     test = Test(
@@ -3870,7 +3869,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             's=$(curl http://$endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
-            f'sleep 120',
+            f'sleep 90',
             _check_replica_in_status(
                 name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
                        (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
