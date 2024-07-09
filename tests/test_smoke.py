@@ -801,7 +801,7 @@ def test_gcp_mig():
 def test_gcp_force_enable_external_ips():
     name = _get_cluster_name()
     test_commands = [
-        f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
+        f'sky launch -y -c {name} --cloud gcp --cpus 2 tests/test_yamls/minimal.yaml',
         # Check network of vm is "default"
         (f'gcloud compute instances list --filter=name~"{name}" --format='
          '"value(networkInterfaces.network)" | grep "networks/default"'),
