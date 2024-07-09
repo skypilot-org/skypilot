@@ -19,80 +19,43 @@
 #   sky down nemo_gpt_train
 
 resources:
-  cpus: 6+
-  accelerators: A100:1
+  cpus: 16+
+  memory: 128+
+  accelerators: A100-80GB:4
+  image_id: docker:nvcr.io/nvidia/nemo:24.05
 
 num_nodes: 2
 
 envs:
   DATASET_ROOT: /wiki
-  BUCKET_NAME: # Enter a unique bucket name here - if it doesn't exist SkyPilot will create it
+  BUCKET_NAME: romil-sky-wiki # Enter a unique bucket name here - if it doesn't exist SkyPilot will create it
 
 file_mounts:
   ${DATASET_ROOT}:
     name: ${BUCKET_NAME}
     store: gcs  # We recommend using GCS for large datasets in mount mode - S3 based mounts may fail with "transport endpoint is not connected" error.
     mode: MOUNT
-    
+
 
 setup: |  
   # ============== Dependency Setup ==============
-  conda activate nemo
-  if [ $? -eq 0 ]; then
-      echo "Nemo conda env exists"
-  else
-      echo "Setup start"
-  
-      conda create -y --name nemo python==3.10.12
-      conda activate nemo
-  
-      # Install PyTorch
-      pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-      
-      # Install nemo
+  conda deactivate
+  # Clone NeMo if not already present
+  if [ ! -d NeMo ]; then
       git clone https://github.com/NVIDIA/NeMo.git
-      cd NeMo
-      git checkout b4ad7eaa7873d632391d6985aa6b359f39c20bab
-      pip install Cython
-      pip install .[all]
-      cd ..
+      git checkout 5df8e11255802a2ce2f33db6362e60990e215b64
+  fi
   
-      # Install megatron-core
-      # We install in editable mode because setup.py does not install all 
-      # required modules if we install in non-editable mode.
-      git clone https://github.com/NVIDIA/Megatron-LM
-      cd Megatron-LM
-      git checkout dc21350806361564b8ce61d4a8d247cb195cc5f0
-      pip install -e .  
-      cd ..
-      
-      # Install ninja for faster compilation
-      pip install ninja packaging
-  
-      # Install transformer engine and flash-attn (Takes ~1hr to compile)
-      MAX_JOBS=4 pip install flash-attn==2.0.4 --no-build-isolation # Version upper capped by TransformerEngine
-      MAX_JOBS=4 pip install git+https://github.com/NVIDIA/TransformerEngine.git@stable
-      
-      pip install pytorch-extension
-  
-      # Install Apex
-      git clone https://github.com/NVIDIA/apex.git
-      cd apex
-      git checkout 52e18c894223800cb611682dce27d88050edf1de
-      pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
-      cd ..
-
-      # Install gsutil if it doesn't exist
-      if ! command -v gsutil &> /dev/null
-      then
-          pip install gsutil
-      else
-          echo "gsutil exists"
-      fi
+  # Install gsutil if it doesn't exist
+  if ! command -v gsutil &> /dev/null
+  then
+      pip install gsutil
+  else
+      echo "gsutil exists"
   fi
 
 run: |
-  conda activate nemo
+  conda deactivate
   # ============= Data Download =============
   # We download pre-processed data from a read-only bucket at gs://sky-wiki-data
   # to our shared bucket at gs://${BUCKET_NAME}. 
@@ -120,6 +83,9 @@ run: |
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
   master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
   
+  # Kill any existing megatron processes
+  pkill -f -9 megatron
+  
   python -m torch.distributed.run \
     --nproc_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
     --nnodes=${num_nodes} \
@@ -139,6 +105,7 @@ run: |
     trainer.limit_test_batches=50 \
     trainer.accumulate_grad_batches=1 \
     trainer.precision=16 \
+    model.mcore_gpt=True \
     model.micro_batch_size=6 \
     model.global_batch_size=192 \
     model.tensor_model_parallel_size=1 \
