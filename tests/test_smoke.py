@@ -3847,7 +3847,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         '  echo "$s"; '
         'done')
     four_spot_up_cmd = _check_replica_in_status(name, [(4, True, 'READY')])
-    update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done; sleep 10;']
+    update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done; sleep 15;']
     if mode == 'rolling':
         # Check rolling update, it will terminate one of the old on-demand
         # instances, once there are 4 spot instance ready.
