@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import urllib.parse
 
+from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
@@ -18,6 +19,8 @@ from sky.adaptors import ibm
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data.data_utils import Rclone
+
+logger = sky_logging.init_logger(__name__)
 
 
 class CloudStorage:
@@ -189,6 +192,18 @@ class AzureBlobCloudStorage(CloudStorage):
 
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
+        
+        Args:
+            url: Endpoint url of the container/blob.
+
+        Returns:
+            True if the url is an endpoint of a directory and False if it
+            is a blob(file).
+
+        Raises:
+            azure.core.exceptions.HttpResponseError: If the user's Azure
+              Azure account does not have sufficient IAM role for the given
+              storage account.
         """
         # split the url using split_az_path
         storage_account_name, container_name, path = data_utils.split_az_path(
@@ -204,13 +219,21 @@ class AzureBlobCloudStorage(CloudStorage):
         container_client = data_utils.create_az_client(
             client_type='container', container_url=container_url)
         num_objects = 0
-        for blob in container_client.list_blobs(name_starts_with=path):
-            if blob.name == path:
-                return False
-            num_objects += 1
-            if num_objects > 1:
-                return True
-
+        try:
+            for blob in container_client.list_blobs(name_starts_with=path):
+                if blob.name == path:
+                    return False
+                num_objects += 1
+                if num_objects > 1:
+                    return True
+        except azure.exceptions().HttpResponseError as e:
+            if 'AuthorizationPermissionMismatch' in str(e):
+                logger.error('Failed to list blobs in container '
+                             f'{container_url!r}. This implies insufficient '
+                             'permissions for storage account '
+                             f'{storage_account_name!r}. Please check your '
+                             f'Azure account IAM roles.')
+            raise
         # A directory with few or no items
         return True
 
