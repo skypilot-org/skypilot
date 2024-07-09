@@ -515,6 +515,9 @@ class GCP(clouds.Cloud):
             int(use_mig))
         if use_mig:
             resources_vars.update(managed_instance_group_config)
+        resources_vars[
+            'force_enable_external_ips'] = skypilot_config.get_nested(
+                ('gcp', 'force_enable_external_ips'), False)
         return resources_vars
 
     def _get_feasible_launchable_resources(
