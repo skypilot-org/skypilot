@@ -43,6 +43,7 @@ setup: |
   # Clone NeMo if not already present
   if [ ! -d NeMo ]; then
       git clone https://github.com/NVIDIA/NeMo.git
+      cd NeMo 
       git checkout 5df8e11255802a2ce2f33db6362e60990e215b64
   fi
   
