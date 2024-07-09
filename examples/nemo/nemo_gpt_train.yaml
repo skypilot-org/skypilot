@@ -86,6 +86,11 @@ run: |
   # Kill any existing megatron processes
   pkill -f -9 megatron
   
+  # Store checkpoints on the shared dataset bucket
+  # Create a directory to store checkpoints
+  CHECKPOINT_PATH=${DATASET_ROOT}/results
+  mkdir -p ${CHECKPOINT_PATH}
+  
   python -m torch.distributed.run \
     --nproc_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
     --nnodes=${num_nodes} \
@@ -99,7 +104,7 @@ run: |
     trainer.num_nodes=${num_nodes} \
     trainer.max_epochs=null \
     trainer.max_steps=300000 \
-    trainer.val_check_interval=300 \
+    trainer.val_check_interval=50 \
     trainer.log_every_n_steps=50 \
     trainer.limit_val_batches=50 \
     trainer.limit_test_batches=50 \
@@ -136,6 +141,7 @@ run: |
     exp_manager.resume_if_exists=True \
     exp_manager.resume_ignore_no_checkpoint=True \
     exp_manager.create_checkpoint_callback=True \
+    +exp_manager.checkpoint_callback_params.dirpath=${CHECKPOINT_PATH} \
     exp_manager.checkpoint_callback_params.monitor=val_loss \
     exp_manager.checkpoint_callback_params.save_top_k=3 \
     exp_manager.checkpoint_callback_params.mode=min \
