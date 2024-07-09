@@ -261,3 +261,6 @@ SKYPILOT_NODE_RANK = 'SKYPILOT_NODE_RANK'
 # Placeholder for the SSH user in proxy command, replaced when the ssh_user is
 # known after provisioning.
 SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
+
+RCLONE_CONFIG_DIR = '~/.config/rclone'
+RCLONE_CONFIG_PATH = f'{RCLONE_CONFIG_DIR}/rclone.conf'
