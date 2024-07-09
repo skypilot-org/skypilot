@@ -4510,7 +4510,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # It is a file so make sure *its parent dir* exists.
                     mkdir_for_wrapped_dst = (
                         f'mkdir -p {os.path.dirname(wrapped_dst)}')
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 logger.error(
                     f'Failed to fetch from the bucket {src!r} to '
                     f'remote instance at {dst!r}.\n'
