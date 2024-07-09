@@ -192,7 +192,7 @@ class AzureBlobCloudStorage(CloudStorage):
 
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
-        
+
         Args:
             url: Endpoint url of the container/blob.
 
