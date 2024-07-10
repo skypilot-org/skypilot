@@ -33,36 +33,6 @@ def _check_not_both_fields_present(field1: str, field2: str):
     }
 
 
-def _get_cloud_name_property_mapping(field: str):
-    return {
-        field: {
-            'oneOf': [
-                {
-                    'type': 'string'
-                },
-                {
-                    # A list of single-element dict to pretain the
-                    # order.
-                    # Example:
-                    #  property_name:
-                    #    - my-cluster1-*: my-property-1
-                    #    - my-cluster2-*: my-property-2
-                    #    - "*"": my-property-3
-                    'type': 'array',
-                    'items': {
-                        'type': 'object',
-                        'additionalProperties': {
-                            'type': 'string'
-                        },
-                        'maxProperties': 1,
-                        'minProperties': 1,
-                    },
-                }
-            ]
-        }
-    }
-
-
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
@@ -642,6 +612,32 @@ _LABELS_SCHEMA = {
     }
 }
 
+_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
+    'oneOf': [
+        {
+            'type': 'string'
+        },
+        {
+            # A list of single-element dict to pretain the
+            # order.
+            # Example:
+            #  property_name:
+            #    - my-cluster1-*: my-property-1
+            #    - my-cluster2-*: my-property-2
+            #    - "*"": my-property-3
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                },
+                'maxProperties': 1,
+                'minProperties': 1,
+            },
+        }
+    ]
+}
+
 
 class RemoteIdentityOptions(enum.Enum):
     """Enum for remote identity types.
@@ -710,7 +706,7 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
-                **_get_cloud_name_property_mapping('security_group_name'),
+                'security_group_name': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY,
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -869,8 +865,9 @@ def get_config_schema():
 
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
-            config['properties'].update(
-                _get_cloud_name_property_mapping('remote_identity'))
+            config['properties'].update({
+                'remote_identity': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
+            })
         elif cloud == 'kubernetes':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
         else:
