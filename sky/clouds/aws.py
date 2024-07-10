@@ -415,11 +415,11 @@ class AWS(clouds.Cloud):
                 # Already checked in Resources._try_validate_ports
                 security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
                     cluster_name.name_on_cloud)
-        elif user_security_group is not None and resources.ports is not None:
+        elif security_group is not None and resources.ports is not None:
             with ux_utils.print_exception_no_traceback():
                 logger.warning(
                     f'Ports {resources.ports} and security group name are '
-                    f'specified: {user_security_group}. It is not '
+                    f'specified: {security_group}. It is not '
                     'guaranteed that the ports will be opened if the '
                     'specified security group is not correctly set up. '
                     'Please try to specify `ports` only and leave out '
