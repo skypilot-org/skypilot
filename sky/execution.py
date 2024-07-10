@@ -56,8 +56,7 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     with rich_utils.safe_status('Creating image from source cluster '
                                 f'{clone_disk_from!r}'):
         image_id = original_cloud.create_image_from_cluster(
-            clone_disk_from,
-            resources_utils.ClusterName(
+            cluster_name=resources_utils.ClusterName(
                 display_name=handle.cluster_name,
                 name_on_cloud=handle.cluster_name_on_cloud),
             region=handle.launched_resources.region,
