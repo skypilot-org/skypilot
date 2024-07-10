@@ -3,17 +3,21 @@
 # Inspired from https://github.com/NVIDIA/NeMo/blob/main/docs/source/nlp/nemo_megatron/gpt/gpt_training.rst
 #
 # Note that we provide a read-only bucket at gs://sky-wiki-data that is used to
-# download preprocessed data to your bucket. If you want to preprocess the data
+# download preprocessed data to local disk. If you want to preprocess the data
 # yourself, see nemo_gpt_preprocessing.yaml.
 #
+# We use a shared bucket to store the index files that are used to coordinate
+# between the head and worker nodes. This shared bucket is mounted as a
+# network filesystem (NFS) on the head and worker nodes.
+#
 # After the script completes, the model checkpoints will be saved in
-# ~/sky_workdir/results on the head node.
+# /ckpts on the head node (can be changed to /shared for cloud storage).
 #
 # Usage:
-#   sky launch --env BUCKET_NAME=<unique_bucket_name> -c nemo_gpt_train nemo_gpt_train.yaml
+#   sky launch --env SHARED_NFS_BUCKET_NAME=<unique_bucket_name> -c nemo_gpt nemo_gpt_distributed.yaml
 #
 #   # Terminate cluster after you're done
-#   sky down nemo_gpt_train
+#   sky down nemo_gpt
 
 resources:
   cpus: 8+
@@ -25,14 +29,25 @@ num_nodes: 2
 
 envs:
   DATASET_ROOT: /wiki
-  BUCKET_NAME:  # Enter a unique bucket name here - if it doesn't exist SkyPilot will create it
+  SHARED_NFS_ROOT: /shared
+  SHARED_NFS_BUCKET_NAME: # Enter a unique bucket name here for the shared directory - if it doesn't exist SkyPilot will create it
+  CHECKPOINT_PATH: /ckpts # Store checkpoints at a local path. You can change this to /shared for checkpointing to cloud bucket at every callback, but this will slow down training.
 
 file_mounts:
   ${DATASET_ROOT}:
-    name: ${BUCKET_NAME}
-    store: gcs  # We recommend using GCS for large datasets in mount mode - S3 based mounts may fail with "transport endpoint is not connected" error.
-    mode: MOUNT
+    source: gs://sky-wiki-data    # This is a read-only bucket provided by SkyPilot for the dataset
+    mode: COPY
 
+  # The SHARED_NFS_ROOT path acts as a network filesystem (NFS) between the
+  # head and worker nodes. In NeMo, the head node writes an indexmap to this
+  # shared filesystem that is read by workers.
+  #
+  # Note that NeMo requires this shared filesystem to be strongly consistent -
+  # any writes made by the head should be immediately visible to the workers.
+  ${SHARED_NFS_ROOT}:
+    name: ${SHARED_NFS_BUCKET_NAME}
+    store: gcs  # We recommend using GCS in mount mode - S3 based mounts may fail with "transport endpoint is not connected" error.
+    mode: MOUNT
 
 setup: |
   conda deactivate
@@ -43,43 +58,9 @@ setup: |
       cd NeMo 
       git checkout 5df8e11255802a2ce2f33db6362e60990e215b64
   fi
-  
-  # Install gsutil if it doesn't exist
-  if ! command -v gsutil &> /dev/null
-  then
-      pip install gsutil
-  else
-      echo "gsutil exists"
-  fi
-  
 
 run: |
   conda deactivate
-  # ============= Data Download =============
-  # We download pre-processed data from a read-only bucket at gs://sky-wiki-data
-  # to our shared bucket at gs://${BUCKET_NAME}. 
-  # 
-  # This bucket acts as a network filesystem (NFS) between the head node and 
-  # worker nodes. In our training script, the head node writes a index 
-  # file to this shared filesystem that is read by workers.
-  #
-  # Note that NeMo requires this shared filesystem to be strongly consistent - 
-  # any writes made by the head should be immediately visible to the workers.
-  
-  if [ ${SKYPILOT_NODE_RANK} -eq 0 ]; then
-      if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; then
-          echo "Data already downloaded"
-      else
-          echo "Head node downloading data to shared bucket."
-          gsutil -m cp gs://sky-wiki-data/{gpt2-merges.txt,gpt2-vocab.json,hfbpe_gpt_training_data_text_document.bin,hfbpe_gpt_training_data_text_document.idx} ${DATASET_ROOT}
-      fi
-  else
-      while [ ! -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; do
-          echo "Worker ${SKYPILOT_NODE_RANK} - waiting for data to be downloaded to shared bucket."
-          sleep 1
-      done
-  fi 
-  
   # ============= Training =============  
   # Get the number of nodes and master address from SkyPilot envvars
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
@@ -88,12 +69,10 @@ run: |
   # Kill any existing megatron processes
   pkill -f -9 megatron
   
-  # Store checkpoints at a local path.
-  # You can change this to the shared bucket for checkpointing to cloud bucket
-  # at every callback, but this will slow down training.
-  # CHECKPOINT_PATH=${DATASET_ROOT}/results
-  CHECKPOINT_PATH=~/sky_workdir/results
   mkdir -p ${CHECKPOINT_PATH}
+  
+  echo "Writing checkpoints to ${CHECKPOINT_PATH}"
+  echo "Writing index files to shared storage ${SHARED_NFS_ROOT}"
   
   python -m torch.distributed.run \
     --nproc_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
@@ -108,7 +87,7 @@ run: |
     trainer.num_nodes=${num_nodes} \
     trainer.max_epochs=null \
     trainer.max_steps=300000 \
-    trainer.val_check_interval=100 \
+    trainer.val_check_interval=50 \
     trainer.log_every_n_steps=50 \
     trainer.limit_val_batches=50 \
     trainer.limit_test_batches=50 \
@@ -134,6 +113,7 @@ run: |
     model.data.num_workers=2 \
     model.data.seq_length=1024 \
     model.data.splits_string=\'980,10,10\' \
+    model.data.index_mapping_dir=${SHARED_NFS_ROOT} \
     model.optim.name=fused_adam \
     model.optim.lr=6e-4 \
     model.optim.betas=[0.9,0.95] \
@@ -152,8 +132,8 @@ run: |
     exp_manager.checkpoint_callback_params.always_save_nemo=True
   
   # Optional - if writing checkpoints to a local directory,
-  # copy checkpoints to the mounted dataset bucket (~6 GB)
+  # copy final checkpoints to the shared bucket at the end of training (~6 GB)
   # if [ ${SKYPILOT_NODE_RANK} -eq 0 ]; then
-  #     mkdir -p ${DATASET_ROOT}/results
-  #     cp -R ~/sky_workdir/nemo_experiments 
+  #     mkdir -p ${SHARED_NFS_ROOT}/results
+  #     cp -R ${CHECKPOINT_PATH}
   # fi
