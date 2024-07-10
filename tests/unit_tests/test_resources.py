@@ -95,12 +95,12 @@ def test_kubernetes_labels_resources():
               './tests/test_yamls/test_aws_config.yaml')
 @patch.object(skypilot_config, '_dict', None)
 @patch.object(skypilot_config, '_loaded_config_path', None)
-@patch("sky.clouds.service_catalog.instance_type_exists", return_value=True)
-@patch("sky.clouds.service_catalog.get_accelerators_from_instance_type",
-       return_value={"fake-acc": 2})
-@patch("sky.clouds.service_catalog.get_image_id_from_tag",
-       return_value="fake-image")
-@patch.object(clouds.aws, "DEFAULT_SECURITY_GROUP_NAME", "fake-default-sg")
+@patch('sky.clouds.service_catalog.instance_type_exists', return_value=True)
+@patch('sky.clouds.service_catalog.get_accelerators_from_instance_type',
+       return_value={'fake-acc': 2})
+@patch('sky.clouds.service_catalog.get_image_id_from_tag',
+       return_value='fake-image')
+@patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
     skypilot_config._try_load_config()
 
@@ -109,7 +109,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
                                                name_on_cloud='cloud')
     region = clouds.Region(name='fake-region')
     zones = [clouds.Zone(name='fake-zone')]
-    resource = Resources(cloud=cloud, instance_type="fake-type: 3")
+    resource = Resources(cloud=cloud, instance_type='fake-type: 3')
     config = resource.make_deploy_variables(cluster_name,
                                             region,
                                             zones,
@@ -134,18 +134,18 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     # test using defaults
     expected_config = expected_config_base.copy()
     expected_config.update({
-        'security_group': "fake-default-sg",
+        'security_group': 'fake-default-sg',
         'security_group_managed_by_skypilot': 'true'
     })
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')
 
-    # test using culuster matches regex, top
+    # test using cluster matches regex, top
     cluster_name = resources_utils.ClusterName(
         display_name='sky-serve-fake1-1234', name_on_cloud='name-on-cloud')
     expected_config = expected_config_base.copy()
     expected_config.update({
-        'security_group': "fake-1-sg",
+        'security_group': 'fake-1-sg',
         'security_group_managed_by_skypilot': 'false'
     })
     config = resource.make_deploy_variables(cluster_name,
@@ -155,12 +155,12 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')
 
-    # test using culuster matches regex, middle
+    # test using cluster matches regex, middle
     cluster_name = resources_utils.ClusterName(
         display_name='sky-serve-fake2-1234', name_on_cloud='name-on-cloud')
     expected_config = expected_config_base.copy()
     expected_config.update({
-        'security_group': "fake-2-sg",
+        'security_group': 'fake-2-sg',
         'security_group_managed_by_skypilot': 'false'
     })
     config = resource.make_deploy_variables(cluster_name,
