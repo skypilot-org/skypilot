@@ -708,21 +708,28 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'security_group_name': {
-                    'oneOf': [{
-                        'type': 'string'
-                    }, {
-                        'type': 'object',
-                        'additionalProperties': False,
-                        'required': ['default'],
-                        'properties': {
-                            'sky-serve-controller': {
-                                'type': 'string',
+                    'oneOf': [
+                        {
+                            'type': 'string'
+                        },
+                        {
+                            # A list of single-element dict to pretain the order.
+                            # Example:
+                            #  security_group_name:
+                            #    - my-cluster1-*: my-security-group-1
+                            #    - my-cluster2-*: my-security-group-2
+                            #    - "*"": my-security-group-3
+                            'type': 'array',
+                            'items': {
+                                'type': 'object',
+                                'additionalProperties': {
+                                    'type': 'string'
+                                },
+                                'maxProperties': 1,
+                                'minProperties': 1,
                             },
-                            'default': {
-                                'type': 'string'
-                            }
                         }
-                    }]
+                    ]
                 },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
