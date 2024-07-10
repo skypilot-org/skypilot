@@ -10,6 +10,7 @@ from sky import clouds
 from sky import status_lib
 from sky.clouds import service_catalog
 from sky.provision.fluidstack import fluidstack_utils
+from sky.utils import resources_utils
 from sky.utils.resources_utils import DiskTier
 
 _CREDENTIAL_FILES = [
@@ -174,7 +175,7 @@ class Fluidstack(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name_on_cloud: str,
+        cluster_name: resources_utils.ClusterName,
         region: clouds.Region,
         zones: Optional[List[clouds.Zone]],
         dryrun: bool = False,
@@ -189,7 +190,7 @@ class Fluidstack(clouds.Cloud):
         else:
             custom_resources = None
         cuda_installation_commands = """
-        sudo wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb -O /usr/local/cuda-keyring_1.1-1_all.deb; 
+        sudo wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb -O /usr/local/cuda-keyring_1.1-1_all.deb;
         sudo dpkg -i /usr/local/cuda-keyring_1.1-1_all.deb;
         sudo apt-get update;
         sudo apt-get -y install cuda-toolkit-12-3;

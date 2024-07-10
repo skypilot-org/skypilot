@@ -155,7 +155,11 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # we need to take this field from the new yaml.
     ('provider', 'tpu_node'),
     ('provider', 'security_group', 'GroupName'),
+    ('available_node_types', 'ray.head.default', 'node_config',
+     'IamInstanceProfile'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
+    ('available_node_types', 'ray.worker.default', 'node_config',
+     'IamInstanceProfile'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
 
@@ -793,8 +797,11 @@ def write_cluster_config(
     # move the check out of this function, i.e. the caller should be responsible
     # for the validation.
     # TODO(tian): Move more cloud agnostic vars to resources.py.
-    resources_vars = to_provision.make_deploy_variables(cluster_name_on_cloud,
-                                                        region, zones, dryrun)
+    resources_vars = to_provision.make_deploy_variables(
+        resources_utils.ClusterName(
+            cluster_name,
+            cluster_name_on_cloud,
+        ), region, zones, dryrun)
     config_dict = {}
 
     specific_reservations = set(
