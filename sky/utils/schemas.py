@@ -713,7 +713,8 @@ def get_config_schema():
                             'type': 'string'
                         },
                         {
-                            # A list of single-element dict to pretain the order.
+                            # A list of single-element dict to pretain the
+                            # order.
                             # Example:
                             #  security_group_name:
                             #    - my-cluster1-*: my-security-group-1

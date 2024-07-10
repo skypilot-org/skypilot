@@ -400,9 +400,11 @@ class AWS(clouds.Cloud):
 
         user_security_group = skypilot_config.get_nested(
             ('aws', 'security_group_name'), None)
-        if user_security_group is not None and not isinstance(user_security_group, str):
+        if user_security_group is not None and not isinstance(
+                user_security_group, str):
             for profile in user_security_group:
-                if fnmatch.fnmatchcase(cluster_name_on_cloud, list(profile.keys())[0]):
+                if fnmatch.fnmatchcase(cluster_name_on_cloud,
+                                       list(profile.keys())[0]):
                     user_security_group = list(profile.values())[0]
                     break
         security_group = user_security_group
