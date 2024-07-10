@@ -399,12 +399,15 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       r.instance_type)
 
-        user_security_group = skypilot_config.get_nested(
+
+        user_security_group_config = skypilot_config.get_nested(
             ('aws', 'security_group_name'), None)
-        if user_security_group is not None and not isinstance(
-                user_security_group, str):
-            for profile in user_security_group:
-                if fnmatch.fnmatchcase(cluster_name.name_on_cloud,
+        user_security_group = None
+        if isinstance(user_security_group_config, str):
+            user_security_group = user_security_group_config
+        elif isinstance(user_security_group_config, list):
+            for profile in user_security_group_config:
+                if fnmatch.fnmatchcase(cluster_name.display_name,
                                        list(profile.keys())[0]):
                     user_security_group = list(profile.values())[0]
                     break
@@ -414,18 +417,15 @@ class AWS(clouds.Cloud):
             if resources.ports is not None:
                 # Already checked in Resources._try_validate_ports
                 security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
-                    cluster_name.name_on_cloud)
-        elif security_group is not None and resources.ports is not None:
+                    cluster_name.display_name)
+        elif resources.ports is not None:
             with ux_utils.print_exception_no_traceback():
                 logger.warning(
-                    f'Ports {resources.ports} and security group name are '
-                    f'specified: {security_group}. It is not '
-                    'guaranteed that the ports will be opened if the '
-                    'specified security group is not correctly set up. '
-                    'Please try to specify `ports` only and leave out '
-                    '`aws.security_group_name` in `~/.sky/config.yaml` to '
-                    'allow SkyPilot to automatically create and configure '
-                    'the security group.')
+                    f'Skip opening ports {resources.ports} for cluster {cluster_name!r}, '
+                    'as `aws.security_group_name` in `~/.sky/config.yaml` is specified as '
+                    f' {security_group!r}. Please make sure the specified security group '
+                    'has requested ports setup; or, leave out `aws.security_group_name` '
+                    'in `~/.sky/config.yaml`.')
 
         return {
             'instance_type': r.instance_type,

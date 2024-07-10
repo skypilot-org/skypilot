@@ -100,6 +100,7 @@ def test_kubernetes_labels_resources():
        return_value={"fake-acc": 2})
 @patch("sky.clouds.service_catalog.get_image_id_from_tag",
        return_value="fake-image")
+@patch.object(clouds.aws, "DEFAULT_SECURITY_GROUP_NAME", "fake-default-sg")
 def test_aws_make_deploy_variables(*mocks) -> None:
     skypilot_config._try_load_config()
 
@@ -133,15 +134,15 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     # test using defaults
     expected_config = expected_config_base.copy()
     expected_config.update({
-        'security_group': "fake-skypilot-default",
-        'security_group_managed_by_skypilot': 'false'
+        'security_group': "fake-default-sg",
+        'security_group_managed_by_skypilot': 'true'
     })
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')
 
     # test using culuster matches regex, top
     cluster_name = resources_utils.ClusterName(
-        display_name='display', name_on_cloud='sky-serve-fake1-1234')
+        display_name='sky-serve-fake1-1234', name_on_cloud='name-on-cloud')
     expected_config = expected_config_base.copy()
     expected_config.update({
         'security_group': "fake-1-sg",
@@ -156,7 +157,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
 
     # test using culuster matches regex, middle
     cluster_name = resources_utils.ClusterName(
-        display_name='display', name_on_cloud='sky-serve-fake2-1234')
+        display_name='sky-serve-fake2-1234', name_on_cloud='name-on-cloud')
     expected_config = expected_config_base.copy()
     expected_config.update({
         'security_group': "fake-2-sg",
