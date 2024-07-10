@@ -158,8 +158,6 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.head.default', 'node_config',
      'IamInstanceProfile'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
-    ('available_node_types', 'ray.worker.default', 'node_config',
-     'IamInstanceProfile'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
 
