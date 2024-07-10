@@ -929,20 +929,6 @@ class Resources:
         """
         if self.ports is None:
             return
-        if self.cloud is None or isinstance(self.cloud, clouds.AWS):
-            security_group_name = skypilot_config.get_nested(
-                ('aws', 'security_group_name'), None)
-            if security_group_name is not None:
-                with ux_utils.print_exception_no_traceback():
-                    logger.warning(
-                        f'Ports {self.ports} and security group name are '
-                        f'specified: {security_group_name}. It is not '
-                        'guaranteed that the ports will be opened if the '
-                        'specified security group is not correctly set up. '
-                        'Please try to specify `ports` only and leave out '
-                        '`aws.security_group_name` in `~/.sky/config.yaml` to '
-                        'allow SkyPilot to automatically create and configure '
-                        'the security group.')
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
                 self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
