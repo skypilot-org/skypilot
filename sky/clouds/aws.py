@@ -399,7 +399,6 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       r.instance_type)
 
-
         user_security_group_config = skypilot_config.get_nested(
             ('aws', 'security_group_name'), None)
         user_security_group = None
