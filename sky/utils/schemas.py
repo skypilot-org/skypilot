@@ -706,7 +706,8 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
-                'security_group_name': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY,
+                'security_group_name':
+                    (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
