@@ -19,6 +19,7 @@ from sky.usage import usage_lib
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -55,8 +56,9 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     with rich_utils.safe_status('Creating image from source cluster '
                                 f'{clone_disk_from!r}'):
         image_id = original_cloud.create_image_from_cluster(
-            clone_disk_from,
-            handle.cluster_name_on_cloud,
+            cluster_name=resources_utils.ClusterName(
+                display_name=clone_disk_from,
+                name_on_cloud=handle.cluster_name_on_cloud),
             region=handle.launched_resources.region,
             zone=handle.launched_resources.zone,
         )

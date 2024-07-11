@@ -929,12 +929,6 @@ class Resources:
         """
         if self.ports is None:
             return
-        if skypilot_config.get_nested(('aws', 'security_group_name'),
-                                      None) is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cannot specify ports when AWS security group name is '
-                    'specified.')
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
                 self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
@@ -1009,7 +1003,7 @@ class Resources:
     def get_spot_str(self) -> str:
         return '[Spot]' if self.use_spot else ''
 
-    def make_deploy_variables(self, cluster_name_on_cloud: str,
+    def make_deploy_variables(self, cluster_name: resources_utils.ClusterName,
                               region: clouds.Region,
                               zones: Optional[List[clouds.Zone]],
                               dryrun: bool) -> Dict[str, Optional[str]]:
@@ -1047,7 +1041,7 @@ class Resources:
 
         # Cloud specific variables
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
-            self, cluster_name_on_cloud, region, zones, dryrun)
+            self, cluster_name, region, zones, dryrun)
         return dict(
             cloud_specific_variables,
             **{

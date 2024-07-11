@@ -114,6 +114,8 @@ def _get_single_resources_schema():
                             'type': 'integer',
                         }]
                     }
+                }, {
+                    'type': 'null',
                 }],
             },
             'labels': {
@@ -610,6 +612,32 @@ _LABELS_SCHEMA = {
     }
 }
 
+_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
+    'oneOf': [
+        {
+            'type': 'string'
+        },
+        {
+            # A list of single-element dict to pretain the
+            # order.
+            # Example:
+            #  property_name:
+            #    - my-cluster1-*: my-property-1
+            #    - my-cluster2-*: my-property-2
+            #    - "*"": my-property-3
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                },
+                'maxProperties': 1,
+                'minProperties': 1,
+            },
+        }
+    ]
+}
+
 
 class RemoteIdentityOptions(enum.Enum):
     """Enum for remote identity types.
@@ -634,33 +662,6 @@ _REMOTE_IDENTITY_SCHEMA = {
         'type': 'string',
         'case_insensitive_enum': [
             option.value for option in RemoteIdentityOptions
-        ]
-    }
-}
-
-_REMOTE_IDENTITY_SCHEMA_AWS = {
-    'remote_identity': {
-        'oneOf': [
-            {
-                'type': 'string'
-            },
-            {
-                # A list of single-element dict to pretain the order.
-                # Example:
-                #  remote_identity:
-                #    - my-cluster1-*: my-iam-role-1
-                #    - my-cluster2-*: my-iam-role-2
-                #    - "*"": my-iam-role-3
-                'type': 'array',
-                'items': {
-                    'type': 'object',
-                    'additionalProperties': {
-                        'type': 'string'
-                    },
-                    'maxProperties': 1,
-                    'minProperties': 1,
-                },
-            }
         ]
     }
 }
@@ -705,9 +706,8 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
-                'security_group_name': {
-                    'type': 'string'
-                },
+                'security_group_name':
+                    (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -866,7 +866,9 @@ def get_config_schema():
 
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
-            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
+            config['properties'].update({
+                'remote_identity': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
+            })
         elif cloud == 'kubernetes':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
         else:

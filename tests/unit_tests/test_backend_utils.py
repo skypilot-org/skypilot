@@ -1,0 +1,123 @@
+import pathlib
+from typing import Dict
+from unittest.mock import Mock
+from unittest.mock import patch
+
+import pytest
+
+from sky import clouds
+from sky import skypilot_config
+from sky.backends import backend_utils
+from sky.resources import Resources
+from sky.resources import resources_utils
+
+
+@patch.object(skypilot_config, 'CONFIG_PATH',
+              './tests/test_yamls/test_aws_config.yaml')
+@patch.object(skypilot_config, '_dict', None)
+@patch.object(skypilot_config, '_loaded_config_path', None)
+@patch('sky.clouds.service_catalog.instance_type_exists', return_value=True)
+@patch('sky.clouds.service_catalog.get_accelerators_from_instance_type',
+       return_value={'fake-acc': 2})
+@patch('sky.clouds.service_catalog.get_image_id_from_tag',
+       return_value='fake-image')
+@patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
+@patch('sky.check.get_cloud_credential_file_mounts',
+       return_value='~/.aws/credentials')
+@patch('sky.backends.backend_utils._get_yaml_path_from_cluster_name',
+       return_value='/tmp/fake/path')
+@patch('sky.utils.common_utils.fill_template')
+def test_write_cluster_config_w_remote_identity(mock_fill_template,
+                                                *mocks) -> None:
+    skypilot_config._try_load_config()
+
+    cloud = clouds.AWS()
+
+    region = clouds.Region(name='fake-region')
+    zones = [clouds.Zone(name='fake-zone')]
+    resource = Resources(cloud=cloud, instance_type='fake-type: 3')
+
+    cluster_config_template = 'aws-ray.yml.j2'
+
+    # test default
+    backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=2,
+        cluster_config_template=cluster_config_template,
+        cluster_name="display",
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='b1bd84059bc0342f7843fcbe04ab563e',
+        region=region,
+        zones=zones,
+        dryrun=True,
+        keep_launch_fields_in_existing_config=True)
+
+    expected_subset = {
+        'instance_type': 'fake-type: 3',
+        'custom_resources': '{"fake-acc":2}',
+        'region': 'fake-region',
+        'zones': 'fake-zone',
+        'image_id': 'fake-image',
+        'security_group': 'fake-default-sg',
+        'security_group_managed_by_skypilot': 'true',
+        'vpc_name': 'fake-vpc',
+        'remote_identity': 'LOCAL_CREDENTIALS',  # remote identity
+        'sky_local_path': '/tmp/fake',
+        'sky_wheel_hash': 'b1bd84059bc0342f7843fcbe04ab563e',
+    }
+
+    mock_fill_template.assert_called_once()
+    assert mock_fill_template.call_args[0][
+        0] == cluster_config_template, "config template incorrect"
+    assert mock_fill_template.call_args[0][1].items() >= expected_subset.items(
+    ), "config fill values incorrect"
+
+    # test using cluster matches regex, top
+    mock_fill_template.reset_mock()
+    expected_subset.update({
+        'security_group': 'fake-1-sg',
+        'security_group_managed_by_skypilot': 'false',
+        'remote_identity': 'fake1-skypilot-role'
+    })
+    backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=2,
+        cluster_config_template=cluster_config_template,
+        cluster_name="sky-serve-fake1-1234",
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='b1bd84059bc0342f7843fcbe04ab563e',
+        region=region,
+        zones=zones,
+        dryrun=True,
+        keep_launch_fields_in_existing_config=True)
+
+    mock_fill_template.assert_called_once()
+    assert (mock_fill_template.call_args[0][0] == cluster_config_template,
+            "config template incorrect")
+    assert (mock_fill_template.call_args[0][1].items() >=
+            expected_subset.items(), "config fill values incorrect")
+
+    # test using cluster matches regex, middle
+    mock_fill_template.reset_mock()
+    expected_subset.update({
+        'security_group': 'fake-2-sg',
+        'security_group_managed_by_skypilot': 'false',
+        'remote_identity': 'fake2-skypilot-role'
+    })
+    backend_utils.write_cluster_config(
+        to_provision=resource,
+        num_nodes=2,
+        cluster_config_template=cluster_config_template,
+        cluster_name="sky-serve-fake2-1234",
+        local_wheel_path=pathlib.Path('/tmp/fake'),
+        wheel_hash='b1bd84059bc0342f7843fcbe04ab563e',
+        region=region,
+        zones=zones,
+        dryrun=True,
+        keep_launch_fields_in_existing_config=True)
+
+    mock_fill_template.assert_called_once()
+    assert (mock_fill_template.call_args[0][0] == cluster_config_template,
+            "config template incorrect")
+    assert (mock_fill_template.call_args[0][1].items() >=
+            expected_subset.items(), "config fill values incorrect")
