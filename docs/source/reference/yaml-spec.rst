@@ -331,3 +331,28 @@ Available fields:
 
       # Demoing env var usage.
       echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
+
+Experimental
+------------
+
+In additional to the above fields, SkyPilot also supports the following experimental fields in the task YAML:
+
+.. code-block:: yaml
+
+  experimental:
+    # Override the configs in ~/.sky/config.yaml from a task level.
+    #
+    # The following fields can be overridden. Please refer to docs of Advanced
+    # Configuration for more details of those fields:
+    # https://skypilot.readthedocs.io/en/latest/reference/config.html
+    config_overrides:
+        docker:
+            run_options: ...
+        kubernetes:
+            pod_config: ...
+            provision_timeout: ...
+        gcp:
+            managed_instance_group: ...
+        nvidia_gpus:
+            disable_ecc: ...
+
