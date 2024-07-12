@@ -4609,6 +4609,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
             mount_cmd = store.mount_command(dst)
+            if store.is_sky_managed:
+                # Only add labels to buckets managed by sky pilot
+                if not store.update_labels(
+                    {'used_by_skypilot_cluster': handle.cluster_name}):
+                    logger.warning(
+                        f'{style.DIM}\tCan not assign labels to backing store. '
+                        'Please check logs for further details.'
+                        f'{style.RESET_ALL}')
+
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):

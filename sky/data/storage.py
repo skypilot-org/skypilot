@@ -318,6 +318,13 @@ class AbstractStore:
         """
         raise NotImplementedError
 
+    def update_labels(self, labels: dict) -> bool:
+        """Update given labels for the store
+        Args:
+          labels: dict, Labels to assign to backing storage
+        """
+        raise NotImplementedError
+
     def __deepcopy__(self, memo):
         # S3 Client and GCS Client cannot be deep copied, hence the
         # original Store object is returned
@@ -960,7 +967,6 @@ class Storage(object):
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
         common_utils.validate_schema(config, schemas.get_storage_schema(),
                                      'Invalid storage YAML: ')
-
         name = config.pop('name', None)
         source = config.pop('source', None)
         store = config.pop('store', None)
@@ -1425,6 +1431,11 @@ class S3Store(AbstractStore):
             time.sleep(0.1)
         return True
 
+    def update_labels(self, labels: Dict) -> bool:
+        logger.warning(
+            'Assigning labels to S3Store store is not implemented yet.')
+        return False
+
 
 class GcsStore(AbstractStore):
     """GcsStore inherits from Storage Object and represents the backend
@@ -1567,6 +1578,9 @@ class GcsStore(AbstractStore):
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
+
+        if self.is_sky_managed:
+            self.update_labels({'is_sky_managed': 'true'})
 
     def upload(self):
         """Uploads source to store bucket.
@@ -1867,6 +1881,44 @@ class GcsStore(AbstractStore):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
                         f'Failed to delete GCS bucket {bucket_name}.')
+
+    def update_labels(self, labels: dict) -> bool:
+        """Assignes given labels to GCS bucket
+        Args:
+          labels: dict; Labels to assign to bucket
+
+        Returns:
+         bool; True if labels are applied sucessfully, False otherwise.
+        """
+        try:
+            bucket_name = self.name
+            bucket = self.client.get_bucket(bucket_name)
+
+            existing_labels = bucket.labels
+
+            if labels is None:
+                labels = {}
+
+            existing_labels.update(labels)
+            bucket.labels = existing_labels
+            bucket.patch()
+            return True
+        except gcp.not_found_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to fetch a non-existent bucket: '
+                    f'{self.name}') from e
+        except (gcp.forbidden_exception(), ValueError) as e:
+            command = f'gsutil ls gs://{self.name}'
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                    f' To debug, consider running `{command}`.') from e
+        except gcp.bad_request_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketLabelNameError(
+                    f'Can not label bucket: {self.name} with labels: {labels}'
+                ) from e
 
 
 class R2Store(AbstractStore):
@@ -2241,6 +2293,11 @@ class R2Store(AbstractStore):
         while data_utils.verify_r2_bucket(bucket_name):
             time.sleep(0.1)
         return True
+
+    def update_labels(self, labels: Dict) -> bool:
+        logger.warning(
+            'Assigning labels to R2Store store is not implemented yet.')
+        return False
 
 
 class IBMCosStore(AbstractStore):
@@ -2644,3 +2701,8 @@ class IBMCosStore(AbstractStore):
             if e.__class__.__name__ == 'NoSuchBucket':
                 logger.debug('bucket already removed')
         Rclone.delete_rclone_bucket_profile(self.name, Rclone.RcloneClouds.IBM)
+
+    def update_labels(self, labels: Dict) -> bool:
+        logger.warning(
+            'Assigning labels to IBMCosStore store is not implemented yet.')
+        return False

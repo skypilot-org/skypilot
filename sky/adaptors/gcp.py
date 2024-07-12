@@ -55,6 +55,13 @@ def forbidden_exception():
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
+def bad_request_exception():
+    """BadRequest exception."""
+    from google.api_core import exceptions as gcs_exceptions
+    return gcs_exceptions.BadRequest
+
+
+@common.load_lazy_modules(_LAZY_MODULES)
 def http_error_exception():
     """HttpError exception."""
     from googleapiclient import errors
