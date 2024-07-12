@@ -1580,7 +1580,7 @@ class GcsStore(AbstractStore):
             self.is_sky_managed = is_new_bucket
 
         if self.is_sky_managed:
-            self.update_labels({'is_sky_managed': 'true'})
+            self.update_labels({'managedby': 'skypilot'})
 
     def upload(self):
         """Uploads source to store bucket.
