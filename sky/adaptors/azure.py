@@ -303,7 +303,14 @@ def assign_storage_account_iam_role(
         object_id = str(user.additional_data['id'])
         return object_id
 
-    object_id = asyncio.run(get_object_id())
+    # Create a new event loop if none exists
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    object_id = loop.run_until_complete(get_object_id())
 
     # Defintion ID of Storage Blob Data Owner role.
     # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # pylint: disable=line-too-long

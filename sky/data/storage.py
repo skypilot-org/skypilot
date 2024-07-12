@@ -2320,12 +2320,14 @@ class AzureBlobStore(AbstractStore):
         # storage account creation fully propagates.
         role_assignment_start = time.time()
         retry = 0
+
         while (time.time() - role_assignment_start <
                constants.WAIT_FOR_STORAGE_ACCOUNT_CREATION):
             try:
                 azure.assign_storage_account_iam_role(
                     storage_account_name=storage_account_name,
                     storage_account_id=creation_response.id)
+                return
             except AttributeError as e:
                 if 'signed_session' in str(e):
                     if retry % 5 == 0:
