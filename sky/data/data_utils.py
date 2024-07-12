@@ -204,44 +204,13 @@ def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
     container_url = AZURE_CONTAINER_URL.format(
         storage_account_name=storage_account_name,
         container_name=container_name)
-    resource_group_name = get_az_resource_group(storage_account_name)
+    resource_group_name = azure.get_az_resource_group(storage_account_name)
     container_client = create_az_client(
         client_type='container',
         container_url=container_url,
         storage_account_name=storage_account_name,
         resource_group_name=resource_group_name)
     return container_client.exists()
-
-
-def get_az_resource_group(
-        storage_account_name: str,
-        storage_client: Optional[Client] = None) -> Optional[str]:
-    """Returns the resource group name the given storage account belongs to.
-
-    Args:
-        storage_account_name: Name of the storage account
-        storage_client: Client object facing storage
-
-    Returns:
-        Name of the resource group the given storage account belongs to, or
-        None if not found.
-    """
-    if storage_client is None:
-        storage_client = create_az_client('storage')
-    for account in storage_client.storage_accounts.list():
-        if account.name == storage_account_name:
-            # Extract the resource group name from the account ID
-            # An example of account.id would be the following:
-            # /subscriptions/{subscription_id}/resourceGroups/{resource_group_name}/providers/Microsoft.Storage/storageAccounts/{container_name} # pylint: disable=line-too-long
-            split_account_id = account.id.split('/')
-            assert len(split_account_id) == 9
-            resource_group_name = split_account_id[4]
-            return resource_group_name
-    # resource group cannot be found when using container not created
-    # under the user's subscription id, i.e. public container, or
-    # private containers not belonging to the user or when the storage account
-    # does not exist.
-    return None
 
 
 def get_az_storage_account_key(

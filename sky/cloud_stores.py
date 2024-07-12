@@ -219,8 +219,7 @@ class AzureBlobCloudStorage(CloudStorage):
         container_url = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=storage_account_name,
             container_name=container_name)
-        resource_group_name = data_utils.get_az_resource_group(
-            storage_account_name)
+        resource_group_name = azure.get_az_resource_group(storage_account_name)
         role_assignment_start = time.time()
         refresh_client = False
         role_assigned = False
