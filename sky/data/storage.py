@@ -2257,6 +2257,8 @@ class AzureBlobStore(AbstractStore):
                             f'{resource_group_name}'):
                         self.resource_client.resource_groups.create_or_update(
                             resource_group_name, {'location': self.region})
+                    logger.info('Created Azure resource group '
+                                f'{resource_group_name!r}.')
                 # check if the storage account name already exists under the
                 # given resource group name.
                 try:
@@ -2270,6 +2272,8 @@ class AzureBlobStore(AbstractStore):
                                                      storage_account_name)
                         # wait until new resource creation propagates to Azure.
                         time.sleep(1)
+                    logger.info('Created Azure storage account '
+                                f'{storage_account_name!r}.')
 
         return storage_account_name, resource_group_name
 
