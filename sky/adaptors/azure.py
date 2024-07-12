@@ -132,7 +132,7 @@ def get_client(name: str, subscription_id: Optional[str] = None, **kwargs):
             # and retry with credentials.
             start_time = time.time()
             role_assigned = False
-            
+
             while (time.time() - start_time <
                    constants.WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT):
                 container_client = blob.ContainerClient.from_container_url(
@@ -340,8 +340,7 @@ def assign_storage_account_iam_role(
             },
         )
         sky_logger.info('Assigned Storage Blob Data Owner role to your '
-                        f'account on storage account {storage_account_name!r}.'
-                        )
+                        f'account on storage account {storage_account_name!r}.')
         return
     except exceptions().ResourceExistsError as e:
         # Return if the storage account already has been assigned
