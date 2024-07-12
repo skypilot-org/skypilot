@@ -332,8 +332,15 @@ Available fields:
       # Demoing env var usage.
       echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
 
+
+.. _task-yaml-experimental:
+
 Experimental
 ------------
+
+.. note::
+
+  Experimental features and APIs may be changed or removed without any notice.
 
 In additional to the above fields, SkyPilot also supports the following experimental fields in the task YAML:
 
@@ -355,4 +362,3 @@ In additional to the above fields, SkyPilot also supports the following experime
             managed_instance_group: ...
         nvidia_gpus:
             disable_ecc: ...
-
