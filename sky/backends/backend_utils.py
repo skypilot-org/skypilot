@@ -155,6 +155,8 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # we need to take this field from the new yaml.
     ('provider', 'tpu_node'),
     ('provider', 'security_group', 'GroupName'),
+    ('available_node_types', 'ray.head.default', 'node_config',
+     'IamInstanceProfile'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
@@ -793,8 +795,11 @@ def write_cluster_config(
     # move the check out of this function, i.e. the caller should be responsible
     # for the validation.
     # TODO(tian): Move more cloud agnostic vars to resources.py.
-    resources_vars = to_provision.make_deploy_variables(cluster_name_on_cloud,
-                                                        region, zones, dryrun)
+    resources_vars = to_provision.make_deploy_variables(
+        resources_utils.ClusterName(
+            cluster_name,
+            cluster_name_on_cloud,
+        ), region, zones, dryrun)
     config_dict = {}
 
     specific_reservations = set(
@@ -803,11 +808,13 @@ def write_cluster_config(
 
     assert cluster_name is not None
     excluded_clouds = []
-    remote_identity = skypilot_config.get_nested(
-        (str(cloud).lower(), 'remote_identity'),
-        schemas.get_default_remote_identity(str(cloud).lower()))
-    if remote_identity is not None and not isinstance(remote_identity, str):
-        for profile in remote_identity:
+    remote_identity_config = skypilot_config.get_nested(
+        (str(cloud).lower(), 'remote_identity'), None)
+    remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
+    if isinstance(remote_identity_config, str):
+        remote_identity = remote_identity_config
+    if isinstance(remote_identity_config, list):
+        for profile in remote_identity_config:
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
                 break
@@ -874,23 +881,8 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
-    # Docker run options
-    docker_run_options = skypilot_config.get_nested(('docker', 'run_options'),
-                                                    [])
-    if isinstance(docker_run_options, str):
-        docker_run_options = [docker_run_options]
-    if docker_run_options and isinstance(to_provision.cloud, clouds.Kubernetes):
-        logger.warning(f'{colorama.Style.DIM}Docker run options are specified, '
-                       'but ignored for Kubernetes: '
-                       f'{" ".join(docker_run_options)}'
-                       f'{colorama.Style.RESET_ALL}')
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
-    initial_setup_commands = []
-    if (skypilot_config.get_nested(('nvidia_gpus', 'disable_ecc'), False) and
-            to_provision.accelerators is not None):
-        initial_setup_commands.append(constants.DISABLE_GPU_ECC_COMMAND)
     tmp_yaml_path = yaml_path + '.tmp'
     common_utils.fill_template(
         cluster_config_template,
@@ -922,8 +914,6 @@ def write_cluster_config(
                 # currently only used by GCP.
                 'specific_reservations': specific_reservations,
 
-                # Initial setup commands.
-                'initial_setup_commands': initial_setup_commands,
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
@@ -934,9 +924,6 @@ def write_cluster_config(
                         '{sky_wheel_hash}',
                         wheel_hash).replace('{cloud}',
                                             str(cloud).lower())),
-
-                # Docker
-                'docker_run_options': docker_run_options,
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
@@ -976,16 +963,19 @@ def write_cluster_config(
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
+
+    # Add kubernetes config fields from ~/.sky/config
+    if isinstance(cloud, clouds.Kubernetes):
+        kubernetes_utils.combine_pod_config_fields(
+            tmp_yaml_path,
+            cluster_config_overrides=to_provision.cluster_config_overrides)
+        kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
+
     if dryrun:
         # If dryrun, return the unfinished tmp yaml path.
         config_dict['ray'] = tmp_yaml_path
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
-
-    # Add kubernetes config fields from ~/.sky/config
-    if isinstance(cloud, clouds.Kubernetes):
-        kubernetes_utils.combine_pod_config_fields(tmp_yaml_path)
-        kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:

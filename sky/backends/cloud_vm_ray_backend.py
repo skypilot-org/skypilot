@@ -1566,8 +1566,8 @@ class RetryingVmProvisioner(object):
                         to_provision.cloud,
                         region,
                         zones,
-                        provisioner.ClusterName(cluster_name,
-                                                handle.cluster_name_on_cloud),
+                        resources_utils.ClusterName(
+                            cluster_name, handle.cluster_name_on_cloud),
                         num_nodes=num_nodes,
                         cluster_yaml=handle.cluster_yaml,
                         prev_cluster_ever_up=prev_cluster_ever_up,
@@ -1577,8 +1577,10 @@ class RetryingVmProvisioner(object):
                     # caller.
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
-                            to_provision, handle.cluster_name_on_cloud, region,
-                            zones))
+                            to_provision,
+                            resources_utils.ClusterName(
+                                cluster_name, handle.cluster_name_on_cloud),
+                            region, zones))
                     config_dict['provision_record'] = provision_record
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
@@ -2020,8 +2022,16 @@ class RetryingVmProvisioner(object):
         failover_history: List[Exception] = list()
 
         style = colorama.Style
+        fore = colorama.Fore
         # Retrying launchable resources.
         while True:
+            if (isinstance(to_provision.cloud, clouds.Azure) and
+                    to_provision.accelerators is not None and
+                    'A10' in to_provision.accelerators):
+                logger.warning(f'{style.BRIGHT}{fore.YELLOW}Trying to launch '
+                               'an A10 cluster on Azure. This may take ~20 '
+                               'minutes due to driver installation.'
+                               f'{style.RESET_ALL}')
             try:
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
@@ -2890,8 +2900,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # 4. Starting ray cluster and skylet.
                 cluster_info = provisioner.post_provision_runtime_setup(
                     repr(handle.launched_resources.cloud),
-                    provisioner.ClusterName(handle.cluster_name,
-                                            handle.cluster_name_on_cloud),
+                    resources_utils.ClusterName(handle.cluster_name,
+                                                handle.cluster_name_on_cloud),
                     handle.cluster_yaml,
                     provision_record=provision_record,
                     custom_resource=resources_vars.get('custom_resources'),
@@ -3869,7 +3879,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             try:
                 provisioner.teardown_cluster(repr(cloud),
-                                             provisioner.ClusterName(
+                                             resources_utils.ClusterName(
                                                  cluster_name,
                                                  cluster_name_on_cloud),
                                              terminate=terminate,

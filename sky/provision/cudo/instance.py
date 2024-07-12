@@ -157,11 +157,10 @@ def terminate_instances(
     del provider_config
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
-        logger.info(f'Terminating instance {inst_id}.'
-                    f'{inst}')
         if worker_only and inst['name'].endswith('-head'):
             continue
-        logger.info(f'Removing {inst_id}: {inst}')
+        logger.debug(f'Terminating Cudo instance {inst_id}.'
+                     f'{inst}')
         cudo_wrapper.remove(inst_id)
 
 
@@ -218,6 +217,16 @@ def query_instances(
             continue
         statuses[inst_id] = status
     return statuses
+
+
+def open_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    del cluster_name_on_cloud, ports, provider_config
+    # Cudo has all ports open by default. Nothing to do here.
+    return
 
 
 def cleanup_ports(

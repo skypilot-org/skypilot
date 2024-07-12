@@ -1,4 +1,6 @@
 """Constants for SkyPilot."""
+from typing import List, Tuple
+
 from packaging import version
 
 import sky
@@ -261,6 +263,16 @@ SKYPILOT_NODE_RANK = 'SKYPILOT_NODE_RANK'
 # Placeholder for the SSH user in proxy command, replaced when the ssh_user is
 # known after provisioning.
 SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
+
+# The keys that can be overridden in the `~/.sky/config.yaml` file. The
+# overrides are specified in task YAMLs.
+OVERRIDEABLE_CONFIG_KEYS: List[Tuple[str, ...]] = [
+    ('docker', 'run_options'),
+    ('nvidia_gpus', 'disable_ecc'),
+    ('kubernetes', 'pod_config'),
+    ('kubernetes', 'provision_timeout'),
+    ('gcp', 'managed_instance_group'),
+]
 
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
 # Observed time for new role assignment to propagate was ~45s

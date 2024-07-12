@@ -38,15 +38,6 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-    # Timeout for resource provisioning. This timeout determines how long to
-    # wait for pod to be in pending status before giving up.
-    # Larger timeout may be required for autoscaling clusters, since autoscaler
-    # may take some time to provision new nodes.
-    # Note that this timeout includes time taken by the Kubernetes scheduler
-    # itself, which can be upto 2-3 seconds.
-    # For non-autoscaling clusters, we conservatively set this to 10s.
-    timeout = skypilot_config.get_nested(['kubernetes', 'provision_timeout'],
-                                         10)
 
     # Limit the length of the cluster name to avoid exceeding the limit of 63
     # characters for Kubernetes resources. We limit to 42 characters (63-21) to
@@ -233,11 +224,11 @@ class Kubernetes(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud, zones, dryrun  # Unused.
+        del cluster_name, zones, dryrun  # Unused.
         if region is None:
             region = self._regions[0]
 
@@ -309,6 +300,17 @@ class Kubernetes(clouds.Cloud):
         if resources.use_spot:
             spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
 
+        # Timeout for resource provisioning. This timeout determines how long to
+        # wait for pod to be in pending status before giving up.
+        # Larger timeout may be required for autoscaling clusters, since
+        # autoscaler may take some time to provision new nodes.
+        # Note that this timeout includes time taken by the Kubernetes scheduler
+        # itself, which can be upto 2-3 seconds.
+        # For non-autoscaling clusters, we conservatively set this to 10s.
+        timeout = skypilot_config.get_nested(
+            ('kubernetes', 'provision_timeout'),
+            10,
+            override_configs=resources.cluster_config_overrides)
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -316,7 +318,7 @@ class Kubernetes(clouds.Cloud):
             'cpus': str(cpus),
             'memory': str(mem),
             'accelerator_count': str(acc_count),
-            'timeout': str(self.timeout),
+            'timeout': str(timeout),
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
