@@ -276,8 +276,8 @@ OVERRIDEABLE_CONFIG_KEYS: List[Tuple[str, ...]] = [
 
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
 # Observed time for new role assignment to propagate was ~45s
-WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT = 120
-RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 5
+WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT = 180
+RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
 ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
