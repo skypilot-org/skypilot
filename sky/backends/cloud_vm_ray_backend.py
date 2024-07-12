@@ -4372,11 +4372,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 list(task.resources)[0].ports)
             current_ports_set = resources_utils.port_ranges_to_set(
                 handle.launched_resources.ports)
-            all_ports_set = (current_ports_set | requested_ports_set)
-            all_ports = resources_utils.port_set_to_ranges(all_ports_set)
+            all_ports = resources_utils.port_set_to_ranges(current_ports_set |
+                                                           requested_ports_set)
             to_provision = handle.launched_resources
             if (to_provision.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY):
+                # TODO(tian): Use python set operator for subset judgement
                 if not all(port in current_ports_set
                            for port in requested_ports_set):
                     current_cloud = to_provision.cloud

@@ -86,7 +86,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
                         'host': port['ip'],
                         'port': port['publicPort']
                     }
-                if not port['isIpPublic']:
+                else:
                     info['internal_ip'] = port['ip']
 
         instance_dict[instance['id']] = info
