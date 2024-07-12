@@ -1561,6 +1561,9 @@ class RetryingVmProvisioner(object):
                 assert to_provision.region == region.name, (to_provision,
                                                             region)
                 num_nodes = handle.launched_nodes
+                ports_to_open_on_launch = (
+                    to_provision.ports if to_provision.cloud.OPEN_PORTS_VERSION
+                    <= clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY else None)
                 try:
                     provision_record = provisioner.bulk_provision(
                         to_provision.cloud,
@@ -1571,7 +1574,8 @@ class RetryingVmProvisioner(object):
                         num_nodes=num_nodes,
                         cluster_yaml=handle.cluster_yaml,
                         prev_cluster_ever_up=prev_cluster_ever_up,
-                        log_dir=self.log_dir)
+                        log_dir=self.log_dir,
+                        ports_to_open_on_launch=ports_to_open_on_launch)
                     # NOTE: We will handle the logic of '_ensure_cluster_ray_started' #pylint: disable=line-too-long
                     # in 'provision_utils.post_provision_runtime_setup()' in the
                     # caller.
@@ -3062,9 +3066,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_utils.port_ranges_to_set(current_ports) -
             resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
-            with rich_utils.safe_status(
-                    '[bold cyan]Launching - Opening new ports'):
-                self._open_ports(handle)
+            cloud = handle.launched_resources.cloud
+            if not (cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY):
+                with rich_utils.safe_status(
+                        '[bold cyan]Launching - Opening new ports'):
+                    self._open_ports(handle)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
@@ -4361,12 +4368,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Assume resources share the same ports.
             for resource in task.resources:
                 assert resource.ports == list(task.resources)[0].ports
-            all_ports = resources_utils.port_set_to_ranges(
-                resources_utils.port_ranges_to_set(
-                    handle.launched_resources.ports) |
-                resources_utils.port_ranges_to_set(
-                    list(task.resources)[0].ports))
+            requested_ports_set = resources_utils.port_ranges_to_set(
+                list(task.resources)[0].ports)
+            current_ports_set = resources_utils.port_ranges_to_set(
+                handle.launched_resources.ports)
+            all_ports_set = (current_ports_set | requested_ports_set)
+            all_ports = resources_utils.port_set_to_ranges(all_ports_set)
             to_provision = handle.launched_resources
+            if (to_provision.cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY):
+                if not all(port in current_ports_set
+                           for port in requested_ports_set):
+                    current_cloud = to_provision.cloud
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.NotSupportedError(
+                            'Failed to open new ports on an existing cluster '
+                            f'with the current cloud {current_cloud} as it only'
+                            ' supports opening ports on launch of the cluster. '
+                            'Please terminate the existing cluster and launch '
+                            'a new cluster with the desired ports open.')
             if all_ports:
                 to_provision = to_provision.copy(ports=all_ports)
             return RetryingVmProvisioner.ToProvisionConfig(

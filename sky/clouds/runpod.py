@@ -30,9 +30,6 @@ class RunPod(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on RunPod.'),
-        clouds.CloudImplementationFeatures.OPEN_PORTS:
-            ('Opening ports is not '
-             'supported yet on RunPod.'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
             ('Specifying image ID is not supported on RunPod.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
@@ -51,6 +48,7 @@ class RunPod(clouds.Cloud):
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+    OPEN_PORTS_VERSION = clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY
 
     @classmethod
     def _unsupported_features_for_resources(
