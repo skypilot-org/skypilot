@@ -167,15 +167,28 @@ def create_az_client(client_type: str, **kwargs: Any) -> Client:
     Returns:
         Client object facing AZ Resource of the 'client_type'.
     """
+    resource_group_name = kwargs.pop('resource_group_name', None)
     container_url = kwargs.pop('container_url', None)
+    storage_account_name = kwargs.pop('storage_account_name', None)
+    refresh_client = kwargs.pop('refresh_client', False)
     if client_type == 'container':
+        # We do not assert on resource_group_name as it is set to None when the
+        # container_url is for public container with user access.
         assert container_url is not None, ('container_url must be provided for '
                                            'container client')
+        assert storage_account_name is not None, ('storage_account_name must '
+                                                  'be provided for container '
+                                                  'client')
 
     subscription_id = azure.get_subscription_id()
-    return azure.get_client(client_type,
-                            subscription_id,
-                            container_url=container_url)
+    if refresh_client:
+        azure.get_client.cache_clear()
+    client = azure.get_client(client_type,
+                              subscription_id,
+                              container_url=container_url,
+                              storage_account_name=storage_account_name,
+                              resource_group_name=resource_group_name)
+    return client
 
 
 def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
@@ -191,8 +204,12 @@ def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
     container_url = AZURE_CONTAINER_URL.format(
         storage_account_name=storage_account_name,
         container_name=container_name)
-    container_client = create_az_client(client_type='container',
-                                        container_url=container_url)
+    resource_group_name = get_az_resource_group(storage_account_name)
+    container_client = create_az_client(
+        client_type='container',
+        container_url=container_url,
+        storage_account_name=storage_account_name,
+        resource_group_name=resource_group_name)
     return container_client.exists()
 
 
@@ -251,8 +268,8 @@ def get_az_storage_account_key(
     if storage_client is None:
         storage_client = create_az_client('storage')
     if resource_group_name is None:
-        resource_group_name = get_az_resource_group(storage_account_name,
-                                                    storage_client)
+        resource_group_name = azure.get_az_resource_group(
+            storage_account_name, storage_client)
     # resource_group_name is None when using a public container or
     # a private container not belonging to the user.
     if resource_group_name is None:

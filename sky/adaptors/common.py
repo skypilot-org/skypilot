@@ -60,6 +60,10 @@ def load_lazy_modules(modules: Tuple[LazyImport, ...]):
                 m.load_module()
             return func(*args, **kwargs)
 
+        # Preserve lru_cache methods
+        if hasattr(func, 'cache_clear'):
+            wrapper.cache_clear = func.cache_clear
+
         return wrapper
 
     return decorator

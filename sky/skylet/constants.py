@@ -261,3 +261,11 @@ SKYPILOT_NODE_RANK = 'SKYPILOT_NODE_RANK'
 # Placeholder for the SSH user in proxy command, replaced when the ssh_user is
 # known after provisioning.
 SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
+
+WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
+# Observed time for new role assignment to propagate was ~45s
+WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT = 120
+RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 5
+ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
+    'Failed to assign Storage Blob Data Owner role to the '
+    'storage account {storage_account_name}.')

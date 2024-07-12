@@ -1,7 +1,5 @@
 """Storage and Store Classes for Sky Data."""
-import asyncio
 import enum
-import logging
 import os
 import re
 import shlex
@@ -10,7 +8,6 @@ import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
-import uuid
 
 import colorama
 
@@ -31,6 +28,7 @@ from sky.data import data_utils
 from sky.data import mounting_utils
 from sky.data import storage_utils
 from sky.data.data_utils import Rclone
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
@@ -72,8 +70,6 @@ _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
 _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'Bucket {bucket_name!r} does not exist. '
     'It may have been deleted externally.')
-
-_WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
 
 
 def get_cached_enabled_storage_clouds_or_refresh(
@@ -2200,7 +2196,7 @@ class AzureBlobStore(AbstractStore):
         # self.storage_account_name already has a value only when it is being
         # reconstructed with metadata from local db.
         if self.storage_account_name:
-            resource_group_name = data_utils.get_az_resource_group(
+            resource_group_name = azure.get_az_resource_group(
                 self.storage_account_name)
             if resource_group_name is None:
                 # If the storage account does not exist, the containers under
@@ -2218,7 +2214,7 @@ class AzureBlobStore(AbstractStore):
             storage_account_name, container_name, _ = data_utils.split_az_path(
                 self.source)
             assert self.name == container_name
-            resource_group_name = data_utils.get_az_resource_group(
+            resource_group_name = azure.get_az_resource_group(
                 storage_account_name)
         # Creates new resource group and storage account or use the
         # storage_account provided by the user through config.yaml
@@ -2228,7 +2224,7 @@ class AzureBlobStore(AbstractStore):
             if config_storage_account is not None:
                 # using user provided storage account from config.yaml
                 storage_account_name = config_storage_account
-                resource_group_name = data_utils.get_az_resource_group(
+                resource_group_name = azure.get_az_resource_group(
                     storage_account_name)
                 # when the provided storage account does not exist under user's
                 # subscription id.
@@ -2320,56 +2316,18 @@ class AzureBlobStore(AbstractStore):
                     'attempting to create a storage account '
                     'already being in use. Details: '
                     f'{common_utils.format_exception(error, use_bracket=True)}')
-        # Assigning Storage Blob Data Owner role to the
-        # storage account.
-        # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
-        authorization_client = data_utils.create_az_client('authorization')
-        graph_client = data_utils.create_az_client('graph')
-
-        async def get_object_id():
-            httpx_logger = logging.getLogger('httpx')
-            original_level = httpx_logger.getEffectiveLevel()
-            # silencing the INFO level response log from httpx request
-            httpx_logger.setLevel(logging.WARNING)
-            user = await graph_client.users.with_url(
-                'https://graph.microsoft.com/v1.0/me').get()
-            httpx_logger.setLevel(original_level)
-            object_id = str(user.additional_data['id'])
-            return object_id
-
-        object_id = asyncio.run(get_object_id())
-        # Defintion ID of Storage Blob Data Owner role.
-        # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # pylint: disable=line-too-long
-        storage_blob_data_owner_role_id = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
-        role_definition_id = ('/subscriptions'
-                              f'/{azure.get_subscription_id()}'
-                              '/providers/Microsoft.Authorization'
-                              '/roleDefinitions'
-                              f'/{storage_blob_data_owner_role_id}')
 
         # It may take some time for the created storage account to propagate
         # to Azure, we reattempt to assign the role for several times until
-        # it fully propagates
+        # storage account creation fully propagates.
         role_assignment_start = time.time()
         retry = 0
-        role_assignment_failure_error_msg = (
-            'Failed to assign Storage Blob Data Owner role to the '
-            f'storage account {storage_account_name!r}. ')
         while (time.time() - role_assignment_start <
-               _WAIT_FOR_STORAGE_ACCOUNT_CREATION):
+               constants.WAIT_FOR_STORAGE_ACCOUNT_CREATION):
             try:
-                authorization_client.role_assignments.create(
-                    scope=creation_response.id,
-                    role_assignment_name=uuid.uuid4(),
-                    parameters={
-                        'properties': {
-                            'principalId': f'{object_id}',
-                            'principalType': 'User',
-                            'roleDefinitionId': role_definition_id,
-                        }
-                    },
-                )
-                return
+                azure.assign_storage_account_iam_role(
+                    storage_account_name=storage_account_name,
+                    storage_account_id=creation_response.id)
             except AttributeError as e:
                 if 'signed_session' in str(e):
                     if retry % 5 == 0:
@@ -2381,36 +2339,13 @@ class AzureBlobStore(AbstractStore):
                     retry += 1
                     continue
                 with ux_utils.print_exception_no_traceback():
+                    role_assignment_failure_error_msg = (
+                        constants.ROLE_ASSIGNMENT_FAILURE_ERROR_MSG.format(
+                            storage_account_name=storage_account_name))
                     raise exceptions.StorageBucketCreateError(
                         f'{role_assignment_failure_error_msg}'
-                        f'Details: {common_utils.format_exception(e, use_bracket=True)}'
-                    )
-            except azure.exceptions().ResourceExistsError as e:
-                # Break the loop and return if the storage account already has
-                # been assigned the role.
-                if 'RoleAssignmentExists' in str(e):
-                    return
-                else:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketCreateError(
-                            f'{role_assignment_failure_error_msg}'
-                            f'Details: {common_utils.format_exception(e, use_bracket=True)}'
-                        )
-            except azure.exceptions().HttpResponseError as e:
-                if 'AuthorizationFailed' in str(e):
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketCreateError(
-                            f'{role_assignment_failure_error_msg}'
-                            'Please check to see if you have the authorization'
-                            ' "Microsoft.Authorization/roleAssignments/write" '
-                            'to assign the role to the newly created storage '
-                            'account.')
-                else:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketCreateError(
-                            f'{role_assignment_failure_error_msg}'
-                            f'Details: {common_utils.format_exception(e, use_bracket=True)}'
-                        )
+                        'Details: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
     def upload(self):
         """Uploads source to store bucket.
@@ -2562,7 +2497,10 @@ class AzureBlobStore(AbstractStore):
                 storage_account_name=self.storage_account_name,
                 container_name=self.name)
             container_client = data_utils.create_az_client(
-                client_type='container', container_url=container_url)
+                client_type='container',
+                container_url=container_url,
+                storage_account_name=self.storage_account_name,
+                resource_group_name=self.resource_group_name)
             if container_client.exists():
                 is_private = (True if
                               container_client.get_container_properties().get(

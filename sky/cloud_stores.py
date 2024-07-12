@@ -9,6 +9,7 @@ TODO:
 """
 import shlex
 import subprocess
+import time
 import urllib.parse
 
 from sky import sky_logging
@@ -19,6 +20,7 @@ from sky.adaptors import ibm
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data.data_utils import Rclone
+from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
@@ -205,37 +207,72 @@ class AzureBlobCloudStorage(CloudStorage):
               Azure account does not have sufficient IAM role for the given
               storage account.
         """
-        # split the url using split_az_path
         storage_account_name, container_name, path = data_utils.split_az_path(
             url)
+
         # If there aren't more than just container name and storage account,
         # that's a directory.
         if not path:
             return True
+
+        # If there are more, we need to check if it is a directory or a file.
         container_url = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=storage_account_name,
             container_name=container_name)
-        # If there's more, we'd need to check if it's a directory or a file.
-        container_client = data_utils.create_az_client(
-            client_type='container', container_url=container_url)
-        num_objects = 0
-        try:
-            for blob in container_client.list_blobs(name_starts_with=path):
-                if blob.name == path:
-                    return False
-                num_objects += 1
-                if num_objects > 1:
-                    return True
-        except azure.exceptions().HttpResponseError as e:
-            if 'AuthorizationPermissionMismatch' in str(e):
-                logger.error('Failed to list blobs in container '
-                             f'{container_url!r}. This implies insufficient '
-                             'permissions for storage account '
-                             f'{storage_account_name!r}. Please check your '
-                             f'Azure account IAM roles.')
-            raise
-        # A directory with few or no items
-        return True
+        resource_group_name = data_utils.get_az_resource_group(
+            storage_account_name)
+        role_assignment_start = time.time()
+        refresh_client = False
+        role_assigned = False
+
+        while (time.time() - role_assignment_start <
+               constants.WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT):
+            container_client = data_utils.create_az_client(
+                client_type='container',
+                container_url=container_url,
+                storage_account_name=storage_account_name,
+                resource_group_name=resource_group_name,
+                refresh_client=refresh_client)
+
+            num_objects = 0
+            try:
+                for blob in container_client.list_blobs(name_starts_with=path):
+                    if blob.name == path:
+                        return False
+                    num_objects += 1
+                    if num_objects > 1:
+                        return True
+            except azure.exceptions().HttpResponseError as e:
+                # Handle case where user lacks sufficient IAM role for
+                # a private container in the same subscription. Attempt to
+                # assign appropriate role to current user.
+                if 'AuthorizationPermissionMismatch' in str(e):
+                    if not role_assigned:
+                        logger.info('Failed to list blobs in container '
+                                    f'{container_url!r}. This implies '
+                                    'insufficient IAM role for storage account'
+                                    f' {storage_account_name!r}.')
+                        azure.assign_storage_account_iam_role(
+                            storage_account_name=storage_account_name,
+                            resource_group_name=resource_group_name)
+                        role_assigned = True
+                        refresh_client = True
+                    else:
+                        logger.info(
+                            'Waiting due to the propagation delay of IAM '
+                            'role assignment to the storage account '
+                            f'{storage_account_name!r}.')
+                        time.sleep(
+                            constants.RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT)
+                    continue
+                raise
+            # A directory with few or no items
+            return True
+        else:
+            raise TimeoutError(
+                'Failed to determine the container path status within '
+                f'{constants.WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT}'
+                'seconds.')
 
     def _get_azcopy_source(self, source: str, is_dir: bool) -> str:
         """Converts the source so it can be used as an argument for azcopy."""
