@@ -7,6 +7,10 @@ You can pass **optional configurations** to SkyPilot in the ``~/.sky/config.yaml
 
 Such configurations apply to all new clusters and do not affect existing clusters.
 
+.. tip::
+
+  Some config fields can be overridden on a per-task basis through the :code:`experimental.config_overrides` field. See :ref:`here <task-yaml-experimental>` for more details.
+
 Spec: ``~/.sky/config.yaml``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
