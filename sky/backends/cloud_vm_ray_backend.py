@@ -1562,8 +1562,9 @@ class RetryingVmProvisioner(object):
                                                             region)
                 num_nodes = handle.launched_nodes
                 ports_to_open_on_launch = (
-                    to_provision.ports if to_provision.cloud.OPEN_PORTS_VERSION
-                    <= clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY else None)
+                    list(resources_utils.port_ranges_to_set(to_provision.ports))
+                    if to_provision.cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY else None)
                 try:
                     provision_record = provisioner.bulk_provision(
                         to_provision.cloud,
@@ -2046,8 +2047,9 @@ class RetryingVmProvisioner(object):
                     cloud_user = to_provision.cloud.get_current_user_identity()
 
                 requested_features = self._requested_features.copy()
-                # Skip stop feature for Kubernetes controllers.
-                if (isinstance(to_provision.cloud, clouds.Kubernetes) and
+                # Skip stop feature for Kubernetes and RunPod controllers.
+                if (isinstance(to_provision.cloud,
+                               (clouds.Kubernetes, clouds.RunPod)) and
                         controller_utils.Controllers.from_name(cluster_name)
                         is not None):
                     assert (clouds.CloudImplementationFeatures.STOP
@@ -4177,15 +4179,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
-            # Skip auto-stop for Kubernetes clusters.
-            if (isinstance(handle.launched_resources.cloud, clouds.Kubernetes)
-                    and not down and idle_minutes_to_autostop >= 0):
+            # Skip auto-stop for Kubernetes and RunPod clusters.
+            if (isinstance(handle.launched_resources.cloud,
+                           (clouds.Kubernetes, clouds.RunPod)) and not down and
+                    idle_minutes_to_autostop >= 0):
                 # We should hit this code path only for the controllers on
-                # Kubernetes clusters.
+                # Kubernetes and RunPod clusters.
                 assert (controller_utils.Controllers.from_name(
                     handle.cluster_name) is not None), handle.cluster_name
                 logger.info('Auto-stop is not supported for Kubernetes '
-                            'clusters. Skipping.')
+                            'and RunPod clusters. Skipping.')
                 return
 
             # Check if we're stopping spot
@@ -4377,9 +4380,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             to_provision = handle.launched_resources
             if (to_provision.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY):
-                # TODO(tian): Use python set operator for subset judgement
-                if not all(port in current_ports_set
-                           for port in requested_ports_set):
+                if not requested_ports_set <= current_ports_set:
                     current_cloud = to_provision.cloud
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.NotSupportedError(

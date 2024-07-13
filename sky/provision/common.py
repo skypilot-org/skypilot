@@ -53,7 +53,7 @@ class ProvisionConfig:
     # Whether or not to resume stopped instances.
     resume_stopped_nodes: bool
     # Optional ports to open on launch of the cluster.
-    ports_to_open_on_launch: Optional[List[str]]
+    ports_to_open_on_launch: Optional[List[int]]
 
 
 # -------------------- output data model -------------------- #

@@ -129,7 +129,7 @@ def bulk_provision(
     cluster_yaml: str,
     prev_cluster_ever_up: bool,
     log_dir: str,
-    ports_to_open_on_launch: Optional[List[str]] = None,
+    ports_to_open_on_launch: Optional[List[int]] = None,
 ) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned.
 

@@ -95,7 +95,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
-           ports: Optional[List[str]]) -> str:
+           ports: Optional[List[int]]) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
