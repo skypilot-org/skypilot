@@ -283,15 +283,9 @@ class GCPInstance:
                         target_instance_id: str,
                         is_head: bool = True) -> str:
         if is_head:
-            node_tag = {
-                provision_constants.TAG_SKYPILOT_HEAD_NODE: '1',
-                provision_constants.TAG_RAY_NODE_KIND: 'head',
-            }
+            node_tag = provision_constants.HEAD_NODE_TAGS
         else:
-            node_tag = {
-                provision_constants.TAG_SKYPILOT_HEAD_NODE: '0',
-                provision_constants.TAG_RAY_NODE_KIND: 'worker',
-            }
+            node_tag = provision_constants.WORKER_NODE_TAGS
         cls.set_labels(project_id=project_id,
                        availability_zone=availability_zone,
                        node_id=target_instance_id,
@@ -1001,7 +995,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
                     provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name,
                     # Assume all nodes are workers, we can update the head node
                     # once the instances are created.
-                    provision_constants.TAG_RAY_NODE_KIND: 'worker',
+                    **provision_constants.WORKER_NODE_TAGS,
                     provision_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
                 }),
         })
@@ -1479,15 +1473,10 @@ class GCPTPUVMInstance(GCPInstance):
         for i, name in enumerate(names):
             node_config = config.copy()
             if i == 0:
-                node_config['labels'][
-                    provision_constants.TAG_SKYPILOT_HEAD_NODE] = '1'
-                node_config['labels'][
-                    provision_constants.TAG_RAY_NODE_KIND] = 'head'
+                node_config['labels'].update(provision_constants.HEAD_NODE_TAGS)
             else:
-                node_config['labels'][
-                    provision_constants.TAG_SKYPILOT_HEAD_NODE] = '0'
-                node_config['labels'][
-                    provision_constants.TAG_RAY_NODE_KIND] = 'worker'
+                node_config['labels'].update(
+                    provision_constants.WORKER_NODE_TAGS)
             try:
                 logger.debug('Launching GCP TPU VM ...')
                 request = (

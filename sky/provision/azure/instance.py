@@ -35,7 +35,7 @@ _RESUME_INSTANCE_TIMEOUT = 480  # 8 minutes
 _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 UNIQUE_ID_LEN = 4
 _TAG_SKYPILOT_VM_ID = 'skypilot-vm-id'
-_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
+_WAIT_CREATION_TIMEOUT_SECONDS = 600
 
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
@@ -168,10 +168,7 @@ def _get_instance_ips(network_client, vm, resource_group: str,
 
 def _get_head_instance_id(instances: List) -> Optional[str]:
     head_instance_id = None
-    head_node_tags = (
-        (constants.TAG_SKYPILOT_HEAD_NODE, '1'),
-        (constants.TAG_RAY_NODE_KIND, 'head'),  # backward compat with Ray
-    )
+    head_node_tags = tuple(constants.HEAD_NODE_TAGS.items())
     for inst in instances:
         for k, v in inst.tags.items():
             if (k, v) in head_node_tags:
@@ -196,8 +193,7 @@ def _create_instances(
     tags = {
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
-        constants.TAG_RAY_NODE_KIND: 'worker',
-        constants.TAG_SKYPILOT_HEAD_NODE: '0',
+        **constants.WORKER_NODE_TAGS,
         _TAG_SKYPILOT_VM_ID: vm_id,
         **tags,
     }
@@ -224,6 +220,9 @@ def _create_instances(
     template_params['msi'] = provider_config['msi']
     template_params['nsg'] = provider_config['nsg']
     template_params['subnet'] = provider_config['subnet']
+    # In Azure, cloud-init script must be encoded in base64. For more
+    # information, see:
+    # https://learn.microsoft.com/en-us/azure/virtual-machines/custom-data
     template_params['cloudInitSetupCommands'] = (base64.b64encode(
         template_params['cloudInitSetupCommands'].encode('utf-8')).decode(
             'utf-8'))
@@ -287,12 +286,13 @@ def _create_instances(
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
+    # TODO(zhwu): This function is too long. We should refactor it.
     provider_config = config.provider_config
     resource_group = provider_config['resource_group']
     subscription_id = provider_config['subscription_id']
     compute_client = azure.get_client('compute', subscription_id)
 
-    resumed_instances = []
+    instances_to_resume = []
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
 
@@ -304,7 +304,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                            {AzureInstanceStatus.DELETING})
     existing_instances = _filter_instances(
         compute_client,
-        filters=filters,
+        tag_filters=filters,
         resource_group=resource_group,
         status_filters=list(non_deleting_states),
     )
@@ -333,16 +333,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             pending_instances.append(instance)
 
     def _create_instance_tag(target_instance, is_head: bool = True) -> str:
-        if is_head:
-            new_instance_tags = {
-                constants.TAG_SKYPILOT_HEAD_NODE: '1',
-                constants.TAG_RAY_NODE_KIND: 'head'
-            }
-        else:
-            new_instance_tags = {
-                constants.TAG_SKYPILOT_HEAD_NODE: '0',
-                constants.TAG_RAY_NODE_KIND: 'worker'
-            }
+        new_instance_tags = (constants.HEAD_NODE_TAGS
+                             if is_head else constants.WORKER_NODE_TAGS)
+
         tags = target_instance.tags
         tags.update(new_instance_tags)
 
@@ -418,18 +411,18 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             logger.error(msg)
             raise RuntimeError(msg)
 
-        resumed_instances = stopped_instances[:to_start_count]
-        resumed_instances.sort(key=lambda x: x.name)
-        resumed_instance_ids = [t.name for t in resumed_instances]
-        logger.debug(
-            f'run_instances: Resuming stopped instances {resumed_instance_ids}.'
-        )
+        instances_to_resume = stopped_instances[:to_start_count]
+        instances_to_resume.sort(key=lambda x: x.name)
+        instances_to_resume_ids = [t.name for t in instances_to_resume]
+        logger.debug('run_instances: Resuming stopped instances '
+                     f'{instances_to_resume_ids}.')
         start_virtual_machine = _get_azure_sdk_function(
             compute_client.virtual_machines, 'start')
         with pool.ThreadPool() as p:
             p.starmap(
                 start_virtual_machine,
-                [(resource_group, inst.name) for inst in resumed_instances])
+                [(resource_group, inst.name) for inst in instances_to_resume])
+        resumed_instance_ids = instances_to_resume_ids
 
     to_start_count -= len(resumed_instance_ids)
 
@@ -447,18 +440,23 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             count=to_start_count)
         created_instance_ids = [inst.name for inst in created_instances]
 
-    non_running_instances = list(
+    non_running_instance_statuses = list(
         set(AzureInstanceStatus) - {AzureInstanceStatus.RUNNING})
+    start = time.time()
     while True:
         # Wait for all instances to be in running state
-        instances = _filter_instances(compute_client,
-                                      resource_group,
-                                      filters,
-                                      status_filters=non_running_instances,
-                                      included_instances=created_instance_ids +
-                                      resumed_instance_ids)
+        instances = _filter_instances(
+            compute_client,
+            resource_group,
+            filters,
+            status_filters=non_running_instance_statuses,
+            included_instances=created_instance_ids + resumed_instance_ids)
         if not instances:
             break
+        if time.time() - start > _WAIT_CREATION_TIMEOUT_SECONDS:
+            raise TimeoutError(
+                'run_instances: Timed out waiting for Azure instances to be '
+                f'running: {instances}')
         logger.debug(f'run_instances: Waiting for {len(instances)} instances '
                      'in PENDING status.')
         time.sleep(_POLL_INTERVAL)
@@ -482,8 +480,10 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         # Tag the instances in case the old resumed instances are not correctly
         # tagged.
         with pool.ThreadPool() as p:
-            p.starmap(_create_instance_tag,
-                      [(inst, False) for inst in instances_to_tag])
+            p.starmap(
+                _create_instance_tag,
+                # is_head=False for all wokers.
+                [(inst, False) for inst in instances_to_tag])
 
     assert head_instance_id is not None, head_instance_id
     return common.ProvisionRecord(
@@ -642,13 +642,13 @@ def _get_instance_status(
 def _filter_instances(
     compute_client: 'azure_compute.ComputeManagementClient',
     resource_group: str,
-    filters: Dict[str, str],
+    tag_filters: Dict[str, str],
     status_filters: Optional[List[AzureInstanceStatus]] = None,
     included_instances: Optional[List[str]] = None,
 ) -> List['azure_compute.models.VirtualMachine']:
 
     def match_tags(vm):
-        for k, v in filters.items():
+        for k, v in tag_filters.items():
             if vm.tags.get(k) != v:
                 return False
         return True
@@ -688,7 +688,7 @@ def query_instances(
     nodes = _filter_instances(compute_client, resource_group, filters)
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
 
-    def _fetch_and_map_status(node, resource_group: str):
+    def _fetch_and_map_status(node, resource_group: str) -> None:
         compute_client = azure.get_client('compute', subscription_id)
         status = _get_instance_status(compute_client, node, resource_group)
 
@@ -730,12 +730,11 @@ def open_ports(
             while True:
                 if nsg.provisioning_state not in ['Creating', 'Updating']:
                     break
-                if (time.time() - start_time >
-                        _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS):
+                if time.time() - start_time > _WAIT_CREATION_TIMEOUT_SECONDS:
                     logger.warning(
                         f'Fails to wait for the creation of NSG {nsg.name} in '
                         f'{resource_group} within '
-                        f'{_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS} seconds. '
+                        f'{_WAIT_CREATION_TIMEOUT_SECONDS} seconds. '
                         'Skip this NSG.')
                 backoff_time = backoff.current_backoff()
                 logger.info(f'NSG {nsg.name} is not created yet. Waiting for '

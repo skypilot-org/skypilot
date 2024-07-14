@@ -13,8 +13,6 @@ from typing import Any, Callable
 from sky.adaptors import azure
 from sky.provision import common
 
-UNIQUE_ID_LEN = 4
-
 logger = logging.getLogger(__name__)
 
 _DEPLOYMENT_NAME = 'skypilot-config'

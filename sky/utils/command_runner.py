@@ -495,10 +495,10 @@ class SSHCommandRunner(CommandRunner):
         if self.ssh_control_name is not None:
             control_path = _ssh_control_path(self.ssh_control_name)
             if control_path is not None:
-                logger.debug(f'Closing cached connection: {control_path}')
                 cmd = (f'ssh -O exit -S {control_path}/%C '
                        f'{self.ssh_user}@{self.ip}')
-                print(cmd)
+                logger.debug(f'Closing cached connection {control_path!r} with '
+                             f'cmd: {cmd}')
                 log_lib.run_with_log(cmd,
                                      log_path=os.devnull,
                                      require_outputs=False,

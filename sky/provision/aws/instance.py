@@ -246,10 +246,8 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
 
 def _get_head_instance_id(instances: List) -> Optional[str]:
     head_instance_id = None
-    head_node_markers = (
-        (constants.TAG_SKYPILOT_HEAD_NODE, '1'),
-        (constants.TAG_RAY_NODE_KIND, 'head'),  # backward compat with Ray
-    )
+    head_node_markers = tuple(constants.HEAD_NODE_TAGS.items())
+
     for inst in instances:
         for t in inst.tags:
             if (t['Key'], t['Value']) in head_node_markers:
@@ -310,28 +308,19 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             raise RuntimeError(f'Impossible state "{state}".')
 
     def _create_node_tag(target_instance, is_head: bool = True) -> str:
+        node_type_tags = (constants.HEAD_NODE_TAGS
+                          if is_head else constants.WORKER_NODE_TAGS)
+        node_tag = [{'Key': k, 'Value': v} for k, v in node_type_tags.items()]
         if is_head:
-            node_tag = [{
-                'Key': constants.TAG_SKYPILOT_HEAD_NODE,
-                'Value': '1'
-            }, {
-                'Key': constants.TAG_RAY_NODE_KIND,
-                'Value': 'head'
-            }, {
+            node_tag.append({
                 'Key': 'Name',
                 'Value': f'sky-{cluster_name_on_cloud}-head'
-            }]
+            })
         else:
-            node_tag = [{
-                'Key': constants.TAG_SKYPILOT_HEAD_NODE,
-                'Value': '0'
-            }, {
-                'Key': constants.TAG_RAY_NODE_KIND,
-                'Value': 'worker'
-            }, {
+            node_tag.append({
                 'Key': 'Name',
                 'Value': f'sky-{cluster_name_on_cloud}-worker'
-            }]
+            })
         ec2.meta.client.create_tags(
             Resources=[target_instance.id],
             Tags=target_instance.tags + node_tag,
