@@ -7,6 +7,10 @@ You can pass **optional configurations** to SkyPilot in the ``~/.sky/config.yaml
 
 Such configurations apply to all new clusters and do not affect existing clusters.
 
+.. tip::
+
+  Some config fields can be overridden on a per-task basis through the :code:`experimental.config_overrides` field. See :ref:`here <task-yaml-experimental>` for more details.
+
 Spec: ``~/.sky/config.yaml``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -158,11 +162,27 @@ Available fields and semantics:
 
     # Security group (optional).
     #
-    # The name of the security group to use for all instances. If not specified,
+    # Security group name to use for AWS instances. If not specified,
     # SkyPilot will use the default name for the security group: sky-sg-<hash>
     # Note: please ensure the security group name specified exists in the
     # regions the instances are going to be launched or the AWS account has the
     # permission to create a security group.
+    #
+    # Some example use cases are shown below. All fields are optional.
+    # - <string>: apply the service account with the specified name to all instances.
+    #    Example:
+    #       security_group_name: my-security-group
+    # - <list of single-element dict>: A list of single-element dict mapping from the cluster name (pattern)
+    #   to the security group name to use. The matching of the cluster name is done in the same order
+    #   as the list.
+    #   NOTE: If none of the wildcard expressions in the dict match the cluster name, SkyPilot will use the default
+    #   security group name as mentioned above:  sky-sg-<hash>
+    #   To specify your default, use "*" as the wildcard expression.
+    #   Example:
+    #       security_group_name:
+    #         - my-cluster-name: my-security-group-1
+    #         - sky-serve-controller-*: my-security-group-2
+    #         - "*": my-default-security-group
     security_group_name: my-security-group
 
     # Identity to use for AWS instances (optional).
@@ -245,6 +265,16 @@ Available fields and semantics:
     #
     # Default: false.
     use_internal_ips: true
+
+    # Should instances in a vpc where communicated with via internal IPs still
+    # have an external IP? (optional)
+    #
+    # Set to true to force VMs to be assigned an exteral IP even when vpc_name
+    # and use_internal_ips are set.
+    #
+    # Default: false
+    force_enable_external_ips: true
+
     # SSH proxy command (optional).
     #
     # Please refer to the aws.ssh_proxy_command section above for more details.
@@ -312,7 +342,7 @@ Available fields and semantics:
       #
       # Default: 900
       provision_timeout: 900
-      
+
 
     # Identity to use for all GCP instances (optional).
     #

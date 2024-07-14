@@ -268,12 +268,13 @@ class Azure(clouds.Cloud):
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources.Resources',
-                                        cluster_name_on_cloud: str,
-                                        region: 'clouds.Region',
-                                        zones: Optional[List['clouds.Zone']],
-                                        dryrun: bool = False) -> Dict[str, Any]:
+    def make_deploy_resources_variables(
+            self,
+            resources: 'resources.Resources',
+            cluster_name: resources_utils.ClusterName,
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Any]:
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
@@ -372,7 +373,7 @@ class Azure(clouds.Cloud):
             'disk_tier': Azure._get_disk_type(_failover_disk_tier()),
             'cloud_init_setup_commands': cloud_init_setup_commands,
             'azure_subscription_id': self.get_project_id(dryrun),
-            'resource_group': f'{cluster_name_on_cloud}-{region_name}',
+            'resource_group': f'{cluster_name.name_on_cloud}-{region_name}',
         }
 
     def _get_feasible_launchable_resources(

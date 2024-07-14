@@ -1367,9 +1367,10 @@ def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
         elif isinstance(value, list) and key in destination:
             assert isinstance(destination[key], list), \
                 f'Expected {key} to be a list, found {destination[key]}'
-            if key == 'containers':
-                # If the key is 'containers', we take the first and only
-                # container in the list and merge it.
+            if key in ['containers', 'imagePullSecrets']:
+                # If the key is 'containers' or 'imagePullSecrets, we take the
+                # first and only container/secret in the list and merge it, as
+                # we only support one container per pod.
                 assert len(value) == 1, \
                     f'Expected only one container, found {value}'
                 merge_dicts(value[0], destination[key][0])
@@ -1392,7 +1393,10 @@ def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
             destination[key] = value
 
 
-def combine_pod_config_fields(cluster_yaml_path: str) -> None:
+def combine_pod_config_fields(
+    cluster_yaml_path: str,
+    cluster_config_overrides: Dict[str, Any],
+) -> None:
     """Adds or updates fields in the YAML with fields from the ~/.sky/config's
     kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
@@ -1434,8 +1438,14 @@ def combine_pod_config_fields(cluster_yaml_path: str) -> None:
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
+    # We don't use override_configs in `skypilot_config.get_nested`, as merging
+    # the pod config requires special handling.
     kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
-                                                   {})
+                                                   default_value={},
+                                                   override_configs={})
+    override_pod_config = (cluster_config_overrides.get('kubernetes', {}).get(
+        'pod_config', {}))
+    merge_dicts(override_pod_config, kubernetes_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     merge_dicts(
@@ -1567,7 +1577,7 @@ def get_head_pod_name(cluster_name_on_cloud: str):
 def get_autoscaler_type(
 ) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
     """Returns the autoscaler type by reading from config"""
-    autoscaler_type = skypilot_config.get_nested(['kubernetes', 'autoscaler'],
+    autoscaler_type = skypilot_config.get_nested(('kubernetes', 'autoscaler'),
                                                  None)
     if autoscaler_type is not None:
         autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
