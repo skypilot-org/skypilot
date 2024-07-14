@@ -822,7 +822,12 @@ class ManagedJobCodeGen:
                            follow={follow}, controller={controller})
         print(msg, flush=True)
         """)
-        return cls._build(code)
+        # Activate the python env to make sure some cloud CLIs are available in
+        # the subprocess, such as az. This is useful for a controller to query
+        # statuses of old Azure instances that was provisioned with ray
+        # autoscaler.
+        # TODO(zhwu): figure out why we need to activate env here.
+        return cls._build(code, activate_env=True)
 
     @classmethod
     def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag') -> str:
@@ -841,12 +846,12 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def _build(cls, code: str) -> str:
+    def _build(cls, code: str, activate_env: bool=False) -> str:
         generated_code = cls._PREFIX + '\n' + code
-        # Activate the python env to make sure some cloud CLI, such as az
-        # command is available in the subprocess. This useful for a controller
-        # to query statuses of old Azure instances that was provisioned with ray
-        # autoscaler.
+        
+        active_cmd = ''
+        if activate_env:
+            active_cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
         return (
-            f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};'
+            f'{active_cmd}'
             f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}')

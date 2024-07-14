@@ -702,7 +702,7 @@ class FailoverCloudErrorHandlerV1:
     """
 
     @staticmethod
-    def _handle_unknown_error(
+    def _handle_errors(
             stdout: str, stderr: str,
             is_error_str_known: Callable[[str], bool]) -> List[str]:
         stdout_splits = stdout.split('\n')
@@ -743,7 +743,7 @@ class FailoverCloudErrorHandlerV1:
                         zones: Optional[List['clouds.Zone']], stdout: str,
                         stderr: str):
         del zones  # Unused.
-        errors = FailoverCloudErrorHandlerV1._handle_unknown_error(
+        errors = FailoverCloudErrorHandlerV1._handle_errors(
             stdout,
             stderr,
             is_error_str_known=lambda x: 'LambdaCloudError:' in x.strip())
@@ -770,7 +770,7 @@ class FailoverCloudErrorHandlerV1:
                      zones: Optional[List['clouds.Zone']], stdout: str,
                      stderr: str):
         del zones  # Unused.
-        errors = FailoverCloudErrorHandlerV1._handle_unknown_error(
+        errors = FailoverCloudErrorHandlerV1._handle_errors(
             stdout,
             stderr,
             is_error_str_known=lambda x: 'SCPError:' in x.strip())
@@ -798,7 +798,7 @@ class FailoverCloudErrorHandlerV1:
                      zones: Optional[List['clouds.Zone']], stdout: str,
                      stderr: str):
 
-        errors = FailoverCloudErrorHandlerV1._handle_unknown_error(
+        errors = FailoverCloudErrorHandlerV1._handle_errors(
             stdout, stderr,
             lambda x: 'ERR' in x.strip() or 'PANIC' in x.strip())
 
@@ -818,12 +818,13 @@ class FailoverCloudErrorHandlerV1:
                      region: 'clouds.Region',
                      zones: Optional[List['clouds.Zone']], stdout: str,
                      stderr: str):
-        errors = FailoverCloudErrorHandlerV1._handle_unknown_error(
+        known_service_errors = [
+            'NotAuthorizedOrNotFound', 'CannotParseRequest', 'InternalError',
+            'LimitExceeded', 'NotAuthenticated']
+        errors = FailoverCloudErrorHandlerV1._handle_errors(
             stdout, stderr, lambda x: 'VcnSubnetNotFound' in x.strip() or
             ('oci.exceptions.ServiceError' in x.strip() and
-             ('NotAuthorizedOrNotFound' in x.strip() or 'CannotParseRequest' in
-              x.strip() or 'InternalError' in x.strip() or 'LimitExceeded' in x.
-              strip() or 'NotAuthenticated' in x.strip())))
+             any(known_err in x.strip() for known_err in known_service_errors)))
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
         style = colorama.Style
@@ -2352,10 +2353,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 zip(ip_list, port_list), **ssh_credentials)
             return runners
         if self.cached_cluster_info is None:
-            # When a cluster's cloud is just upgraded to the new provsioner,
+            # We have `or self.cached_external_ips is None` here, because
+            # when a cluster's cloud is just upgraded to the new provsioner,
             # although it has the cached_external_ips, the cached_cluster_info
             # can be None. We need to update it here, even when force_cached is
             # set to True.
+            # TODO: We can remove `self.cached_external_ips is None` after
+            # version 0.8.0.
             assert not force_cached or self.cached_external_ips is not None, (
                 force_cached, self.cached_external_ips)
             self._update_cluster_info()
