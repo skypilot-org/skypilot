@@ -702,9 +702,8 @@ class FailoverCloudErrorHandlerV1:
     """
 
     @staticmethod
-    def _handle_errors(
-            stdout: str, stderr: str,
-            is_error_str_known: Callable[[str], bool]) -> List[str]:
+    def _handle_errors(stdout: str, stderr: str,
+                       is_error_str_known: Callable[[str], bool]) -> List[str]:
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
         errors = [
@@ -820,11 +819,12 @@ class FailoverCloudErrorHandlerV1:
                      stderr: str):
         known_service_errors = [
             'NotAuthorizedOrNotFound', 'CannotParseRequest', 'InternalError',
-            'LimitExceeded', 'NotAuthenticated']
+            'LimitExceeded', 'NotAuthenticated'
+        ]
         errors = FailoverCloudErrorHandlerV1._handle_errors(
             stdout, stderr, lambda x: 'VcnSubnetNotFound' in x.strip() or
-            ('oci.exceptions.ServiceError' in x.strip() and
-             any(known_err in x.strip() for known_err in known_service_errors)))
+            ('oci.exceptions.ServiceError' in x.strip() and any(
+                known_err in x.strip() for known_err in known_service_errors)))
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
         style = colorama.Style
@@ -2339,8 +2339,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
+        updated_to_skypilot_provisioner_after_provisioned = (
+            self.launched_resources.cloud.PROVISIONER_VERSION >=
+            clouds.ProvisionerVersion.SKYPILOT and
+            self.cached_external_ips is not None and
+            self.cached_cluster_info is None)
+        if updated_to_skypilot_provisioner_after_provisioned:
+            logger.debug(
+                f'{self.launched_resources.cloud} has been updated to the new '
+                f'provisioner after cluster {self.cluster_name} was '
+                f'provisioned. Cached IPs are used for connecting to the '
+                'cluster.')
         if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR >=
-                self.launched_resources.cloud.PROVISIONER_VERSION):
+                self.launched_resources.cloud.PROVISIONER_VERSION or
+                updated_to_skypilot_provisioner_after_provisioned):
             ip_list = (self.cached_external_ips
                        if force_cached else self.external_ips())
             if ip_list is None:
