@@ -10,6 +10,7 @@ from sky import skypilot_config
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import common
+from sky.provision import constants
 from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import network_utils
@@ -25,7 +26,6 @@ _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
-TAG_RAY_NODE_KIND = 'ray-node-type'  # legacy tag for backward compatibility
 TAG_POD_INITIALIZED = 'skypilot-initialized'
 
 POD_STATUSES = {
@@ -74,7 +74,7 @@ def _filter_pods(namespace: str, tag_filters: Dict[str, str],
 def _get_head_pod_name(pods: Dict[str, Any]) -> Optional[str]:
     head_pod_name = None
     for pod_name, pod in pods.items():
-        if pod.metadata.labels[TAG_RAY_NODE_KIND] == 'head':
+        if pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head':
             head_pod_name = pod_name
             break
     return head_pod_name
@@ -455,12 +455,12 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                  f'(count={to_start_count}).')
     for _ in range(to_start_count):
         if head_pod_name is None:
-            pod_spec['metadata']['labels'][TAG_RAY_NODE_KIND] = 'head'
+            pod_spec['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
             head_selector = head_service_selector(cluster_name_on_cloud)
             pod_spec['metadata']['labels'].update(head_selector)
             pod_spec['metadata']['name'] = f'{cluster_name_on_cloud}-head'
         else:
-            pod_spec['metadata']['labels'][TAG_RAY_NODE_KIND] = 'worker'
+            pod_spec['metadata']['labels'].update(constants.WORKER_NODE_TAGS)
             pod_uuid = str(uuid.uuid4())[:4]
             pod_name = f'{cluster_name_on_cloud}-{pod_uuid}'
             pod_spec['metadata']['name'] = f'{pod_name}-worker'
@@ -636,7 +636,7 @@ def terminate_instances(
     pods = _filter_pods(namespace, tag_filters, None)
 
     def _is_head(pod) -> bool:
-        return pod.metadata.labels[TAG_RAY_NODE_KIND] == 'head'
+        return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
 
     for pod_name, pod in pods.items():
         logger.debug(f'Terminating instance {pod_name}: {pod}')
@@ -685,7 +685,7 @@ def get_cluster_info(
                 tags=pod.metadata.labels,
             )
         ]
-        if pod.metadata.labels[TAG_RAY_NODE_KIND] == 'head':
+        if pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head':
             head_pod_name = pod_name
             head_spec = pod.spec
             assert head_spec is not None, pod

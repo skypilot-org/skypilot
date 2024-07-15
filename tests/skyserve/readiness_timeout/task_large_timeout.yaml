@@ -12,4 +12,6 @@ resources:
   cpus: 2+
   ports: 8081
 
+setup: pip install fastapi uvicorn
+
 run: python3 server.py --port 8081

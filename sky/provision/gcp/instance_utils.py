@@ -13,6 +13,7 @@ from sky import sky_logging
 from sky.adaptors import gcp
 from sky.clouds import gcp as gcp_cloud
 from sky.provision import common
+from sky.provision import constants as provision_constants
 from sky.provision.gcp import constants
 from sky.provision.gcp import mig_utils
 from sky.utils import common_utils
@@ -21,8 +22,6 @@ from sky.utils import ux_utils
 # Tag for the name of the node
 INSTANCE_NAME_MAX_LEN = 64
 INSTANCE_NAME_UUID_LEN = 8
-TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
-TAG_RAY_NODE_KIND = 'ray-node-type'
 
 TPU_NODE_CREATION_FAILURE = 'Failed to provision TPU node.'
 
@@ -284,15 +283,9 @@ class GCPInstance:
                         target_instance_id: str,
                         is_head: bool = True) -> str:
         if is_head:
-            node_tag = {
-                TAG_SKYPILOT_HEAD_NODE: '1',
-                TAG_RAY_NODE_KIND: 'head',
-            }
+            node_tag = provision_constants.HEAD_NODE_TAGS
         else:
-            node_tag = {
-                TAG_SKYPILOT_HEAD_NODE: '0',
-                TAG_RAY_NODE_KIND: 'worker',
-            }
+            node_tag = provision_constants.WORKER_NODE_TAGS
         cls.set_labels(project_id=project_id,
                        availability_zone=availability_zone,
                        node_id=target_instance_id,
@@ -676,8 +669,8 @@ class GCPComputeInstance(GCPInstance):
         config.update({
             'labels': dict(
                 labels, **{
-                    constants.TAG_RAY_CLUSTER_NAME: cluster_name,
-                    constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name
+                    provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+                    provision_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name
                 }),
         })
 
@@ -999,11 +992,11 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             'labels': dict(
                 labels,
                 **{
-                    constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+                    provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name,
                     # Assume all nodes are workers, we can update the head node
                     # once the instances are created.
-                    constants.TAG_RAY_NODE_KIND: 'worker',
-                    constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
+                    **provision_constants.WORKER_NODE_TAGS,
+                    provision_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
                 }),
         })
         cls._convert_selflinks_in_config(config)
@@ -1021,17 +1014,18 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             project_id, zone, managed_instance_group_name)
 
         label_filters = {
-            constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+            provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name,
         }
         potential_head_instances = []
         if mig_exists:
-            instances = cls.filter(project_id,
-                                   zone,
-                                   label_filters={
-                                       constants.TAG_RAY_NODE_KIND: 'head',
-                                       **label_filters,
-                                   },
-                                   status_filters=cls.NEED_TO_TERMINATE_STATES)
+            instances = cls.filter(
+                project_id,
+                zone,
+                label_filters={
+                    provision_constants.TAG_RAY_NODE_KIND: 'head',
+                    **label_filters,
+                },
+                status_filters=cls.NEED_TO_TERMINATE_STATES)
             potential_head_instances = list(instances.keys())
 
         config['labels'] = {
@@ -1165,7 +1159,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         pending_running_instances = cls.filter(
             project_id,
             zone,
-            {constants.TAG_RAY_CLUSTER_NAME: cluster_name},
+            {provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name},
             # Find all provisioning and running instances.
             status_filters=cls.NEED_TO_STOP_STATES)
         for running_instance_name in pending_running_instances.keys():
@@ -1452,8 +1446,8 @@ class GCPTPUVMInstance(GCPInstance):
         config.update({
             'labels': dict(
                 labels, **{
-                    constants.TAG_RAY_CLUSTER_NAME: cluster_name,
-                    constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name
+                    provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+                    provision_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name
                 }),
         })
 
@@ -1479,11 +1473,10 @@ class GCPTPUVMInstance(GCPInstance):
         for i, name in enumerate(names):
             node_config = config.copy()
             if i == 0:
-                node_config['labels'][TAG_SKYPILOT_HEAD_NODE] = '1'
-                node_config['labels'][TAG_RAY_NODE_KIND] = 'head'
+                node_config['labels'].update(provision_constants.HEAD_NODE_TAGS)
             else:
-                node_config['labels'][TAG_SKYPILOT_HEAD_NODE] = '0'
-                node_config['labels'][TAG_RAY_NODE_KIND] = 'worker'
+                node_config['labels'].update(
+                    provision_constants.WORKER_NODE_TAGS)
             try:
                 logger.debug('Launching GCP TPU VM ...')
                 request = (
