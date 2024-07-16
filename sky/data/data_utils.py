@@ -180,9 +180,10 @@ def create_az_client(client_type: str, **kwargs: Any) -> Client:
                                                   'be provided for container '
                                                   'client')
 
-    subscription_id = azure.get_subscription_id()
     if refresh_client:
         azure.get_client.cache_clear()
+
+    subscription_id = azure.get_subscription_id()
     client = azure.get_client(client_type,
                               subscription_id,
                               container_url=container_url,
