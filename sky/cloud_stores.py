@@ -224,6 +224,10 @@ class AzureBlobCloudStorage(CloudStorage):
         refresh_client = False
         role_assigned = False
 
+        # 1. List blobs in the container_url to decide wether it is a directory
+        # 2. If it fails due to permission issues, try to assign a permissive
+        # role for the storage account to the current Azure account
+        # 3. Wait for the role assignment to propagate and retry.
         while (time.time() - role_assignment_start <
                constants.WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT):
             container_client = data_utils.create_az_client(
@@ -241,6 +245,8 @@ class AzureBlobCloudStorage(CloudStorage):
                     num_objects += 1
                     if num_objects > 1:
                         return True
+                # A directory with few or no items
+                return True
             except azure.exceptions().HttpResponseError as e:
                 # Handle case where user lacks sufficient IAM role for
                 # a private container in the same subscription. Attempt to
@@ -265,8 +271,6 @@ class AzureBlobCloudStorage(CloudStorage):
                             constants.RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT)
                     continue
                 raise
-            # A directory with few or no items
-            return True
         else:
             raise TimeoutError(
                 'Failed to determine the container path status within '
