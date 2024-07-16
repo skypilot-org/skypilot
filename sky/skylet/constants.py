@@ -274,6 +274,7 @@ OVERRIDEABLE_CONFIG_KEYS: List[Tuple[str, ...]] = [
     ('gcp', 'managed_instance_group'),
 ]
 
+# Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
 # Observed time for new role assignment to propagate was ~45s
 WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT = 180
