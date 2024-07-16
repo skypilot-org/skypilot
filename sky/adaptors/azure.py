@@ -69,7 +69,9 @@ def exceptions():
 
 @functools.lru_cache()
 @common.load_lazy_modules(modules=_LAZY_MODULES)
-def get_client(name: str, subscription_id: Optional[str] = None, **kwargs) -> Client:
+def get_client(name: str,
+               subscription_id: Optional[str] = None,
+               **kwargs) -> Client:
     """Creates and returns an Azure client for the specified service.
 
     Args:
@@ -127,8 +129,8 @@ def get_client(name: str, subscription_id: Optional[str] = None, **kwargs) -> Cl
             # Note: Checking a private container without credentials is
             # faster (~0.2s) than checking a public container with
             # credentials (~90s).
-            from azure.storage import blob
             from azure.mgmt import storage
+            from azure.storage import blob
             container_url = kwargs.pop('container_url', None)
             assert container_url is not None, ('Must provide container_url'
                                                ' keyword arguments for '
@@ -146,13 +148,12 @@ def get_client(name: str, subscription_id: Optional[str] = None, **kwargs) -> Cl
                 credential, subscription_id)
             storage_account_availability = (
                 storage_client.storage_accounts.check_name_availability(
-                    {"name": storage_account_name}))
+                    {'name': storage_account_name}))
             if storage_account_availability.name_available:
                 with ux_utils.print_exception_no_traceback():
                     raise sky_exceptions.NonExistentStorageAccountError(
                         f'The storage account {storage_account_name!r} does '
-                        'not exist. Please check if the name is correct and '
-                        'the account is created.')
+                        'not exist. Please check if the name is correct.')
 
             # First, assume the URL is from a public container.
             container_client = blob.ContainerClient.from_container_url(

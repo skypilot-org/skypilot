@@ -236,17 +236,16 @@ class AzureBlobCloudStorage(CloudStorage):
                 storage_account_name=storage_account_name,
                 resource_group_name=resource_group_name,
                 refresh_client=refresh_client)
-            
+
             if not container_client.exists():
                 with ux_utils.print_exception_no_traceback():
                     raise sky_exceptions.StorageBucketGetError(
                         f'The provided container {container_name!r} from the '
                         f'passed endpoint url {url!r} does not exist. Please '
-                        'check if the name is correct and the container is '
-                        'created.')
-            
+                        'check if the name is correct.')
+
             # If there aren't more than just container name and storage account,
-            # that's a directory. 
+            # that's a directory.
             # Note: This must be ran after existence of the storage account is
             # checked while obtaining container client.
             if not path:

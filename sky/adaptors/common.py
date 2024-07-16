@@ -60,7 +60,6 @@ def load_lazy_modules(modules: Tuple[LazyImport, ...]):
                 m.load_module()
             return func(*args, **kwargs)
 
-
         return wrapper
 
     return decorator
