@@ -12,6 +12,7 @@ import subprocess
 import time
 import urllib.parse
 
+from sky import exceptions as sky_exceptions
 from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import azure
@@ -21,6 +22,7 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data.data_utils import Rclone
 from sky.skylet import constants
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -204,16 +206,14 @@ class AzureBlobCloudStorage(CloudStorage):
 
         Raises:
             azure.core.exceptions.HttpResponseError: If the user's Azure
-              Azure account does not have sufficient IAM role for the given
-              storage account.
+                Azure account does not have sufficient IAM role for the given
+                storage account.
+            StorageBucketGetError: Provided container name does not exist.
+            TimeoutError: If unable to determine the container path status
+                in time.
         """
         storage_account_name, container_name, path = data_utils.split_az_path(
             url)
-
-        # If there aren't more than just container name and storage account,
-        # that's a directory.
-        if not path:
-            return True
 
         # If there are more, we need to check if it is a directory or a file.
         container_url = data_utils.AZURE_CONTAINER_URL.format(
@@ -236,6 +236,21 @@ class AzureBlobCloudStorage(CloudStorage):
                 storage_account_name=storage_account_name,
                 resource_group_name=resource_group_name,
                 refresh_client=refresh_client)
+            
+            if not container_client.exists():
+                with ux_utils.print_exception_no_traceback():
+                    raise sky_exceptions.StorageBucketGetError(
+                        f'The provided container {container_name!r} from the '
+                        f'passed endpoint url {url!r} does not exist. Please '
+                        'check if the name is correct and the container is '
+                        'created.')
+            
+            # If there aren't more than just container name and storage account,
+            # that's a directory. 
+            # Note: This must be ran after existence of the storage account is
+            # checked while obtaining container client.
+            if not path:
+                return True
 
             num_objects = 0
             try:

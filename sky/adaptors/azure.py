@@ -69,7 +69,26 @@ def exceptions():
 
 @functools.lru_cache()
 @common.load_lazy_modules(modules=_LAZY_MODULES)
-def get_client(name: str, subscription_id: Optional[str] = None, **kwargs):
+def get_client(name: str, subscription_id: Optional[str] = None, **kwargs) -> Client:
+    """Creates and returns an Azure client for the specified service.
+
+    Args:
+        name: The type of Azure client to create.
+        subscription_id: The Azure subscription ID. Defaults to None.
+
+    Returns:
+        An instance of the specified Azure client.
+
+    Raises:
+        NonExistentStorageAccountError: When storage account provided
+            either through config.yaml or local db does not exist under
+            user's subscription ID.
+        StorageBucketGetError: If there is an error retrieving the container
+            client or if a non-existent public container is specified.
+        ValueError: If an unsupported client type is specified.
+        TimeoutError: If unable to get the container client within the
+            specified time.
+    """
     # Sky only supports Azure CLI credential for now.
     # Increase the timeout to fix the Azure get-access-token timeout issue.
     # Tracked in
@@ -109,6 +128,7 @@ def get_client(name: str, subscription_id: Optional[str] = None, **kwargs):
             # faster (~0.2s) than checking a public container with
             # credentials (~90s).
             from azure.storage import blob
+            from azure.mgmt import storage
             container_url = kwargs.pop('container_url', None)
             assert container_url is not None, ('Must provide container_url'
                                                ' keyword arguments for '
@@ -118,6 +138,21 @@ def get_client(name: str, subscription_id: Optional[str] = None, **kwargs):
                                                       'storage_account_name '
                                                       'keyword arguments for '
                                                       'container client.')
+
+            # Check if the given storage account exists. This separate check
+            # is necessary as running container_client.exists() with container
+            # url on non-existent storage account errors out after long lag(~90s)
+            storage_client = storage.StorageManagementClient(
+                credential, subscription_id)
+            storage_account_availability = (
+                storage_client.storage_accounts.check_name_availability(
+                    {"name": storage_account_name}))
+            if storage_account_availability.name_available:
+                with ux_utils.print_exception_no_traceback():
+                    raise sky_exceptions.NonExistentStorageAccountError(
+                        f'The storage account {storage_account_name!r} does '
+                        'not exist. Please check if the name is correct and '
+                        'the account is created.')
 
             # First, assume the URL is from a public container.
             container_client = blob.ContainerClient.from_container_url(
