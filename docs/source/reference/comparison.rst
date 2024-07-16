@@ -1,0 +1,172 @@
+.. _sky-compare:
+
+Comparing SkyPilot with other systems
+=====================================
+
+We are often asked "How does SkyPilot compare against XYZ?". Providing an unbiased and up-to date answer for such questions is not easy, especially when the differences may be qualitative.
+
+This page tries to provide a comparison of SkyPilot with other systems, focusing on the unique features of SkyPilot. We welcome feedback and contributions to this page.
+
+
+SkyPilot vs Vanilla Kubernetes
+------------------------------
+
+Kubernetes is a powerful system for managing containerized applications. SkyPilot builds on top of Kubernetes to provide a more powerful and easier-to-use framework for running AI workloads.
+
+Faster iteration with interactive development
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/k8s_vs_skypilot_iterative_v2.png
+    :align: center
+    :width: 80%
+    :alt: Iterative Development with Kubernetes vs SkyPilot
+
+    Iterative Development with Kubernetes requires tedious updates to docker images and multiple steps to update the training run. With SkyPilot, all you need is sky launch.
+
+Interactive workflows benefit from faster iteration with SkyPilot. For example, a common workflow for AI engineers is to iteratively develop and train models by tweaking code and hyperparameters by observing the training runs.
+
+* **With Kubernetes, a single iteration is a multi-step process** involving building a Docker image, pushing it to a registry, updating the Kubernetes YAML and then deploying it.
+
+* **With SkyPilot, a single sky launch takes care of everything.** Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs and provides SSH and VSCode access to debug.
+
+
+Simpler YAMLs
+^^^^^^^^^^^^^
+
+Consider serving `Gemma <https://ai.google.dev/gemma>`_ with `vLLM <https://github.com/vllm-project/vllm>`_ on Kubernetes:
+
+* **With vanilla Kubernetes**, you need over `65 lines of Kubernetes YAML <https://cloud.google.com/kubernetes-engine/docs/tutorials/serve-gemma-gpu-vllm#deploy-vllm>`_ to launch a Gemma model served with vLLM.
+* **With SkyPilot**, an easy-to-understand `19-line YAML <https://gist.github.com/romilbhardwaj/b5b6b893e7a3749a2815f055f3f5351c>`_ launches a pod serving Gemma with vLLM.
+
+Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on SkyPilot vs Kubernetes:
+
+.. raw:: html
+
+   <div class="row">
+       <div class="col-md-6 mb-3">
+            <h3> SkyPilot </h3>
+           <pre>
+           <code class="yaml">
+   envs:
+     MODEL_NAME: google/gemma-2b-it
+     HF_TOKEN: myhftoken
+
+   resources:
+     image_id: docker:vllm/vllm-openai:latest
+     accelerators: L4:1
+     ports: 8000
+
+   setup: |
+     conda deactivate
+     python3 -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+   run: |
+     conda deactivate
+     echo 'Starting vllm openai api server...'
+     python -m vllm.entrypoints.openai.api_server \
+     --model $MODEL_NAME \
+     --tokenizer hf-internal-testing/llama-tokenizer \
+     --host 0.0.0.0
+           </code>
+           </pre>
+       </div>
+       <div class="col-md-6 mb-3">
+            <h3> Kubernetes </h3>
+           <pre>
+           <code class="yaml">
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+   name: vllm-gemma-deployment
+   spec:
+   replicas: 1
+   selector:
+     matchLabels:
+       app: gemma-server
+   template:
+     metadata:
+       labels:
+         app: gemma-server
+         ai.gke.io/model: gemma-1.1-2b-it
+         ai.gke.io/inference-server: vllm
+         examples.ai.gke.io/source: user-guide
+     spec:
+       containers:
+       - name: inference-server
+         image: us-docker.pkg.dev/vertex-ai/ vertex-vision-model-garden-dockers/pytorch-vllm-serve:20240527_0916_RC00
+         resources:
+           requests:
+             cpu: "2"
+             memory: "10Gi"
+             ephemeral-storage: "10Gi"
+             nvidia.com/gpu: 1
+           limits:
+             cpu: "2"
+             memory: "10Gi"
+             ephemeral-storage: "10Gi"
+             nvidia.com/gpu: 1
+         args:
+         - --model=$(MODEL_ID)
+         - --tensor-parallel-size=1
+         env:
+         - name: MODEL_ID
+           value: google/gemma-1.1-2b-it
+         - name: HUGGING_FACE_HUB_TOKEN
+           valueFrom:
+             secretKeyRef:
+               name: hf-secret
+               key: hf_api_token
+         volumeMounts:
+         - mountPath: /dev/shm
+           name: dshm
+       volumes:
+       - name: dshm
+         emptyDir:
+             medium: Memory
+       nodeSelector:
+         cloud.google.com/gke-accelerator: nvidia-l4
+   ---
+   apiVersion: v1
+   kind: Service
+   metadata:
+   name: llm-service
+   spec:
+   selector:
+     app: gemma-server
+   type: ClusterIP
+   ports:
+     - protocol: TCP
+       port: 8000
+       targetPort: 8000
+           </code>
+           </pre>
+       </div>
+   </div>
+
+
+Scale beyond single region/cluster
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/failover.png
+    :align: center
+    :width: 80%
+    :alt: Scaling beyond a single region Kubernetes cluster with SkyPilot
+
+    If the Kubernetes cluster is full, SkyPilot can get GPUs from other regions and clouds to run your tasks at the lowest cost.
+
+Kubernetes deployments are typically contained to a single region in a single cluster.
+This is because longer latencies across regions causes etcd, the store for Kubernetes state, to timeout and fail [1]_ [2]_ [3]_.
+
+Being restricted to a single region/cloud with Vanilla Kubernetes has two drawbacks:
+
+1. `Availability is reduced by up to 29% <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ because you cannot utilize
+available capacity elsewhere.
+
+2. `Costs increase by 2.4x <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ as you are unable to
+take advantage of cheaper resources in other regions.
+
+SkyPilot was designed to scale across clouds and regions - it allows you to run your tasks on your Kubernetes cluster, and burst to more regions and clouds if needed. In doing so, SkyPilot ensures that your tasks are always running in the most cost-effective region, while maintaining high availability.
+
+.. [1] `etcd FAQ <https://etcd.io/docs/v3.3/faq/#does-etcd-work-in-cross-region-or-cross-data-center-deployments>`_
+.. [2] `"Multi-region etcd cluster performance issue" on GitHub <https://github.com/etcd-io/etcd/issues/12232>`_
+.. [3] `DevOps StackExchange answer <https://devops.stackexchange.com/a/13194>`_

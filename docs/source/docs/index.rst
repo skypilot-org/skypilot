@@ -161,6 +161,7 @@ Contents
    ../reference/tpu
    ../reference/logging
    ../reference/faq
+   Comparing SkyPilot <../reference/comparison>
 
 
 .. toctree::
