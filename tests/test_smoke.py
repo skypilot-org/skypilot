@@ -3124,7 +3124,6 @@ def test_kubernetes_custom_image(image_id):
     run_one_test(test)
 
 
-@pytest.mark.slow
 def test_azure_start_stop_two_nodes():
     name = _get_cluster_name()
     test = Test(
@@ -3911,8 +3910,15 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
     name = _get_service_name() + mode
 
+    wait_until_no_pending = (
+        f's=$(sky serve status {name}); echo "$s"; '
+        'until ! echo "$s" | grep PENDING; do '
+        '  echo "Waiting for replica to be out of pending..."; '
+        f' sleep 5; s=$(sky serve status {name}); '
+        '  echo "$s"; '
+        'done')
     four_spot_up_cmd = _check_replica_in_status(name, [(4, True, 'READY')])
-    update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done; sleep 10;']
+    update_check = [f'until ({four_spot_up_cmd}); do sleep 5; done; sleep 15;']
     if mode == 'rolling':
         # Check rolling update, it will terminate one of the old on-demand
         # instances, once there are 4 spot instance ready.
@@ -3941,7 +3947,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             's=$(curl http://$endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
-            f'sleep 120',
+            f'sleep 90',
+            wait_until_no_pending,
             _check_replica_in_status(
                 name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
                        (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),

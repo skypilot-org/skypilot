@@ -244,7 +244,8 @@ def _get_cloud_dependencies_installation_commands(
                 '! command -v curl &> /dev/null || '
                 '! command -v socat &> /dev/null || '
                 '! command -v netcat &> /dev/null; '
-                'then apt update && apt install curl socat netcat -y; '
+                'then apt update && apt install curl socat netcat -y '
+                '&> /dev/null; '
                 'fi" && '
                 # Install kubectl
                 '(command -v kubectl &>/dev/null || '

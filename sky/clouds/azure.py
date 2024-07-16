@@ -1,5 +1,4 @@
 """Azure."""
-import base64
 import functools
 import json
 import os
@@ -67,7 +66,7 @@ class Azure(clouds.Cloud):
 
     _INDENT_PREFIX = ' ' * 4
 
-    PROVISIONER_VERSION = clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
@@ -325,8 +324,7 @@ class Azure(clouds.Cloud):
         # restarted, identified by a file /tmp/__restarted is existing.
         # Also, add default user to docker group.
         # pylint: disable=line-too-long
-        cloud_init_setup_commands = base64.b64encode(
-            textwrap.dedent("""\
+        cloud_init_setup_commands = textwrap.dedent("""\
             #cloud-config
             runcmd:
               - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
@@ -342,7 +340,7 @@ class Azure(clouds.Cloud):
               - path: /etc/apt/apt.conf.d/10cloudinit-disable
                 content: |
                   APT::Periodic::Enable "0";
-            """).encode('utf-8')).decode('utf-8')
+            """).split('\n')
 
         def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
             if (r.disk_tier is not None and

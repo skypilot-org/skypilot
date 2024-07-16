@@ -413,3 +413,10 @@ def get_az_resource_group(
 def create_security_rule(**kwargs):
     from azure.mgmt.network import models
     return models.SecurityRule(**kwargs)
+
+
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def deployment_mode():
+    """Azure deployment mode."""
+    from azure.mgmt.resource.resources.models import DeploymentMode
+    return DeploymentMode
