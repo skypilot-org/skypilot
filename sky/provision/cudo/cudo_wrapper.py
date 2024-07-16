@@ -142,3 +142,25 @@ def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
         return total_count
     except cudo.cudo.rest.ApiException as e:
         raise e
+
+
+def setup_network(region, network_id):
+    try:
+        api = cudo.cudo.cudo_api.networks()
+        project_id = cudo.cudo.cudo_api.project_id_throwable()
+        network = cudo.cudo.CreateNetworkBody(id=network_id, network_id=network_id,
+                                                 cidr_prefix='10.0.0.0/10',
+                                                 data_center_id=region)
+        api.create_network(project_id, create_network_body=network)
+
+    except cudo.cudo.rest.ApiException as e:
+        raise e
+
+
+def delete_network(network_id):
+    try:
+        api = cudo.cudo.cudo_api.networks()
+        project_id = cudo.cudo.cudo_api.project_id_throwable()
+        api.delete_network(project_id, id=network_id, network_id=network_id)
+    except cudo.cudo.rest.ApiException as e:
+        raise e

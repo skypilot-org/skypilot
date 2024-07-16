@@ -163,6 +163,13 @@ def terminate_instances(
                      f'{inst}')
         cudo_wrapper.remove(inst_id)
 
+    if not worker_only:
+        try:
+            cudo_wrapper.delete_network(cluster_name_on_cloud)
+        except IndexError:
+            logger.warning(f'Network {cluster_name_on_cloud}'
+                           'already deleted')
+
 
 def get_cluster_info(
         region: str,
