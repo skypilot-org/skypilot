@@ -4423,13 +4423,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             storage = cloud_stores.get_storage_from_path(src)
             if storage.is_directory(src):
-                sync = storage.make_sync_dir_command(source=src,
-                                                     destination=wrapped_dst)
+                sync_cmd = (storage.make_sync_dir_command(
+                    source=src, destination=wrapped_dst))
                 # It is a directory so make sure it exists.
                 mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
             else:
-                sync = storage.make_sync_file_command(source=src,
-                                                      destination=wrapped_dst)
+                sync_cmd = (storage.make_sync_file_command(
+                    source=src, destination=wrapped_dst))
                 # It is a file so make sure *its parent dir* exists.
                 mkdir_for_wrapped_dst = (
                     f'mkdir -p {os.path.dirname(wrapped_dst)}')
@@ -4438,7 +4438,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Ensure sync can write to wrapped_dst (e.g., '/data/').
                 mkdir_for_wrapped_dst,
                 # Both the wrapped and the symlink dir exist; sync.
-                sync,
+                sync_cmd,
             ]
             command = ' && '.join(download_target_commands)
             # dst is only used for message printing.

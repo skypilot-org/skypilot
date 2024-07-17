@@ -273,3 +273,12 @@ OVERRIDEABLE_CONFIG_KEYS: List[Tuple[str, ...]] = [
     ('kubernetes', 'provision_timeout'),
     ('gcp', 'managed_instance_group'),
 ]
+
+# Constants for Azure blob storage
+WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
+# Observed time for new role assignment to propagate was ~45s
+WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT = 180
+RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
+ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
+    'Failed to assign Storage Blob Data Owner role to the '
+    'storage account {storage_account_name}.')

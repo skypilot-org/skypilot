@@ -74,7 +74,7 @@ FLUIDSTACK_TYPE = '--cloud fluidstack --gpus RTXA4000'
 SCP_TYPE = '--cloud scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
-storage_setup_commands = [
+STORAGE_SETUP_COMMANDS = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
     'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
     'touch ~/tmp-workdir/foo',
@@ -972,7 +972,7 @@ def test_file_mounts(generic_cloud: str):
         #  arm64 (e.g., Apple Silicon) since goofys does not work on arm64.
         extra_flags = '--num-nodes 1'
     test_commands = [
-        *storage_setup_commands,
+        *STORAGE_SETUP_COMMANDS,
         f'sky launch -y -c {name} --cloud {generic_cloud} {extra_flags} examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
@@ -989,7 +989,7 @@ def test_file_mounts(generic_cloud: str):
 def test_scp_file_mounts():
     name = _get_cluster_name()
     test_commands = [
-        *storage_setup_commands,
+        *STORAGE_SETUP_COMMANDS,
         f'sky launch -y -c {name} {SCP_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
@@ -1007,7 +1007,7 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = _get_cluster_name()
     storage_name = TestStorageWithCredentials.generate_bucket_name()
     test_commands = [
-        *storage_setup_commands,
+        *STORAGE_SETUP_COMMANDS,
         (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name}'),
@@ -1033,18 +1033,19 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 @pytest.mark.aws
 def test_aws_storage_mounts_with_stop():
     name = _get_cluster_name()
+    cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    content = template.render(storage_name=storage_name, cloud=cloud)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud aws {file_path}',
+            *STORAGE_SETUP_COMMANDS,
+            f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
             f'sky stop -y {name}',
@@ -1065,18 +1066,19 @@ def test_aws_storage_mounts_with_stop():
 @pytest.mark.gcp
 def test_gcp_storage_mounts_with_stop():
     name = _get_cluster_name()
+    cloud = 'gcp'
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    content = template.render(storage_name=storage_name, cloud=cloud)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud gcp {file_path}',
+            *STORAGE_SETUP_COMMANDS,
+            f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'gsutil ls gs://{storage_name}/hello.txt',
             f'sky stop -y {name}',
@@ -1087,6 +1089,47 @@ def test_gcp_storage_mounts_with_stop():
         ]
         test = Test(
             'gcp_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.azure
+def test_azure_storage_mounts_with_stop():
+    name = _get_cluster_name()
+    cloud = 'azure'
+    storage_name = f'sky-test-{int(time.time())}'
+    default_region = 'eastus'
+    storage_account_name = (
+        storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+            region=default_region, user_hash=common_utils.get_user_hash()))
+    storage_account_key = data_utils.get_az_storage_account_key(
+        storage_account_name)
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name, cloud=cloud)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *STORAGE_SETUP_COMMANDS,
+            f'sky launch -y -c {name} --cloud {cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'output=$(az storage blob list -c {storage_name} --account-name {storage_account_name} --account-key {storage_account_key} --prefix hello.txt)'
+            # if the file does not exist, az storage blob list returns '[]'
+            f'[ "$output" = "[]" ] && exit 1;'
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
+        ]
+        test = Test(
+            'azure_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
@@ -1110,7 +1153,7 @@ def test_kubernetes_storage_mounts():
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud kubernetes {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt || '
@@ -1144,13 +1187,19 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    # ubuntu 18.04 does not support fuse3, and blobfuse2 depends on fuse3.
+    azure_mount_unsupported_ubuntu_version = '18.04'
+    if azure_mount_unsupported_ubuntu_version in image_id:
+        content = template.render(storage_name=storage_name,
+                                  include_azure_mount=False)
+    else:
+        content = template.render(storage_name=storage_name,)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt || '
@@ -1179,7 +1228,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
@@ -1209,7 +1258,7 @@ def test_ibm_storage_mounts():
         f.flush()
         file_path = f.name
         test_commands = [
-            *storage_setup_commands,
+            *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud ibm {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'rclone ls {bucket_rclone_profile}:{storage_name}/hello.txt',
@@ -2931,7 +2980,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         test = Test(
             'managed_jobs_storage',
             [
-                *storage_setup_commands,
+                *STORAGE_SETUP_COMMANDS,
                 f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 'sleep 60',  # Wait the spot queue to be updated
@@ -4062,6 +4111,15 @@ class TestStorageWithCredentials:
         'abc_',  # ends with an underscore
     ]
 
+    AZURE_INVALID_NAMES = [
+        'ab',  # less than 3 characters
+        # more than 63 characters
+        'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1',
+        'Abcdef',  # contains an uppercase letter
+        '.abc',  # starts with a non-letter(dot)
+        'a--bc',  # contains consecutive hyphens
+    ]
+
     IBM_INVALID_NAMES = [
         'ab',  # less than 3 characters
         'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz1',
@@ -4172,7 +4230,9 @@ class TestStorageWithCredentials:
                     path, substructure)
 
     @staticmethod
-    def cli_delete_cmd(store_type, bucket_name):
+    def cli_delete_cmd(store_type,
+                       bucket_name,
+                       storage_account_name: str = None):
         if store_type == storage_lib.StoreType.S3:
             url = f's3://{bucket_name}'
             return f'aws s3 rb {url} --force'
@@ -4180,6 +4240,18 @@ class TestStorageWithCredentials:
             url = f'gs://{bucket_name}'
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             return f'{alias_gen}; {gsutil_alias} rm -r {url}'
+        if store_type == storage_lib.StoreType.AZURE:
+            default_region = 'eastus'
+            storage_account_name = (
+                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                    region=default_region,
+                    user_hash=common_utils.get_user_hash()))
+            storage_account_key = data_utils.get_az_storage_account_key(
+                storage_account_name)
+            return ('az storage container delete '
+                    f'--account-name {storage_account_name} '
+                    f'--account-key {storage_account_key} '
+                    f'--name {bucket_name}')
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
@@ -4203,6 +4275,20 @@ class TestStorageWithCredentials:
             else:
                 url = f'gs://{bucket_name}'
             return f'gsutil ls {url}'
+        if store_type == storage_lib.StoreType.AZURE:
+            default_region = 'eastus'
+            storage_account_name = (
+                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                    region=default_region,
+                    user_hash=common_utils.get_user_hash()))
+            storage_account_key = data_utils.get_az_storage_account_key(
+                storage_account_name)
+            list_cmd = ('az storage blob list '
+                        f'--container-name {bucket_name} '
+                        f'--prefix {shlex.quote(suffix)} '
+                        f'--account-name {storage_account_name} '
+                        f'--account-key {storage_account_key}')
+            return list_cmd
         if store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             if suffix:
@@ -4240,6 +4326,21 @@ class TestStorageWithCredentials:
                 return f'gsutil ls -r gs://{bucket_name}/{suffix} | grep "{file_name}" | wc -l'
             else:
                 return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
+        elif store_type == storage_lib.StoreType.AZURE:
+            default_region = 'eastus'
+            storage_account_name = (
+                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                    region=default_region,
+                    user_hash=common_utils.get_user_hash()))
+            storage_account_key = data_utils.get_az_storage_account_key(
+                storage_account_name)
+            return ('az storage blob list '
+                    f'--container-name {bucket_name} '
+                    f'--prefix {shlex.quote(suffix)} '
+                    f'--account-name {storage_account_name} '
+                    f'--account-key {storage_account_key} | '
+                    f'grep {file_name} | '
+                    'wc -l')
         elif store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             if suffix:
@@ -4253,6 +4354,20 @@ class TestStorageWithCredentials:
             return f'aws s3 ls s3://{bucket_name} --recursive | wc -l'
         elif store_type == storage_lib.StoreType.GCS:
             return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
+        elif store_type == storage_lib.StoreType.AZURE:
+            default_region = 'eastus'
+            storage_account_name = (
+                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                    region=default_region,
+                    user_hash=common_utils.get_user_hash()))
+            storage_account_key = data_utils.get_az_storage_account_key(
+                storage_account_name)
+            return ('az storage blob list '
+                    f'--container-name {bucket_name} '
+                    f'--account-name {storage_account_name} '
+                    f'--account-key {storage_account_key} | '
+                    'grep \\"name\\": | '
+                    'wc -l')
         elif store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
@@ -4442,6 +4557,30 @@ class TestStorageWithCredentials:
         subprocess.check_call(['gsutil', 'rm', '-r', bucket_uri])
 
     @pytest.fixture
+    def tmp_az_bucket(self, tmp_bucket_name):
+        # Creates a temporary bucket using gsutil
+        default_region = 'eastus'
+        storage_account_name = (
+            storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                region=default_region, user_hash=common_utils.get_user_hash()))
+        storage_account_key = data_utils.get_az_storage_account_key(
+            storage_account_name)
+        bucket_uri = data_utils.AZURE_CONTAINER_URL.format(
+            storage_account_name=storage_account_name,
+            container_name=tmp_bucket_name)
+        subprocess.check_call([
+            'az', 'storage', 'container', 'create', '--name',
+            f'{tmp_bucket_name}', '--account-name', f'{storage_account_name}',
+            '--account-key', f'{storage_account_key}'
+        ])
+        yield tmp_bucket_name, bucket_uri
+        subprocess.check_call([
+            'az', 'storage', 'container', 'delete', '--name',
+            f'{tmp_bucket_name}', '--account-name', f'{storage_account_name}',
+            '--account-key', f'{storage_account_key}'
+        ])
+
+    @pytest.fixture
     def tmp_awscli_bucket_r2(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
         endpoint_url = cloudflare.create_endpoint()
@@ -4472,6 +4611,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
@@ -4497,6 +4637,7 @@ class TestStorageWithCredentials:
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm)
     ])
@@ -4537,6 +4678,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
@@ -4562,6 +4704,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
@@ -4592,6 +4735,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
@@ -4612,7 +4756,11 @@ class TestStorageWithCredentials:
         'tmp_public_storage_obj, store_type',
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
          ('s3://digitalcorpora', storage_lib.StoreType.S3),
-         ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS)],
+         ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS),
+         pytest.param(
+             'https://azureopendatastorage.blob.core.windows.net/nyctlc',
+             storage_lib.StoreType.AZURE,
+             marks=pytest.mark.azure)],
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not
@@ -4624,11 +4772,17 @@ class TestStorageWithCredentials:
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
     @pytest.mark.no_fluidstack
-    @pytest.mark.parametrize('nonexist_bucket_url', [
-        's3://{random_name}', 'gs://{random_name}',
-        pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
-        pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
-    ])
+    @pytest.mark.parametrize(
+        'nonexist_bucket_url',
+        [
+            's3://{random_name}',
+            'gs://{random_name}',
+            pytest.param(
+                'https://{account_name}.blob.core.windows.net/{random_name}',  # pylint: disable=line-too-long
+                marks=pytest.mark.azure),
+            pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
+            pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
+        ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
         # Generate a random bucket name and verify it doesn't exist:
@@ -4641,6 +4795,16 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('gs'):
                 command = f'gsutil ls {nonexist_bucket_url.format(random_name=nonexist_bucket_name)}'
                 expected_output = 'BucketNotFoundException'
+            elif nonexist_bucket_url.startswith('https'):
+                default_region = 'eastus'
+                storage_account_name = (
+                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
+                    format(region=default_region,
+                           user_hash=common_utils.get_user_hash()))
+                storage_account_key = data_utils.get_az_storage_account_key(
+                    storage_account_name)
+                command = f'az storage container exists --account-name {storage_account_name} --account-key {storage_account_key} --name {nonexist_bucket_name}'
+                expected_output = '"exists": false'
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
@@ -4679,24 +4843,38 @@ class TestStorageWithCredentials:
                                        'to use. This is higly unlikely - '
                                        'check if the tests are correct.')
 
-        with pytest.raises(
-                sky.exceptions.StorageBucketGetError,
-                match='Attempted to use a non-existent bucket as a source'):
-            storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
-                random_name=nonexist_bucket_name))
+        with pytest.raises(sky.exceptions.StorageBucketGetError,
+                           match='Attempted to use a non-existent'):
+            if nonexist_bucket_url.startswith('https'):
+                storage_obj = storage_lib.Storage(
+                    source=nonexist_bucket_url.format(
+                        account_name=storage_account_name,
+                        random_name=nonexist_bucket_name))
+            else:
+                storage_obj = storage_lib.Storage(
+                    source=nonexist_bucket_url.format(
+                        random_name=nonexist_bucket_name))
 
     @pytest.mark.no_fluidstack
-    @pytest.mark.parametrize('private_bucket', [
-        f's3://imagenet', f'gs://imagenet',
-        pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
-    ])
+    @pytest.mark.parametrize(
+        'private_bucket',
+        [
+            f's3://imagenet',
+            f'gs://imagenet',
+            pytest.param('https://smoketestprivate.blob.core.windows.net/test',
+                         marks=pytest.mark.azure),  # pylint: disable=line-too-long
+            pytest.param('cos://us-east/bucket1', marks=pytest.mark.ibm)
+        ])
     def test_private_bucket(self, private_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
-        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc if \
-              urllib.parse.urlsplit(private_bucket).scheme != 'cos' else \
-                  urllib.parse.urlsplit(private_bucket).path.strip('/')
+        store_type = urllib.parse.urlsplit(private_bucket).scheme
+        if store_type == 'https' or store_type == 'cos':
+            private_bucket_name = urllib.parse.urlsplit(
+                private_bucket).path.strip('/')
+        else:
+            private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
                 match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
@@ -4707,6 +4885,9 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
+                              pytest.param('tmp_az_bucket',
+                                           storage_lib.StoreType.AZURE,
+                                           marks=pytest.mark.azure),
                               pytest.param('tmp_ibm_cos_bucket',
                                            storage_lib.StoreType.IBM,
                                            marks=pytest.mark.ibm),
@@ -4756,6 +4937,7 @@ class TestStorageWithCredentials:
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
@@ -4784,6 +4966,9 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize('invalid_name_list, store_type',
                              [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
                               (GCS_INVALID_NAMES, storage_lib.StoreType.GCS),
+                              pytest.param(AZURE_INVALID_NAMES,
+                                           storage_lib.StoreType.AZURE,
+                                           marks=pytest.mark.azure),
                               pytest.param(IBM_INVALID_NAMES,
                                            storage_lib.StoreType.IBM,
                                            marks=pytest.mark.ibm),
@@ -4803,6 +4988,7 @@ class TestStorageWithCredentials:
         'gitignore_structure, store_type',
         [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
          (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS),
+         (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.AZURE),
          pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
                       storage_lib.StoreType.R2,
                       marks=pytest.mark.cloudflare)])

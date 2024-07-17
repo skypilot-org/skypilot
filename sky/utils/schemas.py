@@ -748,6 +748,16 @@ def get_config_schema():
             },
             **_check_not_both_fields_present('instance_tags', 'labels')
         },
+        'azure': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'storage_account': {
+                    'type': 'string',
+                },
+            }
+        },
         'kubernetes': {
             'type': 'object',
             'required': [],
