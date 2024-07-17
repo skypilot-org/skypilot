@@ -24,22 +24,24 @@ Welcome to SkyPilot!
    </p>
 
    <p style="text-align:center">
-   <strong>Run LLMs and AI on Any Cloud</strong>
+   <strong>Run AI on Any Infra</strong>
    </p>
 
-SkyPilot is a framework for running LLMs, AI, and batch jobs on any cloud, offering maximum cost savings, highest GPU availability, and managed execution.
+SkyPilot is a framework for running LLMs, AI, and batch jobs on any infrastructure (12+ clouds and Kubernetes).
 
-SkyPilot **abstracts away cloud infra burdens**:
+**Developer friendly**:
 
-- Launch jobs & clusters on any cloud
+- One command to launch jobs & clusters on any infra
 - Easy scale-out: queue and run many jobs, automatically managed
-- Easy access to object stores (S3, GCS, R2)
+- SSH and VSCode integration out of the box
+- Easy access to object stores (S3, GCS, Azure, R2)
 
-SkyPilot **maximizes GPU availability for your jobs**:
+**Maximum GPU availability**:
 
-* Provision in all zones/regions/clouds you have access to (`the Sky <https://arxiv.org/abs/2205.07147>`_), with automatic failover
+* Provision in all zones/regions/cloud/kubernetes clusters you have access to (`the Sky <https://arxiv.org/abs/2205.07147>`_), with automatic failover
+* If your Kubernetes cluster is full, SkyPilot bursts to cloud
 
-SkyPilot **cuts your cloud costs**:
+**Cost efficient**:
 
 * `Managed Spot <https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html>`_: 3-6x cost savings using spot VMs, with auto-recovery from preemptions
 * Optimizer: 2x cost savings by auto-picking the cheapest VM/zone/region/cloud
@@ -57,6 +59,99 @@ Current supported providers (AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidst
       <img class="only-dark" alt="SkyPilot Supported Clouds" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png" width=85%>
    </picture>
    </p>
+
+Why use SkyPilot?
+-----------------
+
+
+.. tab-set::
+
+    .. tab-item:: Single Cloud Users
+        :sync: single-cloud-tab
+
+        .. raw:: html
+
+            <p style="text-align:center">Have access to only one cloud? SkyPilot helps you make the most of it. </p>
+
+        .. grid:: 2
+            :gutter: 3
+
+            .. grid-item-card::  ✅ Ease of use
+                :text-align: center
+
+                One command -- ``sky launch`` -- to launch repeatable runs. :ref:`SSH <dev-ssh>`, :ref:`VSCode integration <dev-vscode>`, :ref:`job queueing <managed-jobs>` supported out of the box.
+
+            .. grid-item-card::  💰 Cost savings
+                :text-align: center
+
+                :ref:`Spot instances <spot-jobs>` save upto 6x, SkyPilot optimizer picks the cheapest resources for you, no more idle resource wastage with :ref:`autostop <auto-stop>`.
+
+            .. grid-item-card::  🚀 Maximum availability
+                :text-align: center
+
+                SkyPilot's failover finds GPUs across regions, ensuring your job runs as soon as possible.
+
+            .. grid-item-card:: 🔮 Future-proof
+                :text-align: center
+
+                SkyPilot is cloud-agnostic and moving to a new cloud is as simple as adding a flag. No rewrites required when you switch clouds.
+
+    .. tab-item:: Kubernetes only Users
+        :sync: multi-infra-tab
+
+        Running on Kubernetes? SkyPilot makes your workflows faster and simpler.
+
+        .. grid:: 2
+            :gutter: 3
+
+            .. grid-item-card::  ✅ Ease of use
+                :text-align: center
+
+                No complex kubernetes manifests - write a simple SkyPilot YAML and run with one command ``sky launch``.
+
+            .. grid-item-card::  📋 Interactive development on Kubernetes
+                :text-align: center
+
+                :ref:`SSH access to pods <dev-ssh>`, :ref:`VSCode integration <dev-vscode>`, :ref:`job management <managed-jobs>`, :ref:`autodown idle pods <auto-stop>` and more.
+
+            .. grid-item-card::  ☁️ Burst to the cloud
+                :text-align: center
+
+                Kubernetes cluster is full? SkyPilot :ref:`seamlessly gets resources on the cloud <kubernetes-optimizer-table>` to get your job running sooner.
+
+            .. grid-item-card::  🖼 Run popular models on Kubernetes
+                :text-align: center
+
+                Train and serve `Llama-3 <https://skypilot.readthedocs.io/en/latest/gallery/llms/llama-3.html>`_, `Mixtral <https://skypilot.readthedocs.io/en/latest/gallery/llms/mixtral.html>`_, and more on your Kubernetes with ready-to-use recipes from the :ref:`AI gallery <ai-gallery>`.
+
+    .. tab-item:: Multi Infra Users
+        :sync: multi-infra-tab
+
+        Have access to multiple clouds and/or Kubernetes clusters? SkyPilot was designed to get the most out of your resources.
+
+        .. grid:: 2
+            :gutter: 3
+
+            .. grid-item-card::  ✅ Ease of use
+                :text-align: center
+
+                One command to launch repeatable runs on any infra. Same features, :ref:`SSH access <dev-ssh>`, :ref:`VSCode integration <dev-vscode>`, :ref:`job queueing <managed-jobs>`, any cloud.
+
+            .. grid-item-card::  💰 Cost savings
+                :text-align: center
+
+                Cost for the same GPUs varies by up to 4x across clouds - SkyPilot picks the cheapest for you. Run on spot instances to save 3-6x on supported clouds.
+
+            .. grid-item-card::  🚀 Maximum availability
+                :text-align: center
+
+                SkyPilot scans all your clouds, regions and Kubernetes clusters for GPU availability. If there's a GPU out there, SkyPilot will find it for you.
+
+            .. grid-item-card::  ☁️ Unified platform for all Infrastructure
+                :text-align: center
+
+                Manage all your jobs across all your clouds and Kubernetes clusters in one place. No need to switch between different platforms.
+
 
 More Information
 --------------------------
