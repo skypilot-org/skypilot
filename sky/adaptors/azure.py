@@ -67,6 +67,9 @@ def exceptions():
     return azure_exceptions
 
 
+# We should keep the order of the decorators having 'lru_cache' followed
+# by 'load_lazy_modules' as we need to make sure a caller can call
+# 'get_client.cache_clear', which is a function provided by 'lru_cache'
 @functools.lru_cache()
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_client(name: str,
