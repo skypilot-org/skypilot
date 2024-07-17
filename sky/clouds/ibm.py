@@ -169,7 +169,7 @@ class IBM(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name_on_cloud: str,
+        cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
         dryrun: bool = False,
@@ -185,7 +185,7 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
-        del cluster_name_on_cloud, dryrun  # Unused.
+        del cluster_name, dryrun  # Unused.
 
         def _get_profile_resources(instance_profile):
             """returns a dict representing the

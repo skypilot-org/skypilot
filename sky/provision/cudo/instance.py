@@ -16,7 +16,6 @@ logger = sky_logging.init_logger(__name__)
 
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]]) -> Dict[str, Any]:
-
     instances = cudo_wrapper.list_instances()
     possible_names = [
         f'{cluster_name_on_cloud}-head', f'{cluster_name_on_cloud}-worker'
@@ -77,10 +76,19 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     created_instance_ids = []
     public_key = config.node_config['AuthorizedKey']
-
+    instance_type = config.node_config['InstanceType']
+    spec = cudo_machine_type.get_spec_from_instance(instance_type, region)
+    gpu_count = int(float(spec['gpu_count']))
+    vcpu_count = int(spec['vcpu_count'])
+    memory_gib = int(spec['mem_gb'])
+    gpu_model = spec['gpu_model']
+    try:
+        cudo_wrapper.vm_available(to_start_count, gpu_count, gpu_model, region,
+                                  memory_gib, vcpu_count)
+    except Exception as e:
+        logger.warning(f'run_instances: {e}')
+        raise
     for _ in range(to_start_count):
-        instance_type = config.node_config['InstanceType']
-        spec = cudo_machine_type.get_spec_from_instance(instance_type, region)
 
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
@@ -89,10 +97,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 ssh_key=public_key,
                 data_center_id=region,
                 machine_type=spec['machine_type'],
-                memory_gib=int(spec['mem_gb']),
-                vcpu_count=int(spec['vcpu_count']),
-                gpu_count=int(float(spec['gpu_count'])),
-                gpu_model=spec['gpu_model'],
+                memory_gib=memory_gib,
+                vcpu_count=vcpu_count,
+                gpu_count=gpu_count,
                 tags={},
                 disk_size=config.node_config['DiskSize'])
         except Exception as e:  # pylint: disable=broad-except
@@ -150,11 +157,10 @@ def terminate_instances(
     del provider_config
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
-        logger.info(f'Terminating instance {inst_id}.'
-                    f'{inst}')
         if worker_only and inst['name'].endswith('-head'):
             continue
-        logger.info(f'Removing {inst_id}: {inst}')
+        logger.debug(f'Terminating Cudo instance {inst_id}.'
+                     f'{inst}')
         cudo_wrapper.remove(inst_id)
 
 
@@ -211,6 +217,16 @@ def query_instances(
             continue
         statuses[inst_id] = status
     return statuses
+
+
+def open_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    del cluster_name_on_cloud, ports, provider_config
+    # Cudo has all ports open by default. Nothing to do here.
+    return
 
 
 def cleanup_ports(

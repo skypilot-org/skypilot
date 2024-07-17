@@ -253,7 +253,7 @@ class Cloud:
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name_on_cloud: str,
+        cluster_name: resources_utils.ClusterName,
         region: 'Region',
         zones: Optional[List['Zone']],
         dryrun: bool = False,
@@ -726,8 +726,8 @@ class Cloud:
     # cloud._cloud_unsupported_features().
 
     @classmethod
-    def create_image_from_cluster(cls, cluster_name: str,
-                                  cluster_name_on_cloud: str,
+    def create_image_from_cluster(cls,
+                                  cluster_name: resources_utils.ClusterName,
                                   region: Optional[str],
                                   zone: Optional[str]) -> str:
         """Creates an image from the cluster.

@@ -1,5 +1,6 @@
 """Amazon Web Services."""
 import enum
+import fnmatch
 import functools
 import json
 import os
@@ -371,12 +372,13 @@ class AWS(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='aws')
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources_lib.Resources',
-                                        cluster_name_on_cloud: str,
-                                        region: 'clouds.Region',
-                                        zones: Optional[List['clouds.Zone']],
-                                        dryrun: bool = False) -> Dict[str, Any]:
+    def make_deploy_resources_variables(
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name: resources_utils.ClusterName,
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Any]:
         del dryrun  # unused
         assert zones is not None, (region, zones)
 
@@ -398,18 +400,32 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       r.instance_type)
 
-        user_security_group = skypilot_config.get_nested(
+        user_security_group_config = skypilot_config.get_nested(
             ('aws', 'security_group_name'), None)
-        if resources.ports is not None:
-            # Already checked in Resources._try_validate_ports
-            assert user_security_group is None
-            security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
-                cluster_name_on_cloud)
-        elif user_security_group is not None:
-            assert resources.ports is None
-            security_group = user_security_group
-        else:
+        user_security_group = None
+        if isinstance(user_security_group_config, str):
+            user_security_group = user_security_group_config
+        elif isinstance(user_security_group_config, list):
+            for profile in user_security_group_config:
+                if fnmatch.fnmatchcase(cluster_name.display_name,
+                                       list(profile.keys())[0]):
+                    user_security_group = list(profile.values())[0]
+                    break
+        security_group = user_security_group
+        if security_group is None:
             security_group = DEFAULT_SECURITY_GROUP_NAME
+            if resources.ports is not None:
+                # Already checked in Resources._try_validate_ports
+                security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
+                    cluster_name.display_name)
+        elif resources.ports is not None:
+            with ux_utils.print_exception_no_traceback():
+                logger.warning(
+                    f'Skip opening ports {resources.ports} for cluster {cluster_name!r}, '
+                    'as `aws.security_group_name` in `~/.sky/config.yaml` is specified as '
+                    f' {security_group!r}. Please make sure the specified security group '
+                    'has requested ports setup; or, leave out `aws.security_group_name` '
+                    'in `~/.sky/config.yaml`.')
 
         return {
             'instance_type': r.instance_type,
@@ -841,22 +857,24 @@ class AWS(clouds.Cloud):
         assert False, 'This code path should not be used.'
 
     @classmethod
-    def create_image_from_cluster(cls, cluster_name: str,
-                                  cluster_name_on_cloud: str,
+    def create_image_from_cluster(cls,
+                                  cluster_name: resources_utils.ClusterName,
                                   region: Optional[str],
                                   zone: Optional[str]) -> str:
-        assert region is not None, (cluster_name, cluster_name_on_cloud, region)
+        assert region is not None, (cluster_name.display_name,
+                                    cluster_name.name_on_cloud, region)
         del zone  # unused
 
-        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
+        image_name = f'skypilot-{cluster_name.display_name}-{int(time.time())}'
 
-        status = provision_lib.query_instances('AWS', cluster_name_on_cloud,
+        status = provision_lib.query_instances('AWS',
+                                               cluster_name.name_on_cloud,
                                                {'region': region})
         instance_ids = list(status.keys())
         if not instance_ids:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Failed to find the source cluster {cluster_name!r} on '
+                    f'Failed to find the source cluster {cluster_name.display_name!r} on '
                     'AWS.')
 
         if len(instance_ids) != 1:
@@ -883,7 +901,7 @@ class AWS(clouds.Cloud):
             stream_logs=True)
 
         rich_utils.force_update_status(
-            f'Waiting for the source image {cluster_name!r} from {region} to be available on AWS.'
+            f'Waiting for the source image {cluster_name.display_name!r} from {region} to be available on AWS.'
         )
         # Wait for the image to be available
         wait_image_cmd = (
@@ -974,7 +992,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def is_label_valid(cls, label_key: str,
                        label_value: str) -> Tuple[bool, Optional[str]]:
-        key_regex = re.compile(r'^[^aws:][\S]{0,127}$')
+        key_regex = re.compile(r'^(?!aws:)[\S]{1,127}$')
         value_regex = re.compile(r'^[\S]{0,255}$')
         key_valid = bool(key_regex.match(label_key))
         value_valid = bool(value_regex.match(label_value))

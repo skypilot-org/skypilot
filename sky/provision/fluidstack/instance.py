@@ -26,7 +26,7 @@ logger = sky_logging.init_logger(__name__)
 def get_internal_ip(node_info: Dict[str, Any]) -> None:
     node_info['internal_ip'] = node_info['ip_address']
     runner = command_runner.SSHCommandRunner(
-        node_info['ip_address'],
+        (node_info['ip_address'], 22),
         ssh_user=node_info['capabilities']['default_user_name'],
         ssh_private_key=auth.PRIVATE_SSH_KEY_PATH)
     result = runner.run(_GET_INTERNAL_IP_CMD,

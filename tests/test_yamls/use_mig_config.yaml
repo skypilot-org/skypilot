@@ -1,0 +1,4 @@
+gcp:
+  managed_instance_group:
+    run_duration: 36000
+    provision_timeout: 900

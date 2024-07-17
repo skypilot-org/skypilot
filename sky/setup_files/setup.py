@@ -218,7 +218,7 @@ extras_require: Dict[str, List[str]] = {
     # timeout of AzureCliCredential.
     'azure': [
         'azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0',
-        'azure-mgmt-network'
+        'azure-mgmt-network', 'azure-storage-blob', 'msgraph-sdk'
     ] + local_ray,
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances.

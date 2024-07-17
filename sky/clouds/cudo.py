@@ -67,6 +67,10 @@ class Cudo(clouds.Cloud):
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             ('Docker image is currently not supported on Cudo. You can try '
              'running docker command inside the `run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: (
+            'Cudo Compute cannot host a controller as it does not '
+            'autostopping, which will leave the controller to run indefinitely.'
+        ),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
 
@@ -191,12 +195,12 @@ class Cudo(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name_on_cloud: str,
+        cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
-        del zones
+        del zones, cluster_name  # unused
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:

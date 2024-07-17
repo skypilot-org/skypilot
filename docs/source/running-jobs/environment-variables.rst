@@ -1,23 +1,38 @@
 
 .. _env-vars:
 
-Using Environment Variables
+Secrets and Environment Variables
 ================================================
+
+Environment variables are a powerful way to pass configuration and secrets to your tasks. There are two types of environment variables in SkyPilot:
+
+- :ref:`User-specified environment variables <user-specified-env-vars>`: Passed by users to tasks, useful for secrets and configurations.
+- :ref:`SkyPilot environment variables <sky-env-vars>`: Predefined by SkyPilot with information about the current cluster and task.
+
+.. _user-specified-env-vars:
 
 User-specified environment variables
 ------------------------------------------------------------------
 
+User-specified environment variables are useful for passing secrets and any arguments or configurations needed for your tasks. They are made available in ``file_mounts``, ``setup``, and ``run``.
+
 You can specify environment variables to be made available to a task in two ways:
 
-- The ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`
-- The ``--env`` flag in the ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
+- ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`:
+
+  .. code-block:: yaml
+
+    envs:
+      MYVAR: val
+  
+- ``--env`` flag in ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
 
 .. tip::
 
-  If an environment variable is required to be specified with `--env` during
-  ``sky launch/exec``, you can set it to ``null`` in task YAML to raise an
-  error when it is forgotten to be specified. For example, the ``WANDB_API_KEY``
-  and ``HF_TOKEN`` in the following task YAML:
+  To mark an environment variable as required and make SkyPilot forcefully check
+  its existence (errors out if not specified), set it to an empty string or
+  ``null`` in the task YAML. For example, ``WANDB_API_KEY`` and ``HF_TOKEN`` in
+  the following task YAML are marked as required:
 
   .. code-block:: yaml
 
@@ -27,6 +42,26 @@ You can specify environment variables to be made available to a task in two ways
       MYVAR: val
 
 The ``file_mounts``, ``setup``, and ``run`` sections of a task YAML can access the variables via the ``${MYVAR}`` syntax.
+
+.. _passing-secrets:
+
+Passing secrets
+~~~~~~~~~~~~~~~
+
+We recommend passing secrets to any node(s) executing your task by first making
+it available in your current shell, then using ``--env SECRET`` to pass it to SkyPilot:
+
+.. code-block:: console
+
+  $ sky launch -c mycluster --env HF_TOKEN --env WANDB_API_KEY task.yaml
+  $ sky exec mycluster --env WANDB_API_KEY task.yaml
+
+.. tip::
+
+  You do not need to pass the value directly such as ``--env
+  WANDB_API_KEY=1234``. When the value is not specified (e.g., ``--env WANDB_API_KEY``),
+  SkyPilot reads it from local environment variables.
+
 
 Using in ``file_mounts``
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -77,40 +112,29 @@ For example, this is useful for passing secrets (see below) or passing configura
 See complete examples at `llm/vllm/serve.yaml <https://github.com/skypilot-org/skypilot/blob/596c1415b5039adec042594f45b342374e5e6a00/llm/vllm/serve.yaml#L4-L5>`_ and `llm/vicuna/train.yaml <https://github.com/skypilot-org/skypilot/blob/596c1415b5039adec042594f45b342374e5e6a00/llm/vicuna/train.yaml#L111-L116>`_.
 
 
-.. _passing-secrets:
 
-Passing secrets
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-We recommend passing secrets to any node(s) executing your task by first making
-it available in your current shell, then using ``--env`` to pass it to SkyPilot:
-
-.. code-block:: console
-
-  $ sky launch -c mycluster --env WANDB_API_KEY task.yaml
-  $ sky exec mycluster --env WANDB_API_KEY task.yaml
-
-.. tip::
-
-   In other words, you do not need to pass the value directly such as ``--env
-   WANDB_API_KEY=1234``.
-
-
-
-
+.. _sky-env-vars:
 
 SkyPilot environment variables
 ------------------------------------------------------------------
 
-SkyPilot exports these environment variables for a task's execution. ``setup``
-and ``run`` stages have different environment variables available.
+SkyPilot exports several predefined environment variables made available during a task's execution. These variables contain information about the current cluster or task, which can be useful for distributed frameworks such as
+torch.distributed, OpenMPI, etc. See examples in :ref:`dist-jobs` and :ref:`managed-jobs`.
+
+The values of these variables are filled in by SkyPilot at task execution time.
+You can access these variables in the following ways:
+
+* In the task YAML's ``setup``/``run`` commands (a Bash script), access them using the ``${MYVAR}`` syntax;
+* In the program(s) launched in ``setup``/``run``, access them using the language's standard method (e.g., ``os.environ`` for Python).
+
+The ``setup`` and ``run`` stages can access different sets of SkyPilot environment variables:
 
 Environment variables for ``setup``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 .. list-table::
-   :widths: 20 60 10
+   :widths: 20 40 10
    :header-rows: 1
 
    * - Name
@@ -121,7 +145,17 @@ Environment variables for ``setup``
      - 0
    * - ``SKYPILOT_SETUP_NODE_IPS``
      - A string of IP addresses of the nodes in the cluster with the same order as the node ranks, where each line contains one IP address.
-     - 1.2.3.4
+     
+       Note that this is not necessarily the same as the nodes in ``run`` stage: the ``setup`` stage runs on all nodes of the cluster, while the ``run`` stage can run on a subset of nodes.
+     -      
+       .. code-block:: text
+
+         1.2.3.4
+         3.4.5.6
+
+   * - ``SKYPILOT_NUM_NODES``
+     - Number of nodes in the cluster. Same value as ``$(echo "$SKYPILOT_NODE_IPS" | wc -l)``.
+     - 2
    * - ``SKYPILOT_TASK_ID``
      - A unique ID assigned to each task.
        
@@ -133,7 +167,15 @@ Environment variables for ``setup``
      
        For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
    * - ``SKYPILOT_CLUSTER_INFO``
-     - A JSON string containing information about the cluster. To access the information, you could parse the JSON string in bash ``echo $SKYPILOT_CLUSTER_INFO | jq .cloud`` or in Python ``json.loads(os.environ['SKYPILOT_CLUSTER_INFO'])['cloud']``.
+     - A JSON string containing information about the cluster. To access the information, you could parse the JSON string in bash ``echo $SKYPILOT_CLUSTER_INFO | jq .cloud`` or in Python :
+
+       .. code-block:: python
+         
+         import json
+         json.loads(
+           os.environ['SKYPILOT_CLUSTER_INFO']
+         )['cloud']
+
      - {"cluster_name": "my-cluster-name", "cloud": "GCP", "region": "us-central1", "zone": "us-central1-a"}
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
@@ -147,7 +189,7 @@ Environment variables for ``run``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
-   :widths: 20 60 10
+   :widths: 20 40 10
    :header-rows: 1
 
    * - Name
@@ -158,7 +200,14 @@ Environment variables for ``run``
      - 0
    * - ``SKYPILOT_NODE_IPS``
      - A string of IP addresses of the nodes reserved to execute the task, where each line contains one IP address. Read more :ref:`here <dist-jobs>`.
-     - 1.2.3.4
+     - 
+       .. code-block:: text
+
+         1.2.3.4
+
+   * - ``SKYPILOT_NUM_NODES``
+     - Number of nodes assigned to execute the current task. Same value as ``$(echo "$SKYPILOT_NODE_IPS" | wc -l)``. Read more :ref:`here <dist-jobs>`.
+     - 1
    * - ``SKYPILOT_NUM_GPUS_PER_NODE``
      - Number of GPUs reserved on each node to execute the task; the same as the
        count in ``accelerators: <name>:<count>`` (rounded up if a fraction). Read
@@ -175,16 +224,15 @@ Environment variables for ``run``
      
        For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
    * - ``SKYPILOT_CLUSTER_INFO``
-     - A JSON string containing information about the cluster. To access the information, you could parse the JSON string in bash ``echo $SKYPILOT_CLUSTER_INFO | jq .cloud`` or in Python ``json.loads(os.environ['SKYPILOT_CLUSTER_INFO'])['cloud']``.
+     - A JSON string containing information about the cluster. To access the information, you could parse the JSON string in bash ``echo $SKYPILOT_CLUSTER_INFO | jq .cloud``  or in Python :
+
+       .. code-block:: python
+         
+         import json
+         json.loads(
+           os.environ['SKYPILOT_CLUSTER_INFO']
+         )['cloud']
      - {"cluster_name": "my-cluster-name", "cloud": "GCP", "region": "us-central1", "zone": "us-central1-a"}
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
-
-The values of these variables are filled in by SkyPilot at task execution time.
-
-You can access these variables in the following ways:
-
-* In the task YAML's ``setup``/``run`` commands (a Bash script), access them using the ``${MYVAR}`` syntax;
-* In the program(s) launched in ``setup``/``run``, access them using the
-  language's standard method (e.g., ``os.environ`` for Python).

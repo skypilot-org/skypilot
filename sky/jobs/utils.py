@@ -843,4 +843,5 @@ class ManagedJobCodeGen:
     @classmethod
     def _build(cls, code: str) -> str:
         generated_code = cls._PREFIX + '\n' + code
+
         return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}'

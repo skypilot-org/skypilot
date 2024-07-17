@@ -12,196 +12,156 @@ Kubernetes Cluster Setup
     and shared a kubeconfig file with you, :ref:`Submitting tasks to Kubernetes <kubernetes-instructions>`
     explains how to submit tasks to your cluster.
 
+.. grid:: 1 1 3 3
+    :gutter: 2
 
-SkyPilot's Kubernetes support is designed to work with most Kubernetes distributions and deployment environments.
+    .. grid-item-card:: ⚙️ Setup Kubernetes Cluster
+        :link: kubernetes-setup-intro
+        :link-type: ref
+        :text-align: center
 
-To connect to a Kubernetes cluster, SkyPilot needs:
+        Configure your Kubernetes cluster to run SkyPilot.
 
-* An existing Kubernetes cluster running Kubernetes v1.20 or later.
-* A `Kubeconfig <kubeconfig>`_ file containing access credentials and namespace to be used.
+    .. grid-item-card::  ✅️ Verify Setup
+        :link: kubernetes-setup-verify
+        :link-type: ref
+        :text-align: center
 
-
-Deployment Guides
------------------
-Below we show minimal examples to set up a new Kubernetes cluster in different environments, including hosted services on the cloud, and generating kubeconfig files which can be :ref:`used by SkyPilot <kubernetes-instructions>`.
-
-..
-  TODO(romilb) - Add a table of contents/grid cards for each deployment environment.
-
-* :ref:`Deploying locally on your laptop <kubernetes-setup-kind>`
-* :ref:`Deploying on Google Cloud GKE <kubernetes-setup-gke>`
-* :ref:`Deploying on Amazon EKS <kubernetes-setup-eks>`
-* :ref:`Deploying on on-prem clusters <kubernetes-setup-onprem>`
-
-.. _kubernetes-setup-kind:
+        Ensure your cluster is set up correctly for SkyPilot.
 
 
-Deploying locally on your laptop
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    .. grid-item-card::  👀️ Observability
+        :link: kubernetes-observability
+        :link-type: ref
+        :text-align: center
 
-To try out SkyPilot on Kubernetes on your laptop or run SkyPilot
-tasks locally without requiring any cloud access, we provide the
-:code:`sky local up` CLI to create a 1-node Kubernetes cluster locally.
-
-Under the hood, :code:`sky local up` uses `kind <https://kind.sigs.k8s.io/>`_,
-a tool for creating a Kubernetes cluster on your local machine.
-It runs a Kubernetes cluster inside a container, so no setup is required.
-
-1. Install `Docker <https://docs.docker.com/engine/install/>`_ and `kind <https://kind.sigs.k8s.io/>`_.
-2. Run :code:`sky local up` to launch a Kubernetes cluster and automatically configure your kubeconfig file:
-
-   .. code-block:: console
-
-     $ sky local up
-
-3. Run :code:`sky check` and verify that Kubernetes is enabled in SkyPilot. You can now run SkyPilot tasks on this locally hosted Kubernetes cluster using :code:`sky launch`.
-4. After you are done using the cluster, you can remove it with :code:`sky local down`. This will terminate the KinD container and switch your kubeconfig back to it's original context:
-
-   .. code-block:: console
-
-     $ sky local down
-
-.. note::
-    We recommend allocating at least 4 or more CPUs to your docker runtime to
-    ensure kind has enough resources. See instructions
-    `here <https://docs.docker.com/desktop/settings/linux/>`_.
-
-.. note::
-    kind does not support multiple nodes and GPUs.
-    It is not recommended for use in a production environment.
-    If you want to run a private on-prem cluster, see the section on :ref:`on-prem deployment <kubernetes-setup-onprem>` for more.
+        Use your existing Kubernetes tooling to monitor SkyPilot resources.
 
 
-.. _kubernetes-setup-gke:
 
-Deploying on Google Cloud GKE
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. _kubernetes-setup-intro:
 
-1. Create a GKE standard cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
-2. Get the kubeconfig for your cluster. The following command will automatically update ``~/.kube/config`` with new kubecontext for the GKE cluster:
+Setting up Kubernetes cluster for SkyPilot
+------------------------------------------
 
-   .. code-block:: console
+To prepare a Kubernetes cluster to run SkyPilot, the cluster administrator must:
 
-     $ gcloud container clusters get-credentials <cluster-name> --region <region>
+1. :ref:`Deploy a cluster <kubernetes-setup-deploy>` running Kubernetes v1.20 or later.
+2. Set up :ref:`GPU support <kubernetes-setup-gpusupport>`.
+3. [Optional] :ref:`Set up ports <kubernetes-setup-ports>` for exposing services.
+4. [Optional] :ref:`Set up permissions <kubernetes-setup-serviceaccount>`: create a namespace for your users and/or create a service account with minimal permissions for SkyPilot.
 
-     # Example:
-     # gcloud container clusters get-credentials testcluster --region us-central1-c
+After these steps, the administrator can share the kubeconfig file with users, who can then submit tasks to the cluster using SkyPilot.
 
-3. [If using GPUs] If your GKE nodes have GPUs, you may need to to
-   `manually install <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_
-   nvidia drivers. You can do so by deploying the daemonset
-   depending on the GPU and OS on your nodes:
+.. _kubernetes-setup-deploy:
 
-   .. code-block:: console
+Step 1 - Deploy a Kubernetes Cluster
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-     # For Container Optimized OS (COS) based nodes with GPUs other than Nvidia L4 (e.g., V100, A100, ...):
-     $ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
+.. tip::
 
-     # For Container Optimized OS (COS) based nodes with L4 GPUs:
-     $ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded-latest.yaml
+    If you already have a Kubernetes cluster, skip this step.
 
-     # For Ubuntu based nodes with GPUs other than Nvidia L4 (e.g., V100, A100, ...):
-     $ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded.yaml
+Below we link to minimal guides to set up a new Kubernetes cluster in different environments, including hosted services on the cloud.
 
-     # For Ubuntu based nodes with L4 GPUs:
-     $ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded-R525.yaml
+.. grid:: 2
+    :gutter: 3
 
-   To verify if GPU drivers are set up, run ``kubectl describe nodes`` and verify that ``nvidia.com/gpu`` is listed under the ``Capacity`` section.
+    .. grid-item-card::  Local Development Cluster
+        :link: kubernetes-setup-kind
+        :link-type: ref
+        :text-align: center
 
-4. Verify your kubeconfig (and GPU support, if available) is correctly set up by running :code:`sky check`:
+        Run a local Kubernetes cluster on your laptop with ``sky local up``.
 
-   .. code-block:: console
+    .. grid-item-card::  On-prem Clusters (RKE2, K3s, etc.)
+        :link: kubernetes-setup-onprem
+        :link-type: ref
+        :text-align: center
 
-     $ sky check
+        For on-prem deployments with kubeadm, RKE2, K3s or other distributions.
 
-.. note::
-    GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
+    .. grid-item-card:: Google Cloud - GKE
+        :link: kubernetes-setup-gke
+        :link-type: ref
+        :text-align: center
 
+        Google's hosted Kubernetes service.
 
-.. _kubernetes-setup-eks:
+    .. grid-item-card::  Amazon - EKS
+        :link: kubernetes-setup-eks
+        :link-type: ref
+        :text-align: center
 
-Deploying on Amazon EKS
-^^^^^^^^^^^^^^^^^^^^^^^
+        Amazon's hosted Kubernetes service.
 
-1. Create a EKS cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
-
-2. Get the kubeconfig for your cluster. The following command will automatically update ``~/.kube/config`` with new kubecontext for the EKS cluster:
-
-   .. code-block:: console
-
-     $ aws eks update-kubeconfig --name <cluster-name> --region <region>
-
-     # Example:
-     # aws eks update-kubeconfig --name testcluster --region us-west-2
-
-3. [If using GPUs] EKS clusters already come with Nvidia drivers set up. However, you will need to label the nodes with the GPU type. Use the SkyPilot node labelling tool to do so:
-
-   .. code-block:: console
-
-     python -m sky.utils.kubernetes.gpu_labeler
-
-
-   This will create a job on each node to read the GPU type from `nvidia-smi` and assign a ``skypilot.co/accelerator`` label to the node. You can check the status of these jobs by running:
-
-   .. code-block:: console
-
-     kubectl get jobs -n kube-system
-
-4. Verify your kubeconfig (and GPU support, if available) is correctly set up by running :code:`sky check`:
-
-   .. code-block:: console
-
-     $ sky check
-
-
-.. _kubernetes-setup-onprem:
-
-Deploying on on-prem clusters
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-You can also deploy Kubernetes on your on-prem clusters using off-the-shelf tools,
-such as `kubeadm <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_,
-`k3s <https://docs.k3s.io/quick-start>`_ or
-`Rancher <https://ranchermanager.docs.rancher.com/v2.5/pages-for-subheaders/kubernetes-clusters-in-rancher-setup>`_.
-Please follow their respective guides to deploy your Kubernetes cluster.
 
 .. _kubernetes-setup-gpusupport:
 
-Setting up GPU support
-~~~~~~~~~~~~~~~~~~~~~~
-If your Kubernetes cluster has Nvidia GPUs, ensure that:
+Step 2 - Set up GPU support
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-1. The Nvidia GPU operator is installed (i.e., ``nvidia.com/gpu`` resource is available on each node) and ``nvidia`` is set as the default runtime for your container engine. See `Nvidia's installation guide <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_ for more details.
-2. Each node in your cluster is labelled with the GPU type. This labelling can be done using `SkyPilot's GPU labelling script <automatic-gpu-labelling_>`_ or by manually adding a label of the format ``skypilot.co/accelerator: <gpu_name>``, where the ``<gpu_name>`` is the lowercase name of the GPU. For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerator: v100`.
+To utilize GPUs on Kubernetes, your cluster must:
+
+1. Have the ``nvidia.com/gpu`` **resource** available on all GPU nodes and have ``nvidia`` as the default runtime for your container engine.
+
+   * If you are following :ref:`our deployment guides <kubernetes-deployment>` or using GKE or EKS, this would already be set up. Else, install the `Nvidia GPU Operator <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_.
+
+2. Have a **label on each node specifying the GPU type**. See :ref:`Setting up GPU labels <kubernetes-gpu-labels>` for more details.
+
 
 .. tip::
-    You can check if GPU operator is installed and the ``nvidia`` runtime is set as default by running:
+    To verify the `Nvidia GPU Operator <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_ is installed after step 1 and the ``nvidia`` runtime is set as default, run:
 
     .. code-block:: console
 
         $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/gpu_test_pod.yaml
         $ watch kubectl get pods
-        # If the pod status changes to completed after a few minutes, your Kubernetes environment is set up correctly.
+        # If the pod status changes to completed after a few minutes, Nvidia GPU driver is set up correctly. Move on to setting up GPU labels.
 
 .. note::
 
     Refer to :ref:`Notes for specific Kubernetes distributions <kubernetes-setup-onprem-distro-specific>` for additional instructions on setting up GPU support on specific Kubernetes distributions, such as RKE2 and K3s.
 
 
-.. note::
+.. _kubernetes-gpu-labels:
 
-    GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerator`` label.
+Setting up GPU labels
+~~~~~~~~~~~~~~~~~~~~~
 
-.. note::
+.. tip::
 
-    GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
+    If your cluster has the Nvidia GPU Operator installed or you are using GKE or Karpenter, your cluster already has the necessary GPU labels. You can skip this section.
 
-.. _automatic-gpu-labelling:
+To use GPUs with SkyPilot, cluster nodes must be labelled with the GPU type. This informs SkyPilot which GPU types are available on the cluster.
 
-Automatic GPU labelling
-~~~~~~~~~~~~~~~~~~~~~~~
+Currently supported labels are:
 
-We provide a convenience script that automatically detects GPU types and labels each node. You can run it with:
+* ``nvidia.com/gpu.product``: automatically created by Nvidia GPU Operator.
+* ``cloud.google.com/gke-accelerator``: used by GKE clusters.
+* ``karpenter.k8s.aws/instance-gpu-name``: used by Karpenter.
+* ``skypilot.co/accelerator``: custom label used by SkyPilot if none of the above are present.
+
+Any one of these labels is sufficient for SkyPilot to detect GPUs on the cluster.
+
+.. tip::
+
+    To check if your nodes contain the necessary labels, run:
+
+    .. code-block:: bash
+
+        output=$(kubectl get nodes --show-labels | awk -F'[, ]' '{for (i=1; i<=NF; i++) if ($i ~ /nvidia.com\/gpu.product=|cloud.google.com\/gke-accelerator=|karpenter.k8s.aws\/instance-gpu-name=|skypilot.co\/accelerator=/) print $i}')
+        if [ -z "$output" ]; then
+          echo "No valid GPU labels found."
+        else
+          echo "GPU Labels found:"
+          echo "$output"
+        fi
+
+Automatically Labelling Nodes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If none of the above labels are present on your cluster, we provide a convenience script that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with:
 
 .. code-block:: console
 
@@ -217,11 +177,82 @@ We provide a convenience script that automatically detects GPU types and labels 
 
     If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
 
+Manually Labelling Nodes
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can also manually label nodes, if required. Labels must be of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
+
+For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerator: v100`.
+
+Use the following command to label a node:
+
+.. code-block:: bash
+
+    kubectl label nodes <node-name> skypilot.co/accelerator=<gpu_name>
+
+
+.. note::
+
+    GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerator`` label.
+
+
+.. _kubernetes-setup-ports:
+
+[Optional] Step 3 - Set up for Exposing Services
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. tip::
+
+    If you are using GKE or EKS or do not plan expose ports publicly on Kubernetes (such as ``sky launch --ports``, SkyServe), no additional setup is required. On GKE and EKS, SkyPilot will create a LoadBalancer service automatically.
+
+Running SkyServe or tasks exposing ports requires additional setup to expose ports running services.
+SkyPilot supports either of two modes to expose ports:
+
+* :ref:`LoadBalancer Service <kubernetes-loadbalancer>` (default)
+* :ref:`Nginx Ingress <kubernetes-ingress>`
+
+Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more details.
+
+.. _kubernetes-setup-serviceaccount:
+
+[Optional] Step 4 - Namespace and Service Account Setup
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. tip::
+
+    This step is optional and required only in specific environments. By default, SkyPilot runs in the namespace configured in current `kube-context <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#define-clusters-users-and-contexts>`_ and creates a service account named ``skypilot-service-account`` to run tasks.
+    **This step is not required if you use these defaults.**
+
+If your cluster requires isolating SkyPilot tasks to a specific namespace and restricting the permissions granted to users,
+you can create a new namespace and service account for SkyPilot to use.
+
+The minimal permissions required for the service account can be found on the :ref:`Minimal Kubernetes Permissions <cloud-permissions-kubernetes>` page.
+
+To simplify the setup, we provide a `script <https://github.com/skypilot-org/skypilot/blob/master/sky/utils/kubernetes/generate_kubeconfig.sh>`_ that creates a namespace and service account with the necessary permissions for a given service account name and namespace.
+
+.. code-block:: bash
+
+    # Download the script
+    wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/utils/kubernetes/generate_kubeconfig.sh
+    chmod +x generate_kubeconfig.sh
+
+    # Execute the script to generate a kubeconfig file with the service account and namespace
+    # Replace my-sa and my-namespace with your desired service account name and namespace
+    # The script will create the namespace if it does not exist and create a service account with the necessary permissions.
+    SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
+
+You may distribute the generated kubeconfig file to users who can then use it to submit tasks to the cluster.
+
+.. _kubernetes-setup-verify:
+
+Verifying Setup
+---------------
+
 Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/config``, verify your setup by running :code:`sky check`:
 
-.. code-block:: console
+.. code-block:: bash
 
-    $ sky check
+    sky check kubernetes
 
 This should show ``Kubernetes: Enabled`` without any warnings.
 
@@ -230,216 +261,9 @@ You can also check the GPUs available on your nodes by running:
 .. code-block:: console
 
     $ sky show-gpus --cloud kubernetes
-
-.. tip::
-
-    If automatic GPU labelling fails, you can manually label your nodes with the GPU type. Use the following command to label your nodes:
-
-    .. code-block:: console
-
-        $ kubectl label nodes <node-name> skypilot.co/accelerator=<gpu_name>
-
-.. _kubernetes-setup-onprem-distro-specific:
-
-Notes for specific Kubernetes distributions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Rancher Kubernetes Engine 2 (RKE2)
-**********************************
-
-Nvidia GPU operator installation on RKE2 through helm requires extra flags to set ``nvidia`` as the default runtime for containerd.
-
-.. code-block:: console
-
-    $ helm install gpu-operator -n gpu-operator --create-namespace \
-      nvidia/gpu-operator $HELM_OPTIONS \
-        --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \
-        --set 'toolkit.env[0].value=/var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl' \
-        --set 'toolkit.env[1].name=CONTAINERD_SOCKET' \
-        --set 'toolkit.env[1].value=/run/k3s/containerd/containerd.sock' \
-        --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \
-        --set 'toolkit.env[2].value=nvidia' \
-        --set 'toolkit.env[3].name=CONTAINERD_SET_AS_DEFAULT' \
-        --set-string 'toolkit.env[3].value=true'
-
-Refer to instructions on `Nvidia GPU Operator installation with Helm on RKE2 <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#rancher-kubernetes-engine-2>`_ for details.
-
-K3s
-***
-
-Installing Nvidia GPU operator on K3s is similar to `RKE2 instructions from Nvidia <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#rancher-kubernetes-engine-2>`_, but requires changing
-the ``CONTAINERD_CONFIG`` variable to ``/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl``. Here is an example command to install the Nvidia GPU operator on K3s:
-
-.. code-block:: console
-
-    $ helm install gpu-operator -n gpu-operator --create-namespace \
-      nvidia/gpu-operator $HELM_OPTIONS \
-        --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \
-        --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \
-        --set 'toolkit.env[1].name=CONTAINERD_SOCKET' \
-        --set 'toolkit.env[1].value=/run/k3s/containerd/containerd.sock' \
-        --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \
-        --set 'toolkit.env[2].value=nvidia'
-
-Check the status of the GPU operator installation by running ``kubectl get pods -n gpu-operator``. It takes a few minutes to install and some CrashLoopBackOff errors are expected during the installation process.
-
-.. tip::
-
-    If your gpu-operator installation stays stuck in CrashLoopBackOff, you may need to create a symlink to the ``ldconfig`` binary to work around a `known issue <https://github.com/NVIDIA/nvidia-docker/issues/614#issuecomment-423991632>`_ with nvidia-docker runtime. Run the following command on your nodes:
-
-    .. code-block:: console
-
-        $ ln -s /sbin/ldconfig /sbin/ldconfig.real
-
-After the GPU operator is installed, create the nvidia RuntimeClass required by K3s. This runtime class will automatically be used by SkyPilot to schedule GPU pods:
-
-.. code-block:: console
-
-    $ kubectl apply -f - <<EOF
-    apiVersion: node.k8s.io/v1
-    kind: RuntimeClass
-    metadata:
-      name: nvidia
-    handler: nvidia
-    EOF
-
-Now you can label your K3s nodes with the :code:`skypilot.co/accelerator` label using the `SkyPilot GPU labelling script <automatic-gpu-labelling_>`_ above.
-
-.. _kubernetes-ports:
-
-Setting up Ports on Kubernetes
--------------------------------
-
-
-.. note::
-    This is a guide on how to configure an existing Kubernetes cluster (along with the caveats involved) to successfully expose ports and services externally through SkyPilot.
-
-    If you are a SkyPilot user and your cluster has already been set up to expose ports,
-    :ref:`Opening Ports <ports>` explains how to expose services in your task through SkyPilot.
-
-SkyPilot clusters can :ref:`open ports <ports>` to expose services. For SkyPilot
-clusters running on Kubernetes, we support either of two modes to expose ports:
-
-* :ref:`LoadBalancer Service <kubernetes-loadbalancer>` (default)
-* :ref:`Nginx Ingress <kubernetes-ingress>`
-
-
-By default, SkyPilot creates a `LoadBalancer Service <https://kubernetes.io/docs/concepts/services-networking/service/>`__ on your Kubernetes cluster to expose the port.
-
-If your cluster does not support LoadBalancer services, SkyPilot can also use `an existing Nginx IngressController <https://kubernetes.github.io/ingress-nginx/>`_ to create an `Ingress <https://kubernetes.io/docs/concepts/services-networking/ingress/>`_ to expose your service.
-
-.. _kubernetes-loadbalancer:
-
-LoadBalancer Service
-^^^^^^^^^^^^^^^^^^^^
-
-This mode exposes ports through a Kubernetes `LoadBalancer Service <https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer>`__. This is the default mode used by SkyPilot.
-
-
-To use this mode, you must have a Kubernetes cluster that supports LoadBalancer Services:
-
-* On Google GKE, Amazon EKS or other cloud-hosted Kubernetes services, this mode is supported out of the box and no additional configuration is needed.
-* On bare metal and self-managed Kubernetes clusters, `MetalLB <https://metallb.universe.tf/>`_ can be used to support LoadBalancer Services.
-
-When using this mode, SkyPilot will create a single LoadBalancer Service for all ports that you expose on a cluster.
-Each port can be accessed using the LoadBalancer's external IP address and the port number. Use :code:`sky status --endpoints <cluster>` to view the external endpoints for all ports.
-
-.. note::
-    In cloud based Kubernetes clusters, this will automatically create an external Load Balancer.     GKE creates a (`pass-through load balancer <https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer>`__)
-    and AWS creates a `Network Load Balancer <https://docs.aws.amazon.com/eks/latest/userguide/network-load-balancing.html>`__). These load balancers will be automatically terminated when the cluster is deleted.
-
-.. note::
-    The default LoadBalancer implementation in EKS selects a random port from the list of opened ports for the
-    `LoadBalancer's health check <https://docs.aws.amazon.com/elasticloadbalancing/latest/network/target-group-health-checks.html>`_. This can cause issues if the selected port does not have a service running behind it.
-
-
-    For example, if a SkyPilot task exposes 5 ports but only 2 of them have services running behind them, EKS may select a port that does not have a service running behind it and the LoadBalancer will not pass the healthcheck. As a result, the service will not be assigned an external IP address.
-
-    To work around this issue, make sure all your ports have services running behind them.
-
-.. note::
-    LoadBalancer services are not supported on kind clusters created using :code:`sky local up`.
-
-
-.. _kubernetes-ingress:
-
-Nginx Ingress
-^^^^^^^^^^^^^
-
-This mode exposes ports by creating a Kubernetes `Ingress <https://kubernetes.io/docs/concepts/services-networking/ingress/>`_ backed by an existing `Nginx Ingress Controller <https://kubernetes.github.io/ingress-nginx/>`_.
-
-To use this mode:
-
-1. Install the Nginx Ingress Controller on your Kubernetes cluster. Refer to the `documentation <https://kubernetes.github.io/ingress-nginx/deploy/>`_ for installation instructions specific to your environment.
-2. Verify that the ``ingress-nginx-controller`` service has a valid external IP:
-
-.. code-block:: bash
-
-    $ kubectl get service ingress-nginx-controller -n ingress-nginx
-
-    # Example output:
-    # NAME                             TYPE                CLUSTER-IP    EXTERNAL-IP     PORT(S)
-    # ingress-nginx-controller         LoadBalancer        10.24.4.254   35.202.58.117   80:31253/TCP,443:32699/TCP
-
-.. note::
-    If the ``EXTERNAL-IP`` field is ``<none>``, you may manually assign it an External IP.
-    This can be done by patching the service with an IP that can be accessed from outside the cluster.
-    If the service type is ``NodePort``, you can set the ``EXTERNAL-IP`` to any node's IP address:
-
-    .. code-block:: bash
-
-      # Patch the nginx ingress service with an external IP. Can be any node's IP if using NodePort service.
-      # Replace <IP> in the following command with the IP you select.
-      $ kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{"spec": {"externalIPs": ["<IP>"]}}'
-
-    If the ``EXTERNAL-IP`` field is left as ``<none>``, SkyPilot will use ``localhost`` as the external IP for the Ingress,
-    and the endpoint may not be accessible from outside the cluster.
-
-.. note::
-    If you cannot update the ``EXTERNAL-IP`` field of the service, you can also
-    specify the Ingress IP or hostname through the ``skypilot.co/external-ip``
-    annotation on the ``ingress-nginx-controller`` service. In this case,
-    having a valid ``EXTERNAL-IP`` field is not required.
-
-    For example, if your ``ingress-nginx-controller`` service is ``NodePort``:
-
-    .. code-block:: bash
-
-      # Add skypilot.co/external-ip annotation to the  nginx ingress service.
-      # Replace <IP> in the following command with the IP you select.
-      # Can be any node's IP if using NodePort service type.
-      $ kubectl annotate service ingress-nginx-controller skypilot.co/external-ip=<IP> -n ingress-nginx
-
-
-3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
-
-.. code-block:: yaml
-
-    kubernetes:
-      ports: ingress
-
-.. tip::
-
-    For RKE2 and K3s, the pre-installed Nginx ingress is not correctly configured by default. Follow the `bare-metal installation instructions <https://kubernetes.github.io/ingress-nginx/deploy/#bare-metal-clusters/>`_ to set up the Nginx ingress controller correctly.
-
-When using this mode, SkyPilot creates an ingress resource and a ClusterIP service for each port opened. The port can be accessed externally by using the Ingress URL plus a path prefix of the form :code:`/skypilot/{pod_name}/{port}`.
-
-Use :code:`sky status --endpoints <cluster>` to view the full endpoint URLs for all ports.
-
-.. code-block::
-
-    $ sky status --endpoints mycluster
-    8888: http://34.173.152.251/skypilot/test-2ea4/8888
-
-.. note::
-
-    When exposing a port under a sub-path such as an ingress, services expecting root path access, (e.g., Jupyter notebooks) may face issues. To resolve this, configure the service to operate under a different base URL. For Jupyter, use `--NotebookApp.base_url <https://jupyter-notebook.readthedocs.io/en/5.7.4/config.html>`_ flag during launch. Alternatively, consider using :ref:`LoadBalancer <kubernetes-loadbalancer>` mode.
-
-
-.. note::
-
-    Currently, SkyPilot does not support opening ports on a Kubernetes cluster using the `Gateway API <https://kubernetes.io/docs/concepts/services-networking/gateway/>`_.
-    If you are interested in this feature, please `reach out <https//slack.skypilot.co>`_.
+    GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+    L4    1, 2, 3, 4    8           6
+    H100  1, 2          4           2
 
 
 .. _kubernetes-observability:
@@ -483,7 +307,15 @@ Note that this dashboard can only be accessed from the machine where the ``kubec
     `Kubernetes documentation <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_
     for more information on how to set up access control for the dashboard.
 
+
 Troubleshooting Kubernetes Setup
 --------------------------------
 
 If you encounter issues while setting up your Kubernetes cluster, please refer to the :ref:`troubleshooting guide <kubernetes-troubleshooting>` to diagnose and fix issues.
+
+
+.. toctree::
+   :hidden:
+
+   kubernetes-deployment
+   Exposing Services <kubernetes-ports>

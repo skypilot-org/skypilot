@@ -199,7 +199,7 @@ def generic_cloud(request) -> str:
 
 
 @pytest.fixture
-def enable_all_clouds(monkeypatch: pytest.MonkeyPatch):
+def enable_all_clouds(monkeypatch: pytest.MonkeyPatch) -> None:
     common.enable_all_clouds_in_monkeypatch(monkeypatch)
 
 

@@ -68,3 +68,5 @@ def enable_all_clouds_in_monkeypatch(
                         lambda *_args, **_kwargs: [True, []])
     monkeypatch.setattr('sky.provision.kubernetes.utils.check_instance_fits',
                         lambda *_args, **_kwargs: [True, ''])
+    monkeypatch.setattr('sky.provision.kubernetes.utils.get_spot_label',
+                        lambda *_args, **_kwargs: [None, None])

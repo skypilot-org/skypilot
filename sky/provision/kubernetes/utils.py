@@ -3,6 +3,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
@@ -16,6 +17,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import network_utils
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
@@ -52,6 +54,10 @@ ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
                            '\nTo debug, run: {debug_cmd}')
 
 KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
+
+# Port-forward proxy command constants
+PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
+PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/kubernetes-port-forward-proxy-command.sh'
 
 logger = sky_logging.init_logger(__name__)
 
@@ -100,6 +106,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     Uses the format - nvidia-tesla-<accelerator>.
     A100-80GB, H100-80GB and L4 are an exception. They use nvidia-<accelerator>.
     """
+    if accelerator == 'H100':
+        # H100 is named as H100-80GB in GKE.
+        accelerator = 'H100-80GB'
     if accelerator in ('A100-80GB', 'L4', 'H100-80GB'):
         # A100-80GB, L4 and H100-80GB have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
@@ -183,10 +192,75 @@ class GKELabelFormatter(GPULabelFormatter):
         if value.startswith('nvidia-tesla-'):
             return value.replace('nvidia-tesla-', '').upper()
         elif value.startswith('nvidia-'):
-            return value.replace('nvidia-', '').upper()
+            acc = value.replace('nvidia-', '').upper()
+            if acc in ['H100-80GB', 'H100-MEGA-80GB']:
+                # H100 is named H100-80GB or H100-MEGA-80GB in GKE,
+                # where the latter has improved bandwidth.
+                # See a3-mega instances on GCP.
+                # TODO: we do not distinguish the two GPUs for simplicity,
+                # but we can evaluate whether we should distinguish
+                # them based on users' requests.
+                return 'H100'
+            return acc
         else:
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
+
+
+class GFDLabelFormatter(GPULabelFormatter):
+    """GPU Feature Discovery label formatter
+
+    NVIDIA GPUs nodes are labeled by GPU feature discovery
+    e.g. nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+    https://github.com/NVIDIA/gpu-feature-discovery
+
+    GPU feature discovery is included as part of the
+    NVIDIA GPU Operator:
+    https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html
+
+    This LabelFormatter can't be used in autoscaling clusters since accelerators
+    may map to multiple label, so we're not implementing `get_label_value`
+    """
+
+    LABEL_KEY = 'nvidia.com/gpu.product'
+
+    @classmethod
+    def get_label_key(cls) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        """An accelerator can map to many Nvidia GFD labels
+        (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
+        As a result, we do not support get_label_value for GFDLabelFormatter."""
+        raise NotImplementedError
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        """Searches against a canonical list of NVIDIA GPUs and pattern
+        matches the canonical GPU name against the GFD label.
+        """
+        canonical_gpu_names = [
+            'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4',
+            'V100', 'A10', 'P4000', 'P100', 'P40', 'P4', 'L4'
+        ]
+        for canonical_name in canonical_gpu_names:
+            # A100-80G accelerator is A100-SXM-80GB or A100-PCIE-80GB
+            if canonical_name == 'A100-80GB' and re.search(
+                    r'A100.*-80GB', value):
+                return canonical_name
+            elif canonical_name in value:
+                return canonical_name
+
+        # If we didn't find a canonical name:
+        # 1. remove 'NVIDIA-' (e.g., 'NVIDIA-RTX-A6000' -> 'RTX-A6000')
+        # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
+        # 3. remove 'RTX-' (e.g. 'RTX-6000' -> 'RTX6000')
+        # Same logic, but uppercased, as the Skypilot labeler job found in
+        # sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
+        return value.upper().replace('NVIDIA-',
+                                     '').replace('GEFORCE-',
+                                                 '').replace('RTX-', 'RTX')
 
 
 class KarpenterLabelFormatter(SkyPilotLabelFormatter):
@@ -203,8 +277,8 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
 # it will be used to determine the priority of the label formats when
 # auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
-    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter,
-    KarpenterLabelFormatter
+    SkyPilotLabelFormatter, GKELabelFormatter, KarpenterLabelFormatter,
+    GFDLabelFormatter, CoreWeaveLabelFormatter
 ]
 
 # Mapping of autoscaler type to label formatter
@@ -447,7 +521,6 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 # conclude that the cluster is setup correctly and return.
                 return '', ''
             k8s_acc_label_key = label_formatter.get_label_key()
-            k8s_acc_label_value = label_formatter.get_label_value(acc_type)
             # Search in node_labels to see if any node has the requested
             # GPU type.
             # Note - this only checks if the label is available on a
@@ -457,10 +530,9 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
                     if (label == k8s_acc_label_key and
-                            value == k8s_acc_label_value):
-                        # If a node is found, we can break out of the loop
-                        # and proceed to deploy.
-                        return k8s_acc_label_key, k8s_acc_label_value
+                            label_formatter.get_accelerator_from_label_value(
+                                value) == acc_type):
+                        return label, value
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
                 suffix = ''
@@ -692,6 +764,12 @@ def get_current_kube_config_context_namespace() -> str:
             the default namespace.
     """
     k8s = kubernetes.kubernetes
+    # Get namespace if using in-cluster config
+    ns_path = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
+    if os.path.exists(ns_path):
+        with open(ns_path, encoding='utf-8') as f:
+            return f.read().strip()
+    # If not in-cluster, get the namespace from kubeconfig
     try:
         _, current_context = k8s.config.list_kube_config_contexts()
         if 'namespace' in current_context['context']:
@@ -844,30 +922,38 @@ class KubernetesInstanceType:
         return self.name
 
 
-def construct_ssh_jump_command(private_key_path: str,
-                               ssh_jump_ip: str,
-                               ssh_jump_port: Optional[int] = None,
-                               proxy_cmd_path: Optional[str] = None) -> str:
+def construct_ssh_jump_command(
+        private_key_path: str,
+        ssh_jump_ip: str,
+        ssh_jump_port: Optional[int] = None,
+        ssh_jump_user: str = 'sky',
+        proxy_cmd_path: Optional[str] = None,
+        proxy_cmd_target_pod: Optional[str] = None) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
                               f'-o IdentitiesOnly=yes '
-                              f'-W %h:%p sky@{ssh_jump_ip}')
+                              f'-W %h:%p {ssh_jump_user}@{ssh_jump_ip}')
     if ssh_jump_port is not None:
         ssh_jump_proxy_command += f' -p {ssh_jump_port} '
     if proxy_cmd_path is not None:
         proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
         # adding execution permission to the proxy command script
         os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)
-        ssh_jump_proxy_command += f' -o ProxyCommand=\'{proxy_cmd_path}\' '
+        ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
+                                   f'{proxy_cmd_target_pod}\' ')
     return ssh_jump_proxy_command
 
 
 def get_ssh_proxy_command(
-        private_key_path: str, ssh_jump_name: str,
-        network_mode: kubernetes_enums.KubernetesNetworkingMode, namespace: str,
-        port_fwd_proxy_cmd_path: str, port_fwd_proxy_cmd_template: str) -> str:
-    """Generates the SSH proxy command to connect through the SSH jump pod.
+        k8s_ssh_target: str,
+        network_mode: kubernetes_enums.KubernetesNetworkingMode,
+        private_key_path: Optional[str] = None,
+        namespace: Optional[str] = None) -> str:
+    """Generates the SSH proxy command to connect to the pod.
+
+    Uses a jump pod if the network mode is NODEPORT, and direct port-forwarding
+    if the network mode is PORTFORWARD.
 
     By default, establishing an SSH connection creates a communication
     channel to a remote node by setting up a TCP connection. When a
@@ -883,55 +969,75 @@ def get_ssh_proxy_command(
 
     With the NodePort networking mode, a NodePort service is launched. This
     service opens an external port on the node which redirects to the desired
-    port within the pod. When establishing an SSH session in this mode, the
+    port to a SSH jump pod. When establishing an SSH session in this mode, the
     ProxyCommand makes use of this external port to create a communication
     channel directly to port 22, which is the default port ssh server listens
     on, of the jump pod.
 
     With Port-forward mode, instead of directly exposing an external port,
     'kubectl port-forward' sets up a tunnel between a local port
-    (127.0.0.1:23100) and port 22 of the jump pod. Then we establish a TCP
+    (127.0.0.1:23100) and port 22 of the provisioned pod. Then we establish TCP
     connection to the local end of this tunnel, 127.0.0.1:23100, using 'socat'.
-    This is setup in the inner ProxyCommand of the nested ProxyCommand, and the
-    rest is the same as NodePort approach, which the outer ProxyCommand
-    establishes a communication channel between 127.0.0.1:23100 and port 22 on
-    the jump pod. Consequently, any stdin provided on the local machine is
-    forwarded through this tunnel to the application (SSH server) listening in
-    the pod. Similarly, any output from the application in the pod is tunneled
-    back and displayed in the terminal on the local machine.
+    All of this is done in a ProxyCommand script. Any stdin provided on the
+    local machine is forwarded through this tunnel to the application
+    (SSH server) listening in the pod. Similarly, any output from the
+    application in the pod is tunneled back and displayed in the terminal on
+    the local machine.
 
     Args:
-        private_key_path: str; Path to the private key to use for SSH.
-            This key must be authorized to access the SSH jump pod.
-        ssh_jump_name: str; Name of the SSH jump service to use
+        k8s_ssh_target: str; The Kubernetes object that will be used as the
+            target for SSH. If network_mode is NODEPORT, this is the name of the
+            service. If network_mode is PORTFORWARD, this is the pod name.
         network_mode: KubernetesNetworkingMode; networking mode for ssh
             session. It is either 'NODEPORT' or 'PORTFORWARD'
-        namespace: Kubernetes namespace to use
-        port_fwd_proxy_cmd_path: str; path to the script used as Proxycommand
-            with 'kubectl port-forward'
-        port_fwd_proxy_cmd_template: str; template used to create
-            'kubectl port-forward' Proxycommand
+        private_key_path: str; Path to the private key to use for SSH.
+            This key must be authorized to access the SSH jump pod.
+            Required for NODEPORT networking mode.
+        namespace: Kubernetes namespace to use.
+            Required for NODEPORT networking mode.
     """
     # Fetch IP to connect to for the jump svc
     ssh_jump_ip = get_external_ip(network_mode)
+    assert private_key_path is not None, 'Private key path must be provided'
     if network_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
-        ssh_jump_port = get_port(ssh_jump_name, namespace)
+        assert namespace is not None, 'Namespace must be provided for NodePort'
+        ssh_jump_port = get_port(k8s_ssh_target, namespace)
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
-    # Setting kubectl port-forward/socat to establish ssh session using
-    # ClusterIP service to disallow any ports opened
     else:
-        vars_to_fill = {
-            'ssh_jump_name': ssh_jump_name,
-        }
-        common_utils.fill_template(port_fwd_proxy_cmd_template,
-                                   vars_to_fill,
-                                   output_path=port_fwd_proxy_cmd_path)
+        ssh_jump_proxy_command_path = create_proxy_command_script()
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path,
             ssh_jump_ip,
-            proxy_cmd_path=port_fwd_proxy_cmd_path)
+            ssh_jump_user=constants.SKY_SSH_USER_PLACEHOLDER,
+            proxy_cmd_path=ssh_jump_proxy_command_path,
+            proxy_cmd_target_pod=k8s_ssh_target)
     return ssh_jump_proxy_command
+
+
+def create_proxy_command_script() -> str:
+    """Creates a ProxyCommand script that uses kubectl port-forward to setup
+    a tunnel between a local port and the SSH server in the pod.
+
+    Returns:
+        str: Path to the ProxyCommand script.
+    """
+    port_fwd_proxy_cmd_path = os.path.expanduser(PORT_FORWARD_PROXY_CMD_PATH)
+    os.makedirs(os.path.dirname(port_fwd_proxy_cmd_path),
+                exist_ok=True,
+                mode=0o700)
+
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    template_path = os.path.join(root_dir, 'templates',
+                                 PORT_FORWARD_PROXY_CMD_TEMPLATE)
+    # Copy the template to the proxy command path. We create a copy to allow
+    # different users sharing the same SkyPilot installation to have their own
+    # proxy command scripts.
+    shutil.copy(template_path, port_fwd_proxy_cmd_path)
+    # Set the permissions to 700 to ensure only the owner can read, write,
+    # and execute the file.
+    os.chmod(port_fwd_proxy_cmd_path, 0o700)
+    return port_fwd_proxy_cmd_path
 
 
 def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
@@ -1261,9 +1367,10 @@ def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
         elif isinstance(value, list) and key in destination:
             assert isinstance(destination[key], list), \
                 f'Expected {key} to be a list, found {destination[key]}'
-            if key == 'containers':
-                # If the key is 'containers', we take the first and only
-                # container in the list and merge it.
+            if key in ['containers', 'imagePullSecrets']:
+                # If the key is 'containers' or 'imagePullSecrets, we take the
+                # first and only container/secret in the list and merge it, as
+                # we only support one container per pod.
                 assert len(value) == 1, \
                     f'Expected only one container, found {value}'
                 merge_dicts(value[0], destination[key][0])
@@ -1286,7 +1393,10 @@ def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
             destination[key] = value
 
 
-def combine_pod_config_fields(cluster_yaml_path: str) -> None:
+def combine_pod_config_fields(
+    cluster_yaml_path: str,
+    cluster_config_overrides: Dict[str, Any],
+) -> None:
     """Adds or updates fields in the YAML with fields from the ~/.sky/config's
     kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
@@ -1328,8 +1438,14 @@ def combine_pod_config_fields(cluster_yaml_path: str) -> None:
     with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
         yaml_content = f.read()
     yaml_obj = yaml.safe_load(yaml_content)
+    # We don't use override_configs in `skypilot_config.get_nested`, as merging
+    # the pod config requires special handling.
     kubernetes_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
-                                                   {})
+                                                   default_value={},
+                                                   override_configs={})
+    override_pod_config = (cluster_config_overrides.get('kubernetes', {}).get(
+        'pod_config', {}))
+    merge_dicts(override_pod_config, kubernetes_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
     merge_dicts(
@@ -1423,6 +1539,14 @@ def create_namespace(namespace: str) -> None:
         namespace: Name of the namespace to create
     """
     kubernetes_client = kubernetes.kubernetes.client
+    try:
+        kubernetes.core_api().read_namespace(namespace)
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            raise
+    else:
+        return
+
     ns_metadata = dict(name=namespace, labels={'parent': 'skypilot'})
     merge_custom_metadata(ns_metadata)
     namespace_obj = kubernetes_client.V1Namespace(metadata=ns_metadata)
@@ -1453,12 +1577,50 @@ def get_head_pod_name(cluster_name_on_cloud: str):
 def get_autoscaler_type(
 ) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
     """Returns the autoscaler type by reading from config"""
-    autoscaler_type = skypilot_config.get_nested(['kubernetes', 'autoscaler'],
+    autoscaler_type = skypilot_config.get_nested(('kubernetes', 'autoscaler'),
                                                  None)
     if autoscaler_type is not None:
         autoscaler_type = kubernetes_enums.KubernetesAutoscalerType(
             autoscaler_type)
     return autoscaler_type
+
+
+# Mapping of known spot label keys and values for different cluster types
+# Add new cluster types here if they support spot instances along with the
+# corresponding spot label key and value.
+SPOT_LABEL_MAP = {
+    kubernetes_enums.KubernetesAutoscalerType.GKE.value:
+        ('cloud.google.com/gke-spot', 'true')
+}
+
+
+def get_spot_label() -> Tuple[Optional[str], Optional[str]]:
+    """Get the spot label key and value for using spot instances, if supported.
+
+    Checks if the underlying cluster supports spot instances by checking nodes
+    for known spot label keys and values. If found, returns the spot label key
+    and value. If not, checks if autoscaler is configured and returns
+    appropriate labels. If neither are found, returns None.
+
+    Returns:
+        Tuple[str, str]: Tuple containing the spot label key and value. Returns
+            None if spot instances are not supported.
+    """
+    # Check if the cluster supports spot instances by checking nodes for known
+    # spot label keys and values
+    for node in get_kubernetes_nodes():
+        for _, (key, value) in SPOT_LABEL_MAP.items():
+            if key in node.metadata.labels and node.metadata.labels[
+                    key] == value:
+                return key, value
+
+    # Check if autoscaler is configured. Allow spot instances if autoscaler type
+    # is known to support spot instances.
+    autoscaler_type = get_autoscaler_type()
+    if autoscaler_type == kubernetes_enums.KubernetesAutoscalerType.GKE:
+        return SPOT_LABEL_MAP[autoscaler_type.value]
+
+    return None, None
 
 
 def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
