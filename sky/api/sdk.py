@@ -29,11 +29,11 @@ from sky.api.requests import tasks
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
 from sky.utils import ux_utils
-from sky.utils import controller_utils
 
 if typing.TYPE_CHECKING:
     import sky
