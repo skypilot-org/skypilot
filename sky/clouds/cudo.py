@@ -46,6 +46,15 @@ class Cudo(clouds.Cloud):
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
     )
 
+    _PROJECT_HINT = (
+        'Create a project and then set it as the default project,:\n'
+        f'{_INDENT_PREFIX} $ cudoctl projects create my-project-name\n'
+        f'{_INDENT_PREFIX} $ cudoctl init\n'
+        f'{_INDENT_PREFIX}For more info: '
+        # pylint: disable=line-too-long
+        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
+    )
+
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
@@ -57,6 +66,10 @@ class Cudo(clouds.Cloud):
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             ('Docker image is currently not supported on Cudo. You can try '
              'running docker command inside the `run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS: (
+            'Cudo Compute cannot host a controller as it does not '
+            'autostopping, which will leave the controller to run indefinitely.'
+        ),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
 
@@ -181,12 +194,12 @@ class Cudo(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name_on_cloud: str,
+        cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
-        del zones
+        del zones, cluster_name  # unused
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
@@ -289,7 +302,9 @@ class Cudo(clouds.Cloud):
         project_id, error = cudo_api.get_project_id()
         if error is not None:
             return False, (
-                f'Error getting project '
+                f'Default project is not set. '
+                f'{cls._PROJECT_HINT}\n'
+                f'{cls._INDENT_PREFIX}'
                 f'{common_utils.format_exception(error, use_bracket=True)}')
         try:
             api = cudo_api.virtual_machines()

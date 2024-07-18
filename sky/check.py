@@ -77,8 +77,8 @@ def check(
     # Use allowed_clouds from config if it exists, otherwise check all clouds.
     # Also validate names with get_cloud_tuple.
     config_allowed_cloud_names = [
-        get_cloud_tuple(c)[0] for c in skypilot_config.get_nested(
-            ['allowed_clouds'], get_all_clouds())
+        get_cloud_tuple(c)[0] for c in skypilot_config.get_nested((
+            'allowed_clouds',), get_all_clouds())
     ]
     # Use disallowed_cloud_names for logging the clouds that will be disabled
     # because they are not included in allowed_clouds in config.yaml.

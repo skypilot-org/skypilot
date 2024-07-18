@@ -5,9 +5,12 @@
 #   sky launch -c k3s --cloud gcp --gpus T4:1
 #   scp deploy_k3s.sh k3s:~/
 #   ssh k3s
+#   # (optional) skip the skypilot labeler job
+#   export SKY_SKIP_K8S_LABEL=1
+#   # deploy k3s
 #   chmod +x deploy_k3s.sh && ./deploy_k3s.sh
 
-set -e
+set -ex
 
 # Function to wait for SkyPilot GPU labeling jobs to complete
 wait_for_gpu_labeling_jobs() {
@@ -71,6 +74,7 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
 # Wait for k3s to be ready
 echo "Waiting for k3s to be ready"
+sleep 5
 kubectl wait --for=condition=ready node --all --timeout=5m
 
 # =========== GPU support ===========
@@ -113,11 +117,14 @@ metadata:
 handler: nvidia
 EOF
 
-# Label nodes with GPUs
-echo "Labelling nodes with GPUs..."
-python -m sky.utils.kubernetes.gpu_labeler
+if [ ! "$SKY_SKIP_K8S_LABEL" == "1" ]
+then
+    # Label nodes with GPUs
+    echo "Labelling nodes with GPUs..."
+    python -m sky.utils.kubernetes.gpu_labeler
 
-# Wait for all the GPU labeling jobs to complete
-wait_for_gpu_labeling_jobs
+    # Wait for all the GPU labeling jobs to complete
+    wait_for_gpu_labeling_jobs
+fi
 
-echo "K3s cluster ready! Run sky check to setup Kubernetes access."
+echo "K3s cluster ready! To setup Kubernetes access in SkyPilot, run: sky check kubernetes"

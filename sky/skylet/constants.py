@@ -1,4 +1,6 @@
 """Constants for SkyPilot."""
+from typing import List, Tuple
+
 from packaging import version
 
 import sky
@@ -37,8 +39,23 @@ SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
 SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # Ray executable, e.g., /opt/conda/bin/ray
-SKY_RAY_CMD = (f'$([ -s {SKY_RAY_PATH_FILE} ] && '
+# We need to add SKY_PYTHON_CMD before ray executable because:
+# The ray executable is a python script with a header like:
+#   #!/opt/conda/bin/python3
+# When we create the skypilot-runtime venv, the previously installed ray
+# executable will be reused (due to --system-site-packages), and that will cause
+# running ray CLI commands to use the wrong python executable.
+SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
+# Separate env for SkyPilot runtime dependencies.
+SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
+SKY_REMOTE_PYTHON_ENV = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
+ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
+# Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
+# environment. `deactivate` command does not work when conda is used.
+DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
+    'export PATH='
+    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||")')
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
@@ -83,6 +100,26 @@ DOCKER_LOGIN_ENV_VARS = {
     DOCKER_SERVER_ENV_VAR,
 }
 
+# Commands for disable GPU ECC, which can improve the performance of the GPU
+# for some workloads by 30%. This will only be applied when a user specify
+# `nvidia_gpus.disable_ecc: true` in ~/.sky/config.yaml.
+# Running this command will reboot the machine, introducing overhead for
+# provisioning the machine.
+# https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW
+DISABLE_GPU_ECC_COMMAND = (
+    # Check if the GPU ECC is enabled. We use `sudo which` to check nvidia-smi
+    # because in some environments, nvidia-smi is not in path for sudo and we
+    # should skip disabling ECC in this case.
+    'sudo which nvidia-smi && echo "Checking Nvidia ECC Mode" && '
+    'out=$(nvidia-smi -q | grep "ECC Mode" -A2) && '
+    'echo "$out" && echo "$out" | grep Current | grep Enabled && '
+    'echo "Disabling Nvidia ECC" && '
+    # Disable the GPU ECC.
+    'sudo nvidia-smi -e 0 && '
+    # Reboot the machine to apply the changes.
+    '{ sudo reboot || echo "Failed to reboot. ECC mode may not be disabled"; } '
+    '|| true; ')
+
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with
 # best effort.
@@ -91,20 +128,29 @@ DOCKER_LOGIN_ENV_VARS = {
 # AWS's Deep Learning AMI's default conda environment.
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
-    '{ wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
+    '{ curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
     'bash Miniconda3-Linux-x86_64.sh -b && '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     'conda config --set auto_activate_base true && '
-    # Use $(echo ~) instead of ~ to avoid the error "no such file or directory".
-    # Also, not using $HOME to avoid the error HOME variable not set.
-    f'echo "$(echo ~)/miniconda3/bin/python" > {SKY_PYTHON_PATH_FILE}; }}; '
+    f'conda activate base; }}; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
-    '(type -a python | grep -q python3) || '
-    'echo \'alias python=python3\' >> ~/.bashrc;'
-    '(type -a pip | grep -q pip3) || echo \'alias pip=pip3\' >> ~/.bashrc;'
-    # Writes Python path to file if it does not exist or the file is empty.
-    f'[ -s {SKY_PYTHON_PATH_FILE} ] || which python3 > {SKY_PYTHON_PATH_FILE};')
+    # If Python version is larger then equal to 3.12, create a new conda env
+    # with Python 3.10.
+    # We don't use a separate conda env for SkyPilot dependencies because it is
+    # costly to create a new conda env, and venv should be a lightweight and
+    # faster alternative when the python version satisfies the requirement.
+    '[[ $(python3 --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
+    f'echo "Creating conda env with Python 3.10" && '
+    f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
+    f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
+    # Create a separate conda environment for SkyPilot dependencies.
+    # We use --system-site-packages to reuse the system site packages to avoid
+    # the overhead of installing the same packages in the new environment.
+    f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
+    f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages && '
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE}; }};'
+)
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
@@ -113,8 +159,15 @@ RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 # backend_utils.write_cluster_config.
 RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
+    # Disable the pip version check to avoid the warning message, which makes
+    # the output hard to read.
+    'export PIP_DISABLE_PIP_VERSION_CHECK=1;'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
+    # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
+    # causing the error:
+    #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
+    f'{SKY_PIP_CMD} install "setuptools<70"; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -142,7 +195,9 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # mentioned above are resolved.
     'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
-    f'[ -s {SKY_RAY_PATH_FILE} ] || which ray > {SKY_RAY_PATH_FILE}; '
+    f'[ -s {SKY_RAY_PATH_FILE} ] || '
+    f'{{ {ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
+    f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; '
     # END ray package check and installation
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
@@ -198,3 +253,32 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
 CONTROLLER_PROCESS_CPU_DEMAND = 0.25
+
+# SkyPilot environment variables
+SKYPILOT_NUM_NODES = 'SKYPILOT_NUM_NODES'
+SKYPILOT_NODE_IPS = 'SKYPILOT_NODE_IPS'
+SKYPILOT_NUM_GPUS_PER_NODE = 'SKYPILOT_NUM_GPUS_PER_NODE'
+SKYPILOT_NODE_RANK = 'SKYPILOT_NODE_RANK'
+
+# Placeholder for the SSH user in proxy command, replaced when the ssh_user is
+# known after provisioning.
+SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
+
+# The keys that can be overridden in the `~/.sky/config.yaml` file. The
+# overrides are specified in task YAMLs.
+OVERRIDEABLE_CONFIG_KEYS: List[Tuple[str, ...]] = [
+    ('docker', 'run_options'),
+    ('nvidia_gpus', 'disable_ecc'),
+    ('kubernetes', 'pod_config'),
+    ('kubernetes', 'provision_timeout'),
+    ('gcp', 'managed_instance_group'),
+]
+
+# Constants for Azure blob storage
+WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
+# Observed time for new role assignment to propagate was ~45s
+WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT = 180
+RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
+ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
+    'Failed to assign Storage Blob Data Owner role to the '
+    'storage account {storage_account_name}.')

@@ -38,18 +38,13 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
-    PORT_FORWARD_PROXY_CMD_TEMPLATE = \
-        'kubernetes-port-forward-proxy-command.sh.j2'
-    PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
-    # Timeout for resource provisioning. This timeout determines how long to
-    # wait for pod to be in pending status before giving up.
-    # Larger timeout may be required for autoscaling clusters, since autoscaler
-    # may take some time to provision new nodes.
-    # Note that this timeout includes time taken by the Kubernetes scheduler
-    # itself, which can be upto 2-3 seconds.
-    # For non-autoscaling clusters, we conservatively set this to 10s.
-    timeout = skypilot_config.get_nested(['kubernetes', 'provision_timeout'],
-                                         10)
+
+    # Limit the length of the cluster name to avoid exceeding the limit of 63
+    # characters for Kubernetes resources. We limit to 42 characters (63-21) to
+    # allow additional characters for creating ingress services to expose ports.
+    # These services are named as {cluster_name_on_cloud}--skypilot-svc--{port},
+    # where the suffix is 21 characters long.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
@@ -92,7 +87,8 @@ class Kubernetes(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
+        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+        # Features to be disabled for exec auth
         is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
         if is_exec_auth:
             assert isinstance(message, str), message
@@ -102,7 +98,16 @@ class Kubernetes(clouds.Cloud):
             # Pod does not have permissions to terminate itself with exec auth.
             unsupported_features[
                 clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
+        # Allow spot instances if supported by the cluster
+        spot_label_key, _ = kubernetes_utils.get_spot_label()
+        if spot_label_key is not None:
+            unsupported_features.pop(
+                clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
         return unsupported_features
+
+    @classmethod
+    def max_cluster_name_length(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
@@ -219,11 +224,11 @@ class Kubernetes(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud, zones, dryrun  # Unused.
+        del cluster_name, zones, dryrun  # Unused.
         if region is None:
             region = self._regions[0]
 
@@ -290,6 +295,22 @@ class Kubernetes(clouds.Cloud):
 
         fuse_device_required = bool(resources.requires_fuse)
 
+        # Configure spot labels, if requested and supported
+        spot_label_key, spot_label_value = None, None
+        if resources.use_spot:
+            spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
+
+        # Timeout for resource provisioning. This timeout determines how long to
+        # wait for pod to be in pending status before giving up.
+        # Larger timeout may be required for autoscaling clusters, since
+        # autoscaler may take some time to provision new nodes.
+        # Note that this timeout includes time taken by the Kubernetes scheduler
+        # itself, which can be upto 2-3 seconds.
+        # For non-autoscaling clusters, we conservatively set this to 10s.
+        timeout = skypilot_config.get_nested(
+            ('kubernetes', 'provision_timeout'),
+            10,
+            override_configs=resources.cluster_config_overrides)
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -297,10 +318,11 @@ class Kubernetes(clouds.Cloud):
             'cpus': str(cpus),
             'memory': str(mem),
             'accelerator_count': str(acc_count),
-            'timeout': str(self.timeout),
+            'timeout': str(timeout),
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
+            'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
@@ -311,6 +333,8 @@ class Kubernetes(clouds.Cloud):
             'k8s_fuse_device_required': fuse_device_required,
             # Namespace to run the FUSE device manager in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
+            'k8s_spot_label_key': spot_label_key,
+            'k8s_spot_label_value': spot_label_value,
             'image_id': image_id,
         }
 

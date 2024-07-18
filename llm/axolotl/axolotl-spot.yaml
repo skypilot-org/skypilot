@@ -12,6 +12,7 @@ resources:
   accelerators: A100:1
   cloud: gcp # optional
   use_spot: True
+  image_id: docker:winglian/axolotl:main-py3.10-cu118-2.0.1
 
 workdir: mistral
 
@@ -20,29 +21,11 @@ file_mounts:
     name: ${BUCKET}
     mode: MOUNT
 
-setup: |
-  docker pull winglian/axolotl:main-py3.10-cu118-2.0.1
-
 run: |
-  docker run --gpus all \
-    -v ~/sky_workdir:/sky_workdir \
-    -v /root/.cache:/root/.cache \
-    winglian/axolotl:main-py3.10-cu118-2.0.1 \
-    huggingface-cli login --token ${HF_TOKEN}
+  huggingface-cli login --token ${HF_TOKEN}
   
-  docker run --gpus all \
-    -v ~/sky_workdir:/sky_workdir \
-    -v /root/.cache:/root/.cache \
-    -v /sky-notebook:/sky-notebook \
-    winglian/axolotl:main-py3.10-cu118-2.0.1 \
-    accelerate launch -m axolotl.cli.train /sky_workdir/qlora-checkpoint.yaml
+  accelerate launch -m axolotl.cli.train qlora-checkpoint.yaml
 
 envs:
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
   BUCKET: # TODO: Fill with your unique bucket name, or use --env to pass.
-  
-  
-
-
-  
-

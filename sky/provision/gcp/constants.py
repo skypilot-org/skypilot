@@ -214,3 +214,9 @@ POLL_INTERVAL = 1
 MAX_POLLS = 60 // POLL_INTERVAL
 # Stopping instances can take several minutes, so we increase the timeout
 MAX_POLLS_STOP = MAX_POLLS * 8
+
+# MIG constants
+MANAGED_INSTANCE_GROUP_CONFIG = 'managed-instance-group'
+DEFAULT_MANAGED_INSTANCE_GROUP_PROVISION_TIMEOUT = 900  # 15 minutes
+MIG_NAME_PREFIX = 'sky-mig-'
+INSTANCE_TEMPLATE_NAME_PREFIX = 'sky-it-'

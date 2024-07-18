@@ -69,6 +69,7 @@ warmup_steps: 10
 eval_steps: 0.05
 eval_table_size:
 eval_table_max_new_tokens: 128
+eval_sample_packing: false
 save_steps:
 debug:
 deepspeed:

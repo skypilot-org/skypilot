@@ -96,6 +96,17 @@ def init_logger(name: str):
 
 
 @contextlib.contextmanager
+def set_logging_level(logger: str, level: int):
+    logger = logging.getLogger(logger)
+    original_level = logger.level
+    logger.setLevel(level)
+    try:
+        yield
+    finally:
+        logger.setLevel(original_level)
+
+
+@contextlib.contextmanager
 def silent():
     """Make all sky_logging.print() and logger.{info, warning...} silent.
 

@@ -6,8 +6,9 @@ import json
 import os
 import resource
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from sky import exceptions
 from sky import provision
 from sky import sky_logging
 from sky.provision import common
@@ -22,8 +23,6 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
-_START_TITLE = '\n' + '-' * 20 + 'Start: {} ' + '-' * 20
-_END_TITLE = '-' * 20 + 'End:   {} ' + '-' * 20 + '\n'
 
 _MAX_RETRY = 6
 
@@ -61,46 +60,41 @@ RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
     'done;')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-MAYBE_SKYLET_RESTART_CMD = (f'{constants.SKY_PYTHON_CMD} -m '
+# We need to activate the python environment to make sure autostop in skylet
+# can find the cloud SDK/CLI in PATH.
+MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+                            f'{constants.SKY_PYTHON_CMD} -m '
                             'sky.skylet.attempt_skylet;')
 
 
-def _auto_retry(func):
+def _auto_retry(should_retry: Callable[[Exception], bool] = lambda _: True):
     """Decorator that retries the function if it fails.
 
     This decorator is mostly for SSH disconnection issues, which might happen
     during the setup of instances.
     """
 
-    @functools.wraps(func)
-    def retry(*args, **kwargs):
-        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
-        for retry_cnt in range(_MAX_RETRY):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:  # pylint: disable=broad-except
-                if retry_cnt >= _MAX_RETRY - 1:
-                    raise e
-                sleep = backoff.current_backoff()
-                logger.info(
-                    f'{func.__name__}: Retrying in {sleep:.1f} seconds, '
-                    f'due to {e}')
-                time.sleep(sleep)
+    def decorator(func):
 
-    return retry
+        @functools.wraps(func)
+        def retry(*args, **kwargs):
+            backoff = common_utils.Backoff(initial_backoff=1,
+                                           max_backoff_factor=5)
+            for retry_cnt in range(_MAX_RETRY):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:  # pylint: disable=broad-except
+                    if not should_retry(e) or retry_cnt >= _MAX_RETRY - 1:
+                        raise
+                    sleep = backoff.current_backoff()
+                    logger.info(
+                        f'{func.__name__}: Retrying in {sleep:.1f} seconds, '
+                        f'due to {e}')
+                    time.sleep(sleep)
 
+        return retry
 
-def _log_start_end(func):
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        logger.info(_START_TITLE.format(func.__name__))
-        try:
-            return func(*args, **kwargs)
-        finally:
-            logger.info(_END_TITLE.format(func.__name__))
-
-    return wrapper
+    return decorator
 
 
 def _hint_worker_log_path(cluster_name: str, cluster_info: common.ClusterInfo,
@@ -144,7 +138,7 @@ def _parallel_ssh_with_cache(func,
         return [future.result() for future in results]
 
 
-@_log_start_end
+@common.log_function_start_end
 def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
                       cluster_info: common.ClusterInfo,
                       ssh_credentials: Dict[str, Any]) -> Optional[str]:
@@ -153,7 +147,8 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
         return None
     _hint_worker_log_path(cluster_name, cluster_info, 'initialize_docker')
 
-    @_auto_retry
+    @_auto_retry(should_retry=lambda e: isinstance(e, exceptions.CommandError)
+                 and e.returncode == 255)
     def _initialize_docker(runner: command_runner.CommandRunner, log_path: str):
         docker_user = docker_utils.DockerInitializer(docker_config, runner,
                                                      log_path).initialize()
@@ -174,7 +169,7 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
     return docker_users[0]
 
 
-@_log_start_end
+@common.log_function_start_end
 def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                              cluster_info: common.ClusterInfo,
                              ssh_credentials: Dict[str, Any]) -> None:
@@ -190,7 +185,7 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
         hasher.update(d)
     digest = hasher.hexdigest()
 
-    @_auto_retry
+    @_auto_retry()
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         for cmd in setup_commands:
             returncode, stdout, stderr = runner.run(
@@ -250,8 +245,8 @@ def _ray_gpu_options(custom_resource: str) -> str:
     return f' --num-gpus={acc_count}'
 
 
-@_log_start_end
-@_auto_retry
+@common.log_function_start_end
+@_auto_retry()
 def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                            cluster_info: common.ClusterInfo,
                            ssh_credentials: Dict[str, Any]) -> None:
@@ -310,8 +305,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                            f'===== stderr ====={stderr}')
 
 
-@_log_start_end
-@_auto_retry
+@common.log_function_start_end
+@_auto_retry()
 def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                               custom_resource: Optional[str], ray_port: int,
                               cluster_info: common.ClusterInfo,
@@ -407,8 +402,8 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                                    f'===== stderr ====={stderr}')
 
 
-@_log_start_end
-@_auto_retry
+@common.log_function_start_end
+@_auto_retry()
 def start_skylet_on_head_node(cluster_name: str,
                               cluster_info: common.ClusterInfo,
                               ssh_credentials: Dict[str, Any]) -> None:
@@ -434,7 +429,7 @@ def start_skylet_on_head_node(cluster_name: str,
                            f'===== stderr ====={stderr}')
 
 
-@_auto_retry
+@_auto_retry()
 def _internal_file_mounts(file_mounts: Dict,
                           runner: command_runner.CommandRunner,
                           log_path: str) -> None:
@@ -491,7 +486,7 @@ def _max_workers_for_file_mounts(common_file_mounts: Dict[str, str]) -> int:
     return max_workers
 
 
-@_log_start_end
+@common.log_function_start_end
 def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
                          cluster_info: common.ClusterInfo,
                          ssh_credentials: Dict[str, str]) -> None:

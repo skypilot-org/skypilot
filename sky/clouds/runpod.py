@@ -166,11 +166,11 @@ class RunPod(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del zones, dryrun  # unused
+        del zones, dryrun, cluster_name  # unused
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
