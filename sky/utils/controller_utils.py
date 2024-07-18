@@ -360,6 +360,7 @@ def shared_controller_vars_to_fill(
         # cloud SDKs are installed in SkyPilot runtime environment and can be
         # accessed.
         'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
+        'sky_python_cmd': constants.SKY_PYTHON_CMD,
     }
     env_vars: Dict[str, str] = {
         env.value: '1' for env in env_options.Options if env.get()
