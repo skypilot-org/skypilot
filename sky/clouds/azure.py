@@ -377,18 +377,18 @@ class Azure(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-        self, resources: 'resources.Resources'
-    ) -> Tuple[List['resources.Resources'], List[str], Optional[str]]:
+            self,
+            resources: 'resources.Resources') -> 'resources.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             ok, _ = Azure.check_disk_tier(resources.instance_type,
                                           resources.disk_tier)
             if not ok:
-                return ([], [], None)
+                return resources.FeasibleResources([], [], None)
             # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
             # Resources(Azure, Standard_NC4as_T4_v3).
             resources = resources.copy(accelerators=None)
-            return ([resources], [], None)
+            return resources.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -418,9 +418,10 @@ class Azure(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [], None)
+                return resources.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [], None)
+                return resources.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -435,8 +436,9 @@ class Azure(clouds.Cloud):
             zone=resources.zone,
             clouds='azure')
         if instance_list is None:
-            return ([], fuzzy_candidate_list, None)
-        return (_make(instance_list), fuzzy_candidate_list, None)
+            return resources.FeasibleResources([], fuzzy_candidate_list, None)
+        return resources.FeasibleResources(_make(instance_list),
+                                           fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

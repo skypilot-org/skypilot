@@ -214,13 +214,14 @@ class Cudo(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> 'resources_lib.FeasibleResources':
         if resources.use_spot:
-            return ([], [], None)
+            return resources_lib.FeasibleResources([], [], None)
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return ([resources], [], None)
+            return resources_lib.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -243,9 +244,10 @@ class Cudo(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [], None)
+                return resources_lib.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [], None)
+                return resources_lib.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -260,8 +262,10 @@ class Cudo(clouds.Cloud):
             zone=resources.zone,
             clouds='cudo')
         if instance_list is None:
-            return ([], fuzzy_candidate_list, None)
-        return (_make(instance_list), fuzzy_candidate_list, None)
+            return resources_lib.FeasibleResources([], fuzzy_candidate_list,
+                                                   None)
+        return resources_lib.FeasibleResources(_make(instance_list),
+                                               fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

@@ -1238,12 +1238,11 @@ def _fill_in_launchable_resources(
         # If clouds provide hints, store them for later printing.
         hints: Dict[clouds.Cloud, str] = {}
         for cloud in clouds_list:
-            (feasible_resources, fuzzy_candidate_list,
-             hint) = cloud.get_feasible_launchable_resources(
-                 resources, num_nodes=task.num_nodes)
-            if hint:
-                hints[cloud] = hint
-            if len(feasible_resources) > 0:
+            feasible_resources = cloud.get_feasible_launchable_resources(
+                resources, num_nodes=task.num_nodes)
+            if feasible_resources.hint:
+                hints[cloud] = feasible_resources.hint
+            if len(feasible_resources.resources_list) > 0:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
                 # the underlying service_catalog filtering
@@ -1253,7 +1252,8 @@ def _fill_in_launchable_resources(
                     _make_launchables_for_valid_region_zones(cheapest))
                 cloud_candidates[cloud] = feasible_resources
             else:
-                all_fuzzy_candidates.update(fuzzy_candidate_list)
+                all_fuzzy_candidates.update(
+                    feasible_resources.fuzzy_candidate_list)
         if len(launchable[resources]) == 0:
             clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                 clouds_list[0])

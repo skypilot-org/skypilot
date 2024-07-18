@@ -2,10 +2,10 @@
 import json
 import os
 import re
-import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -15,10 +15,6 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
-
-if typing.TYPE_CHECKING:
-    # Renaming to avoid shadowing variables.
-    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -342,12 +338,13 @@ class Kubernetes(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str], Optional[str]]:
+    ) -> 'resources_lib.FeasibleResources':
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return ([resources], fuzzy_candidate_list, None)
+            return resources_lib.FeasibleResources([resources],
+                                                   fuzzy_candidate_list, None)
 
         def _make(instance_list):
             resource_list = []
@@ -403,10 +400,11 @@ class Kubernetes(clouds.Cloud):
                 logger.debug(f'Instance type {chosen_instance_type} does '
                              'not fit in the Kubernetes cluster. '
                              f'Reason: {reason}')
-                return [], [], reason
+                return resources_lib.FeasibleResources([], [], reason)
 
         # No fuzzy lists for Kubernetes
-        return _make([chosen_instance_type]), [], None
+        return resources_lib.FeasibleResources(_make([chosen_instance_type]),
+                                               [], None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
