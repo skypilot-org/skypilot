@@ -223,7 +223,7 @@ def _wait_for_pods_to_run(namespace, new_nodes):
     creation.
     """
 
-    def _check_init_containers(pod: 'kubernetes.client.V1Pod'):
+    def _check_init_containers(pod):
         # Check if any of the init containers failed
         # to start. Could be because the init container
         # command failed or failed to pull image etc.
