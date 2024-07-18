@@ -17,7 +17,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
-from sky import status_lib
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
