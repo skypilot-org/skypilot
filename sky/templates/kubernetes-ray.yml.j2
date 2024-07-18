@@ -321,7 +321,7 @@ available_node_types:
             - |
               FILE_PATTERN="~/sky_logs/*/tasks/*.log"
               while ! ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; do
-                sleep 5
+                sleep 0.1
               done
               # Tails file and checks every 5 sec for
               # open file handlers with write access
@@ -355,8 +355,7 @@ available_node_types:
                   monitor_file $file &
                   already_monitored="${already_monitored} ${file}"
                 done
-                
-                sleep 5
+                sleep 0.1
               done
 
           ports:
