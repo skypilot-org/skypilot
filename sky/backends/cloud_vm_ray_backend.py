@@ -3230,7 +3230,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Add the managed job to job queue database.
             managed_job_codegen = managed_jobs.ManagedJobCodeGen()
             managed_job_code = managed_job_codegen.set_pending(
-                job_id, managed_job_dag)
+                job_id, managed_job_dag, common_utils.get_user_hash())
             # Set the managed job to PENDING state to make sure that this
             # managed job appears in the `sky jobs queue`, when there are
             # already 2x vCPU controller processes running on the controller VM,

@@ -83,6 +83,7 @@ db_utils.add_column_to_table(_CURSOR,
                              'task_name',
                              'TEXT',
                              copy_from='job_name')
+db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'user', 'TEXT')
 
 # `job_info` contains the mapping from job_id to the job_name.
 # In the future, it may contain more information about each job.
@@ -122,7 +123,8 @@ columns = [
     'task_name',
     # columns from the job_info table
     '_job_info_job_id',  # This should be the same as job_id
-    'job_name'
+    'job_name',
+    'user',
 ]
 
 
@@ -252,13 +254,13 @@ _SPOT_STATUS_TO_COLOR = {
 
 
 # === Status transition functions ===
-def set_job_name(job_id: int, name: str):
+def set_job_name(job_id: int, name: str, user_hash: str):
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             INSERT INTO job_info
-            (spot_job_id, name)
-            VALUES (?, ?)""", (job_id, name))
+            (spot_job_id, name, user)
+            VALUES (?, ?, ?)""", (job_id, name, user_hash))
 
 
 def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):

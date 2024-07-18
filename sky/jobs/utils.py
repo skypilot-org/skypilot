@@ -617,7 +617,7 @@ def format_job_table(
         jobs = {job_id: jobs[job_id] for job_id in job_ids}
 
     columns = [
-        'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
+        'ID', 'TASK', 'USER', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
     ]
     if show_all:
@@ -677,6 +677,7 @@ def format_job_table(
             job_values = [
                 job_id,
                 '',
+                task.get('user', '-'),
                 job_name,
                 '-',
                 submitted,
@@ -703,6 +704,7 @@ def format_job_table(
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
+                task.get('user', '-') if len(job_tasks) > 1 else '-',
                 task['task_name'],
                 task['resources'],
                 # SUBMITTED
@@ -825,11 +827,12 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag') -> str:
+    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag',
+                    user_hash: str) -> str:
         dag_name = managed_job_dag.name
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            managed_job_state.set_job_name({job_id}, {dag_name!r})
+            managed_job_state.set_job_name({job_id}, {dag_name!r}, user_hash={user_hash!r})
             """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
