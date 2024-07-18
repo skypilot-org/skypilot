@@ -11,33 +11,6 @@ Install SkyPilot using pip:
 
 .. tab-set::
 
-    .. tab-item:: Nightly (recommended)
-        :sync: nightly-tab
-
-        .. code-block:: shell
-
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.11.
-          conda create -y -n sky python=3.10
-          conda activate sky
-
-          # Choose your cloud:
-
-          pip install "skypilot-nightly[aws]"
-          pip install "skypilot-nightly[gcp]"
-          pip install "skypilot-nightly[azure]"
-          pip install "skypilot-nightly[oci]"
-          pip install "skypilot-nightly[lambda]"
-          pip install "skypilot-nightly[runpod]"
-          pip install "skypilot-nightly[fluidstack]"
-          pip install "skypilot-nightly[paperspace]"
-          pip install "skypilot-nightly[cudo]"
-          pip install "skypilot-nightly[ibm]"
-          pip install "skypilot-nightly[scp]"
-          pip install "skypilot-nightly[vsphere]"
-          pip install "skypilot-nightly[kubernetes]"
-          pip install "skypilot-nightly[all]"
-
     .. tab-item:: Latest Release
         :sync: latest-release-tab
 
@@ -64,6 +37,35 @@ Install SkyPilot using pip:
           pip install "skypilot[vsphere]"
           pip install "skypilot[kubernetes]"
           pip install "skypilot[all]"
+
+
+    .. tab-item:: Nightly
+        :sync: nightly-tab
+
+        .. code-block:: shell
+
+          # Recommended: use a new conda env to avoid package conflicts.
+          # SkyPilot requires 3.7 <= python <= 3.11.
+          conda create -y -n sky python=3.10
+          conda activate sky
+
+          # Choose your cloud:
+
+          pip install "skypilot-nightly[aws]"
+          pip install "skypilot-nightly[gcp]"
+          pip install "skypilot-nightly[azure]"
+          pip install "skypilot-nightly[oci]"
+          pip install "skypilot-nightly[lambda]"
+          pip install "skypilot-nightly[runpod]"
+          pip install "skypilot-nightly[fluidstack]"
+          pip install "skypilot-nightly[paperspace]"
+          pip install "skypilot-nightly[cudo]"
+          pip install "skypilot-nightly[ibm]"
+          pip install "skypilot-nightly[scp]"
+          pip install "skypilot-nightly[vsphere]"
+          pip install "skypilot-nightly[kubernetes]"
+          pip install "skypilot-nightly[all]"
+
 
     .. tab-item:: From Source
         :sync: from-source-tab
@@ -99,19 +101,19 @@ To use more than one cloud, combine the pip extras:
 
 .. tab-set::
 
-    .. tab-item:: Nightly (recommended)
-        :sync: nightly-tab
-
-        .. code-block:: shell
-
-          pip install -U "skypilot-nightly[aws,gcp]"
-
     .. tab-item:: Latest Release
         :sync: latest-release-tab
 
         .. code-block:: shell
 
           pip install -U "skypilot[aws,gcp]"
+
+    .. tab-item:: Nightly
+        :sync: nightly-tab
+
+        .. code-block:: shell
+
+          pip install -U "skypilot-nightly[aws,gcp]"
 
     .. tab-item:: From Source
         :sync: from-source-tab
@@ -504,7 +506,7 @@ You can simply run:
     -v "$HOME/.sky:/root/.sky:rw" \
     -v "$HOME/.aws:/root/.aws:rw" \
     -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" \
-    berkeleyskypilot/skypilot-nightly
+    berkeleyskypilot/skypilot
 
   docker exec -it sky /bin/bash
 
