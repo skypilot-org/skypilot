@@ -68,7 +68,6 @@ SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 # Exclude subnet mask from IP address regex.
 IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
 SKY_REMOTE_PATH = '~/.sky/wheels'
-SKY_USER_FILE_PATH = '~/.sky/generated'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
@@ -168,8 +167,9 @@ def is_ip(s: str) -> bool:
     return len(re.findall(IP_ADDR_REGEX, s)) == 1
 
 
-def _get_yaml_path_from_cluster_name(cluster_name: str,
-                                     prefix: str = SKY_USER_FILE_PATH) -> str:
+def _get_yaml_path_from_cluster_name(
+        cluster_name: str,
+        prefix: str = constants.SKY_CLUSTER_YAML_PATH) -> str:
     output_path = pathlib.Path(
         prefix).expanduser().resolve() / f'{cluster_name}.yml'
     os.makedirs(output_path.parents[0], exist_ok=True)
@@ -400,7 +400,7 @@ class SSHConfigHelper(object):
 
     ssh_conf_path = '~/.ssh/config'
     ssh_conf_lock_path = os.path.expanduser('~/.sky/ssh_config.lock')
-    ssh_cluster_path = SKY_USER_FILE_PATH + '/ssh/{}'
+    ssh_cluster_path = constants.SKY_CLUSTER_YAML_PATH + '/ssh/{}'
 
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,

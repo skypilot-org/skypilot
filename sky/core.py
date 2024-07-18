@@ -1,5 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
+import os
+import pickle
 import typing
 from typing import Any, Dict, List, Optional, Union
 
@@ -18,6 +20,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -835,3 +838,67 @@ def storage_delete(name: str) -> None:
                                       source=handle.source,
                                       sync_on_reconstruction=False)
         storage_object.delete()
+
+
+def cluster_add_access(cluster_name: str, public_key: str) -> Dict[str, Any]:
+    """Export a cluster to a file.
+
+    Args:
+        cluster_name: name of the cluster to export.
+
+    Returns:
+        A yaml file that contains the cluster information.
+    """
+
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+
+    add_authorized_key_code = f'echo "{public_key}" >> ~/.ssh/authorized_keys'
+    backend = backend_utils.get_backend_from_handle(handle)
+    returncode, _, stderr = backend.run_on_head(handle,
+                                                add_authorized_key_code,
+                                                require_outputs=True,
+                                                separate_stderr=True)
+    subprocess_utils.handle_returncode(
+        returncode,
+        command=add_authorized_key_code,
+        error_msg=f'Failed to add public key to cluster {cluster_name}.',
+        stderr=stderr,
+        stream_logs=True)
+
+    cluster_data = {
+        'handle': pickle.dumps(handle),
+        'cluster_yaml': common_utils.read_yaml(handle.cluster_yaml)
+    }
+    return cluster_data
+
+
+def load_cluster(new_display_name: str, cluster_data: Dict[str, Any]) -> None:
+    """Load a cluster from a file.
+
+    Args:
+        new_display_name: the new name of the cluster.
+        cluster_data: the data of the cluster.
+    """
+
+    record = global_user_state.get_cluster_from_name(new_display_name)
+    if record is not None:
+        raise ValueError(f'Cluster {new_display_name!r} already exists. Please '
+                         'use a different name.')
+
+    handle = pickle.loads(cluster_data['handle'])
+    cluster_yaml = cluster_data['cluster_yaml']
+    handle.cluster_name = new_display_name
+    handle._cluster_yaml = os.path.join(constants.SKY_CLUSTER_YAML_PATH,
+                                       new_display_name + '.yml')
+    global_user_state.add_or_update_cluster(
+        new_display_name,
+        handle,
+        requested_resources={handle.launched_resources},
+        ready=False,
+        is_launch=True)
+    common_utils.dump_yaml(handle.cluster_yaml, cluster_yaml)
+
+    _start(new_display_name, force=True)

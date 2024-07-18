@@ -7,6 +7,9 @@ import sky
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+# Path to the local SkyPilot cluster yaml file that contains the configs of a
+# cluster.
+SKY_CLUSTER_YAML_PATH = '~/.sky/generated'
 
 # Default Ray port is 6379. Default Ray dashboard port is 8265.
 # Default Ray tempdir is /tmp/ray.

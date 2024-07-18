@@ -94,7 +94,6 @@ _CURSOR.execute("""\
 _CONN.commit()
 db_utils.add_column_to_table(_CURSOR, _CONN, 'job_info', 'user', 'TEXT')
 
-
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
 # and recovery time.
@@ -126,6 +125,7 @@ columns = [
     # columns from the job_info table
     '_job_info_job_id',  # This should be the same as job_id
     'job_name',
+    'user'
 ]
 
 

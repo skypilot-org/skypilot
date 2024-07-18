@@ -642,6 +642,7 @@ def format_job_table(
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
             job_name = job_tasks[0]['job_name']
+            user = job_tasks[0].get('user', '-')
             job_duration = 0
             submitted_at = None
             end_at: Optional[int] = 0
@@ -677,7 +678,7 @@ def format_job_table(
             job_values = [
                 job_id,
                 '',
-                task.get('user', '-'),
+                user,
                 job_name,
                 '-',
                 submitted,
@@ -704,7 +705,7 @@ def format_job_table(
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
-                task.get('user', '-') if len(job_tasks) > 1 else '-',
+                task.get('user', '-') if len(job_tasks) == 1 else '-',
                 task['task_name'],
                 task['resources'],
                 # SUBMITTED
