@@ -74,7 +74,7 @@ Install with pip:
 ```bash
 pip install "skypilot-nightly[aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,kubernetes]"  # choose your clouds
 ```
-To get the latest features and fixes, use the nightly build or [install from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)):
+To get the latest features and fixes, use the nightly build or [install from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html):
 ```bash
 pip install -U "skypilot[aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,kubernetes]"  # choose your clouds
 ```
