@@ -222,6 +222,28 @@ def _wait_for_pods_to_run(namespace, new_nodes):
     Pods may be pulling images or may be in the process of container
     creation.
     """
+
+    def _check_init_containers(pod: 'kubernetes.client.V1Pod'):
+        # Check if any of the init containers failed
+        # to start. Could be because the init container
+        # command failed or failed to pull image etc.
+        for init_status in pod.status.init_container_statuses:
+            init_terminated = init_status.state.terminated
+            if init_terminated and init_terminated.exit_code != 0:
+                msg = init_terminated.message if (
+                    init_terminated.message) else str(init_terminated)
+                raise config_lib.KubernetesError(
+                    f'Failed to run init container for pod {pod.metadata.name}.'
+                    f' Error details: {msg}.')
+            init_waiting = init_status.state.waiting
+            if (init_waiting is not None and init_waiting.reason
+                    not in ['ContainerCreating', 'PodInitializing']):
+                msg = init_waiting.message if (
+                    init_waiting.message) else str(init_waiting)
+                raise config_lib.KubernetesError(
+                    'Failed to create init container for pod '
+                    f'{pod.metadata.name}. Error details: {msg}.')
+
     while True:
         all_pods_running = True
         # Iterate over each pod to check their status
@@ -248,10 +270,14 @@ def _wait_for_pods_to_run(namespace, new_nodes):
                     waiting = container_status.state.waiting
                     if (waiting is not None and
                             waiting.reason != 'ContainerCreating'):
-                        raise config_lib.KubernetesError(
-                            'Failed to create container while launching '
-                            'the node. Error details: '
-                            f'{container_status.state.waiting.message}.')
+                        if waiting.reason == 'PodInitializing':
+                            _check_init_containers(pod)
+                        else:
+                            msg = waiting.message if waiting.message else str(
+                                waiting)
+                            raise config_lib.KubernetesError(
+                                'Failed to create container while launching '
+                                f'the node. Error details: {msg}.')
             # Reaching this point means that one of the pods had an issue,
             # so break out of the loop, and wait until next second.
             break
