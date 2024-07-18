@@ -83,15 +83,17 @@ db_utils.add_column_to_table(_CURSOR,
                              'task_name',
                              'TEXT',
                              copy_from='job_name')
-db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'user', 'TEXT')
 
 # `job_info` contains the mapping from job_id to the job_name.
 # In the future, it may contain more information about each job.
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS job_info (
     spot_job_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT)""")
+    name TEXT,
+    user TEXT)""")
 _CONN.commit()
+db_utils.add_column_to_table(_CURSOR, _CONN, 'job_info', 'user', 'TEXT')
+
 
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
@@ -124,7 +126,6 @@ columns = [
     # columns from the job_info table
     '_job_info_job_id',  # This should be the same as job_id
     'job_name',
-    'user',
 ]
 
 
