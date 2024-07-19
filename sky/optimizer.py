@@ -1250,7 +1250,7 @@ def _fill_in_launchable_resources(
                 # Generate region/zone-specified resources.
                 launchable[resources].extend(
                     _make_launchables_for_valid_region_zones(cheapest))
-                cloud_candidates[cloud] = feasible_resources
+                cloud_candidates[cloud] = feasible_resources.resources_list
             else:
                 all_fuzzy_candidates.update(
                     feasible_resources.fuzzy_candidate_list)
