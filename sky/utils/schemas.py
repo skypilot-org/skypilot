@@ -756,6 +756,9 @@ def get_config_schema():
                 'storage_account': {
                     'type': 'string',
                 },
+                'resource_group': {
+                    'type': 'string',
+                },
             }
         },
         'kubernetes': {
