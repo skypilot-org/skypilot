@@ -5,6 +5,9 @@ ingress_spec:
     annotations:
       nginx.ingress.kubernetes.io/use-regex: "true"
       nginx.ingress.kubernetes.io/rewrite-target: /$2
+      {%- for key, value in annotations.items() %}
+      {{ key }}: {{ value|tojson }}
+      {%- endfor %}
     name: {{ ingress_name }}
     namespace: {{ namespace }}
   spec:

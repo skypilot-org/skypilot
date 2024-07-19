@@ -101,6 +101,8 @@ def fill_ingress_template(namespace: str, service_details: List[Tuple[str, int,
             f'Template "{_INGRESS_TEMPLATE_NAME}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
+    annotations = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'annotations'), {})
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,
@@ -112,6 +114,7 @@ def fill_ingress_template(namespace: str, service_details: List[Tuple[str, int,
         ingress_name=ingress_name,
         selector_key=selector_key,
         selector_value=selector_value,
+        annotations=annotations,
     )
     content = yaml.safe_load(cont)
 
