@@ -368,6 +368,17 @@ Available fields and semantics:
     # Default: 'LOCAL_CREDENTIALS'.
     remote_identity: LOCAL_CREDENTIALS
 
+  # Advanced Azure configurations (optional).
+  # Apply to all new instances but not existing ones.
+  azure:
+    # Specify an existing Azure storage account for SkyPilot-managed containers.
+    # If not set, SkyPilot will use its default naming convention to create and
+    # use the storage account.
+    # Note: SkyPilot cannot create new storage accounts with custom names; it
+    # can only use existing ones or create accounts with its default naming
+    # scheme.
+    storage_account: user-storage-account-name
+
   # Advanced Kubernetes configurations (optional).
   kubernetes:
     # The networking mode for accessing SSH jump pod (optional).
