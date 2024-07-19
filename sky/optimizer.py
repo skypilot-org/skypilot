@@ -1246,7 +1246,7 @@ def _fill_in_launchable_resources(
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
                 # the underlying service_catalog filtering
-                cheapest = feasible_resources[0]
+                cheapest = feasible_resources.resources_list[0]
                 # Generate region/zone-specified resources.
                 launchable[resources].extend(
                     _make_launchables_for_valid_region_zones(cheapest))

@@ -197,11 +197,11 @@ class Vsphere(clouds.Cloud):
     def _get_feasible_launchable_resources(
             self, resources: 'resources_lib.Resources'):
         if resources.use_spot:
-            return resources_lib.FeasibleResources([], [], None)
+            return resources_utils.FeasibleResources([], [], None)
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return resources_lib.FeasibleResources([resources], [], None)
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -226,9 +226,9 @@ class Vsphere(clouds.Cloud):
                 disk_tier=resources.disk_tier,
             )
             if default_instance_type is None:
-                return resources_lib.FeasibleResources([], [], None)
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return resources_lib.FeasibleResources(
+                return resources_utils.FeasibleResources(
                     _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
@@ -247,9 +247,9 @@ class Vsphere(clouds.Cloud):
             clouds=_CLOUD_VSPHERE,
         )
         if instance_list is None:
-            return resources_lib.FeasibleResources([], fuzzy_candidate_list,
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                    None)
-        return resources_lib.FeasibleResources(_make(instance_list),
+        return resources_utils.FeasibleResources(_make(instance_list),
                                                fuzzy_candidate_list, None)
 
     @classmethod

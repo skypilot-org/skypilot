@@ -378,17 +378,17 @@ class Azure(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
             self,
-            resources: 'resources.Resources') -> 'resources.FeasibleResources':
+            resources: 'resources.Resources') -> 'resources_utils.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             ok, _ = Azure.check_disk_tier(resources.instance_type,
                                           resources.disk_tier)
             if not ok:
-                return resources.FeasibleResources([], [], None)
+                return resources_utils.FeasibleResources([], [], None)
             # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
             # Resources(Azure, Standard_NC4as_T4_v3).
             resources = resources.copy(accelerators=None)
-            return resources.FeasibleResources([resources], [], None)
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -418,9 +418,9 @@ class Azure(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return resources.FeasibleResources([], [], None)
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return resources.FeasibleResources(
+                return resources_utils.FeasibleResources(
                     _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
@@ -436,8 +436,8 @@ class Azure(clouds.Cloud):
             zone=resources.zone,
             clouds='azure')
         if instance_list is None:
-            return resources.FeasibleResources([], fuzzy_candidate_list, None)
-        return resources.FeasibleResources(_make(instance_list),
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list, None)
+        return resources_utils.FeasibleResources(_make(instance_list),
                                            fuzzy_candidate_list, None)
 
     @classmethod

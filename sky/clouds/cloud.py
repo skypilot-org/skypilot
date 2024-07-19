@@ -343,7 +343,7 @@ class Cloud:
     def get_feasible_launchable_resources(
             self,
             resources: 'resources_lib.Resources',
-            num_nodes: int = 1) -> 'resources_lib.FeasibleResources':
+            num_nodes: int = 1) -> 'resources_utils.FeasibleResources':
         """Returns FeasibleResources for the given resources.
 
         Feasible resources refer to an offering respecting the resource
@@ -376,7 +376,7 @@ class Cloud:
             # TODO(zhwu): The resources are now silently filtered out. We
             # should have some logging telling the user why the resources
             # are not considered.
-            return resources_lib.FeasibleResources(resources_list=[],
+            return resources_utils.FeasibleResources(resources_list=[],
                                                    fuzzy_candidate_list=[],
                                                    hint=None)
         return self._get_feasible_launchable_resources(resources)

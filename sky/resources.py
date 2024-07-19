@@ -1567,21 +1567,3 @@ class Resources:
                 '_cluster_config_overrides', None)
 
         self.__dict__.update(state)
-
-
-@dataclasses.dataclass
-class FeasibleResources:
-    """Feasible resources returned by cloud.
-
-    Used to represent a collection of feasible resources returned by cloud,
-    any fuzzy candidates, and optionally a string hint if no feasible resources
-    are found.
-
-    Fuzzy candidates example: when the requested GPU is A100:1 but is not
-    available in a cloud/region, the fuzzy candidates are results of a fuzzy
-    search in the catalog that are offered in the location. E.g.,
-    ['A100-80GB:1', 'A100-80GB:2', 'A100-80GB:4', 'A100:8']
-    """
-    resources_list: List[Resources]
-    fuzzy_candidate_list: List[str]
-    hint: Optional[str]

@@ -526,10 +526,10 @@ class GCP(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
             self,
-            resources: 'resources.Resources') -> 'resources.FeasibleResources':
+            resources: 'resources.Resources') -> 'resources_utils.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            return resources.FeasibleResources([resources], [], None)
+            return resources_utils.FeasibleResources([resources], [], None)
 
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
@@ -538,7 +538,7 @@ class GCP(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if host_vm_type is None:
-                return resources.FeasibleResources([], [], None)
+                return resources_utils.FeasibleResources([], [], None)
             else:
                 r = resources.copy(
                     cloud=GCP(),
@@ -547,7 +547,7 @@ class GCP(clouds.Cloud):
                     cpus=None,
                     memory=None,
                 )
-                return resources.FeasibleResources([r], [], None)
+                return resources_utils.FeasibleResources([r], [], None)
 
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
@@ -569,7 +569,7 @@ class GCP(clouds.Cloud):
             clouds='gcp')
 
         if instance_list is None:
-            return resources.FeasibleResources([], fuzzy_candidate_list, None)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list, None)
         assert len(
             instance_list
         ) == 1, f'More than one instance type matched, {instance_list}'
@@ -584,13 +584,13 @@ class GCP(clouds.Cloud):
                 if resources.cpus.endswith('+'):
                     cpus = float(resources.cpus[:-1])
                     if cpus > num_cpus_in_tpu_vm:
-                        return resources.FeasibleResources([],
-                                                           fuzzy_candidate_list,
-                                                           None)
+                        return resources_utils.FeasibleResources([],
+                                                               fuzzy_candidate_list,
+                                                               None)
                 else:
                     cpus = float(resources.cpus)
                     if cpus != num_cpus_in_tpu_vm:
-                        return resources.FeasibleResources([],
+                        return resources_utils.FeasibleResources([],
                                                            fuzzy_candidate_list,
                                                            None)
             # FIXME(woosuk, wei-lin): This leverages the fact that TPU VMs
@@ -601,13 +601,13 @@ class GCP(clouds.Cloud):
                 if resources.memory.endswith('+'):
                     memory = float(resources.memory[:-1])
                     if memory > memory_in_tpu_vm:
-                        return resources.FeasibleResources([],
+                        return resources_utils.FeasibleResources([],
                                                            fuzzy_candidate_list,
                                                            None)
                 else:
                     memory = float(resources.memory)
                     if memory != memory_in_tpu_vm:
-                        return resources.FeasibleResources([],
+                        return resources_utils.FeasibleResources([],
                                                            fuzzy_candidate_list,
                                                            None)
         else:
@@ -621,7 +621,7 @@ class GCP(clouds.Cloud):
             cpus=None,
             memory=None,
         )
-        return resources.FeasibleResources([r], fuzzy_candidate_list, None)
+        return resources_utils.FeasibleResources([r], fuzzy_candidate_list, None)
 
     @classmethod
     def get_accelerators_from_instance_type(
