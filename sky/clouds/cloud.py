@@ -355,7 +355,7 @@ class Cloud:
         The returned dataclass object FeasibleResources contains three fields:
 
         - resources_list: a list of resources that are feasible to launch
-        - fuzzy_candidate_list: a list of resources that loosely match the requested
+        - fuzzy_candidate_list: a list of resources that loosely match requested
             resources. E.g., when A100:1 GPU is requested but is not available
             in a cloud/region, the fuzzy candidates are results of a fuzzy
             search in the catalog that are offered in the location. E.g.,
@@ -377,13 +377,13 @@ class Cloud:
             # should have some logging telling the user why the resources
             # are not considered.
             return resources_utils.FeasibleResources(resources_list=[],
-                                                   fuzzy_candidate_list=[],
-                                                   hint=None)
+                                                     fuzzy_candidate_list=[],
+                                                     hint=None)
         return self._get_feasible_launchable_resources(resources)
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str], Optional[str]]:
+    ) -> 'resources_utils.FeasibleResources':
         """See get_feasible_launchable_resources()."""
         raise NotImplementedError
 

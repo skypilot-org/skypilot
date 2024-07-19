@@ -272,7 +272,7 @@ class IBM(clouds.Cloud):
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
             return resources_utils.FeasibleResources([resources],
-                                                   fuzzy_candidate_list, None)
+                                                     fuzzy_candidate_list, None)
 
         def _make(instance_list):
             resource_list = []
@@ -315,9 +315,9 @@ class IBM(clouds.Cloud):
             clouds='ibm')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
-                                                   None)
+                                                     None)
         return resources_utils.FeasibleResources(_make(instance_list),
-                                               fuzzy_candidate_list, None)
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def get_default_image(cls, region) -> str:

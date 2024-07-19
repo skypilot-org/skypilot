@@ -2,10 +2,10 @@
 import json
 import os
 import re
+import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -15,6 +15,10 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
+
+if typing.TYPE_CHECKING:
+    # Renaming to avoid shadowing variables.
+    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -344,7 +348,7 @@ class Kubernetes(clouds.Cloud):
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
             return resources_utils.FeasibleResources([resources],
-                                                   fuzzy_candidate_list, None)
+                                                     fuzzy_candidate_list, None)
 
         def _make(instance_list):
             resource_list = []
@@ -404,7 +408,7 @@ class Kubernetes(clouds.Cloud):
 
         # No fuzzy lists for Kubernetes
         return resources_utils.FeasibleResources(_make([chosen_instance_type]),
-                                               [], None)
+                                                 [], None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

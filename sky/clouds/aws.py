@@ -500,9 +500,9 @@ class AWS(clouds.Cloud):
             clouds='aws')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
-                                                   None)
+                                                     None)
         return resources_utils.FeasibleResources(_make(instance_list),
-                                                           fuzzy_candidate_list, None)
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.

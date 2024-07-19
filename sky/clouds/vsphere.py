@@ -248,9 +248,9 @@ class Vsphere(clouds.Cloud):
         )
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
-                                                   None)
+                                                     None)
         return resources_utils.FeasibleResources(_make(instance_list),
-                                               fuzzy_candidate_list, None)
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

@@ -9,8 +9,8 @@ from typing import List, Optional, Set
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources as resources_lib
     from sky import backends
+    from sky import resources as resources_lib
 
 _PORT_RANGE_HINT_MSG = ('Invalid port range {}. Please use the format '
                         '"from-to", in which from <= to. e.g. "1-3".')
