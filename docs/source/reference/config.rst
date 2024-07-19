@@ -373,7 +373,7 @@ Available fields and semantics:
   azure:
     # Specify an existing Azure storage account for SkyPilot-managed containers.
     # If not set, SkyPilot will use its default naming convention to create and
-    # use the storage account.
+    # use the storage account unless container endpoint URI is used as source.
     # Note: SkyPilot cannot create new storage accounts with custom names; it
     # can only use existing ones or create accounts with its default naming
     # scheme.
