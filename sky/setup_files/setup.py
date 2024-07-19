@@ -208,6 +208,9 @@ aws_dependencies = [
     'colorama < 0.4.5',
 ]
 
+# Flux requires the same as kubernetes
+kubernetes_requires = ['kubernetes>=20.0.0']
+
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
@@ -231,7 +234,8 @@ extras_require: Dict[str, List[str]] = {
     'cloudflare': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
-    'kubernetes': ['kubernetes>=20.0.0'],
+    'kubernetes': kubernetes_requires,
+    "flux": kubernetes_requires,
     'remote': remote,
     'runpod': ['runpod>=1.5.1'],
     'fluidstack': [],  # No dependencies needed for fluidstack

@@ -267,6 +267,8 @@ class Optimizer:
             fuzzy_candidates: List[str] = []
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
+                # Note: this is where the cloud object gets populated with
+                # resource names, e.g., Flux(): [Kubernetes(2CPU--2GB)]
                 launchable_resources, cloud_candidates, fuzzy_candidates = (
                     _fill_in_launchable_resources(
                         task=node,

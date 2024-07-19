@@ -461,6 +461,14 @@ class Resources:
     def requires_fuse(self, value: Optional[bool]) -> None:
         self._requires_fuse = value
 
+    def set_cloud(self, cloud):
+        """Set the cloud to a different class
+
+        This is used for Kubernetes-based clouds.
+        """
+        if hasattr(self, '_cloud') and self._cloud is not None:
+            self._cloud = cloud
+
     def _set_cpus(
         self,
         cpus: Union[None, int, float, str],

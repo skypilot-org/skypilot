@@ -175,6 +175,7 @@ def _get_cluster_config_template(cloud):
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.Paperspace: 'paperspace-ray.yml.j2',
         clouds.RunPod: 'runpod-ray.yml.j2',
+        clouds.Flux: 'kubernetes-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2'

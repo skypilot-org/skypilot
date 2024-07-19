@@ -312,6 +312,7 @@ class Kubernetes(clouds.Cloud):
             10,
             override_configs=resources.cluster_config_overrides)
         deploy_vars = {
+            'module': 'sky.provision.kubernetes',
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
