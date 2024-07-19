@@ -75,6 +75,8 @@ def fill_loadbalancer_template(namespace: str, service_name: str,
 
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
+    annotations = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'annotations'), {})
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,
@@ -82,6 +84,7 @@ def fill_loadbalancer_template(namespace: str, service_name: str,
         ports=ports,
         selector_key=selector_key,
         selector_value=selector_value,
+        annotations=annotations,
     )
     content = yaml.safe_load(cont)
     return content
