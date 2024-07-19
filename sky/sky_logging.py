@@ -8,7 +8,6 @@ import threading
 import colorama
 
 from sky.utils import env_options
-from sky.utils import rich_utils
 
 # If the SKYPILOT_MINIMIZE_LOGGING environment variable is set to True,
 # remove logging prefixes and unnecessary information in optimizer
@@ -34,13 +33,6 @@ class NewLineFormatter(logging.Formatter):
         return msg
 
 
-class RichSafeStreamHandler(logging.StreamHandler):
-
-    def emit(self, record: logging.LogRecord) -> None:
-        with rich_utils.safe_logger():
-            return super().emit(record)
-
-
 _root_logger = logging.getLogger('sky')
 _default_handler = None
 _logging_config = threading.local()
@@ -60,7 +52,7 @@ def _setup_logger():
     _root_logger.setLevel(logging.DEBUG)
     global _default_handler
     if _default_handler is None:
-        _default_handler = RichSafeStreamHandler(sys.stdout)
+        _default_handler = logging.StreamHandler(sys.stdout)
         _default_handler.flush = sys.stdout.flush  # type: ignore
         if env_options.Options.SHOW_DEBUG_INFO.get():
             _default_handler.setLevel(logging.DEBUG)

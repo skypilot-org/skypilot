@@ -32,6 +32,7 @@ from sky.usage import usage_lib
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
 
@@ -290,7 +291,10 @@ def stream_and_get(request_id: str) -> Any:
         return get(request_id)
     for line in response.iter_lines():
         if line:
-            print(line.decode('utf-8'))
+            msg = line.decode('utf-8')
+            msg = rich_utils.decode_rich_status(msg)
+            if msg is not None:
+                print(msg)
     return get(request_id)
 
 

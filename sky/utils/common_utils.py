@@ -431,7 +431,7 @@ def encode_payload(payload: Any) -> str:
     return payload_str
 
 
-def decode_payload(payload_str: str) -> Any:
+def decode_payload(payload_str: str, raise_for_mismatch: bool = True) -> Any:
     """Decode a payload string.
 
     Args:
@@ -442,7 +442,10 @@ def decode_payload(payload_str: str) -> Any:
     """
     matched = _PAYLOAD_PATTERN.findall(payload_str)
     if not matched:
-        raise ValueError(f'Invalid payload string: \n{payload_str}')
+        if raise_for_mismatch:
+            raise ValueError(f'Invalid payload string: \n{payload_str}')
+        else:
+            return payload_str
     payload_str = matched[0]
     payload = json.loads(payload_str)
     return payload
