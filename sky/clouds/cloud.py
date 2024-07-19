@@ -385,6 +385,9 @@ class Cloud:
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         """See get_feasible_launchable_resources()."""
+        # TODO: Currently only the Kubernetes implementation of this method
+        #  returns hints when no feasible resources are found. This should be
+        #  implemented for all clouds.
         raise NotImplementedError
 
     def get_reservations_available_resources(
