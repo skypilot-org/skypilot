@@ -75,6 +75,7 @@ available_node_types:
           Ebs:
             VolumeSize: {{disk_size}}
             VolumeType: {{disk_tier}}
+            Encrypted: {{disk_encrypted}}
             {% if custom_disk_perf %}
             Iops: {{disk_iops}}
             Throughput: {{disk_throughput}}
