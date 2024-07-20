@@ -28,6 +28,7 @@ provider:
   # instead of the cluster_name. This ensures that ray creates new instances
   # for different cluster_name.
   resource_group: {{resource_group}}
+  use_external_resource_group: {{use_external_resource_group}}
 {%- if docker_login_config is not none %}
   # We put docker login config in provider section because ray's schema disabled
   # additionalProperties for docker config.

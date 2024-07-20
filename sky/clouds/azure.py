@@ -320,9 +320,10 @@ class Azure(clouds.Cloud):
                                         'A10' in acc_dict)
 
         # Determine resource group for deploying the instance.
-        config_resource_group = skypilot_config.get_nested(
+        resource_group_name = skypilot_config.get_nested(
             ('azure', 'resource_group'), None)
-        if config_resource_group is None:
+        use_external_resource_group = resource_group_name is not None
+        if resource_group_name is None:
             resource_group_name = f'{cluster_name.name_on_cloud}-{region_name}'
 
         # Setup commands to eliminate the banner and restart sshd.
@@ -381,6 +382,7 @@ class Azure(clouds.Cloud):
             'cloud_init_setup_commands': cloud_init_setup_commands,
             'azure_subscription_id': self.get_project_id(dryrun),
             'resource_group': resource_group_name,
+            'use_external_resource_group': use_external_resource_group,
         }
 
     def _get_feasible_launchable_resources(

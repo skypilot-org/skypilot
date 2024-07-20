@@ -599,22 +599,34 @@ def terminate_instances(
 
     assert provider_config is not None, cluster_name_on_cloud
 
-    resource_group_client = azure.get_client('resource', subscription_id)
-    # Get delete_resource_group method if the resource_group is not from the user.
-    # If the resource group is from the user through config.yaml, get delete_virtual_machine method.
-    # May need more discussion on how to differentiate user provided resource group name and the name
-    # we generate by default. 
-    delete_resource_group = _get_azure_sdk_function(
-        client=resource_group_client.resource_groups, function_name='delete')
-
-    try:
-        delete_resource_group(resource_group, force_deletion_types=None)
-    except azure.exceptions().ResourceNotFoundError as e:
-        if 'ResourceGroupNotFound' in str(e):
-            logger.warning(f'Resource group {resource_group} not found. Skip '
-                           'terminating it.')
-            return
-        raise
+    use_external_resource_group = provider_config.get(
+        'use_external_resource_group', False)
+    # When the instance is provisioned at user provided resource group, we want
+    # to only delete the VM and not the resource group itself.
+    if use_external_resource_group:
+        compute_client = azure.get_client('compute', subscription_id)
+        delete_virtual_machine = _get_azure_sdk_function(
+            client=compute_client.virtual_machines, function_name='delete')
+        filters = {
+            constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
+        }
+        nodes = _filter_instances(compute_client, resource_group, filters)
+        assert len(nodes) == 1
+        delete_virtual_machine(resource_group, nodes[0].name)
+    else:
+        # For SkyPilot default resource groups, delete entire resource group.
+        # This automatically terminates all resources within, including VMs
+        resource_group_client = azure.get_client('resource', subscription_id)
+        delete_resource_group = _get_azure_sdk_function(
+            client=resource_group_client.resource_groups, function_name='delete')
+        try:
+            delete_resource_group(resource_group, force_deletion_types=None)
+        except azure.exceptions().ResourceNotFoundError as e:
+            if 'ResourceGroupNotFound' in str(e):
+                logger.warning(f'Resource group {resource_group} not found. Skip '
+                            'terminating it.')
+                return
+            raise
 
 
 def _get_instance_status(
