@@ -377,6 +377,7 @@ Available fields and semantics:
     # Note: SkyPilot cannot create new storage accounts with custom names; it
     # can only use existing ones or create accounts with its default naming
     # scheme.
+    # Reference: https://learn.microsoft.com/en-us/azure/storage/common/storage-account-overview
     storage_account: user-storage-account-name
 
   # Advanced Kubernetes configurations (optional).
