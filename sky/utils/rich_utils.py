@@ -45,6 +45,7 @@ class EncodedStatus:
 
     def __init__(self, msg: str):
         self.msg = msg
+        print(common_utils.encode_payload(Control.INIT.encode(self.msg)))
 
     def __enter__(self):
         print(common_utils.encode_payload(Control.START.encode(self.msg)))
@@ -91,6 +92,7 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
         global _status
         if _status is None:
             _status = EncodedStatus(msg)
+            return _status
         _status.update(msg)
         return _status
     return _NoOpConsoleStatus()
@@ -138,11 +140,13 @@ def decode_rich_status(encoded_msg: str) -> Optional[str]:
     if control is None:
         return encoded_msg
     if control == Control.INIT:
-        _rich_status = console.status(encoded_status).start()
-    elif control == Control.UPDATE:
-        _rich_status.update(encoded_status)
-    elif control == Control.STOP:
-        _rich_status.stop()
-    elif control == Control.START:
-        _rich_status.start()
+        _rich_status = console.status(encoded_status)
+    else:
+        assert _rich_status, f'Rich status not initialized: {encoded_msg}'
+        if control == Control.UPDATE:
+            _rich_status.update(encoded_status)
+        elif control == Control.STOP:
+            _rich_status.stop()
+        elif control == Control.START:
+            _rich_status.start()
     return None
