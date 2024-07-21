@@ -1,5 +1,6 @@
 """Logging utils."""
 import enum
+import os
 from typing import List, Optional
 
 import colorama
@@ -7,6 +8,7 @@ import pendulum
 import prettytable
 
 from sky import sky_logging
+from sky.skylet import constants
 from sky.utils import rich_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -191,3 +193,24 @@ def readable_time_duration(start: Optional[float],
         diff = diff.replace('hour', 'hr')
 
     return diff
+
+
+def create_and_symlink_log_dir(log_dir: str):
+    """Creates a new log directory and symlinks to it from parent directory.
+
+    Args:
+        log_dir (str): Expanded log directory path.
+    """
+    if log_dir == os.devnull:
+        return
+    os.makedirs(log_dir, exist_ok=True)
+    symlink_path = os.path.join(log_dir, os.pardir, constants.SKY_LATEST_LINK)
+    if os.path.exists(symlink_path):
+        if os.path.islink(symlink_path):
+            os.remove(symlink_path)
+        else:
+            logger.warning(
+                'Failed to create symlink to latest logs at \'{symlink_path}\'. Please remove the existing file/directory.'
+            )
+            return
+    os.symlink(log_dir, symlink_path)

@@ -1307,7 +1307,8 @@ class RetryingVmProvisioner(object):
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
         if not dryrun:
-            os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
+            log_utils.create_and_symlink_log_dir(
+                os.path.expanduser(self.log_dir))
             os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
@@ -3052,7 +3053,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
             f' -> '
             f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
-        os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
+        log_utils.create_and_symlink_log_dir(os.path.expanduser(self.log_dir))
         os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '

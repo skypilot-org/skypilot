@@ -163,7 +163,7 @@ def run_with_log(
 
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
-    os.makedirs(dirname, exist_ok=True)
+    log_utils.create_and_symlink_log_dir(dirname)
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout_arg = stderr_arg = None

@@ -6,6 +6,7 @@ from packaging import version
 import sky
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
+SKY_LATEST_LINK = 'sky_latest'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 
 # Default Ray port is 6379. Default Ray dashboard port is 8265.
