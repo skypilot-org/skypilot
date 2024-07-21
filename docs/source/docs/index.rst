@@ -33,7 +33,7 @@ SkyPilot **abstracts away cloud infra burdens**:
 
 - Launch jobs & clusters on any cloud
 - Easy scale-out: queue and run many jobs, automatically managed
-- Easy access to object stores (S3, GCS, R2)
+- Easy access to object stores (S3, GCS, Azure, R2, IBM)
 
 SkyPilot **maximizes GPU availability for your jobs**:
 
